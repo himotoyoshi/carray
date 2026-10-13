@@ -688,6 +688,17 @@ class TestCAFrameCopyAndMetadata < Test::Unit::TestCase
     assert_equal ["a", "b"], @df.column_names
   end
 
+  # A Face column is named by its class in data_types and in the frame's
+  # column list: its data_type is the surface its kernels dispatch on.
+  def test_face_columns_are_named_by_their_class
+    df = CAFrame.new("t" => CArray.time(%w[2024-01-01 2024-01-02], unit: :D),
+                     "s" => CArray.const_string(%w[a b]),
+                     "n" => CA_FLOAT64([1, 2]))
+    assert_equal({ "t" => CATime, "s" => CAConstString, "n" => :float64 }, df.data_types)
+    assert_match(/columns=\[t:CATime\[D\], s:CAConstString, n:float64\]/, df.inspect)
+    assert_match(/\A<CAConstString\(2\)/, df["s"].inspect)
+  end
+
   def test_data_types
     assert_equal({ "a" => :int32, "b" => :float64 }, @df.data_types)
   end

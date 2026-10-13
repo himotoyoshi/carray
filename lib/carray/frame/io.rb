@@ -1,6 +1,7 @@
 # CAFrame CSV input/output (memo §11.2, §6-2).
 
 require "carray/frame/csv_parser"
+require "carray/inspect"   # CArray::Inspector.face_label, for the column list
 
 class CAFrame
   # Read a CSV into a frame. The header row supplies column names (Strings,
@@ -409,7 +410,10 @@ class CAFrame
   # middle-elided table.
   # @return [String]
   def inspect
-    parts = @columns.map { |k, v| "#{k}:#{v.data_type}#{v.ndim > 1 ? v.shape[1..].inspect : ''}" }
+    parts = @columns.map do |k, v|
+      type = v.face? ? CArray::Inspector.face_label(v) : v.data_type
+      "#{k}:#{type}#{v.ndim > 1 ? v.shape[1..].inspect : ''}"
+    end
     idx = @index ? " index=#{@axis_name.inspect}" : ""
     head = "#<CAFrame nrow=#{@nrow} columns=[#{parts.join(', ')}]#{idx}>"
     # The table counts the index as a column, so a frame whose only data is its

@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: `CAFrame#data_types` gives a Face column's class (`CATime`,
+  `CAString`, `CACategorical`, ...) where it gave its `data_type`, which
+  for most Faces is `:fixlen` -- the surface their kernels dispatch on,
+  not what the column holds. Plain columns still give a Symbol. The column
+  list of `p df` and the head of a Face's `inspect` name the Face the same
+  way (`time:CATime[D]`, `<CAConstString(3)`). To test a column's storage
+  type, use `df[name].parent.data_type`.
+
 - Change: storing an integer that an integer cell cannot hold raises
   `RangeError`, as an operator already did (`int8_array + 300`). Before,
   `CA_INT8([300])`, `a[0] = 300`, `a[] = [-1]` on an unsigned array,

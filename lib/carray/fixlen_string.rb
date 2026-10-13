@@ -90,6 +90,12 @@ end
 # Mutable fixed-width String Face: L1 ops + in-place variants.  In-place
 # transforms re-store through the native fixlen path (silent truncate).
 class CAFixlenString
+  # inspect's name for the array: the class and the cell width, which is the
+  # longest string a cell holds.
+  private def inspect_label
+    "#{self.class}[#{bytes}]"
+  end
+
   include CArray::StringOperationMixin
   include CArray::StringOperationMixin::Mutable
 end

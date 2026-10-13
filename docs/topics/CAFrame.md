@@ -252,7 +252,7 @@ temp     float64      2       1       2  19.0        22.1        20.55       2.1
 time     CATime       3       0       3  2024-01-01  2024-01-03  2024-01-02  1D
 ```
 
-- `type` is the data type, or the Face's class for a Face column. A text column read by `from_csv` shows as `CAString` here, though `data_types` lists it as `:object` (a `CAString` is a Face over object storage).
+- `type` is the data type, or the Face's class for a Face column (a text column read by `from_csv` shows as `CAString`), as in `data_types`.
 - `count` and `masked` count cells; `unique` is the number of distinct present values. A `masked` count you did not expect is the usual sign that a column was read with the wrong type.
 - `min` / `max` / `mean` / `stddev` apply where the column's kind gives them a meaning and are `UNDEF` elsewhere:
   - real numbers and booleans get all four (a boolean's mean is the share of trues);
@@ -270,7 +270,7 @@ time     CATime       3       0       3  2024-01-01  2024-01-03  2024-01-02  1D
 | `nrow` | number of rows `N` (normally the length of the columns; see [A frame with only an index](#a-frame-with-only-an-index) for the exception) |
 | `ncol` | number of columns |
 | `column_names` | `Array<String>` of column names, in column order |
-| `data_types` | `Hash<String, Symbol>` of `name => data_type` |
+| `data_types` | `Hash` of `name => data_type` (a Symbol), or the Face's class for a Face column (`CATime`, `CAString`, ...) |
 | `columns` | `Array<CArray>` of the stored columns themselves, in column order |
 | `axis_name` | the row-axis name (String); see [The index](#the-index) |
 | `index` | the index `CArray`, or `nil` |

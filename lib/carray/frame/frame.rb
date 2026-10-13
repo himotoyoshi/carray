@@ -558,10 +558,12 @@ class CAFrame
   # Index column (CArray) or nil.
   attr_reader :index
 
-  # name => data_type, freshly derived.
+  # name => data_type, freshly derived; a Face column gives its class
+  # (CATime, CAString, ...), since a Face's data_type is the surface its
+  # kernels dispatch on, not what the column holds.
   def data_types
     h = {}
-    @columns.each { |k, v| h[k] = v.data_type }
+    @columns.each { |k, v| h[k] = v.face? ? v.class : v.data_type }
     h
   end
 

@@ -14,7 +14,7 @@ class TestCAFrameCSVTextColumns < Test::Unit::TestCase
   def test_text_columns_are_castring
     df = frame
     assert_equal [CAString] * 3, df.columns.map(&:class)
-    assert_equal({ "station" => :object, "code" => :object, "temp" => :object }, df.data_types)
+    assert_equal({ "station" => CAString, "code" => CAString, "temp" => CAString }, df.data_types)
     assert_equal ["  Tokyo ", "Osaka", UNDEF], df["station"].to_a
   end
 

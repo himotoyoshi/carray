@@ -21,7 +21,7 @@ class TestTimeUnitChange < Test::Unit::TestCase
     # instance_exec on the array, where a bare format() would resolve to the
     # public CArray#format rather than Kernel#format.
     assert_match(/fixlen\[3\]\(2\)/, CArray.fixlen(2, bytes: 3).inspect)
-    assert_match(/CAFixlenString\.fixlen\[2\]\(2\)/, CArray.fixlen_string(["ab", "cd"]).inspect)
+    assert_match(/\A<CAFixlenString\[2\]\(2\)/, CArray.fixlen_string(["ab", "cd"]).inspect)
     # A time array names its tick in place of the storage type.
     dt = CArray.time(["2024-01-01"], unit: :D)
     assert_equal CA_FIXLEN, dt.data_type

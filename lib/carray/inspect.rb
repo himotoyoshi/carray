@@ -34,15 +34,30 @@ class CArray::Inspector  # :nodoc:
   
   private
 
-  # The name before the shape: the class and the storage type, or what a
-  # Face says instead through a private inspect_label (CATime gives its
-  # tick, which the storage type does not tell).
+  # The name before the shape: the class and the storage type, or for a
+  # Face its own name (see .face_label).
   def get_label
-    if @carray.respond_to?(:inspect_label, true)
-      return @carray.send(:inspect_label)
-    end
+    return CArray::Inspector.face_label(@carray) if @carray.face?
     return format("%s.%s", get_class_name, get_type_name)
   end
+
+  public
+
+  # The name a Face goes by where a person reads it -- the head of inspect,
+  # a frame's column list.  A Face's data_type is the surface the kernels
+  # dispatch on (fixlen for a time, so arithmetic on it raises), which says
+  # nothing to a reader, so it is named by its class: what a private
+  # inspect_label gives (CATime adds its tick), or the class, with the
+  # surface type only for a Face whose surface is numeric.
+  def self.face_label (ca)
+    return ca.send(:inspect_label) if ca.respond_to?(:inspect_label, true)
+    klass = ca.class
+    klass = klass.superclass while klass.name.nil?
+    return klass.name if [CA_FIXLEN, CA_OBJECT].include?(ca.data_type)
+    "#{klass.name}.#{CArray.data_type_name(ca.data_type)}"
+  end
+
+  private
 
   def get_class_name
     return @carray.class.to_s
