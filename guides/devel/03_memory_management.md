@@ -241,8 +241,14 @@ asking an array for its mask (`ca_has_mask`, `ca_create_mask`,
 
 - Take every buffer first, then do the step that can raise under
   `ca_fill_or_free(ca, step, arg)`, which frees `ca` before the raise
-  propagates. `carray_new` copies a source mask this way, and `ca_grid_new`
-  asks its parent for a mask this way.
+  propagates. `carray_new` copies a source mask this way.
+- A view takes its parent's mask in its constructor, after the setup:
+  `ca_fill_or_free(ca, ca_view_inherit_mask, (VALUE) ca)`, and an
+  `initialize_copy`, whose struct Ruby owns, calls `ca_view_inherit_mask`
+  directly. A view's `*_setup` does not ask; `rake view_setup_mask_check`
+  (`utils/check_view_setup_mask.rb`) reports a call that does. The
+  in-tree CAStride subclasses use `ca_stride_setup_view`; the public
+  `ca_stride_setup` still takes the mask, for extensions that call it.
 - A buffer that is not yet part of a struct is freed by an `rb_protect`
   around the step, or taken with `ALLOCV`.
 

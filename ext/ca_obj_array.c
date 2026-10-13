@@ -213,6 +213,7 @@ carray_setup_i (CArray *ca,
 
   ca->mask = NULL;
   if ( mask ) {
+    /* mask: only initialize_copy passes one, on a struct Ruby owns */
     ca_setup_mask(ca, mask);
   }
 
@@ -404,6 +405,7 @@ cscalar_setup (CScalar *ca,
   }
 
   if ( mask ) {
+    /* mask: the constructors pass none (carray_new_with_mask copies it) */
     ca_setup_mask((CArray *)ca, mask);
   }
 
