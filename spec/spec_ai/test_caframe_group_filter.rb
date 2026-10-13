@@ -55,6 +55,23 @@ class TestCAFrameGroupFilter < Test::Unit::TestCase
     assert_raise(ArgumentError) { grp.filter { [true, false, true] } }
   end
 
+  # to_frame gives the grouped rows back as a frame of their own: the same
+  # columns and index, sharing the cells but not the set of columns.
+  def test_to_frame
+    df = frame.set_index("temp")
+    f  = df.group_by("station").to_frame
+    refute_same df, f
+    assert_equal df.column_names, f.column_names
+    assert_equal df.index.to_a, f.index.to_a
+    assert_equal df.axis_name, f.axis_name
+    f["new"] = CA_INT32([1, 2, 3, 4, 5, 6])
+    assert_equal %w[station], df.column_names
+    f["station"][0] = "kyoto"
+    assert_equal "kyoto", df["station"][0]
+    empty = CAFrame.new("k" => CA_OBJECT([]), "v" => CA_FLOAT64([]))
+    assert_equal 0, empty.group_by("k").to_frame.nrow
+  end
+
   def test_resample_bins
     t  = CArray.time_range("2024-01-01T00:00", "2024-01-01T05:00", unit: :h)
     v  = CA_FLOAT64([1, 2, 3, 4, 5, 6])

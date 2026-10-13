@@ -429,6 +429,21 @@ class GroupedFrame
     @frame.filter(keep_masked: keep_masked) { rows }
   end
 
+  # Returns the grouped rows as a frame: the frame the grouping was made
+  # from, its rows, columns and index, as a new frame sharing its columns.
+  # Nothing is copied, so a write to a cell reaches the grouped frame's
+  # rows; adding or dropping a column changes the new frame only.
+  #
+  #   def warm_stations (grp)
+  #     grp.filter { |g| g.mean("temp") > 15.0 }   # the rows of some groups
+  #   end
+  #   grp.to_frame                                  # all of its rows
+  #
+  # @return [CAFrame]
+  def to_frame
+    @frame.__send__(:rebuild, @frame.column_names.to_h { |name| [name, @frame[name]] })
+  end
+
   # @return [String]
   def inspect
     "#<GroupedFrame ngroup=#{ngroup} by=#{@axis_name.inspect}>"

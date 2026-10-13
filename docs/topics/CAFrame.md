@@ -1018,6 +1018,7 @@ df.resample("time", "1 hour").filter { |g| g["temp"].count_not_masked == 6 }   #
 
 - The rows keep the frame's order, and the result shares the frame's columns, as `CAFrame#filter`'s does.
 - A group whose value is `UNDEF` cannot be judged, and neither can a row whose key is masked, since it belongs to no group. Such rows are dropped, or with `keep_masked: true` carried with their cells masked, as for [`filter(keep_masked: true)`](#rows-whose-condition-is-undetermined--keep_masked).
+- The result is a frame, not a grouping: group it again (`kept.group_by("station")`) to go on reducing by group. `to_frame` gives all of a grouped frame's rows as a frame, for code that was handed only the grouping; the frame shares its cells but not its set of columns.
 
 ### Time bins — `resample`
 
