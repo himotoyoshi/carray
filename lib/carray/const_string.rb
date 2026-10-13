@@ -319,6 +319,9 @@ class CAConstString
   # @overload categorize(labels: nil, sort_labels: false)
   #   @return [CACategorical] categories keyed on the strings.
   def categorize (labels: nil, sort_labels: false)
+    # Discovery reads the bytes (a String per distinct value only); a given
+    # vocabulary is matched through the strings.
+    return super if labels.nil?
     to_string.categorize(labels: labels, sort_labels: sort_labels)
   end
 

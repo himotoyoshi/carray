@@ -14,6 +14,7 @@ class CAFrame
   #   CAFrame.from_csv("obs.csv", types: :infer)
   #   CAFrame.from_csv("obs.csv", types: { default: :infer, "code" => :int32, "id" => nil })
   #   CAFrame.from_csv("obs.csv", types: { default: :float64, "station" => nil })
+  #   CAFrame.from_csv("obs.csv", types: { "station" => :categorical })
   #
   # +source+ is a path, or an open IO -- anything answering +gets+, which a
   # StringIO is. So CSV that is already in memory does not have to go to a

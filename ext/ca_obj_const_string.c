@@ -1006,6 +1006,124 @@ static VALUE rb_ca_const_string_min (VALUE self) { return ca_const_string_extrem
 static VALUE rb_ca_const_string_max (VALUE self) { return ca_const_string_extremum(self, 1); }
 
 /* ------------------------------------------------------------------- */
+/* Native factorize: categorize's discovery pass, read from the bytes.  The
+   storage cells are byte ranges, so the fixlen lane of
+   CArray#__factorize_appearance__ would tell ranges apart, not strings.  A
+   String is made per distinct value only, after the scan's window closes. */
+
+static uint64_t
+ca_const_string_hash_bytes (const char *p, int64_t len)
+{
+  uint64_t h = 1469598103934665603ULL;            /* FNV-1a */
+  int64_t i;
+  for ( i = 0; i < len; i++ ) {
+    h ^= (unsigned char) p[i];
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
+
+/* CAConstString#__factorize_appearance__ -> [codes, levels], as the CArray
+   method answers: codes are the narrowest unsigned type holding the k codes
+   and the type-max sentinel, which masked cells store; levels are the k
+   distinct Strings in first-appearance order. */
+static VALUE
+rb_ca_const_string_factorize_appearance (VALUE self)
+{
+  ca_const_string_scan_t s;
+  CAConstString *ca;
+  volatile VALUE vcodes, levels;
+  CArray *co;
+  uint32_t *codes, *slot;
+  int64_t *lev_start, *lev_len;
+  size_t cap = 16, mask_bits;
+  ca_size_t n, i, k = 0;
+  int8_t code_dt;
+
+  TypedData_Get_Struct(self, CAConstString, &catext_data_type, ca);
+  n = ca->elements;
+  if ( (uint64_t) n >= 0xFFFFFFFFULL ) {
+    rb_raise(rb_eArgError, "categorize: too many elements for uint32 codes");
+  }
+  while ( cap < (size_t) n * 2 ) {
+    cap <<= 1;
+  }
+  mask_bits = cap - 1;
+  /* Everything the scan writes is allocated before its window opens. */
+  vcodes    = rb_carray_new(CA_UINT32, ca->ndim, ca->dim, 0, NULL);
+  TypedData_Get_Struct(vcodes, CArray, &carray_data_type, co);
+  codes     = (uint32_t *) co->ptr;
+  slot      = ZALLOC_N(uint32_t, cap);              /* code + 1; 0 is empty */
+  lev_start = ALLOC_N(int64_t, n > 0 ? n : 1);
+  lev_len   = ALLOC_N(int64_t, n > 0 ? n : 1);
+
+  ca_const_string_scan_begin(self, &s);
+  for ( i = 0; i < s.n; i++ ) {
+    const char *p;
+    int64_t len;
+    size_t j;
+    if ( ! ca_const_string_record(&s, i, &p, &len) ) {
+      codes[i] = 0xFFFFFFFFu;
+      continue;
+    }
+    j = (size_t) ca_const_string_hash_bytes(p, len) & mask_bits;
+    for (;;) {
+      uint32_t c = slot[j];
+      if ( c == 0 ) {
+        lev_start[k] = (int64_t) (p - s.buf);
+        lev_len[k]   = len;
+        slot[j]      = (uint32_t) (k + 1);
+        codes[i]     = (uint32_t) k;
+        k++;
+        break;
+      }
+      if ( lev_len[c - 1] == len && memcmp(s.buf + lev_start[c - 1], p, (size_t) len) == 0 ) {
+        codes[i] = c - 1;
+        break;
+      }
+      j = (j + 1) & mask_bits;
+    }
+  }
+  ca_const_string_scan_end(&s);
+  xfree(slot);
+
+  /* The buffer is the column's frozen String, alive past the window. */
+  levels = rb_ary_new_capa(k);
+  {
+    const char *buf = RSTRING_PTR(ca->buffer);
+    rb_encoding *enc = rb_enc_from_index(ca->encoding_id);
+    for ( i = 0; i < k; i++ ) {
+      rb_ary_push(levels, rb_enc_str_new(buf + lev_start[i], lev_len[i], enc));
+    }
+  }
+  xfree(lev_start);
+  xfree(lev_len);
+
+  if      ( k <= 0xFF )   { code_dt = CA_UINT8;  }
+  else if ( k <= 0xFFFF ) { code_dt = CA_UINT16; }
+  else                    { code_dt = CA_UINT32; }
+  if ( code_dt != CA_UINT32 ) {
+    VALUE vnarrow = rb_carray_new(code_dt, ca->ndim, ca->dim, 0, NULL);
+    CArray *cn;
+    TypedData_Get_Struct(vnarrow, CArray, &carray_data_type, cn);
+    if ( code_dt == CA_UINT8 ) {
+      uint8_t *cp = (uint8_t *) cn->ptr;
+      for ( i = 0; i < n; i++ ) {
+        cp[i] = codes[i] == 0xFFFFFFFFu ? (uint8_t) 0xFF : (uint8_t) codes[i];
+      }
+    }
+    else {
+      uint16_t *cp = (uint16_t *) cn->ptr;
+      for ( i = 0; i < n; i++ ) {
+        cp[i] = codes[i] == 0xFFFFFFFFu ? (uint16_t) 0xFFFF : (uint16_t) codes[i];
+      }
+    }
+    vcodes = vnarrow;
+  }
+  return rb_ary_new3(2, vcodes, levels);
+}
+
+/* ------------------------------------------------------------------- */
 
 static VALUE
 rb_ca_const_string_s_allocate (VALUE klass)
@@ -1083,6 +1201,8 @@ Init_ca_obj_const_string (void)
   rb_define_method(rb_cCAConstString, "__sort_addr_bytes__",
                                       rb_ca_const_string_sort_index, 0);
   rb_define_method(rb_cCAConstString, "__min_bytes__", rb_ca_const_string_min, 0);
+  rb_define_private_method(rb_cCAConstString, "__factorize_appearance__",
+                           rb_ca_const_string_factorize_appearance, 0);
   rb_define_method(rb_cCAConstString, "__max_bytes__", rb_ca_const_string_max, 0);
 
   /* Y-pilot: Face-local C-level fast path for per-cell scalar fetch. */

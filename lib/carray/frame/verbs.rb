@@ -281,7 +281,10 @@ class CAFrame
   # column cast to :time is parsed into a CATime column, in the finest unit
   # its text shows (:D for dates alone, :s with a time of day, :ms / :us /
   # :ns for fractions of a second); parse_to_time takes a format and a
-  # unit. Other targets use to_type.
+  # unit. A column cast to :categorical becomes a CACategorical of its
+  # values, the labels in the order they first appear (categorize); a text
+  # column read by from_csv with types: gets there without a String made per
+  # cell. Other targets use to_type.
   # The call shapes are told apart by the fact that column names are always
   # Strings and types always Symbols (§3.7):
   #
@@ -635,6 +638,9 @@ class CAFrame
     key = name.to_s
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
     return cast_time_column(key, col, on_error) if type == :time
+    if type == :categorical
+      return col.is_a?(CACategorical) ? col : col.categorize
+    end
     if CArray.data_type_name(type) == "boolean"
       return read_boolean_text(key, col, on_error) if string_column?(col)
       if !col.face? && INTEGER_TYPES.include?(col.data_type)

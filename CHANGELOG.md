@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: `CAFrame#cast` takes `:categorical`, which makes the column a
+  `CACategorical` of its values, so `from_csv(path, types: { "station" =>
+  :categorical })` reads a column of repeated text as categories. A text
+  column read with `types:` becomes categories without a String made per
+  cell, only one per distinct value.
+
 ## 3.0.3
 
 - New: `CAFrame.from_csv` reads messy tables: `types: :infer` (numbers,
