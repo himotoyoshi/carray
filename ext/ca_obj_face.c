@@ -831,11 +831,16 @@ ca_face_operand_values (VALUE operand)
    - A reference with to_comparable brings any operand into its own space
      (a unit, an instant), and refuses what it cannot convert.
    - Any other reference has no way to read the operand in its space, and
-     refuses it. */
+     refuses it.
+   UNDEF is undefined in every space, so it passes as it is and the entry
+   answers it as it does for a plain array. */
 VALUE
 ca_face_reconcile_operand (VALUE reference, VALUE operand, const char *name)
 {
   CArray *ca;
+  if ( operand == CA_UNDEF ) {
+    return operand;
+  }
   TypedData_Get_Struct(reference, CArray, &carray_data_type, ca);
   if ( ca->obj_type == CA_OBJ_RECORD ) {
     if ( RTEST(rb_obj_is_carray(operand)) ) {
@@ -876,6 +881,38 @@ ca_face_reconcile_operand (VALUE reference, VALUE operand, const char *name)
            "sides to work in storage space",
            name, rb_obj_classname(reference));
   return Qnil;   /* not reached */
+}
+
+/* The reference and the operand of a comparison (an operator, count(v), a
+   search, linear_section) brought into one space.  A time reference answers
+   both through comparable_pair: it keeps itself when the operand sits on its
+   grid, and otherwise meets the operand in the finer unit the two share,
+   where to_comparable would refuse a value off its grid.  Every other
+   reference keeps itself and reconciles the operand
+   (ca_face_reconcile_operand).  An assignment, which has to land on the
+   reference's grid, uses ca_face_reconcile_operand. */
+void
+ca_face_reconcile_pair (volatile VALUE *pref, volatile VALUE *poperand,
+                        const char *name)
+{
+  static ID id_comparable_pair = 0;
+  VALUE ref = *pref, operand = *poperand;
+  CArray *ca;
+  if ( id_comparable_pair == 0 ) {
+    id_comparable_pair = rb_intern("comparable_pair");
+  }
+  TypedData_Get_Struct(ref, CArray, &carray_data_type, ca);
+  if ( operand != CA_UNDEF
+       && ca->obj_type != CA_OBJ_RECORD
+       && ! ca_test_flag(ca, CA_FLAG_FACE_COMPARABLE_STORAGE)
+       && ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE)
+       && rb_respond_to(ref, id_comparable_pair) ) {
+    VALUE pair = rb_funcall(ref, id_comparable_pair, 1, operand);
+    *pref     = rb_ary_entry(pair, 0);
+    *poperand = rb_ca_strip_face_value(rb_ary_entry(pair, 1));
+    return;
+  }
+  *poperand = ca_face_reconcile_operand(ref, operand, name);
 }
 
 int
@@ -1079,15 +1116,16 @@ ca_face_reconcile_comparison (volatile VALUE *pself, volatile VALUE *pother)
 
   {
     int other_was_scalar = ! RTEST(rb_obj_is_carray(other));
-    other = ca_face_reconcile_operand(self, other, "comparison");
-    /* to_comparable lifts a scalar operand to a length-1 array; unwrap it
+    volatile VALUE ref = self, op = other;
+    ca_face_reconcile_pair(&ref, &op, "comparison");
+    /* The reconcile lifts a scalar operand to a length-1 array; unwrap it
        so the comparison stays array-vs-scalar instead of a shape check
        against [1] (which only a 1-D reference would pass). */
-    if ( other_was_scalar && RTEST(rb_obj_is_carray(other)) ) {
-      other = rb_ca_fetch_addr(other, 0);
+    if ( other_was_scalar && RTEST(rb_obj_is_carray(op)) ) {
+      op = rb_ca_fetch_addr(op, 0);
     }
-    *pself  = rb_ca_strip_face_value(self);
-    *pother = other;
+    *pself  = rb_ca_strip_face_value(ref);
+    *pother = op;
   }
 }
 

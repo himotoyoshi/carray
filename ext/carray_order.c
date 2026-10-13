@@ -925,13 +925,16 @@ rb_ca_linear_section_m (int argc, VALUE *argv, VALUE self)
   rb_check_arity(argc, 1, 1);
   VALUE val = argv[0];
 
-  /* Query gate: the reference axis, still a Face here, reconciles the query
-     into its own space (ca_face_reconcile_operand). */
+  /* Query gate: the reference axis, still a Face here, and the query are
+     brought into one space (ca_face_reconcile_pair). */
   if ( rb_obj_is_carray(self) ) {
     CArray *sca;
     TypedData_Get_Struct(self, CArray, &carray_data_type, sca);
     if ( ca_is_face(sca) ) {
-      val = ca_face_reconcile_operand(self, val, "linear_section");
+      volatile VALUE ref = self, query = val;
+      ca_face_reconcile_pair(&ref, &query, "linear_section");
+      self = ref;
+      val  = query;
     }
   }
 

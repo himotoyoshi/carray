@@ -5624,21 +5624,17 @@ module MkKernel
     end
     io.puts "{"
     io.puts "  CArray *src;"
-    io.puts "  VALUE self_ref = self;         /* pre-strip Face, for to_comparable */"
     io.puts "  int self_was_face = 0;"
     io.puts "  GetCArray(self, src);"
     emit_lazy_evaluated(io)
-    io.puts "  /* Face gate (self): descend a Face reference to storage so the"
-    io.puts "     search runs on the numeric storage.  ORDERABLE licenses the"
-    io.puts "     ordered/searchable descent; the query gate below brings the"
-    io.puts "     query into the same space. */"
+    io.puts "  /* Face gate (self): a Face reference is searched on its numeric"
+    io.puts "     storage, which ORDERABLE licenses; the query gate below brings"
+    io.puts "     the reference and the query into one space and descends. */"
     io.puts "  if ( ca_is_face(src) ) {"
     io.puts "    if ( ! ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {"
     io.puts %Q[      ca_face_refuse_order(ca_calling_method_name(), self, "order");]
     io.puts "    }"
     io.puts "    self_was_face = 1;"
-    io.puts "    self = rb_ca_strip_face_value(self);"
-    io.puts "    GetCArray(self, src);"
     io.puts "  }"
 
     if has_eps
@@ -5650,10 +5646,15 @@ module MkKernel
       io.puts "  VALUE raxis = argv[1];"
       io.puts "  VALUE reps  = (argc >= 3) ? argv[2] : Qnil;"
     end
-    io.puts "  /* Query gate: the reference Face reconciles the query into its own"
-    io.puts "     space (ca_face_reconcile_operand). */"
+    io.puts "  /* Query gate: the reference Face and the query are brought into one"
+    io.puts "     space (ca_face_reconcile_pair), then the reference descends to"
+    io.puts "     its storage. */"
     io.puts "  if ( self_was_face ) {"
-    io.puts "    rval = ca_face_reconcile_operand(self_ref, rval, ca_calling_method_name());"
+    io.puts "    volatile VALUE ref = self, query = rval;"
+    io.puts "    ca_face_reconcile_pair(&ref, &query, ca_calling_method_name());"
+    io.puts "    rval = query;"
+    io.puts "    self = rb_ca_strip_face_value(ref);"
+    io.puts "    GetCArray(self, src);"
     io.puts "  }"
 
     # The query and the reference are compared in the type they share, as

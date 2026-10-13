@@ -421,14 +421,13 @@ element-wise, boolean-CArray-returning comparisons.
 Comparison results are plain `bool` or `int` CArrays — they no longer
 carry time semantics.
 
-The two operands may carry **different units**. The left-hand side (the
-reference) reconciles the right-hand operand into its own unit through
-`to_comparable` — the same lossless-cast rule as cross-unit search (§10.3) —
-so a value that does not land exactly on the left operand's grid raises rather
-than being silently truncated. `<=>` is composed from `<` and `>`, so it
-inherits the same behaviour. Because the left operand drives the conversion, a
-right-hand `Time` / `DateTime` / `Element` is accepted too (`dt < Time.utc(…)`),
-lifted into the left operand's unit.
+The two operands may carry **different units**. They meet as cross-unit
+search does (§10.3): in the left operand's unit when the right-hand values sit
+on its grid, and otherwise in the finer unit the two share, so an instant off
+the grid is compared as the instant it is — never floored onto the grid.
+`<=>` is composed from `<` and `>`, so it inherits the same behaviour. Because
+the left operand drives the conversion, a right-hand `Time` / `DateTime` /
+`Element` / `String` is accepted too (`dt < Time.utc(…)`).
 
 ### 5.4 Cross-unit comparison
 
@@ -439,9 +438,9 @@ dt_ms = CArray.int64(2) {|i| [10000, 20000][i] }.time(unit: :ms)  # 10s, 20s
 dt_ms < dt_s      # OK: :s lifted to :ms (coarser → finer is always exact)
 dt_s  < dt_ms     # OK: 10000/20000 ms are whole seconds
 
-dt_bad = CArray.int64(2) {|i| [10500, 20000][i] }.time(unit: :ms)  # 10.5s
-dt_s < dt_bad
-# => ArgumentError: cannot align time unit :ms to :s without loss
+dt_off = CArray.int64(2) {|i| [10500, 20000][i] }.time(unit: :ms)  # 10.5s
+dt_s < dt_off     # => [true, false]: 10 s < 10.5 s, compared in :ms
+dt_s.eq(dt_off)   # => [false, true]
 ```
 
 Comparison, search, and arithmetic all **reconcile** cross-unit operands
@@ -791,8 +790,10 @@ family (§10.2) and the comparison operators (§5.3): before any `bsearch` /
 into its own unit through it — which is why it is documented here, at the
 base of §10.
 
-The operand may carry a **different unit** from the axis. The reference axis
-brings it into its own unit, losslessly:
+The operand may carry a **different unit** from the axis. When every operand
+value sits on the axis's grid, the axis brings the operand into its own unit
+and is used as it is; otherwise the two meet in the finer unit they share, so
+a query off the grid finds nothing rather than a neighbour it was floored to:
 
 ```ruby
 axis_h = CArray.time_series("2024-06-15", count: 72, unit: :h)  # hourly
@@ -824,10 +825,13 @@ The cast rules (operand → axis unit):
   - `:W` is the one exception both ways: month / year starts are not aligned to
     a week grid, so `:Y`/`:M` ↔ `:W` raises.
 
-A `:ns` query whose value is half a second past an `:s` grid point cannot be
-aligned to `:s` without dropping precision, so it raises rather than silently
-truncating. (This is the search / comparison gate; `dt ± td` arithmetic converts the
-duration into the time's unit — §5.2.)
+These are the rules of `to_comparable` itself, which raises on a value it
+cannot bring into the axis's unit without loss. A search or a comparison does
+not need that: a `:ns` query half a second past an `:s` grid point is compared
+in `:ns`, so `bsearch` finds nothing for it and `search_nearest` the nearest
+second. An assignment does need it — the value has to land on the array's
+grid — so `dt[0] = ...` raises on a value off the grid. (`dt ± td` arithmetic
+converts the duration into the time's unit — §5.2.)
 
 ### 10.4 Coordinate lookup — `locate_addr` and `locate_nearest_addr`
 
@@ -864,15 +868,13 @@ t.linear_fetch(CA_FLOAT64([0.0, 2.5]))
 ```
 
 The query side needs nothing special: `linear_section` accepts a `CATime`, an
-`Element`, a Ruby `Time` / `Date` / `DateTime` or a `String` and reconciles the unit through
-`to_comparable` (§10.3), exactly as search does. Reconciliation is lossless,
-though, so a query at a *finer* resolution than the axis has to land on the
-axis's grid — `05:00` against a `2 h` axis raises rather than sit between two
-ticks. Widen the axis first, and both halves then work on the fine grid:
+`Element`, a Ruby `Time` / `Date` / `DateTime` or a `String` and meets it in a
+unit as search does (§10.3), so a query at a *finer* resolution than the
+axis keeps its precision — `05:00` against a `2 h` axis sits between two
+ticks:
 
 ```ruby
-tf = t.to_unit(:h)
-tf.linear_section(CArray.time(["2024-06-15T05:00"], unit: :h))   # => 2.5
+t.linear_section(CArray.time(["2024-06-15T05:00"], unit: :h))   # => 2.5
 ```
 
 `linear_fetch` returns times, so it returns a `CATime` **on the same unit as
