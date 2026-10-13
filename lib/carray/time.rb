@@ -289,7 +289,8 @@ module CATimeUnitAlgebra
   # CATimedelta#to_unit and by dt +/- td, where the result keeps the time's
   # unit and a finer duration is truncated to it (a :D time + a 5 h duration
   # is + 0 days; + 30 h is + 1 day).  Cross-group still raises (a calendar
-  # duration has no fixed ratio to a fixed unit).
+  # duration has no fixed ratio to a fixed unit; dt +/- a month moves the date
+  # through shift_months instead).
   def convert_scale_trunc(storage, from, to)
     a = res(from); b = res(to)
     return storage if a == b
@@ -330,6 +331,40 @@ module CATimeUnitAlgebra
     else
       convert_instant_fixed_to_calendar(storage, a, b)   # coarsen (exact-or-raise)
     end
+  end
+
+  # A time on a fixed grid moved by whole months, as Ruby's Date#>> moves a
+  # date: the year and the month move, the day stays unless the new month is
+  # shorter (then it is that month's last day), and the time of day stays.
+  # The grid has to tile a day, so the result lands on it; on any other grid
+  # (:W, "3 days", "7 hours") a month moves a time off its grid, and that
+  # raises.  +months+ is an Integer or an int64 CArray of the time's shape.
+  def shift_months(storage, from, months)
+    rd = ratio(CATime::Resolution.new(1, :D), from)   # ticks of `from` per day
+    unless rd && rd.denominator == 1
+      raise ArgumentError,
+            "cannot move a time on the #{from} grid by months: a day is not a " \
+            "whole number of its ticks, so the result would be off the grid"
+    end
+    n    = rd.numerator
+    days = storage / n                                 # floors toward the past
+    rest = storage - days * n                          # the time of day, in ticks
+    y, m, d = CATimeCivil.civil_from_days(days)
+    ord  = y * 12 + (m - 1) + months                   # month ordinal after the move
+    ny   = ord / 12
+    nm   = ord - ny * 12 + 1
+    ones = CArray.int64(*storage.shape) { 1 }
+    head = CATimeCivil.days_from_civil(ny, nm, ones)
+    ord1 = ord + 1
+    ny1  = ord1 / 12
+    last = CATimeCivil.days_from_civil(ny1, ord1 - ny1 * 12 + 1, ones) - head
+    widen(head + d.pmin(last) - 1, n) + rest
+  end
+
+  # Whole months in a calendar duration of +res+: its count of months or of
+  # years.
+  def months_per_tick(res)
+    (res.count * CALENDAR.fetch(res.base)).to_i
   end
 
   # calendar time (Resolution `from`) -> days since the epoch (int64
@@ -616,13 +651,14 @@ class CATime
     #   is the anchor: the result keeps `self`'s unit and the duration is
     #   converted into it, truncated toward zero when finer (a :D time + a
     #   5 h duration is + 0 days; + 30 h is + 1 day) -- the same rule as the
-    #   array {CATime#+}.  Only a duration in the SAME group (both calendar
-    #   or both fixed) is accepted -- a cross-group step (a :s time + a :M
-    #   duration) is calendar arithmetic; use `to_date` +
-    #   `Date#next_month` / `#next_year` for that.
+    #   array {CATime#+}.  A month or year duration on a fixed grid moves
+    #   the date as Ruby's `Date#>>` does (the day stays unless the month is
+    #   shorter, the time of day stays); a fixed duration on a month or year
+    #   grid raises, as does a month on a grid a day does not divide.
     #   @param td [CATimedelta::Element]
     #   @return [CATime::Element]
-    #   @raise [TypeError, ArgumentError] on a non-timedelta / cross-group operand.
+    #   @raise [TypeError, ArgumentError] on a non-timedelta operand, or a
+    #     pair that has no answer on self's grid.
     def +(td)
       shifted_by_duration(td, 1)
     end
@@ -661,7 +697,8 @@ class CATime
 
     # s +/- td: the time is the anchor, so the result keeps self's unit and
     # the duration is converted into it (truncated toward zero when finer; a
-    # cross-group calendar duration raises).  Mirrors the array CATime +/-.
+    # month or year duration on a fixed grid moves the date by months).
+    # Mirrors the array CATime +/-.
     def shifted_by_duration(td, sign)
       # An array of durations gives an array of instants, anchored here.
       return sign > 0 ? td + self : (-td) + self if td.is_a?(CATimedelta)
@@ -669,6 +706,13 @@ class CATime
         raise TypeError,
               "CATime::Element #{sign > 0 ? '+' : '-'} #{td.class} is not " \
               "allowed (add / subtract a CATimedelta)"
+      end
+      if CATimeUnitAlgebra::CALENDAR.key?(td.unit.base) &&
+         !CATimeUnitAlgebra::CALENDAR.key?(unit.base)
+        # months on a fixed grid move the date as Date#>> does, as the
+        # array does
+        months = sign * td.value * CATimeUnitAlgebra.months_per_tick(td.unit)
+        return Element.new(CATimeUnitAlgebra.shift_months(CA_INT64([value]), unit, months)[0], unit)
       end
       tv = CATimeUnitAlgebra.convert_scale_trunc(CA_INT64([td.value]), td.unit, unit)[0]
       Element.new(value + sign * tv, unit)
@@ -918,8 +962,13 @@ class CATime
   # @overload +(other)
   #   Returns `self + other` for a {CATimedelta}: the time is the
   #   anchor, so the result keeps `self`'s unit and the duration is converted
-  #   into it (a duration finer than `self`'s unit is truncated to it; a
-  #   cross-group calendar duration raises).  Adding two datetimes is
+  #   into it (a duration finer than `self`'s unit is truncated to it).  A
+  #   month or year duration on a fixed grid moves each date as Ruby's
+  #   `Date#>>` does: the day stays unless the new month is shorter (then it
+  #   is that month's last day), and the time of day stays, so
+  #   `2024-01-31 + 1 month` is `2024-02-29`.  The grid has to divide a day
+  #   into whole ticks; on any other (`:W`, `"3 days"`) a month raises, as a
+  #   fixed duration on a month or year grid does.  Adding two datetimes is
   #   ill-defined.  A single duration -- a {CATimedelta::Element} or a String
   #   such as `"3 days"` -- is added to every cell.
   #   @param other [CATimedelta, CATimedelta::Element, String]
@@ -932,6 +981,7 @@ class CATime
     other = CATimeUnitAlgebra.scalar_operand(other, unit) || other
     case other
     when CATimedelta
+      return shifted_by_months(other, 1) if moved_by_months?(other)
       d = CATimeUnitAlgebra.convert_scale_trunc(other.parent, other.unit, unit)
       d = d[0] if other.scalar?
       (parent + d).time(unit: unit)
@@ -960,6 +1010,7 @@ class CATime
     other = CATimeUnitAlgebra.scalar_operand(other, unit) || other
     case other
     when CATimedelta
+      return shifted_by_months(other, -1) if moved_by_months?(other)
       d = CATimeUnitAlgebra.convert_scale_trunc(other.parent, other.unit, unit)
       d = d[0] if other.scalar?
       (parent - d).time(unit: unit)
@@ -974,6 +1025,23 @@ class CATime
                        "(a CATimedelta, a CATimedelta::Element or a String such as \"3 days\") " \
                        "or a time (a CATime, a CATime::Element, a Time, a Date or a String)"
     end
+  end
+
+  # Whether a duration moves this time by calendar months: a month or year
+  # duration on a time whose grid is fixed-length.  A time on a month or year
+  # grid adds it as months already, and a fixed duration on a calendar grid
+  # is refused by the scale conversion.
+  private def moved_by_months? (td)
+    CATimeUnitAlgebra::CALENDAR.key?(td.unit.base) &&
+      !CATimeUnitAlgebra::CALENDAR.key?(unit.base)
+  end
+
+  # self moved by the months of +td+ (+sign+ 1 to add, -1 to subtract), as
+  # Ruby's Date#>> moves a date: the day is kept unless the month is shorter.
+  private def shifted_by_months (td, sign)
+    months = td.parent.int64 * (sign * CATimeUnitAlgebra.months_per_tick(td.unit))
+    months = months[0] if td.scalar?
+    CATimeUnitAlgebra.shift_months(parent, unit, months).time(unit: unit)
   end
 
   # Element-wise comparison (< <= > >= <=>) rides the core comparison Face

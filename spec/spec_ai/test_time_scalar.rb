@@ -185,7 +185,9 @@ class TestDatetimeScalar < Test::Unit::TestCase
   end
 
   def test_datetime_plus_timedelta_cross_group_raises
-    assert_raise(ArgumentError) { S.new(0, :s) + T.new(1, :M) }  # calendar step
+    assert_equal 2678400, (S.new(0, :s) + T.new(1, :M)).value    # a month, as Date#>> moves it
+    assert_raise(ArgumentError) { S.new(0, :W) + T.new(1, :M) }    # a month leaves the week grid
+    assert_raise(ArgumentError) { S.new(0, :M) + T.new(1, :D) }    # days on a month grid
     assert_raise(TypeError)     { S.new(0, :s) + S.new(1, :s) }  # time + time
   end
 

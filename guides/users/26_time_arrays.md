@@ -291,7 +291,8 @@ The operands may carry different units; arithmetic reconciles them, so no manual
 
 - **`dt ± td`** (instant ± duration): the instant is the anchor, so the result keeps `dt`'s unit and the duration is converted into it. A coarser duration widens exactly; a **finer** one is **truncated** to `dt`'s grid.
 - **`dt - dt2`** and **`td ± td2`**: the result takes the **finer** of the two units (both operands widen exactly).
-- **cross-group**: a calendar duration (`:Y` / `:M`) has no fixed ratio to seconds, so `dt(:s) + td(:M)` raises — that step is calendar arithmetic; use the step system below.
+- **a month or year on a fixed grid**: `dt(:D) + td(:M)` moves each date as Ruby's `Date#>>` does — the day stays unless the new month is shorter, so `2024-01-31 + 1 month` is `2024-02-29` — and keeps the time of day. A grid a month would leave (`:W`, `"3 days"`, `"7 hours"`) raises. As with `Date#>>`, a month is not a fixed step: `+ 1 month - 1 month` need not come back to where it started.
+- **other cross-group pairs**: a calendar duration has no fixed ratio to seconds, so `td(:M) + td(:s)` and `dt(:M) + td(:D)` raise.
 - **overflow**: widening a wide range into a fine unit (a millennium-spanning difference resolved to `:ns`) can exceed `int64`; it raises rather than silently wrapping.
 
 ```ruby
@@ -359,7 +360,7 @@ dt[3] - dt[1]        # => CATimedelta::Element "2D"  (elapsed duration)
 dt[0] + gap_element  # => CATime::Element            (advance by a duration)
 ```
 
-A cross-group step on an element (a `:s` instant plus a `:M` duration) raises — for calendar stepping on a single value, go through `to_date` and Ruby's `Date#next_month` / `#next_year`.
+A month or year duration moves an element as it moves an array, as `Date#>>` moves a date.
 
 ## Field accessors
 

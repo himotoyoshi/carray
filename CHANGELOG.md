@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: a month or year duration can be added to or subtracted from a
+  time on a day, hour, minute or finer grid, and moves each date as Ruby's
+  `Date#>>` does: the day stays unless the new month is shorter (then it is
+  that month's last day), and the time of day stays, so
+  `2024-01-31 + 1 month` is `2024-02-29`. It raised `ArgumentError` before.
+  A grid a month would leave (`:W`, `"3 days"`, `"7 hours"`) still raises,
+  as does a day duration on a month grid. As with `Date#>>`, a month is not
+  a fixed step: `+ 1 month - 1 month` need not undo it.
+
 - Fix: the reductions of the iterators answer as the core reduction does
   over each piece in more cases. `quantile` of a categorical, segment or
   axis-group iterator is NaN at a position next to a NaN, where it skipped

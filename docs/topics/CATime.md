@@ -389,9 +389,18 @@ machinery as comparison and search, §5.3 / §10.3) — no manual conversion:
   `:D` time + a 5 h duration is + 0 days; + 30 h is + 1 day).
 - **`dt - dt2`** and **`td ± td2`**: a duration at the **finer** of the two
   units (both widen exactly).
-- **cross-group** (a fixed unit with a calendar `:Y`/`:M` one): a calendar
-  duration has no fixed ratio to seconds, so `dt(:s) + td(:M)` and
-  `td(:M) + td(:s)` **raise** — that step is calendar arithmetic (§11).
+- **a month or year on a fixed grid**: `dt(:D) + td(:M)` moves each date as
+  Ruby's `Date#>>` does — the year and month move, the day stays unless the
+  new month is shorter (then it is that month's last day), and the time of
+  day stays: `2024-01-31 + 1 month` is `2024-02-29`. The grid has to divide a
+  day into whole ticks (`:D`, `:h`, `"10 minutes"`, …); on `:W`, `"3 days"` or
+  `"7 hours"` a month would leave the grid, so it **raises**. A month is not a
+  fixed step, as with `Date#>>`: `+ 1 month - 1 month` need not undo it
+  (`2024-01-31` comes back as `2024-01-29`), `+ 1 month + 1 month` need not
+  equal `+ 2 months`, and two dates can land on the same day.
+- **other cross-group pairs**: a calendar duration has no fixed ratio to
+  seconds, so `td(:M) + td(:s)` and a fixed duration on a month or year grid
+  (`dt(:M) + td(:D)`) **raise**.
 - **overflow**: widening a wide range into a fine unit (e.g. a millennium-
   spanning difference resolved to `:ns`) can exceed `int64`; it **raises**
   rather than silently wrapping.
@@ -490,8 +499,8 @@ The surface of `CATime::Element`:
   `CATimedelta::Element` (elapsed duration, in the finer unit — or the fixed
   unit across the calendar boundary), and `s ± td` → `CATime::Element`
   (advance by a duration, keeping the time's unit — a finer duration is
-  truncated to it). A cross-group step (`:s` time + `:M` duration) is
-  calendar arithmetic — use `to_date` + `Date#next_month` / `#next_year`.
+  truncated to it). A month or year duration moves a `:s` time as
+  `Date#>>` moves a date, as for an array (§5).
 
 Calendar breakdown is delegated to Ruby `Date` / `Time` rather than
 reimplemented — a single scalar pays one object's cost, so the vectorized
