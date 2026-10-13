@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: a face-mode `CAObject` (`CAObject.new(..., parent: p, face: true)`)
+  over a masked parent no longer leaks its mask, about 100 to 200 bytes
+  per object.
+
 - Change: a masked cell of an integer index array keeps its place when
   indexing: `x[i]`, `x[i, nil]` and the other grid forms, and `CAFrame`
   row selection `df[i]`, now give a result shaped like `i` with the masked

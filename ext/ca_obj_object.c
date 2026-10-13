@@ -764,7 +764,12 @@ free_ca_object (void *ap)
 {
   CAObject *ca = (CAObject *) ap;
   if ( ca != NULL ) {
-    /* ca->mask will be GC-ed by Ruby interpreter */
+    /* A Face's mask is a view over its parent's mask (made by
+       ca_view_func_create_mask) and belongs to this struct.  Otherwise
+       the mask is a Ruby object held in @mask, and the GC frees it. */
+    if ( ca_is_face(ca) ) {
+      ca_free(ca->mask);
+    }
     if ( ca->_pool ) {
       ca_array_free(ca);          /* dim lives in _pool */
     }
@@ -1476,6 +1481,12 @@ rb_ca_object_initialize_copy (VALUE self, VALUE other)
 
   data = ca_wrap_struct(ca->data);
   rb_ivar_set(self, rb_intern("__data__"), data);
+
+  /* A Face's mask is a C struct owned by the Face, so the copy makes its
+     own from the parent when it is asked for one. */
+  if ( ca_is_face(ca) ) {
+    return self;
+  }
 
   ca_update_mask(cs);
   if ( cs->mask ) {
