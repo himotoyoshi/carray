@@ -1,4 +1,5 @@
 data_type = []
+type_const = {}
 %w[
   CA_FIXLEN
   CA_BOOLEAN
@@ -20,6 +21,7 @@ data_type = []
 ].each_with_index do |name, i|
   eval("#{name} = #{i}")
   data_type.push(i)
+  type_const[i] = name
 end
 
 ctype = {
@@ -332,7 +334,27 @@ puts
     ctype1 = ctype[type1]
     ctype2 = ctype[type2]
     CA_CAST_TABLE[type1][type2] = "ca_cast_#{ctype1}_#{ctype2}"
-    puts <<-END_DEF  .gsub(/^ {6}/, '')
+    # float / complex -> integer: a NaN has no integer and C leaves its
+    # conversion undefined.  A cell that is not masked refuses it before
+    # anything is written.  #to_type masks NaN cells first (UNDEF), so
+    # only a store, a view and a single cell reach the raise.
+    nan_check = ""
+    if (FLOAT+[CA_CMPLX64, CA_CMPLX128]).include?(type1) && INTEGER.include?(type2)
+      isnan = if [CA_CMPLX64, CA_CMPLX128].include?(type1)
+                "( isnan(creal(q1[k])) || isnan(cimag(q1[k])) )"
+              else
+                "isnan(q1[k])"
+              end
+      nan_check = <<-END_CHECK.gsub(/^ {6}/, '')
+         for (k=0; k<n; k++) {
+           if ( ( ! m || ! m[k] ) && #{isnan} ) {
+             rb_raise(rb_eFloatDomainError, "NaN cannot be converted to %s",
+                      ca_type_name[#{type_const[type2]}]);
+           }
+         }
+      END_CHECK
+    end
+    puts <<-END_DEF.gsub(/^ {6}/, '').sub("@@NAN_CHECK@@\n", nan_check)
       static void
       ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
       {
@@ -341,6 +363,7 @@ puts
          #{ctype2} *q2 = ptr2;
          #{ctype2} *p2 = q2;
          ca_size_t k;
+      @@NAN_CHECK@@
          if ( m ) {
            boolean8_t *pm = m;
            for (k=0; k<n; k++) {

@@ -368,6 +368,37 @@ ca_seq_bang_numeric_body (VALUE arg)
   return Qnil;
 }
 
+/* An integer array refuses a first value it cannot hold, as a store does,
+   and an Integer step whose size it cannot hold.  An unsigned array takes
+   a negative step (a descending run).  A run that passes the end of the
+   type wraps, as integer arithmetic does. */
+static void
+ca_seq_check_integer_args (CArray *ca, VALUE roffset, VALUE rstep)
+{
+  int8_t dt = ca->data_type;
+  /* Only a number is checked here; anything else is left to the fill's
+     own conversion, which refuses it with TypeError. */
+  if ( RB_INTEGER_TYPE_P(roffset) || RB_FLOAT_TYPE_P(roffset) ) {
+    VALUE first = RB_INTEGER_TYPE_P(roffset) ? roffset : rb_Integer(roffset);
+    if ( ca_integer_range_side(first, dt) != 0 ) {
+      rb_raise(rb_eRangeError, "%s: first value %"PRIsVALUE" is out of range for %s",
+               ca_calling_method_name(), rb_inspect(roffset), ca_type_name[dt]);
+    }
+  }
+  if ( RB_INTEGER_TYPE_P(rstep) ) {
+    int is_unsigned = ( dt == CA_UINT8  || dt == CA_UINT16 ||
+                        dt == CA_UINT32 || dt == CA_UINT64 );
+    VALUE size = rstep;
+    if ( is_unsigned && RTEST(rb_funcall(rstep, rb_intern("negative?"), 0)) ) {
+      size = rb_funcall(rstep, rb_intern("-@"), 0);
+    }
+    if ( ca_integer_range_side(size, dt) != 0 ) {
+      rb_raise(rb_eRangeError, "%s: step %"PRIsVALUE" is out of range for %s",
+               ca_calling_method_name(), rb_inspect(rstep), ca_type_name[dt]);
+    }
+  }
+}
+
 /* CArray#seq!(init_val=0, step=1, axis: nil) -- arithmetic-progression
    fill, in place.  Without `axis:` the fill runs in row-major order
    over the whole array; with `axis: k` the progression runs along axis
@@ -395,6 +426,10 @@ rb_ca_seq_bang_method (int argc, VALUE *argv, VALUE self)
   /* delegate to rb_ca_seq_bang_object if data_type is object */
   if ( ca_is_object_type(ca) ) {
     return rb_ca_seq_bang_object(self, roffset, rstep, axis);
+  }
+
+  if ( ca_is_integer_type(ca) ) {
+    ca_seq_check_integer_args(ca, roffset, rstep);
   }
 
   {

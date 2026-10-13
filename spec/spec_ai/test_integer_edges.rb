@@ -193,6 +193,42 @@ class TestIntegerEdges < Test::Unit::TestCase
     assert_false CA_FLOAT64([1.5, 2.5]).to_type(:int32).has_mask?
   end
 
+  # Every other way to an integer cell (a cast view, a store, fake,
+  # wrap_readonly, clip_<type>) refuses an unmasked NaN before writing
+  # anything.  A masked NaN (mask_invalid keeps it under the mask) is
+  # skipped and reads UNDEF.
+  def test_an_unmasked_nan_is_refused_on_the_way_to_an_integer_cell
+    f = CA_FLOAT64([1.5, Float::NAN, 3.0])
+    assert_raise(FloatDomainError) { f.as_type(:int32).to_a }
+    assert_raise(FloatDomainError) { f.as_type(:int32)[1] }
+    assert_equal 1, f.as_type(:int32)[0]
+    assert_raise(FloatDomainError) { f.fake(:int32).to_a }
+    assert_raise(FloatDomainError) { CArray.wrap_readonly(f, CA_INT32).to_a }
+    assert_raise(FloatDomainError) { CA_FLOAT32([Float::NAN]).as_uint8.to_a }
+    assert_raise(FloatDomainError) { CA_CMPLX128([Complex(1, Float::NAN)]).as_int32.to_a }
+    a = CArray.int32(3).fill(9)
+    assert_raise(FloatDomainError) { a[] = f }
+    assert_equal [9, 9, 9], a.to_a, "nothing is written before the refusal"
+  end
+
+  def test_a_masked_nan_reads_undef_on_the_way_to_an_integer_cell
+    f = CA_FLOAT64([1.5, Float::NAN, 3.0]).mask_invalid
+    assert_equal [1, UNDEF, 3], f.as_type(:int32).to_a
+    assert_equal [1, UNDEF, 3], f.as_type(:int32).copy.to_a
+    assert_equal UNDEF, f.as_type(:int32)[1]
+    assert_equal [1, UNDEF, 3], f.fake(:int32).to_a
+    assert_equal [1, UNDEF, 3], CArray.wrap_readonly(f, CA_INT32).to_a
+    a = CArray.int32(3)
+    a[] = f
+    assert_equal [1, UNDEF, 3], a.to_a
+  end
+
+  def test_refused_nan_casts_leave_the_lazy_arena_usable
+    f = CA_FLOAT64([Float::NAN])
+    100.times { assert_raise(FloatDomainError) { f.as_int32.to_a } }
+    assert_equal [2.0, 3.0], (CA_FLOAT64([1, 2]).lazy + 1).copy.to_a
+  end
+
   # -- a Range with an excluded end ------------------------------------
 
   # The cells are the steps that start before the end, whether or not the
@@ -209,5 +245,35 @@ class TestIntegerEdges < Test::Unit::TestCase
   # recorded for anything (carray-jit) that compiles the same bodies.
   def test_signed_overflow_wraps_in_the_recorded_build_flags
     assert_include CArray::BUILD_FLAGS.split, "-fwrapv"
+  end
+
+  # -- seq ------------------------------------------------------------
+
+  # An integer array refuses a first value or an Integer step it cannot
+  # hold.  Taken modulo the type, int32.seq(0, 2**40) was all zeros.  An
+  # unsigned array takes a negative step, and a run past the end of the
+  # type wraps as integer arithmetic does.
+  def test_seq_refuses_a_first_value_or_step_the_type_cannot_hold
+    assert_raise(RangeError) { CArray.int32(3).seq(0, 2**40) }
+    assert_raise(RangeError) { CArray.int32(2, 2).seq(0, 2**40, axis: 0) }
+    assert_raise(RangeError) { CArray.int8(3).seq(300, 1) }
+    assert_raise(RangeError) { CArray.int8(3).seq(300.0, 1) }
+    assert_raise(RangeError) { CArray.uint8(2).seq(-1, 1) }
+    assert_raise(RangeError) { CArray.uint8(2).seq!(10, -256) }
+    assert_equal [10, 9, 8, 7], CArray.uint8(4).seq(10, -1).to_a
+    assert_equal [0, 2**64 - 1], CArray.uint64(2).seq(0, -1).to_a
+    assert_equal [120, 125, -126, -121], CArray.int8(4).seq(120, 5).to_a
+    assert_equal [1, 1, 2], CArray.int8(3).seq(1.5, 0.5).to_a
+  end
+
+  # -- diagonal --------------------------------------------------------
+
+  # An offset past either edge is an empty diagonal, at the most negative
+  # offset too (negating it overflowed).
+  def test_diagonal_at_the_extreme_offsets_is_empty
+    m = CArray.int32(3, 3).seq
+    assert_equal [], m.diagonal(-2**63).to_a
+    assert_equal [], m.diagonal(2**63 - 1).to_a
+    assert_equal [6], m.diagonal(-2).to_a
   end
 end

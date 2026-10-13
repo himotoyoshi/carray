@@ -99,6 +99,24 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   the array's ndim read past the Ruby Array or ignored the extra entries;
   they now raise IndexError, as `[]` does.
 
+- Fix: `diagonal(offset)` returns an empty view for the most negative
+  offset (`-2**63`), as for any offset past the edge. It raised
+  `IndexError`.
+
+- Change: `seq` and `seq!` on an integer array raise `RangeError` when the
+  first value does not fit the type (`int8.seq(300)`), or an Integer step
+  is larger than the type can hold (`int32.seq(0, 2**40)` came out all
+  zeros). An unsigned array still takes a negative step, and a run that
+  passes the end of the type still wraps.
+
+- Change: reading a NaN into an integer cell through `as_type` (and
+  `as_int32` etc.), `fake`, `CArray.wrap_readonly`, `clip_int32` etc., or
+  storing a float array into an integer array (`ints[] = floats`), raises
+  `FloatDomainError`, as storing a single NaN already did. It wrote a value
+  that depended on the machine (`0` on ARM). A masked NaN (as left by
+  `mask_invalid`) reads UNDEF. `to_type` is unchanged: a NaN cell becomes
+  UNDEF. `clip_uint64` gave `0` for NaN and now raises too.
+
 - Change: NaN comes after the numbers in descending order too, as it
   already did ascending: `order(descending: true)`, `sort_by_key(..., order:
   :desc)`, and `order(descending: true)` on groups put NaN last instead of

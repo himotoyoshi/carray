@@ -2893,14 +2893,22 @@ rb_ca_clip_uint64 (VALUE self)
     uint64_t *op = (uint64_t *) out->ptr;
     ca_size_t n = ca->elements;
     const double LIMIT = 18446744073709551616.0; /* 2^64, exact in f64 */
+    boolean8_t *m = ca_has_mask(src) ? (boolean8_t *) src->mask->ptr : NULL;  /* attached with src */
+    int found_nan = 0;
     for ( ca_size_t i = 0; i < n; i++ ) {
       double v = sp[i];
-      if ( v != v )         op[i] = 0;              /* NaN -> 0 */
+      if ( v != v ) {                 /* NaN has no integer: refused below */
+        op[i] = 0;
+        if ( ! m || ! m[i] ) found_nan = 1;
+      }
       else if ( v >= LIMIT ) op[i] = UINT64_MAX;
       else if ( v <= 0.0 )   op[i] = 0;
       else                   op[i] = (uint64_t) v;
     }
     ca_detach(src);
+    if ( found_nan ) {
+      rb_raise(rb_eFloatDomainError, "NaN cannot be converted to uint64");
+    }
     if ( ca_has_mask(ca) ) {
       ca_copy_mask(out, ca);
     }

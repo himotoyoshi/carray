@@ -350,6 +350,16 @@ ca_monop_is_trapping (uint16_t op_id, int8_t dt)
   return ( op_id == CA_MONOP_RCP && dt >= CA_INT8 && dt <= CA_UINT64 );
 }
 
+/* Whether a cast from `from` to `to` raises on a NaN cell: a float or
+   complex value has no integer for NaN. */
+static int
+ca_monop_cast_refuses_nan (int8_t from, int8_t to)
+{
+  int from_float = ( from == CA_FLOAT32 || from == CA_FLOAT64 ||
+                     from == CA_CMPLX64 || from == CA_CMPLX128 );
+  return from_float && to >= CA_INT8 && to <= CA_UINT64;
+}
+
 /* Apply a single op in-place on `data` (src == dst, unit element stride).
    Raises if the kernel is not implemented for the given input data_type.
 
@@ -477,7 +487,27 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
     v = ALLOCV_N(char, holder, n * parent_bytes);
     if ( dir == CA_XFER_GET ) {
       ca_lazy_req_pull(mo->parent, req, v, CA_XFER_GET);
-      if ( is_cast ) {
+      if ( is_cast && ca_monop_cast_refuses_nan(mo->parent->data_type,
+                                                mo->data_type) ) {
+        /* The cast raises on a NaN cell it is asked to convert; a masked
+           cell (mask_invalid keeps the NaN under the mask) is skipped.
+           The mask is copied off the arena first so a raise leaves no
+           arena slot held. */
+        CArray *parent = mo->parent;
+        boolean8_t *arena_mask = ca_lazy_req_mask(req, 1, &parent);
+        boolean8_t *m = NULL;
+        volatile VALUE mholder = 0;
+        if ( arena_mask ) {
+          m = ALLOCV_N(boolean8_t, mholder, n);
+          memcpy(m, arena_mask, n);
+          ca_lazy_arena_release(arena_mask);
+        }
+        ca_cast_block_with_mask(n, mo->parent, v, (CArray *) mo, data, m);
+        if ( m ) {
+          ALLOCV_END(mholder);
+        }
+      }
+      else if ( is_cast ) {
         ca_cast_block(n, mo->parent, v, (CArray *) mo, data);
       }
       else {
@@ -670,9 +700,17 @@ ca_monop_func_attach (void *ap)
     ca_attach(ca->parent);
     ca->ptr = ca_alloc_cells((CArray *) ca);
     if ( ca_monop_is_cast(ca->op_id) ) {
-      /* Cast parent.ptr (parent data_type) → ca.ptr (cast target data_type).  */
-      ca_cast_block(ca->elements, ca->parent, ca->parent->ptr,
-                    (CArray *) ca, ca->ptr);
+      /* Cast parent.ptr (parent data_type) → ca.ptr (cast target data_type).
+         A cast that raises on NaN skips the masked cells; the parent's
+         mask is attached with the parent.  A raise here is undone by
+         ca_attach, which calls the detach slot once ca->ptr is set. */
+      boolean8_t *m = NULL;
+      if ( ca_monop_cast_refuses_nan(ca->parent->data_type, ca->data_type)
+           && ca_has_mask(ca->parent) ) {
+        m = (boolean8_t *) ca->parent->mask->ptr;
+      }
+      ca_cast_block_with_mask(ca->elements, ca->parent, ca->parent->ptr,
+                              (CArray *) ca, ca->ptr, m);
     }
     else {
       /* byte_swap: memcpy parent.ptr → ca.ptr (same data_type same bytes),
