@@ -71,7 +71,9 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 - Fix: a raise while an array's mask is read no longer leaks memory.
   Converting an array whose mask a `CAObject` answers in Ruby (`to_type`,
-  `int32` and the like), indexing such an array with an index array, and
+  `int32` and the like), taking a view of such an array (a slice,
+  `transpose`, `reshape`, `tile`, `roll`, `shift` and the like), indexing
+  it with an index array, and
   `CArray.wrap_memory_view` / `from_memory_view` with a `mask:` whose
   MemoryView export raises left the new array's buffers, the index copy or
   the MemoryView holders behind. Nothing to change in calling code.
