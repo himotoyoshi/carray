@@ -14,7 +14,8 @@ class CArray
   #   duration of the block — capturing it across iterations sees the last
   #   slab's data — and it is read-only: writing through it raises.  To
   #   produce values per slab use `map_slab` or `reduce_slab`; to write in
-  #   place, assign through the array itself.
+  #   place, assign through the array itself.  Over a Face (`CATime`, a
+  #   record type) the slab is that Face.
   # @overload each_slab(axis:)
   #   Returns an Enumerator when no block is given.
   #   @param axis [Integer, Array<Integer>, nil] the slab axis or axes
@@ -29,7 +30,9 @@ class CArray
   #   block's result.  The block receives the slab view and must return a
   #   value of the same shape as the slab (a CArray or scalar); the results
   #   are written into the output at the same positions, and a masked
-  #   cell of the block's result is masked in the output.
+  #   cell of the block's result is masked in the output.  Over a Face the
+  #   slab is that Face, and the output is too unless `data_type:` is
+  #   given; a read-only Face answers in `:object` cells.
   #   @param axis [Integer, Array<Integer>, nil] the slab axis or axes.
   #   @param data_type [Symbol, Integer, Class, nil] output data type
   #     (defaults to `self`'s data type).
@@ -48,6 +51,10 @@ class CArray
   #   Per-element form (`init:` given): the block receives `(acc, x)` for
   #   each element of the slab and returns the new accumulator; the final
   #   accumulator per slab fills the output.
+  #
+  #   `UNDEF` from the block masks that output cell.  Over a Face the slab
+  #   (and each element) is that Face's, and the output is that Face unless
+  #   `data_type:` is given; a read-only Face answers in `:object` cells.
   #   @param axis [Integer, Array<Integer>, nil] the slab axis or axes.
   #   @param init [Object] the initial accumulator (selects the
   #     per-element form).

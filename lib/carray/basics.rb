@@ -549,3 +549,49 @@ class Enumerator::ArithmeticSequence
     return CA_OBJECT(to_a)
   end
 end
+
+class CArray
+  # map_slab / reduce_slab over a Face answer in that Face, as its other
+  # reductions do: each block value is written into a blank of the Face
+  # (which reads a CATime::Element, a string, a Face array ...) and handed
+  # to the slab engine as the storage it became; the result is lifted back
+  # at the end.  A read-only Face has no blank to write into, so its values
+  # are collected as the surface objects they are.  A `data_type:` from the
+  # caller is the caller's, and passes through.
+  module FaceSlabResult
+    def map_slab (**kw, &block)
+      return super unless face? && kw[:data_type].nil? && block
+      return super(**kw, data_type: :object, &block) if read_only?
+      out = super(**kw, data_type: __face_storage__.data_type) { |slab|
+        face_slab_storage(block.call(slab), slab.shape)
+      }
+      out.face_lift(self)
+    end
+
+    def reduce_slab (**kw, &block)
+      return super unless face? && kw[:data_type].nil? && block
+      return super(**kw, data_type: :object, &block) if read_only?
+      fiber = kw.key?(:init)
+      init  = kw.delete(:init)
+      out = super(**kw, data_type: __face_storage__.data_type) { |slab|
+        value = if fiber
+                  slab.to_a.flatten.inject(init) { |acc, e| block.call(acc, e) }
+                else
+                  block.call(slab)
+                end
+        face_slab_storage(value, [1])[0]
+      }
+      out.face_lift(self)
+    end
+
+    private
+
+    def face_slab_storage (value, shape)
+      cell = __blank_like__(shape)
+      cell[] = value
+      cell.__send__(:__face_storage__)
+    end
+  end
+
+  prepend FaceSlabResult
+end

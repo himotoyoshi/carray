@@ -167,7 +167,24 @@ that derived views see the right window.
 The slab carries the source's mask: a masked cell of the source is
 masked in the slab, so `slab.sum` or `slab.count_masked` in the block
 see it. A masked cell of the CArray the block returns from `map_slab`
-is masked in the output.
+is masked in the output, and `UNDEF` returned from a `reduce_slab`
+block masks that cell of the output.
+
+## Over a Face
+
+Over a Face (`CATime`, a record type, ...) each slab is handed to the
+block as that Face, so `slab.max` or `slab[0]` answer in the Face's own
+values. With no `data_type:`, `map_slab` and `reduce_slab` answer in the
+Face too, and a block value is read the way the Face reads a stored
+value (a `CATime::Element`, a string it parses, another `CATime`):
+
+```ruby
+t.reduce_slab(axis: 1) { |row| row.max }   # a CATime, one per row
+```
+
+A read-only Face (`CAConstString`, `CACategorical`) has nothing to write
+into, so its results come back in `:object` cells holding the values the
+block returned. A `data_type:` you pass is used as given.
 
 ## Internal use — `CA_OBJECT` per-axis paths
 
