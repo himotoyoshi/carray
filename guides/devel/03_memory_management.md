@@ -249,8 +249,12 @@ asking an array for its mask (`ca_has_mask`, `ca_create_mask`,
   (`utils/check_view_setup_mask.rb`) reports a call that does. The
   in-tree CAStride subclasses use `ca_stride_setup_view`; the public
   `ca_stride_setup` still takes the mask, for extensions that call it.
-- A buffer that is not yet part of a struct is freed by an `rb_protect`
-  around the step, or taken with `ALLOCV`.
+- A buffer that is not yet part of a struct goes through
+  `ca_fill_or_xfree(buf, step, arg)`, or is taken with `ALLOCV`; arrays
+  attached for the step go through `ca_fill_or_detach(n, list, step, arg)`.
+  `rake protect_parts_check` (`utils/check_protect_parts.rb`) asks a
+  hand-written `rb_protect` outside the files that implement these parts
+  to say, in a `/* protect: ... */` note, why it is not one of them.
 
 `rake leak_matrix` (`utils/leak_matrix.rb`, macOS) runs every public
 method over a `CAObject` source whose hooks raise and reports the calls

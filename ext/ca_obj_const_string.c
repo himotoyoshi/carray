@@ -647,6 +647,7 @@ ca_const_string_scan_begin_pair (VALUE va, ca_const_string_scan_t *a,
   ca_const_string_scan_begin(va, a);
   x.self = vb;
   x.s    = b;
+  /* protect: ends the first scan, which is not an array */
   rb_protect(ca_const_string_scan_begin_body, (VALUE) &x, &tag);
   if ( tag ) {
     ca_const_string_scan_end(a);

@@ -483,6 +483,7 @@ open_ensure (VALUE argument)
         w.steps = steps;
         w.data  = state->region[i];
         w.read  = state->region[i] + elements * ca->bytes;
+        /* protect: keeps the error so that every region is written back first */
         rb_protect(write_back, (VALUE) &w, &tag);
         if ( tag ) {
           if ( NIL_P(state->put_error) ) {

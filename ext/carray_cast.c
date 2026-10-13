@@ -496,6 +496,7 @@ ca_decimal_object_integer (VALUE v, int *negative, uint64_t *magnitude)
     /* truncate raises for a NaN or infinite BigDecimal, which reads as
        nothing an integer can hold. */
     int state = 0;
+    /* protect: a BigDecimal that is not finite reads as no integer; nothing is held */
     VALUE whole = rb_protect(ca_decimal_truncate, v, &state);
     if ( state ) {
       rb_set_errinfo(Qnil);
@@ -767,6 +768,7 @@ ca_obj2dbl_ok (VALUE val, double *out)
   }
   {
     int state = 0;
+    /* protect: converts the caller's value and reports failure; nothing is held */
     volatile VALUE r = rb_protect(ca_kernel_float, val, &state);
     if ( state ) {
       rb_set_errinfo(Qnil);
@@ -795,6 +797,7 @@ ca_obj2cmplx_ok (VALUE val, double complex *out)
   if ( NIL_P(val) ) {
     return 0;
   }
+  /* protect: converts the caller's value and reports failure; nothing is held */
   r = rb_protect(ca_cmplx_cell_body, val, &state);
   if ( state ) {
     rb_set_errinfo(Qnil);
@@ -819,6 +822,7 @@ ca_obj2integer_ok (VALUE val, int8_t wide_type, void *wide, VALUE *integer)
   if ( RB_TYPE_P(val, T_STRING) ) {
     return ca_decimal_string_to(val, wide_type, wide);
   }
+  /* protect: converts the caller's value and reports failure; nothing is held */
   *integer = rb_protect(ca_kernel_integer, val, &state);
   if ( state ) {
     rb_set_errinfo(Qnil);

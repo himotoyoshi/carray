@@ -70,6 +70,11 @@ task :runtime_error_check do
   ruby "utils/check_runtime_errors.rb" or exit($?.exitstatus)
 end
 
+desc "Check that a step that can raise is undone through a part"
+task :protect_parts_check do
+  ruby "utils/check_protect_parts.rb" or exit($?.exitstatus)
+end
+
 desc "Check that no view setup asks its parent for a mask"
 task :view_setup_mask_check do
   ruby "utils/check_view_setup_mask.rb" or exit($?.exitstatus)
@@ -293,7 +298,7 @@ task :build_c_extension_examples => [
 desc "Run spec_ai tests (ruby -I ext -I lib)"
 task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_parts_check,
                   :runtime_error_check, :index_error_check, :cell_buffer_check,
-                  :view_setup_mask_check,
+                  :view_setup_mask_check, :protect_parts_check,
                   :build_ext, :build_mv_borrower, :build_mock_unattachable,
                   :build_xfer_smoke, :build_author_surface_smoke] do
   # macOS 13+ ships MallocZeroOnFree which zeros freed blocks -- masks any

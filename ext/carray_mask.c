@@ -561,6 +561,7 @@ ca_create_mask (void *ap)
          then comes off again, since the view's sync and detach would
          find it attached to nothing. */
       int tag = 0;
+      /* protect: the mask comes off its view before it is freed */
       rb_protect(ca_create_mask_attach, (VALUE) ca->mask, &tag);
       if ( tag ) {
         CArray *mask = ca->mask;
