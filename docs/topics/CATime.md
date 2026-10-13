@@ -107,12 +107,17 @@ CArray.time_range("2024-06-15T10:00", "2024-06-16T00:00", unit: "10 minutes")
 CArray.time_range("2024-06-15", "2024-06-18", unit: :h, step: "1 day")
 
 # Build from a value or a collection of values (Strings / Times / DateTimes /
-# Unix-seconds Integers). A single literal gives a 1-element result; a Ruby
+# Integers). A single literal gives a 1-element result; a Ruby
 # Array or a CArray gives a same-shape result parsed per cell.
 CArray.time("2024-06-15", unit: :D)                  # 1-element
 CArray.time(%w[2024-01-15 2024-02-15 2024-03-15], unit: :D)   # Ruby Array
 CArray.time(CA_OBJECT(%w[2024-01-15 2024-02-15]), unit: :D)   # CArray
 CArray.time(%w[15/01/2024 20/06/2024], format: "%d/%m/%Y", unit: :D)
+
+# An Integer counts ticks of the unit from the epoch: seconds by default,
+# minutes with unit: :m.
+CArray.time(CA_INT64([0, 10, 60]), unit: :m)       # 00:00, 00:10, 01:00
+CArray.time(1700000000)                            # 2023-11-14T22:13:20Z
 
 # A time element is an instant already, so it needs no parsing: a `floor` /
 # `ceil` / `to_unit` answer feeds straight back in, as a start or an origin.
@@ -126,7 +131,7 @@ Without `unit:`, `CArray.time` reads the values in the finest unit they
 show, so nothing they hold is cut off: text written to the day is `:D`, to
 the second `:s`, with a fraction `:ms` / `:us` / `:ns` by its digits (as
 `CAFrame#parse_to_time` reads text); with `format:`, the finest field the
-format writes; a Unix-seconds Integer `:s`; a `Time` the finest its value
+format writes; an Integer `:s`; a `Time` the finest its value
 needs; a `Date` `:D`. Mixed values take the finest of them.
 
 ```ruby
@@ -151,7 +156,10 @@ explicit timezone suffix such as `"+09:00"` is respected.
 Parsing uses Ruby's own date parser under the hood — `Date._parse` for
 the flexible default and `Date._strptime` when you pass `format:` — so
 any string `Date.parse` / `Time.strptime` accepts works here, and
-`Time` / `DateTime` / Unix-seconds `Integer` values are taken directly.
+`Time` / `DateTime` values are taken directly. An `Integer` counts ticks of
+`unit:` from the epoch (Unix seconds when `unit:` is not given); with
+`format:` it is read as the digits it is written with
+(`CArray.time(20240101, format: "%Y%m%d")`).
 Passing `format:` switches from the flexible heuristic to strict pattern
 matching against that `strftime`-style template (e.g. `"%d/%m/%Y"`) —
 what you want for an unambiguous day/month order or a non-ISO layout.

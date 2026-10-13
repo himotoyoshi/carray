@@ -2404,6 +2404,8 @@ module CATimeLiteral
           frac[i] = (h[:sec_fraction] * 1_000_000_000).floor if h[:sec_fraction]
           off[i] = h[:offset] if h[:offset]
           present[i] = 1
+        elsif s.is_a?(Integer) && format.nil?
+          direct[i] = s          # an Integer counts ticks of the unit
         else
           direct[i] = tick_index(s, res, format)
         end
@@ -2603,10 +2605,12 @@ class CArray
 
   # @overload time(x, unit: :s, format: nil, on_error: :raise)
   #   Builds a {CATime} on the `unit` grid from time value(s).  `x`
-  #   is either a single literal (Time / ISO 8601 String / Unix-seconds
-  #   Integer / DateTime) — giving a 1-element result — or a CArray of such
+  #   is either a single literal (Time / ISO 8601 String / Integer /
+  #   DateTime) — giving a 1-element result — or a CArray of such
   #   literals — giving a same-shape result parsed per cell.  Parsing is UTC
-  #   and DateTime-independent.
+  #   and DateTime-independent.  An Integer counts ticks of `unit` from
+  #   the epoch, so it is Unix seconds when `unit` is not given:
+  #   `CArray.time(CA_INT64([0, 10]), unit: :m)` is 00:00 and 00:10.
   #
   #   A value that cannot be parsed raises by default (`on_error: :raise`);
   #   pass `on_error: :mask` to make it an UNDEF cell instead.  A masked /
@@ -2619,11 +2623,11 @@ class CArray
   #     off: text written to the day is `:D`, to the second `:s`, with a
   #     fraction `:ms` / `:us` / `:ns` by its digits (as
   #     `CAFrame#parse_to_time` reads text); with a format, the finest field
-  #     the format writes; an Integer (Unix seconds) `:s`; a Time the finest
+  #     the format writes; an Integer `:s`; a Time the finest
   #     its value needs; a Date `:D`; an element its own unit.
   #   @param format [String, nil] optional strptime format for String input.
   #     With a format, an Integer is read as its decimal digits
-  #     (`CArray.time(20240101, format: "%Y%m%d")`), not as Unix seconds.
+  #     (`CArray.time(20240101, format: "%Y%m%d")`), not as a count of ticks.
   #   @param on_error [:raise, :mask] parse-failure policy (default `:raise`).
   #   @return [CATime] shape `[1]` for a literal, else `x`'s shape.
   #   @raise [ArgumentError] on an unparseable value when `on_error: :raise`.
@@ -2638,9 +2642,15 @@ class CArray
     end
     x = CA_OBJECT(x) if x.is_a?(Array)   # Ruby Array of literals -> object CArray
     # With a format, an Integer is the digits it is written with (20240101
-    # read as "%Y%m%d"), not Unix seconds: a format describes text.
+    # read as "%Y%m%d"), not a count of ticks: a format describes text.
     x = CATimeLiteral.integers_as_text(x) if format
     res = unit ? CATime::Resolution.parse(unit) : CATimeLiteral.unit_shown(x, format)
+    # Without a format, an Integer counts ticks of the unit from the epoch:
+    # seconds by default, minutes with unit: :m.
+    if format.nil?
+      return CA_INT64([x]).time(unit: res) if x.is_a?(Integer)
+      return x.int64.copy.time(unit: res) if x.is_a?(CArray) && !x.face? && x.integer?
+    end
     unless x.is_a?(CArray)
       return CATimeLiteral.to_time_array(x, res, format, on_error)
     end
@@ -2654,7 +2664,7 @@ class CArray
         next
       end
       begin
-        raw[*idx] = CATimeLiteral.tick_index(s, res, format)
+        raw[*idx] = s.is_a?(Integer) && format.nil? ? s : CATimeLiteral.tick_index(s, res, format)
       rescue ArgumentError, TypeError
         raise if on_error == :raise
         raw[*idx] = UNDEF        # opt-in parse-mask
@@ -3078,7 +3088,8 @@ class CATime
       @unit    = Resolution.parse(unit)
       @origin  = origin
       @storage = resolve_storage
-      @origin  = CArray.time(origin, unit: @storage)[0] if origin
+      # An Integer origin is an instant in Unix seconds, whatever the unit.
+      @origin  = CATimeLiteral.to_time_array(origin, @storage, nil, :raise)[0] if origin
       freeze
     end
 

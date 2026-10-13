@@ -554,7 +554,8 @@ class CAFrame
             "the positional argument must be a CATime::Grid (got #{grid.class})"
     end
     if epoch
-      raw = raw + CArray.time(epoch, unit: unit).ticks[0]
+      # An Integer epoch is an instant in Unix seconds, whatever the unit.
+      raw = raw + CATimeLiteral.to_time_array(epoch, CATime::Resolution.parse(unit), nil, :raise).ticks[0]
     end
     @columns[key] = raw.time(unit: unit)
     self

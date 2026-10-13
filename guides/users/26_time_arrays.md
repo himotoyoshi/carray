@@ -82,7 +82,7 @@ With a `step:` wider than one tick, the phase is anchored at `start` and `last` 
 
 ### From values: `CArray.time`
 
-`CArray.time` builds an array from a value or a collection of values — strings, Ruby `Time` / `DateTime` objects, or Unix-seconds integers. A single literal gives a 1-element result; a Ruby `Array` or a CArray gives a same-shape result parsed per cell.
+`CArray.time` builds an array from a value or a collection of values — strings, Ruby `Time` / `DateTime` objects, or integers. An integer counts ticks of `unit:` from the epoch — seconds when there is no `unit:`, so `CArray.time(CA_INT64([0, 10]), unit: :m)` is 00:00 and 00:10. A single literal gives a 1-element result; a Ruby `Array` or a CArray gives a same-shape result parsed per cell.
 
 ```ruby
 CArray.time("2024-06-15", unit: :D)                            # 1-element
@@ -91,7 +91,7 @@ CArray.time(CA_OBJECT(%w[2024-01-15 2024-02-15]), unit: :D)    # CArray
 CArray.time(%w[15/01/2024 20/06/2024], format: "%d/%m/%Y", unit: :D)
 ```
 
-Without `unit:`, the values are read in the finest unit they show, so nothing they hold is cut off: text written to the day comes back in `:D`, to the second in `:s`, and with a fraction in `:ms`, `:us` or `:ns` by its digits — the same reading `parse_to_time` gives a frame's text column. With `format:`, it is the finest field the format writes; a Unix-seconds Integer is `:s`, a `Time` the finest its value needs, a `Date` `:D`.
+Without `unit:`, the values are read in the finest unit they show, so nothing they hold is cut off: text written to the day comes back in `:D`, to the second in `:s`, and with a fraction in `:ms`, `:us` or `:ns` by its digits — the same reading `parse_to_time` gives a frame's text column. With `format:`, it is the finest field the format writes; an Integer is `:s`, a `Time` the finest its value needs, a `Date` `:D`.
 
 ```ruby
 CArray.time(%w[2024-01-15 2024-02-15]).unit   # => D

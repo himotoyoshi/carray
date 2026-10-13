@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: `CArray.time` reads an Integer as a count of ticks of `unit:`
+  from the epoch: `CArray.time(CA_INT64([0, 10]), unit: :m)` is 00:00 and
+  00:10, as `CA_INT64([0, 10]).time(unit: :m)` is. It read every Integer as
+  Unix seconds and cut it down to the unit. Without `unit:` nothing changes
+  (the unit is seconds); to read Unix seconds onto another unit, convert
+  after reading: `CArray.time(secs).to_unit(:m)`. An Integer given as an
+  `origin:`, an `epoch:` or a start of `time_series` / `time_range` is still
+  an instant in Unix seconds.
+
 - New: `CATime#end_of(unit:, origin:)` gives each time the last tick of its
   bucket on the array's own grid, as `floor` gives its head: a day array's
   `end_of(unit: :M)` is the last day of the month, a second array's
