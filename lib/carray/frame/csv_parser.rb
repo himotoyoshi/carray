@@ -575,7 +575,7 @@ class CAFrame
     private def read_body_into_const_string_columns
       ncol = @names && !@names_to_check ? @names.size : 0
       keep = columns_to_read
-      text = @io.read || ""
+      text = read_rest
       n, buffer, pairs, records = CArray.__csv_read_body_as_const_string_columns__(text, @tok.sep, @tok.quote, ncol, keep)
       unless buffer
         @rows = []
@@ -609,7 +609,7 @@ class CAFrame
       loop do
         text = if chunked then next_chunk(chunk_bytes)
                elsif last then lines_through(last)
-               else @io.read || ""
+               else read_rest
                end
         break if text.nil?
         n, flat, records = CArray.__csv_read_body_as_string_cells__(text, @tok.sep, @tok.quote, ncol, keep)
@@ -673,6 +673,20 @@ class CAFrame
         buf << more
       end
       buf
+    end
+
+    # The rest of the input, in the IO's encoding. Read in pieces when the IO
+    # does not transcode: IO#read without a length checks the text's encoding
+    # as it reads, and the C reader checks it again faster.
+    private def read_rest
+      unless @io.respond_to?(:internal_encoding) && @io.internal_encoding.nil?
+        return @io.read || ""
+      end
+      buf = +""
+      while (piece = @io.read(CHUNK_BYTES))
+        buf << piece
+      end
+      buf.force_encoding(@io.external_encoding || Encoding.default_external)
     end
 
     # The next chunk_bytes of the input, read on to the end of its line and
