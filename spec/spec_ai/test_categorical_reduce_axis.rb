@@ -385,9 +385,7 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     # Sentinel-based exclusion: from_codes auto-masks the type-max sentinel.
     h = CArray.float64(6, 2, 3) { |i, y, x| (i + 1).to_f }
     codes = CArray.int32(6, 2, 3) { |i, y, x| i / 2 }
-    codes[0, 0, 0] = 0xFFFFFFFF   # will be masked by from_codes (signed -1 read)
-    # Wait — CA_INT32 sentinel is -1 (signed). Set via -1.
-    codes[0, 0, 0] = -1
+    codes[0, 0, 0] = -1           # the int32 sentinel, masked by from_codes
     cat = CACategorical.from_codes(codes, [:a, :b, :c])
     ref = CategoricalReduceAxisRef.sum_ref(h, cat, 0)
     out = h.group_by_category(cat).sum(axis: 0)
