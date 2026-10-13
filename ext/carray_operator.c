@@ -646,6 +646,10 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
 
   ca_mask_overlay_safe(ca2, 1, ca1);
 
+  /* No cell to compute: the strided walks below hand the kernel a first
+     row before they look at the outer counts. */
+  if ( ca2->elements == 0 ) return out;
+
   if ( ca_attach_is_alias(ca1) ) {
     ca_monop_call_t k;
     k.f  = func[ca1->data_type];
@@ -720,6 +724,7 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
                                  ca2->ptr, 1);
           }
           else {
+            /* empty: the function returns on a result with no cells, above */
             while ( 1 ) {
               ca_size_t off1 = e1_base;
               for ( k = 0; k < ndim - 1; k++ ) {
@@ -821,6 +826,10 @@ rb_ca_call_monop_typed (VALUE self, ca_monop_func_t func[],
   /* Same fast/slow pattern as rb_ca_call_monop.  ca1 input-only, ca2 output. */
   ca_mask_overlay_safe(ca2, 1, ca1);
 
+  /* No cell to compute: the strided walks below hand the kernel a first
+     row before they look at the outer counts. */
+  if ( ca2->elements == 0 ) return out;
+
   if ( ca_attach_is_alias(ca1) ) {
     ca_monop_call_t k;
     k.f  = func[ca1->data_type];
@@ -891,6 +900,7 @@ rb_ca_call_monop_typed (VALUE self, ca_monop_func_t func[],
                                  ca2->ptr, 1);
           }
           else {
+            /* empty: the function returns on a result with no cells, above */
             while ( 1 ) {
               ca_size_t off1 = e1_base;
               for ( k = 0; k < ndim - 1; k++ ) {
@@ -1206,6 +1216,10 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
      input-only operand does not raise. */
   ca_mask_overlay_safe(ca3, 2, ca1, ca2);
 
+  /* No cell to compute: the strided walks below hand the kernel a first
+     row before they look at the outer counts. */
+  if ( ca3->elements == 0 ) return out;
+
   /* path decision: alias-attachable both → fast path */
   fast_path = ca_attach_is_alias(ca1) && ca_attach_is_alias(ca2);
 
@@ -1376,6 +1390,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
                    ca3->ptr, i3);
         }
         else {
+          /* empty: the function returns on a result with no cells, above */
           while ( 1 ) {
             ca_size_t off1 = e1_base, off2 = e2_base;
             for ( k = 0; k < ndim - 1; k++ ) {
@@ -2041,6 +2056,9 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
 
   ca_mask_overlay_safe(ca2, 1, ca1);
 
+  /* No cell to compute, as in the operators above. */
+  if ( ca2->elements == 0 ) return out;
+
   /* The kernel's masked branch skips masked cells, so they would keep the
      uninitialised data from rb_carray_new.  Zero the output when a mask is
      present so masked cells read as 0 (matching binop's ca_template_safe
@@ -2333,6 +2351,9 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
     TypedData_Get_Struct(out, CArray, &carray_data_type, ca3);
 
     ca_mask_overlay_safe(ca3, 2, ca1, ca2);
+
+    /* No cell to compute, as in the operators above. */
+    if ( ca3->elements == 0 ) return out;
 
     /* The kernel's masked branch skips masked cells, so they would keep the
        uninitialised data from rb_carray_new.  Zero the output when a mask is
