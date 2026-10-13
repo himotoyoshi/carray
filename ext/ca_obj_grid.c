@@ -239,11 +239,19 @@ ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
     }
   }
 
-  if ( ca_has_mask(parent) ) {
+  return 0;
+}
+
+/* Asking the parent for its mask can call Ruby (a CAObject's mask hooks)
+   and raise, so it comes after the grid holds everything it allocated. */
+static VALUE
+ca_grid_inherit_mask (VALUE arg)
+{
+  CAGrid *ca = (CAGrid *) arg;
+  if ( ca_has_mask(ca->parent) ) {
     ca_create_mask(ca);
   }
-
-  return 0;
+  return Qnil;
 }
 
 CAGrid *
@@ -253,6 +261,7 @@ ca_grid_new (CArray *parent, int8_t ndim, cag_axis_t *protos)
   ca_grid_check_protos(parent, ndim, protos);
   ca = (CAGrid *) ca_array_alloc(CA_OBJ_GRID, ndim);
   ca_grid_setup(ca, parent, ndim, protos, 0);
+  ca_fill_or_free((CArray *) ca, ca_grid_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -261,6 +270,7 @@ ca_grid_new_share (CArray *parent, int8_t ndim, cag_axis_t *protos)
 {
   CAGrid *ca = (CAGrid *) ca_array_alloc(CA_OBJ_GRID, ndim);
   ca_grid_setup(ca, parent, ndim, protos, 1);
+  ca_fill_or_free((CArray *) ca, ca_grid_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -1044,6 +1054,7 @@ rb_ca_grid_initialize_copy (VALUE self, VALUE other)
   }
   /* Copy the axes: the source may be collected before the copy. */
   ca_grid_setup(ca, cs->parent, cs->ndim, cs->axes, 0);
+  ca_grid_inherit_mask((VALUE) ca);
 
   return self;
 }

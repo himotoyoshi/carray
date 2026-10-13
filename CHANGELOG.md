@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: a raise while an array's mask is read no longer leaks memory.
+  Converting an array whose mask a `CAObject` answers in Ruby (`to_type`,
+  `int32` and the like), indexing such an array with an index array, and
+  `CArray.wrap_memory_view` / `from_memory_view` with a `mask:` whose
+  MemoryView export raises left the new array's buffers, the index copy or
+  the MemoryView holders behind. Nothing to change in calling code.
+
 - Fix: `cond.then_else("yes", "no")` raised `ArgumentError` (`"yes" is
   unknown data_type representation`), and `then_else("int32", ...)` took
   the String as a data type. A String or Symbol branch is now a value,
