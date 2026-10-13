@@ -21,6 +21,10 @@ class TestIndexOutOfRange < Test::Unit::TestCase
     "a[CArray]"       => ->(t, i) { t.a[CA_INT64([i])].to_a },
     "a[CArray] = v"   => ->(t, i) { x = t.a; x[CA_INT64([i])] = 0; x.to_a },
     "a[i..i]"         => ->(t, i) { t.a[i..i].to_a },
+    "a[[i, 1]]"       => ->(t, i) { t.a[[i, 1]].to_a },
+    "a[[i, 1]] = v"   => ->(t, i) { x = t.a; x[[i, 1]] = 0; x.to_a },
+    "a[[i, 1, 1]]"    => ->(t, i) { t.a[[i, 1, 1]].to_a },
+    "a2[[i, 1], nil]" => ->(t, i) { t.a2[nil, [i, 1]].to_a },
     "elem_fetch"      => ->(t, i) { t.a.elem_fetch(i) },
     "elem_store"      => ->(t, i) { x = t.a; x.elem_store(i, 0); x.to_a },
     "index2addr"      => ->(t, i) { t.a2.index2addr(0, i) },
@@ -46,6 +50,39 @@ class TestIndexOutOfRange < Test::Unit::TestCase
       [N, N + 1, -N - 1, 100, -100, 2**40].each do |i|
         assert_raise(IndexError, "#{name} #{i}") { door.(self, i) }
       end
+    end
+  end
+  # A block's start counts from the end when negative; its last cell is
+  # counted from that start and has to lie inside as it is -- it does not
+  # wrap back in from either end.
+  BLOCKS_INSIDE  = [[0, 4], [-4, 4], [-2, 2], [-1, 1], [1, 2, 2], [-3, 2, 2],
+                    [-1, 2, -2], [3, 4, -1], [2, 0], [-1, 0]]
+  BLOCKS_OUTSIDE = [[-1, 2], [-2, 3], [-4, 5], [0, 5], [1, 2, -2],
+                    [-1, 3, -2], [-3, 2, 3], [3, 2, 1]]
+
+  def test_a_block_stays_inside
+    BLOCKS_INSIDE.each do |b|
+      start = b[0] < 0 ? b[0] + N : b[0]
+      step  = b[2] || 1
+      want  = Array.new(b[1]) { |k| a.to_a[start + k * step] }
+      assert_equal want, a[b].to_a, b.inspect
+      x = a
+      x[b] = 0
+      assert_equal want.size, x.to_a.count(0), "#{b.inspect} = 0"
+    end
+    BLOCKS_OUTSIDE.each do |b|
+      assert_raise(IndexError, b.inspect) { a[b] }
+      assert_raise(IndexError, "#{b.inspect} = 0") { x = a; x[b] = 0 }
+    end
+  end
+
+  # valid_addr? and valid_index? say whether an index names a cell, so they
+  # answer what the doors do.
+  def test_valid_predicates_agree_with_the_doors
+    ((-N - 2)..(N + 1)).each do |i|
+      raises = begin; a[i]; false; rescue IndexError; true; end
+      assert_equal !raises, a.valid_addr?(i), "valid_addr? #{i}"
+      assert_equal !raises, a2.valid_index?(0, i), "valid_index? 0, #{i}"
     end
   end
 end
