@@ -139,6 +139,31 @@ do it).  `rake one_sided_cast_check` asks for a `/* coerce: reason */` note
 on any cast whose target is an array's data type, for the cases where one
 side really is the authority (a store into the receiver).
 
+### Walk an extent that may be empty
+
+A walk over several axes is often written as an odometer: handle the cell
+at the current index, then carry the index forward and stop when the carry
+runs off the first axis.
+
+```c
+for ( k = 0; k < ndim; k++ ) idx[k] = 0;
+/* empty: the function returns on an empty region at its entry */
+while ( 1 ) {
+  /* ... the cell at idx ... */
+  k = ndim - 1;
+  while ( k >= 0 ) { if ( ++idx[k] < counts[k] ) break; idx[k] = 0; k--; }
+  if ( k < 0 ) break;
+}
+```
+
+It handles its first cell before it looks at any count, so an axis of
+length 0 makes it read and write a cell that is not there. Return before
+the walk when the extent is empty (`ca_region_is_empty(ndim, counts)`, or
+`elements == 0` for a whole array), or rely on a caller that does, and say
+which in an `/* empty: ... */` comment on the loop line or just above it.
+`rake empty_walk_check` (`utils/check_empty_walks.rb`, run before
+`rake spec_ai`) asks every such walk for one.
+
 ### Validate shapes
 
 Raise on mismatch — these are the canonical checks
