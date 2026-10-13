@@ -989,7 +989,7 @@ output buffers sized to the non-masked count (e.g. `compress`-style
 operations).
 
 If you would rather not branch at all, `ca_unmask(ca, &fill)` and
-`ca_unmasked_copy(ca, &fill)` substitute a caller-provided fill value
+`ca_unmask_copy(ca, &fill)` substitute a caller-provided fill value
 into masked cells. The first mutates `ca` in place (clearing its
 mask); the second returns a fresh entity. Both expect `fill` to point
 at a value of the correct data_type.

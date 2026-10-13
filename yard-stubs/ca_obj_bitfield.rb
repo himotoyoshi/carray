@@ -39,7 +39,7 @@ class CArray
   #     read as, or `nil` for the narrowest unsigned type.
   #   @return [CABitfield]
   #   @raise [IndexError] when `range` extends past the parent's bit
-  #     width, when the range has a step != 1, when the bit length
+  #     width, when the range descends or has a step != 1, when the bit length
   #     is outside `1..64`, or when the field reaches more than 64 bits
   #     past the start of its first byte.
   #   @raise [CArray::DataTypeError] when `self` is an object or complex

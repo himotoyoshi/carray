@@ -553,6 +553,10 @@ ca_create_mask (void *ap)
   }
 
   ca_func[ca->obj_type].create_mask(ca);
+  if ( ! ca->mask ) {
+    /* a lazy expression with no masked operand has no mask to make */
+    return;
+  }
   ca_set_flag(ca->mask, CA_FLAG_MASK_ARRAY); /* set array as mask array */
   if ( ca_is_view(ca) ) {
     if ( CAVIEW(ca)->attach ) {
@@ -606,6 +610,13 @@ void
 ca_setup_mask (void *ap, CArray *mask)
 {
   CArray *ca = (CArray *) ap;
+
+  if ( mask ) {
+    if ( ! ca_is_boolean_type(mask) ) {
+      rb_raise(rb_eCADataTypeError, "a mask is a boolean array");
+    }
+    ca_check_same_elements(ca, mask);
+  }
 
   ca_update_mask(ca);
 
@@ -686,6 +697,21 @@ ca_copy_mask_overlay_core (CArray *ca, ca_size_t elements, int n,
   char *modes;
   int i, some_has_mask = 0;
 
+  if ( elements > ca->elements ) {
+    elements = ca->elements;
+  }
+
+  /* An array source is read cell by cell over the destination's cells;
+     a scalar source's one cell applies to all of them. */
+  for (i=0; i<n; i++) {
+    cs = slist[i];
+    if ( cs && ! ca_is_scalar(cs) && cs->elements < elements ) {
+      rb_raise(rb_eArgError,
+               "mask source has %lld elements, fewer than the %lld of the destination",
+               (long long) cs->elements, (long long) elements);
+    }
+  }
+
   for (i=0; i<n; i++) {
     if ( slist[i] && ca_has_mask(slist[i]) ) {
       some_has_mask = 1;
@@ -702,10 +728,6 @@ ca_copy_mask_overlay_core (CArray *ca, ca_size_t elements, int n,
       }
     }
     return;
-  }
-
-  if ( elements > ca->elements ) {
-    elements = ca->elements;
   }
 
   o.list     = ALLOCA_N(CArray *, n + 1);
@@ -1492,14 +1514,9 @@ rb_ca_mask_fill (VALUE self, VALUE fval)
   return rb_ca_unmask_method(1, &fval, self);
 }
 
-/* @overload unmask_copy (fill_value = nil)
-
-(Masking, Conversion)
-Returns new unmasked array.
-If the optional argument <code>fill_value</code> is given,
-the masked elements are filled by <code>fill_value</code>.
-The returned array doesn't have the mask array.
-*/
+/* A copy without the mask: with a fill value, the masked cells hold it.
+   Behind rb_ca_unmask_copy / rb_ca_mask_fill_copy (C only; the Ruby
+   surface is strip_mask). */
 
 static VALUE
 rb_ca_unmask_copy_method (int argc, VALUE *argv, VALUE self)

@@ -51,6 +51,17 @@ class TestBitfieldEdges < Test::Unit::TestCase
     assert_raise(CArray::DataTypeError) { o.bitfield(0) }
   end
 
+  # A field is a run of bits from low to high; a descending range does
+  # not name one.
+  def test_a_descending_range_is_refused
+    a = CA_UINT8([0b1110, 0b110000])
+    assert_equal [7, 0], a.bitfield(1..3).to_a
+    assert_raise(IndexError) { a.bitfield(3..1) }
+    assert_raise(IndexError) { a.bitfield(3...1) }
+    assert_raise(IndexError) { a.bitfield(-1..0) }
+    assert_equal [true, false], a.bitfield(3..3).to_a
+  end
+
   # A complex parent is refused, as bitarray refuses it.
   def test_a_complex_parent_is_refused
     c = CA_CMPLX128([Complex(1, 2)])

@@ -189,9 +189,13 @@ predicates for cases where you genuinely need to inspect contents.
 ```c
 void ca_create_mask  (void *ca);              /* allocate mask, zero-fill */
 void ca_clear_mask   (void *ca);              /* zero an existing mask */
-void ca_setup_mask   (void *ca, CArray *mask);/* attach a given mask */
+void ca_setup_mask   (void *ca, CArray *mask);/* take a given mask */
 void ca_update_mask  (void *ca);              /* re-gather from parent */
 ```
+
+`ca_setup_mask` copies a boolean mask with one cell per cell of `ca`
+(another data type raises `CArray::DataTypeError`, another size
+`ArgumentError`); `NULL` clears the mask.
 
 `ca_create_mask` dispatches through `ca_func[ca->obj_type].create_mask`
 — so a CABlock yields a `CABlockMask`, not a generic mask. **Forget to
@@ -235,17 +239,20 @@ the inputs').
 input masks via `xfer_all` into arena scratch and byte-ORs them onto
 `ca_out->mask`, **never** calling `ca_attach` on the input masks. Use
 it whenever the input could be a shrinking view of a giant parent —
-which is "always" in user-facing arithmetic kernels.
+which is "always" in user-facing arithmetic kernels. It writes
+`ca_out->mask->ptr` directly, so `ca_out` is an entity or an attached
+view; each input other than a scalar has `ca_out`'s number of elements
+(`ArgumentError` otherwise), and there are at most 8 inputs.
 
 ### Drop / fill
 
 ```c
 void    ca_unmask        (void *ca, char *fill_value);   /* in-place */
-CArray *ca_unmasked_copy (void *ca, char *fill_value);   /* fresh copy */
+CArray *ca_unmask_copy   (void *ca, char *fill_value);   /* fresh copy */
 ```
 
 `ca_unmask` fills masked cells with `fill_value` bytes (cast from the
-caller's interpretation) and drops the mask. `ca_unmasked_copy`
+caller's interpretation) and drops the mask. `ca_unmask_copy`
 returns a new CArray with the same effect. The VALUE counterparts are
 `rb_ca_unmask` / `rb_ca_unmask_copy` / `rb_ca_mask_fill` /
 `rb_ca_mask_fill_copy` ([ch. 15](15_carray_h_helper_reference.md)).
