@@ -991,7 +991,7 @@ df.resample("time", "1 day").aggregate("rain" => ["rain", :sum], "tmax" => ["tem
 df.resample("time", "1 month").table { |g| { "n" => g.nrow } }
 ```
 
-The result's index is the bin labels as a `CATime`, **in time order**, and its row axis is named after the time column. The time column itself becomes the index, not a reduced column.
+The result's index is the bin labels as a `CATime`, **in time order**, in the time column's unit (a month bin of a day column is labelled `2024-01-01`), and its row axis is named after the time column. The time column itself becomes the index, not a reduced column.
 
 **Which end names the bin.** With `label: :left` (the default) a bin starts at its label and holds the times at or after it: `[00:00, 01:00)` is labelled `00:00`. With `label: :right` a bin ends at its label and holds the times up to and including it: `(00:00, 01:00]` is labelled `01:00` — the usual convention for a value that describes the hour before it, such as hourly precipitation:
 

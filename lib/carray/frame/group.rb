@@ -126,7 +126,9 @@ class CAFrame
   # bins start on the calendar boundary anyway.
   private def resample_grid(bins, unit)
     if %i[Y M].include?(CATime::Resolution.parse(unit).base)
-      CArray.time_range(bins.min, bins.max, unit: unit)
+      # Laid on the month or year grid, then given the bins' unit, as the
+      # labels without fill: are.
+      CArray.time_range(bins.min, bins.max, unit: unit).to_unit(bins.unit)
     else
       CArray.time_range(bins.min, bins.max, unit: bins.unit, step: unit)
     end

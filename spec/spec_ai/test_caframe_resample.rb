@@ -60,7 +60,7 @@ class TestCAFrameResample < Test::Unit::TestCase
     t = CArray.time(["2024-01-05", "2024-01-20", "2024-03-02"], unit: :D)
     df = CAFrame.new("time" => t, "v" => CA_FLOAT64([1, 3, 10]))
     r = df.resample("time", "1 month", fill: true).mean
-    assert_equal ["2024-01", "2024-02", "2024-03"], labels(r)
+    assert_equal ["2024-01-01", "2024-02-01", "2024-03-01"], labels(r)
     assert_equal [2.0, UNDEF, 10.0], r["v"].to_a
   end
 
@@ -139,5 +139,18 @@ class TestCAFrameGroupByIndexType < Test::Unit::TestCase
                      "v" => CA_FLOAT64([1, 2, 3]))
     r = df.group_by("a", "b").sum
     assert_equal [[1, "x"], [2, "y"]], r.index.to_a
+  end
+
+  # Month and year bins keep the time column's unit with fill: true, as
+  # they do without it.
+  def test_filled_month_bins_keep_the_unit
+    t = CArray.time(%w[2024-01-05 2024-02-10 2024-04-20], unit: :D)
+    df = CAFrame.new("time" => t, "v" => CA_FLOAT64([1, 2, 3]))
+    plain  = df.resample("time", "1 month").sum
+    filled = df.resample("time", "1 month", fill: true).sum
+    assert_equal "D", filled.index.unit.to_s
+    assert_equal plain.index.unit.to_s, filled.index.unit.to_s
+    assert_equal %w[2024-01-01 2024-02-01 2024-03-01 2024-04-01], filled.index.to_a.map(&:to_s)
+    assert_equal [1.0, 2.0, 0.0, 3.0], filled["v"].to_a
   end
 end

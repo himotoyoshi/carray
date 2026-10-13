@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `CAFrame#resample` with month or year bins and `fill: true` gave
+  labels in the bins' unit (`2024-01`) where the same call without
+  `fill:` gave them in the time column's unit (`2024-01-01`). Both are
+  now in the time column's unit.
+
 - Fix: `CArray.time` with `format:` read an Integer as Unix seconds, so
   `CArray.time(CA_INT64([20000101]), format: "%Y%m%d")` gave 1970-08-20.
   With a format, an Integer is now read as its digits. `%s` and `%Q`
