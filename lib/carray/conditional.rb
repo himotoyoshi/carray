@@ -28,6 +28,8 @@ class CArray
   #   The result's data type is the common type of the two branches; a
   #   branch given as `UNDEF` masks its cells and leaves the type to the
   #   other branch (`cond.then_else(a, UNDEF)` has `a`'s data type).
+  #   A String or Symbol branch makes the result an object array
+  #   (`cond.then_else("yes", "no")`).
   #   When `self` or a branch is a lazy view, the result is a lazy view
   #   (read-only) that joins the expression around it; `copy` makes an
   #   array of it.  An object result is always computed at once.
@@ -59,8 +61,14 @@ class CArray
     # does (cond.then_else(0, int32_array) is int32).  UNDEF is a missing
     # value, not a value of some type: a branch that is UNDEF leaves the
     # type to the other.
+    # A String or Symbol branch is a value, which result_type would read as
+    # the name of a data type ("int32"), so it makes the result object.
     typed = [x, y].reject { |v| v.equal?(UNDEF) }
-    dt = typed.empty? ? CA_OBJECT : CArray.result_type(*typed)
+    dt = if typed.empty? || typed.any? { |v| v.is_a?(String) || v.is_a?(Symbol) }
+           CA_OBJECT
+         else
+           CArray.result_type(*typed)
+         end
     return lazy_then_else(x, y, dt) if lazy_then_else?(x, y, dt)
     # A branch shaped unlike the condition goes through the lazy select,
     # which pairs the shapes by the operator rule (equal, or size-1 axes

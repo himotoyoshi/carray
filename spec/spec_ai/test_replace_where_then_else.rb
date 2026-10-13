@@ -203,4 +203,16 @@ class TestReplaceWhereThenElse < Test::Unit::TestCase
     assert_equal(a2.to_a, r.to_a)
   end
 
+  # A String branch is a value, not the name of a data type.
+  def test_string_and_symbol_branches_are_values
+    cond = CA_BOOLEAN([true, false, true])
+    cond[2] = UNDEF
+    r = cond.then_else("green", "red")
+    assert_equal CA_OBJECT, r.data_type
+    assert_equal ["green", "red", UNDEF], r.to_a
+    assert_equal ["int32", "x", UNDEF], cond.then_else("int32", "x").to_a
+    assert_equal [:a, :b, UNDEF], cond.then_else(:a, :b).to_a
+    assert_equal [1, "z", UNDEF], cond.then_else(CA_INT32([1, 2, 3]), "z").to_a
+  end
+
 end
