@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `CAFrame#resample(..., fill: true)` with a month or year unit and an
+  `origin:` or `label: :right` no longer drops every row: the empty bins it
+  adds now keep the phase of the occupied ones.
+
 - Fix: `order(descending: true, method: :dense)` gives dense ranks: `0` is
   the largest value and the ranks have no gaps (`[1, 1, 2]` gives `[1, 1, 0]`,
   was `[2, 2, 1]`). The same holds for `order` on groups (`CAFrame#group_by`,

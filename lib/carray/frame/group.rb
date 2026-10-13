@@ -124,15 +124,15 @@ class CAFrame
     GroupedFrame.new(self, cat, name, @columns.key?(name) ? [name] : [], index: grid)
   end
 
-  # Every bin from the first occupied one to the last. A fixed-length bin
-  # steps from the first bin, so an origin's phase is kept; a month or a year
-  # cannot be stepped on a finer grid and is laid on its own unit, where
-  # bins start on the calendar boundary anyway.
+  # Every bin from the first occupied one to the last, stepped from the
+  # first bin so an origin's phase (or label: :right) is kept. A month or a
+  # year cannot be stepped on a finer grid, so it is stepped on the one-month
+  # or one-year grid and then given the bins' unit, as the labels without
+  # fill: are.
   private def resample_grid(bins, unit)
-    if %i[Y M].include?(CATime::Resolution.parse(unit).base)
-      # Laid on the month or year grid, then given the bins' unit, as the
-      # labels without fill: are.
-      CArray.time_range(bins.min, bins.max, unit: unit).to_unit(bins.unit)
+    base = CATime::Resolution.parse(unit).base
+    if %i[Y M].include?(base)
+      CArray.time_range(bins.min, bins.max, unit: base, step: unit).to_unit(bins.unit)
     else
       CArray.time_range(bins.min, bins.max, unit: bins.unit, step: unit)
     end
