@@ -40,7 +40,7 @@ dt.month      # => CArray [6, 6, 6, 6, 6, 6, 6]
 dt.day        # => CArray [15, 16, 17, 18, 19, 20, 21]
 dt.weekday    # => CArray [6, 0, 1, 2, 3, 4, 5]   # Sun=0..Sat=6
 
-dt[2]            # => CATime::Element 2024-06-17T00:00:00Z
+dt[2]            # => CATime::Element 2024-06-17
 dt[2].to_time    # => 2024-06-17 00:00:00 UTC
 
 td = CArray.int64(7) {|i| i + 1}.timedelta(unit: :D)
@@ -49,7 +49,7 @@ dt - dt       # => CATimedelta (all zero)
 
 dt.min        # => CATime::Element 2024-06-15
 dt.max        # => CATime::Element 2024-06-21
-dt.mean       # => CATime::Element 2024-06-18T00:00:00.000000000Z  (midpoint)
+dt.mean       # => CATime::Element 2024-06-18  (midpoint)
 dt.sum        # => raises CArray::DataTypeError (sum of datetimes is undefined)
 
 dt.flip       # => CATime (reversed)
@@ -132,7 +132,8 @@ show, so nothing they hold is cut off: text written to the day is `:D`, to
 the second `:s`, with a fraction `:ms` / `:us` / `:ns` by its digits (as
 `CAFrame#parse_to_time` reads text); with `format:`, the finest field the
 format writes; an Integer `:s`; a `Time` the finest its value
-needs; a `Date` `:D`. Mixed values take the finest of them.
+needs; a `Date` `:D`. Mixed values take the finest of them, and an Integer
+among them still counts seconds (converted to that unit).
 
 ```ruby
 CArray.time(%w[2024-01-15 2024-02-15]).unit        # => D
@@ -156,7 +157,10 @@ explicit timezone suffix such as `"+09:00"` is respected.
 Parsing uses Ruby's own date parser under the hood — `Date._parse` for
 the flexible default and `Date._strptime` when you pass `format:` — so
 any string `Date.parse` / `Time.strptime` accepts works here, and
-`Time` / `DateTime` values are taken directly. An `Integer` counts ticks of
+`Time` / `DateTime` values are taken directly. A date written by its day of
+the year (`"2024-015"`, `%j`), its ISO week (`"2024-W03-1"`, `%G-W%V-%u`) or
+its week of the year (`%U` / `%W` with a weekday) is read as that date. An
+`Integer` counts ticks of
 `unit:` from the epoch (Unix seconds when `unit:` is not given); with
 `format:` it is read as the digits it is written with
 (`CArray.time(20240101, format: "%Y%m%d")`).
@@ -170,7 +174,8 @@ a date — so the form a `:M` / `:Y` element prints comes back in, and a
 missing finer field names the head of that period (`"2019-09"` on `:s` is
 `2019-09-01T00:00:00Z`). And a **field out of range raises** rather than
 rolling over into another date: `"2019-02-31"` is refused instead of
-becoming 2019-03-03. Note that `"201909"` is a valid **YYMMDD** to Ruby
+becoming 2019-03-03, and `"10:75"` or `"25:00"` instead of moving to the next
+hour or day (`24:00` and the leap second `:60` are read). Note that `"201909"` is a valid **YYMMDD** to Ruby
 (2020-19-09), so it is refused too — name the layout with
 `format: "%Y%m"` for a compact year-month.
 
@@ -193,6 +198,10 @@ lead = CArray.int64(4) {|i| i}                 # lead-time steps 0..3
 lead.time(unit: "3 hours", origin: "2022-01-01T09:00")
 # => instants 2022-01-01 09:00, 12:00, 15:00, 18:00 (UTC)
 ```
+
+The origin has to be a point of the grid: `origin: "2022-01-01T10:00"` on
+`"3 hours"`, a midday origin on `:D` or a mid-month origin on `:M` raises
+rather than moving to the tick before it.
 
 `dt.timesteps(unit:, origin:)` (§11) is the inverse — it recovers the
 relative index.
@@ -378,7 +387,8 @@ of an array; it meets every cell, as a number does in an arithmetic operator.
 A duration is a `CATimedelta::Element` or a String that reads as one
 (`"3 days"`, `"30 minutes"`); a time is a `CATime::Element`, a `Time`, a
 `Date` or any other String (`"2024-01-02"`). The same rules apply as between
-arrays: the time is the anchor, and a finer duration is truncated.
+arrays: the time is the anchor, a finer duration is truncated, and a coarser
+one has to land on the time's grid.
 
 ```ruby
 dt + "3 days"              # three days later
@@ -394,7 +404,9 @@ machinery as comparison and search, §5.3 / §10.3) — no manual conversion:
 
 - **`dt ± td`** (time ± duration): the time is the anchor, so the
   result keeps `dt`'s unit and the duration is converted into it. A coarser
-  duration widens exactly; a **finer** one is **truncated** to `dt`'s grid (a
+  duration widens exactly, and **raises** when it is not a whole number of
+  `dt`'s ticks (`"1 day"` on a `"7 hours"` grid, `"15 minutes"` on a
+  `"10 minutes"` grid); a **finer** one is **truncated** to `dt`'s grid (a
   `:D` time + a 5 h duration is + 0 days; + 30 h is + 1 day).
 - **`dt - dt2`** and **`td ± td2`**: a duration at the **finer** of the two
   units (both widen exactly).
@@ -410,9 +422,10 @@ machinery as comparison and search, §5.3 / §10.3) — no manual conversion:
 - **other cross-group pairs**: a calendar duration has no fixed ratio to
   seconds, so `td(:M) + td(:s)` and a fixed duration on a month or year grid
   (`dt(:M) + td(:D)`) **raise**.
-- **overflow**: widening a wide range into a fine unit (e.g. a millennium-
-  spanning difference resolved to `:ns`) can exceed `int64`; it **raises**
-  rather than silently wrapping.
+- **overflow**: widening a wide range into a fine unit, or a sum or
+  difference that leaves the range of the unit (e.g. a millennium-spanning
+  difference resolved to `:ns`), can exceed `int64`; it **raises**
+  `RangeError` rather than silently wrapping.
 
 ```ruby
 CArray.time("2024-01-01", unit: :h) + CA_INT64([1]).timedelta(unit: :D)
@@ -476,13 +489,13 @@ dt = CArray.time_series("2024-06-15", count: 5, unit: :D)
 s  = dt[2]
 
 s.class       # => CATime::Element
-s.value       # => 19725             (raw int64 tick index)
+s.value       # => 19891             (raw int64 tick index)
 s.unit        # => #<CATime::Resolution 1 D>   (.base => :D, .count => 1)
 s.to_time     # => Ruby Time, UTC     (midnight of the day, for a :D scalar)
 s.to_date     # => Ruby Date
 s.to_datetime # => Ruby DateTime, UTC
 s.to_s        # => "2024-06-17"       (unit-aware: a :D prints a date)
-s.inspect     # => "#<CATime::Element 2024-06-17 (19725D)>"
+s.inspect     # => "#<CATime::Element 2024-06-17 (19891D)>"
 s <=> dt[3]  # => -1
 s < dt[3]    # => true              (Comparable mixed in)
 ```
@@ -500,7 +513,8 @@ The surface of `CATime::Element`:
 - `inspect` — `to_s` plus the raw `(value, unit)`
 - `<=>` / `==` (via `Comparable`) compare by **instant**, reconciling a
   different unit — so a `:s` and a `:ms` scalar at the same moment are `==`, and
-  a `Time` / `DateTime` operand is accepted. `eql?` / `hash`, by contrast, are
+  a `Time` / `DateTime` / `Date` operand is accepted (a `Date` is its midnight,
+  UTC, as for an array). `eql?` / `hash`, by contrast, are
   unit-strict (mirroring `1 == 1.0` but `!1.eql?(1.0)`), so those two scalars
   key a `Hash` separately.
 - arithmetic that carries the unit semantic `Time` drops: `s - s2` →
@@ -509,6 +523,7 @@ The surface of `CATime::Element`:
   (advance by a duration, keeping the time's unit — a finer duration is
   truncated to it). A month or year duration moves a `:s` time as
   `Date#>>` moves a date, as for an array (§5).
+- `dup` / `clone` and `Marshal` keep the value and the unit.
 
 Calendar breakdown is delegated to Ruby `Date` / `Time` rather than
 reimplemented — a single scalar pays one object's cost, so the vectorized
@@ -681,11 +696,9 @@ td.stddev     # => CATimedelta::Element
 td.percentile(25, 75)  # => [Element, Element]
 ```
 
-`variance` / `variancep` are the one pair in the family that come back as a
-plain `Float`: their value is in *squared* ticks of `td.unit`, and no type
-represents squared time. (`CATime` refuses them outright instead — a squared
-instant is not a quantity at all, while a squared duration is.) Take
-`stddev` when you want a typed answer.
+`variance` / `variancep` raise `CArray::DataTypeError`, as they do on
+`CATime`: their value would be in *squared* ticks of `td.unit`, and no type
+represents squared time. Take `stddev`, which comes back as a duration.
 
 ---
 
@@ -1318,7 +1331,7 @@ dt.strftime("%a %b %d, %Y")
 # => ["Sat Jun 15, 2024", "Sun Jun 16, 2024", "Mon Jun 17, 2024"]
 
 dt[0].to_s
-# => "2024-06-15T00:00:00Z"   # ISO 8601
+# => "2024-06-15"   # a :D element prints its date (§6)
 ```
 
 `strftime` returns a {CAString} (a mutable string array over object
