@@ -122,6 +122,12 @@ ca_const_string_setup (CAConstString *ca, CArray *parent, VALUE buffer, int enco
              "(parent.data_type must be CA_FIXLEN with bytes == 16)");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type    = CA_OBJ_CONST_STRING;
   /* FIXLEN surface auto-gates mkkernel numeric dispatch. */
   ca->data_type   = CA_FIXLEN;
@@ -157,7 +163,9 @@ ca_const_string_setup (CAConstString *ca, CArray *parent, VALUE buffer, int enco
 CAConstString *
 ca_const_string_new (CArray *parent, VALUE buffer, int encoding_id)
 {
-  CAConstString *ca = (CAConstString *) ca_array_alloc(CA_OBJ_CONST_STRING, parent->ndim);
+  CAConstString *ca;
+  ca_const_string_setup(NULL, parent, buffer, encoding_id);
+  ca = (CAConstString *) ca_array_alloc(CA_OBJ_CONST_STRING, parent->ndim);
   ca_const_string_setup(ca, parent, buffer, encoding_id);
   ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;

@@ -111,6 +111,7 @@ VALUE rb_cCAObjectMask;
 static CAObjectMask *
 ca_objmask_new (VALUE array, int8_t ndim, ca_size_t *dim)
 {
+  /* check: the mask takes the CAObject's own shape, already checked */
   CAObjectMask *ca = ALLOC(CAObjectMask);
   /* CA_OBJ_OBJECT_MASK registers no pool_init, so it lives on the legacy
      ALLOC_N path (dim allocated separately, freed via free_ca_wrap's else
@@ -715,6 +716,12 @@ ca_object_setup (CAObject *ca,
   CA_CHECK_DIM(ndim, dim);
   CA_CHECK_BYTES(data_type, bytes);
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   /* calculate total number of elements */
 
   elements = ca_shape_elements(ndim, dim, bytes);
@@ -745,7 +752,9 @@ ca_object_setup (CAObject *ca,
 static CAObject *
 ca_object_new (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes)
 {
-  CAObject *ca = (CAObject *) ca_array_alloc(CA_OBJ_OBJECT, ndim);
+  CAObject *ca;
+  ca_object_setup(NULL, data_type, ndim, dim, bytes);
+  ca = (CAObject *) ca_array_alloc(CA_OBJ_OBJECT, ndim);
   ca_object_setup(ca, data_type, ndim, dim, bytes);
   return ca;
 }

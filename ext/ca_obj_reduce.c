@@ -56,6 +56,12 @@ ca_reduce_setup (CAReduce *ca, CArray *parent, ca_size_t count, ca_size_t offset
              "[BUG] CAReduce can't inherit other than boolean array");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   elements  = parent->elements / count;
 
   ca->obj_type  = CA_OBJ_REDUCE;
@@ -86,7 +92,9 @@ ca_reduce_setup (CAReduce *ca, CArray *parent, ca_size_t count, ca_size_t offset
 CAReduce *
 ca_reduce_new (CArray *parent, ca_size_t count, ca_size_t offset)
 {
-  CAReduce *ca = ALLOC(CAReduce);
+  CAReduce *ca;
+  ca_reduce_setup(NULL, parent, count, offset);
+  ca = ALLOC(CAReduce);
   ca_reduce_setup(ca, parent, count, offset);
   ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;

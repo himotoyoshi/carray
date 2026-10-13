@@ -129,6 +129,12 @@ ca_remap_setup (CARemap *ca, CArray *ref, CArray *idx)
 {
   ca_remap_check_constraints(ref, idx);
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_REMAP;
   ca->data_type = ref->data_type;
   ca->flags     = 0;
@@ -158,7 +164,9 @@ ca_remap_setup (CARemap *ca, CArray *ref, CArray *idx)
 CARemap *
 ca_remap_new (CArray *ref, CArray *idx)
 {
-  CARemap *ca = (CARemap *) ca_array_alloc(CA_OBJ_REMAP, ref->ndim);
+  CARemap *ca;
+  ca_remap_setup(NULL, ref, idx);
+  ca = (CARemap *) ca_array_alloc(CA_OBJ_REMAP, ref->ndim);
   ca_remap_setup(ca, ref, idx);
   ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;

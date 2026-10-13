@@ -124,6 +124,12 @@ ca_block_setup (CABlock *ca, CArray *parent, int8_t ndim, ca_size_t *dim,
     }
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   /* strides[k] = step[k] * Pi_{j>k} size0[j] * parent->bytes */
   suffix = parent->bytes;
   for (i = ndim - 1; i >= 0; i--) {
@@ -173,7 +179,9 @@ ca_block_new (CArray *parent, int8_t ndim, ca_size_t *dim,
               ca_size_t *start, ca_size_t *step, ca_size_t *count,
               ca_size_t offset)
 {
-  CABlock *ca = (CABlock *) ca_array_alloc(CA_OBJ_BLOCK, ndim);
+  CABlock *ca;
+  ca_block_setup(NULL, parent, ndim, dim, start, step, count, offset);
+  ca = (CABlock *) ca_array_alloc(CA_OBJ_BLOCK, ndim);
   ca_block_setup(ca, parent, ndim, dim, start, step, count, offset);
   ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;

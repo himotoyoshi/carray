@@ -242,8 +242,11 @@ ca_wrap_setup (CArray *ca,
   int ret;
 
   ret = carray_setup_i(ca, data_type, ndim, dim, bytes, mask, 0, 0, NULL);
-  if ( (!ptr) && (ca->elements != 0) ) {
+  if ( (!ptr) && ca_shape_elements(ndim, dim, bytes) != 0 ) {
     rb_raise(rb_eRuntimeError, "wrapping NULL pointer with an non-empty array");
+  }
+  if ( ca == NULL ) {                            /* checks only */
+    return ret;
   }
   ca->ptr = ptr;
   return ret;
@@ -257,7 +260,9 @@ ca_wrap_setup_null (CArray *ca,
   int ret;
 
   ret = carray_setup_i(ca, data_type, ndim, dim, bytes, mask, 0, 0, NULL);
-  ca->ptr = NULL;
+  if ( ca != NULL ) {
+    ca->ptr = NULL;
+  }
   return ret;
 }
 
@@ -319,6 +324,7 @@ carray_new_adopt (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes
   if ( ! ptr ) {
     rb_raise(rb_eRuntimeError, "carray_new_adopt: NULL data pointer");
   }
+  carray_setup_i(NULL, data_type, ndim, dim, bytes, NULL, 0, 0, ptr);
   ca = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
   carray_setup_i(ca, data_type, ndim, dim, bytes, NULL, 0, 0, ptr);
   return ca;
@@ -328,7 +334,9 @@ CAWrap *
 ca_wrap_new (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask, char *ptr)
 {
-  CAWrap *ca  = (CAWrap *) ca_array_alloc(CA_OBJ_ARRAY_WRAP, ndim);
+  CAWrap *ca;
+  ca_wrap_setup(NULL, data_type, ndim, dim, bytes, NULL, ptr);
+  ca = (CAWrap *) ca_array_alloc(CA_OBJ_ARRAY_WRAP, ndim);
   ca_wrap_setup(ca, data_type, ndim, dim, bytes, NULL, ptr);
   return (CAWrap *) carray_new_with_mask((CArray *) ca, mask);
 }
@@ -337,7 +345,9 @@ CAWrap *
 ca_wrap_new_null (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
                   CArray *mask)
 {
-  CAWrap *ca  = (CAWrap *) ca_array_alloc(CA_OBJ_ARRAY_WRAP, ndim);
+  CAWrap *ca;
+  ca_wrap_setup_null(NULL, data_type, ndim, dim, bytes, NULL);
+  ca = (CAWrap *) ca_array_alloc(CA_OBJ_ARRAY_WRAP, ndim);
   ca_wrap_setup_null(ca, data_type, ndim, dim, bytes, NULL);
   return (CAWrap *) carray_new_with_mask((CArray *) ca, mask);
 }
@@ -385,6 +395,12 @@ cscalar_setup (CScalar *ca,
   CA_CHECK_DATA_TYPE(data_type);
   CA_CHECK_BYTES(data_type, bytes);
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_SCALAR;
   ca->data_type = data_type;
   ca->flags     = 0;
@@ -421,7 +437,9 @@ cscalar_setup (CScalar *ca,
 CScalar *
 cscalar_new (int8_t data_type, ca_size_t bytes, CArray *mask)
 {
-  CScalar *ca = ALLOC(CScalar);
+  CScalar *ca;
+  cscalar_setup(NULL, data_type, bytes, NULL);
+  ca = ALLOC(CScalar);
   cscalar_setup(ca, data_type, bytes, NULL);
   return (CScalar *) carray_new_with_mask((CArray *) ca, mask);
 }
@@ -433,7 +451,9 @@ cscalar_new (int8_t data_type, ca_size_t bytes, CArray *mask)
 CScalar *
 cscalar_new2 (int8_t data_type, ca_size_t bytes, char *val)
 {
-  CScalar *ca = ALLOC(CScalar);
+  CScalar *ca;
+  cscalar_setup(NULL, data_type, bytes, NULL);
+  ca = ALLOC(CScalar);
   cscalar_setup(ca, data_type, bytes, NULL);
   memcpy(ca->ptr, val, ca->bytes);
   return ca;

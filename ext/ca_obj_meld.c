@@ -152,6 +152,20 @@ ca_meld_setup (CAMeld *ca, int32_t n_parents, CArray **parents, int8_t meld_axis
   int32_t i;
   int8_t  a;
 
+  /* ca == NULL asks for the checks only, so that a constructor can run
+     them before it allocates.  They see the parents as the setup will,
+     one Face level down, without changing the caller's list. */
+  if ( ca == NULL ) {
+    volatile VALUE holder = 0;
+    CArray **seen = ALLOCV_N(CArray *, holder, n_parents > 0 ? n_parents : 1);
+    for ( i = 0; i < n_parents; i++ ) {
+      seen[i] = ca_is_face(parents[i]) ? CAVIEW(parents[i])->parent : parents[i];
+    }
+    ca_meld_check_uniform(n_parents, seen, meld_axis);
+    ALLOCV_END(holder);
+    return 0;
+  }
+
   /* Pre-strip Face parents one level to storage, as CAStack does, so a
      melded Face lifts to a single-Face chain (CATime[CAMeld[entity, ...]])
      rather than a Face sitting on Face parents.  One level, not a full walk,
@@ -211,7 +225,9 @@ ca_meld_setup (CAMeld *ca, int32_t n_parents, CArray **parents, int8_t meld_axis
 CAMeld *
 ca_meld_new (int32_t n_parents, CArray **parents, int8_t meld_axis)
 {
-  CAMeld *ca = ALLOC(CAMeld);
+  CAMeld *ca;
+  ca_meld_setup(NULL, n_parents, parents, meld_axis);
+  ca = ALLOC(CAMeld);
   ca_meld_setup(ca, n_parents, parents, meld_axis);
   return ca;
 }

@@ -100,6 +100,12 @@ ca_record_setup (CARecord *ca, CArray *parent, VALUE data_class)
              parent->data_type);
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type   = CA_OBJ_RECORD;
   ca->data_type  = CA_FIXLEN;
   ca->flags      = CA_FLAG_IS_FACE;
@@ -134,7 +140,9 @@ ca_record_setup (CARecord *ca, CArray *parent, VALUE data_class)
 CARecord *
 ca_record_new (CArray *parent, VALUE data_class)
 {
-  CARecord *ca = (CARecord *) ca_array_alloc(CA_OBJ_RECORD, parent->ndim);
+  CARecord *ca;
+  ca_record_setup(NULL, parent, data_class);
+  ca = (CARecord *) ca_array_alloc(CA_OBJ_RECORD, parent->ndim);
   ca_record_setup(ca, parent, data_class);
   ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;

@@ -81,6 +81,12 @@ ca_fake_setup (CAFake *ca, CArray *parent, int8_t data_type, ca_size_t bytes)
   CA_CHECK_DATA_TYPE(data_type);
   CA_CHECK_BYTES(data_type, bytes);
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ndim     = parent->ndim;
   dim      = parent->dim;
   elements = parent->elements;
@@ -114,7 +120,9 @@ ca_fake_setup (CAFake *ca, CArray *parent, int8_t data_type, ca_size_t bytes)
 CAFake *
 ca_fake_new (CArray *parent, int8_t data_type, ca_size_t bytes)
 {
-  CAFake *ca = (CAFake *) ca_array_alloc(CA_OBJ_FAKE, parent->ndim);
+  CAFake *ca;
+  ca_fake_setup(NULL, parent, data_type, bytes);
+  ca = (CAFake *) ca_array_alloc(CA_OBJ_FAKE, parent->ndim);
   ca_fake_setup(ca, parent, data_type, bytes);
   ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;

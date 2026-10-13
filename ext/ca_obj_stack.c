@@ -125,6 +125,25 @@ ca_stack_setup_with_axis (CAStack *ca, int32_t n_parents, CArray **parents,
   int32_t i;
   int8_t  a;
 
+  /* ca == NULL asks for the checks only, so that a constructor can run
+     them before it allocates.  They see the parents as the setup will,
+     one Face level down, without changing the caller's list. */
+  if ( ca == NULL ) {
+    volatile VALUE holder = 0;
+    CArray **seen = ALLOCV_N(CArray *, holder, n_parents > 0 ? n_parents : 1);
+    for ( i = 0; i < n_parents; i++ ) {
+      seen[i] = ca_is_face(parents[i]) ? CAVIEW(parents[i])->parent : parents[i];
+    }
+    ca_stack_check_uniform(n_parents, seen);
+    if ( k_axis < 0 || k_axis > seen[0]->ndim ) {
+      rb_raise(rb_eArgError,
+               "CAStack k_axis %d out of range [0, %d]",
+               (int) k_axis, (int) seen[0]->ndim);
+    }
+    ALLOCV_END(holder);
+    return 0;
+  }
+
   /* §8.3 / MEMO_FACE_DOUBLE_LIFT §15.3: pre-strip Face parents one level to
      storage so a stacked Face lifts to a single-Face chain
      (CATime[CAStack[entity, ...]]) instead of a Face on top of Face parents.
@@ -190,7 +209,9 @@ ca_stack_setup (CAStack *ca, int32_t n_parents, CArray **parents)
 CAStack *
 ca_stack_new_with_axis (int32_t n_parents, CArray **parents, int8_t k_axis)
 {
-  CAStack *ca = ALLOC(CAStack);
+  CAStack *ca;
+  ca_stack_setup_with_axis(NULL, n_parents, parents, k_axis);
+  ca = ALLOC(CAStack);
   ca_stack_setup_with_axis(ca, n_parents, parents, k_axis);
   return ca;
 }
