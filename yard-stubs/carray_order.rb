@@ -106,7 +106,8 @@ class CArray
   #     a lower-priority key after it is never consulted; a `:dense` key
   #     preserves the tie so it is.
   #
-  #   `descending:` ranks the largest value `0`. Tied cells keep their
+  #   `descending:` ranks the largest value `0`; NaN comes after the
+  #   numbers in both directions. Tied cells keep their
   #   original order under `:ordinal` and share a rank under `:dense`, so
   #   dense ranks stay without gaps.
   #

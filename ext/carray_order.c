@@ -671,6 +671,28 @@ rb_ca_topk_positions (VALUE self, long cap, long axis_norm, int desc)
   long dim_axis = (long) ca->dim[axis_norm];
   VALUE raxis_norm = LONG2NUM(axis_norm);
 
+  /* The largest: reversing the ascending order would put the NaN and the
+     masked cells first, so rank them descending (NaN, then the masked
+     cells, last) when there can be any. */
+  if ( desc && ( ca_has_mask(ca) || ca_is_float_type(ca) ||
+                 ca->data_type == CA_OBJECT ) ) {
+    VALUE kw = rb_hash_new();
+    rb_hash_aset(kw, ID2SYM(rb_intern("axis")), raxis_norm);
+    rb_hash_aset(kw, ID2SYM(rb_intern("descending")), Qtrue);
+    VALUE rank = rb_funcallv_kw(self, rb_intern("order"), 1, &kw, RB_PASS_KEYWORDS);
+    VALUE full = rb_ca_sort_index_ki_quick(rank, raxis_norm);
+    if ( cap >= dim_axis ) {
+      return rb_ca_copy(full);
+    }
+    int ndim = (int) ca->ndim;
+    VALUE spec[CA_RANK_MAX];
+    for ( int k = 0; k < ndim; k++ ) {
+      spec[k] = Qnil;
+    }
+    spec[axis_norm] = rb_range_new(INT2FIX(0), LONG2NUM(cap), 1);
+    return rb_ca_copy(rb_ca_fetch2(full, ndim, spec));
+  }
+
   if ( cap >= dim_axis ) {
     VALUE full = rb_ca_sort_index_ki_quick(self, raxis_norm);
     if ( desc ) {
@@ -807,10 +829,10 @@ rb_ca_nsmallest (int argc, VALUE *argv, VALUE self)
  * ever compare equal), so a later sort_addr key never gets consulted;
  * dense ranks preserve ties, so it does.
  *
- * descending: ranks the largest value 0.  A dense rank r becomes top-r,
- * top the fiber's highest dense rank, so the ranks stay without gaps.  An
- * ordinal rank is the ascending ordinal rank of those descending dense
- * ranks, so tied cells keep their original order in both directions. */
+ * descending: ranks the largest value 0, with NaN after the numbers as
+ * ascending.  The kernel gives the descending dense rank; the ordinal rank
+ * is the ascending ordinal rank of it, so tied cells keep their original
+ * order in both directions. */
 
 static VALUE
 rb_ca_order (int argc, VALUE *argv, VALUE self)
@@ -837,12 +859,12 @@ rb_ca_order (int argc, VALUE *argv, VALUE self)
     return rb_funcallv_kw(ranked, rb_intern("order"), 1, &kw, RB_PASS_KEYWORDS);
   }
 
-  VALUE asc;
-  long axis_norm = 0;
+  /* The kernel's dense == 2 is the descending dense rank. */
+  int kmode = ( dense && RTEST(rdesc) ) ? 2 : dense;
   if ( NIL_P(raxis) ) {
     VALUE flat = rb_ca_flatten(self);
     /* Direct C-level dispatch via c_callable: true extern (mkkernel). */
-    VALUE ranked = rb_ca_rank_index_ki_kind_dense(flat, INT2FIX(0), do_stable, dense);
+    VALUE ranked = rb_ca_rank_index_ki_kind_dense(flat, INT2FIX(0), do_stable, kmode);
     /* reshape(*shape) */
     CArray *ca;
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
@@ -850,30 +872,12 @@ rb_ca_order (int argc, VALUE *argv, VALUE self)
     for ( long k = 0; k < (long) ca->ndim; k++ ) {
       shape_argv[k] = LONG2NUM((long) ca->dim[k]);
     }
-    asc = rb_ca_reshape((int) ca->ndim, shape_argv, ranked);
-  } else {
-    axis_norm = rb_ca_normalize_axis_value(self, raxis, "order");
-    asc = rb_ca_rank_index_ki_kind_dense(self, LONG2NUM(axis_norm), do_stable, dense);
+    return rb_ca_reshape((int) ca->ndim, shape_argv, ranked);
   }
-  if ( ! RTEST(rdesc) ) {
-    return asc;
-  }
-
-  /* Dense and descending: subtract from the fiber's highest dense rank
-     (`-` via rb_funcall takes an Integer or a CArray receiver alike). */
-  VALUE top;
-  if ( NIL_P(raxis) ) {
-    top = rb_funcall(asc, rb_intern("max"), 0);
-    if ( top == CA_UNDEF ) top = INT2FIX(0);   /* no present cell */
-  } else {
-    VALUE kw = rb_hash_new();
-    rb_hash_aset(kw, ID2SYM(rb_intern("axis")), LONG2NUM(axis_norm));
-    rb_hash_aset(kw, ID2SYM(rb_intern("keep_axis")), Qtrue);
-    top = rb_funcallv_kw(asc, rb_intern("max"), 1, &kw, RB_PASS_KEYWORDS);
-  }
+  long axis_norm = rb_ca_normalize_axis_value(self, raxis, "order");
   /* Output data_type: CA_SIZE (int64 on 64-bit builds), as the rest of the
-     *_index family; Integer - CArray keeps it. */
-  return rb_funcall(top, id_sub, 1, asc);
+     *_index family. */
+  return rb_ca_rank_index_ki_kind_dense(self, LONG2NUM(axis_norm), do_stable, kmode);
 }
 
 /* ---- linear_section / linear_fetch ----------------------------------- */

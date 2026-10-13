@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: NaN comes after the numbers in descending order too, as it
+  already did ascending: `order(descending: true)`, `sort_by_key(..., order:
+  :desc)`, and `order(descending: true)` on groups put NaN last instead of
+  first. `nlargest` no longer returns NaN or masked cells ahead of the
+  numbers, so `nlargest(1)` agrees with `max`. To place NaN with the masked
+  cells instead, mask it first (`a[:is_nan] = UNDEF`).
+
 - Fix: copying the view that `sort` or `partition` returns without `axis:`
   (`a.sort.copy`, `a.partition(k).copy`) is as fast as with `axis:` again,
   about a third less time than in 3.0.3. More generally, reading a flattened
