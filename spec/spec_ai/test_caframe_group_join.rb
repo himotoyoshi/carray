@@ -510,6 +510,76 @@ class TestCAFrameJoin < Test::Unit::TestCase
   end
 end
 
+class TestCAFrameJoinSeveralKeys < Test::Unit::TestCase
+  def setup
+    @obs  = CAFrame.new({"station" => CA_OBJECT(%w[a a b b]),
+                         "day"     => CA_INT32([1, 2, 1, 2]),
+                         "t"       => CA_FLOAT64([10, 11, 12, 13])})
+    @fcst = CAFrame.new({"station" => CA_OBJECT(%w[b a c]),
+                         "day"     => CA_INT32([1, 2, 1]),
+                         "f"       => CA_FLOAT64([20, 21, 22])})
+  end
+
+  def rows(df, names)
+    (0...df.nrow).map { |i| names.map { |n| v = df[n][i]; UNDEF.equal?(v) ? nil : v } }
+  end
+
+  def test_rows_match_when_every_key_matches
+    j = @obs.join(@fcst, on: ["station", "day"])
+    assert_equal %w[station day t f], j.column_names
+    assert_equal [["a", 1, 10.0, nil], ["a", 2, 11.0, 21.0],
+                  ["b", 1, 12.0, 20.0], ["b", 2, 13.0, nil]],
+                 rows(j, %w[station day t f])
+  end
+
+  def test_inner_and_outer
+    assert_equal [["a", 2, 11.0, 21.0], ["b", 1, 12.0, 20.0]],
+                 rows(@obs.join(@fcst, on: ["station", "day"], how: :inner), %w[station day t f])
+    outer = @obs.join(@fcst, on: ["station", "day"], how: :outer)
+    assert_equal ["c", 1, nil, 22.0], rows(outer, %w[station day t f]).last
+    assert_equal 5, outer.nrow
+  end
+
+  def test_right_join
+    j = @obs.join(@fcst, on: ["station", "day"], how: :right)
+    assert_equal [["b", 1, 12.0, 20.0], ["a", 2, 11.0, 21.0], ["c", 1, nil, 22.0]],
+                 rows(j, %w[station day t f])
+  end
+
+  def test_a_masked_key_cell_matches_nothing
+    @obs["day"][2] = UNDEF
+    @fcst["station"][1] = UNDEF
+    j = @obs.join(@fcst, on: ["station", "day"], how: :inner)
+    assert_equal 0, j.nrow
+  end
+
+  def test_a_pair_key_matches_many_rows_as_sql
+    fcst = CAFrame.new({"station" => CA_OBJECT(%w[a a]), "day" => CA_INT32([2, 2]),
+                        "f" => CA_FLOAT64([1, 2])})
+    j = @obs.join(fcst, on: ["station", "day"], how: :inner)
+    assert_equal [["a", 2, 11.0, 1.0], ["a", 2, 11.0, 2.0]], rows(j, %w[station day t f])
+  end
+
+  def test_key_types_are_reconciled_per_column
+    fcst = CAFrame.new({"station" => CA_OBJECT(%w[b]), "day" => CA_FLOAT64([1.0]),
+                        "f" => CA_FLOAT64([5])})
+    j = @obs.join(fcst, on: ["station", "day"], how: :outer)
+    assert_equal :float64, j["day"].data_type
+    assert_equal ["b", 1.0, 12.0, 5.0], rows(j, %w[station day t f])[2]
+  end
+
+  def test_a_one_name_array_is_one_key
+    assert_equal rows(@obs.join(@fcst, on: "day"), %w[day t f]),
+                 rows(@obs.join(@fcst, on: ["day"]), %w[day t f])
+  end
+
+  def test_refuses_no_key_and_a_repeated_key
+    assert_raise(ArgumentError) { @obs.join(@fcst, on: []) }
+    assert_raise(ArgumentError) { @obs.join(@fcst, on: %w[day day]) }
+    assert_raise(TypeError)     { @obs.join(@fcst, on: ["day", :station]) }
+  end
+end
+
 class TestCAFrameAlign < Test::Unit::TestCase
   def setup
     # 10-min series (minutes) with a gap 720 -> 760 (750,740,730 missing)

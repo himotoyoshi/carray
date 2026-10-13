@@ -1085,9 +1085,12 @@ How the rows of the frames are put together decides the verb:
 ```ruby
 obs.join(meta, on: "station")                    # left join (default)
 obs.join(meta, on: "station", how: :inner)       # :inner / :outer / :right
+obs.join(fcst, on: ["station", "date"])          # several key columns
 ```
 
 Rows are matched as SQL joins match them: each pair of a left row and a right row with the same key gives one result row. A key held by 2 left rows and 3 right rows gives 6 rows. A masked key matches nothing, like a NULL key in SQL.
+
+With several key columns, a left row and a right row match when every key column matches; a row with any key cell masked matches nothing. Each key column is compared on its own, as a single key is (below), and each stays a column of the result, without a suffix.
 
 Choose `how:` by which rows you want to keep:
 

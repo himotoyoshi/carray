@@ -36,16 +36,21 @@ class CAFrame
   # both sides (+suffixes: ["_left", "_right"]+); pass a 2-element array to pick
   # meaningful names up front (+["_obs", "_fcst"]+), or +suffixes: false+ to
   # raise instead. Rename afterward with +rename+ if needed (§12-C).
+  #
+  # +on:+ may name several columns, as an Array: rows then match when every
+  # key column matches, and a row with any key cell masked matches nothing.
+  #
+  #   obs.join(fcst, on: ["station", "date"])
   def join(other, on:, how: :left, suffixes: DEFAULT_JOIN_SUFFIXES)
-    on   = column_key(on, "join")
-    lkey = join_key(self[on], on, "join")
-    rkey = join_key(other[on], on, "join")
-    plan = join_name_plan(other, on, suffixes)
+    names = join_key_names(on)
+    lkeys = names.map { |name| join_key(self[name], name, "join") }
+    rkeys = names.map { |name| join_key(other[name], name, "join") }
+    plan  = join_name_plan(other, names, suffixes)
 
     unless %i[left inner outer right].include?(how)
       raise ArgumentError, "unknown join mode #{how.inspect}"
     end
-    join_pairs(other, on, lkey, rkey, how, plan)
+    join_pairs(other, names, lkeys, rkeys, how, plan)
   end
 
   # As-of (nearest-key) left join for irregular series (memo §11.7). Each
@@ -59,11 +64,11 @@ class CAFrame
   # only the address primitive differs.
   def join_asof(other, on:, direction: :floor, tolerance: nil, suffixes: DEFAULT_JOIN_SUFFIXES)
     on   = column_key(on, "join_asof")
-    plan = join_name_plan(other, on, suffixes)
+    plan = join_name_plan(other, [on], suffixes)
     lkey = join_key(self[on], on, "join_asof")
     rkey = join_key(other[on], on, "join_asof")
     addr = lkey.locate_nearest_addr(rkey, direction: direction, tolerance: tolerance)
-    join_by_addr(other, on, addr, plan)
+    join_by_addr(other, [on], addr, plan)
   end
 
   # Conform every column to an externally supplied reference key set (the
@@ -201,8 +206,19 @@ class CAFrame
           "#{verb} on one of its components (e.g. df[name][nil, 0])"
   end
 
-  private def join_name_plan(other, on, suffixes)
-    collisions = (column_names & other.column_names) - [on]
+  # The key column names of a join: one name, or an Array of names.
+  private def join_key_names(on)
+    names = on.is_a?(Array) ? on : [on]
+    raise ArgumentError, "join: on: names no key column" if names.empty?
+    names = names.map { |name| column_key(name, "join") }
+    if names.uniq.size < names.size
+      raise ArgumentError, "join: on: names a key column twice (#{on.inspect})"
+    end
+    names
+  end
+
+  private def join_name_plan(other, names, suffixes)
+    collisions = (column_names & other.column_names) - names
     return { collisions: [], lsuf: nil, rsuf: nil } if collisions.empty?
 
     if suffixes == false
@@ -230,11 +246,11 @@ class CAFrame
     cols[name] = col
   end
 
-  private def join_by_addr(other, on, addr, plan)
+  private def join_by_addr(other, names, addr, plan)
     cols = {}
     column_names.each { |name| put_join_column(cols, join_name(name, plan[:lsuf], plan), self[name]) }
     other.column_names.each do |name|
-      next if name == on
+      next if names.include?(name)
       put_join_column(cols, join_name(name, plan[:rsuf], plan), project_rows(other[name], addr))
     end
     CAFrame.new(cols, axis_name: @axis_name, index: @index)
@@ -242,19 +258,31 @@ class CAFrame
 
   # The rows of a key join: li / ri are the left / right row of each result
   # row, UNDEF on the side a row has no match on.
-  private def join_pairs(other, on, lkey, rkey, how, plan)
-    # Both keys get a code in one set of distinct values, compared as the
-    # lookups compare them (type, unit and width reconciled); a masked key
-    # gets none and matches nothing.
-    common = CArray.align_addr(lkey, rkey, join: :outer)[0]
-    lcode  = lkey.locate_addr(common)
-    rcode  = rkey.locate_addr(common)
+  private def join_pairs(other, names, lkeys, rkeys, how, plan)
+    # Each key column gets a code in one set of distinct values of both
+    # sides, compared as the lookups compare them (type, unit and width
+    # reconciled); a masked key cell gets none and matches nothing.
+    parts = lkeys.zip(rkeys).map do |lkey, rkey|
+      common = CArray.align_addr(lkey, rkey, join: :outer)[0]
+      [common, lkey.locate_addr(common), rkey.locate_addr(common)]
+    end
+    # Several key columns: a row's key is the tuple of its codes, coded
+    # again one column at a time so the number stays below the row count.
+    _, lcode, rcode = parts[0]
+    k = parts[0][0].elements
+    parts.drop(1).each do |common, lc, rc|
+      lt = lcode * common.elements + lc
+      rt = rcode * common.elements + rc
+      tuples = CArray.align_addr(lt, rt, join: :outer)[0]
+      lcode, rcode, k = lt.locate_addr(tuples), rt.locate_addr(tuples), tuples.elements
+    end
+    extra = nil
     if how == :right
-      ri, li = join_expand(rcode, lcode, common.elements, true)
+      ri, li = join_expand(rcode, lcode, k, true)
     else
-      li, ri = join_expand(lcode, rcode, common.elements, how != :inner)
+      li, ri = join_expand(lcode, rcode, k, how != :inner)
       if how == :outer
-        lcount = lcode.bincount(length: common.elements)
+        lcount = lcode.bincount(length: k)
         alone  = rcode.is_masked | lcount.project(rcode).strip_mask(0).eq(0)
         alone  = alone.strip_mask(true)
         extra  = CArray.int64(rcode.elements).seq[alone]
@@ -262,8 +290,8 @@ class CAFrame
           undef_rows = CArray.int64(extra.elements).fill(UNDEF)
           li = CArray.concatenate([li, undef_rows])
           ri = CArray.concatenate([ri, extra])
-          code = CArray.concatenate([lcode.project(li[0...(li.elements - extra.elements)]),
-                                     rcode.project(extra)])
+        else
+          extra = nil
         end
       end
     end
@@ -272,20 +300,28 @@ class CAFrame
                  (nrow == 0 || li.eq(CArray.int64(nrow).seq).all)
     cols = {}
     column_names.each do |name|
+      j = names.index(name)
       col = if identity          then self[name]
             elsif every_left     then self[name][li, *([nil] * (self[name].ndim - 1))]
-            elsif name == on     then nil
+            elsif j && how == :right then project_rows(rkeys[j], ri)
+            elsif j
+              # An unmatched right row of an outer join takes its key from
+              # the right side.
+              common, lc, rc = parts[j]
+              code = if extra
+                       nleft = li.elements - extra.elements
+                       CArray.concatenate([lc.project(li[0...nleft]), rc.project(extra)])
+                     else
+                       lc.project(li)
+                     end
+              common.project(code)
             else                      project_rows(self[name], li)
             end
-      if name == on && col.nil?
-        col = how == :right ? project_rows(rkey, ri) :
-                              common.project(code || lcode.project(li))
-      end
-      name = join_name(name, plan[:lsuf], plan) unless name == on
+      name = join_name(name, plan[:lsuf], plan) unless j
       put_join_column(cols, name, col)
     end
     other.column_names.each do |name|
-      next if name == on
+      next if names.include?(name)
       put_join_column(cols, join_name(name, plan[:rsuf], plan), project_rows(other[name], ri))
     end
     new_index = if @index.nil?  then nil

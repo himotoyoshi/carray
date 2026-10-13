@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: `CAFrame#join` takes several key columns, `on: ["station", "date"]`.
+  Rows match when every key column matches; a row with any key cell masked
+  matches nothing. `join_asof` still takes one key.
+
 - Fix: `CAFrame#group_by` and `is_duplicate` take the index as a key, named
   by the row axis name, as `resample` and `pivot` already did: after
   `set_index("station")`, `group_by("station")` groups by it. It raised
