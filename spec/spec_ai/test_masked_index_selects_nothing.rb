@@ -147,6 +147,54 @@ class TestMaskedIndexSelectsNothing < Test::Unit::TestCase
     assert_equal [10, 20, 30], y.to_a
   end
 
+  # Showing the holes gives a parent that has no mask none: reading, and
+  # writing values or false into the mask, leave it without one.
+  NO_MASK_OPS = {
+    "to_a"      => ->(v) { v.to_a },
+    "copy"      => ->(v) { v.copy },
+    "sum"       => ->(v) { v.sum },
+    "sort"      => ->(v) { v.sort.to_a },
+    "mask"      => ->(v) { v.mask.to_a },
+    "is_masked" => ->(v) { v.is_masked.to_a },
+    "lazy"      => ->(v) { (v.lazy + 1).copy },
+    "add!"      => ->(v) { v.add!(1) },
+    "mask.dup"  => ->(v) { v.mask.dup.to_a },
+    "unmask"    => ->(v) { v.unmask(0) },
+    "mask = 0"  => ->(v) { v.mask = 0 },
+    "fill"      => ->(v) { v[] = 5 },
+    "inspect"   => ->(v) { v.inspect },
+  }
+
+  def test_no_mask_is_made_on_the_parent
+    NO_MASK_OPS.each do |name, op|
+      i = CA_INT64([2, 0, 1]); i[1] = UNDEF
+      x = CA_INT32([10, 20, 30])
+      op.call(x[i])
+      assert_equal false, x.has_mask?, name
+      t = CArray.time(["2024-01-01", "2024-01-02", "2024-01-03"])
+      op.call(t[i]) rescue nil
+      assert_equal false, t.has_mask?, "#{name} (CATime)"
+    end
+  end
+
+  # A mask the parent gains later is read through the view, and a true
+  # written into the view's mask reaches the parent.
+  def test_the_parent_mask_comes_and_goes_through_the_view
+    i = CA_INT64([2, 0, 1]); i[1] = UNDEF
+    x = CA_INT32([10, 20, 30])
+    v = x[i]
+    m = v.mask
+    assert_equal [false, true, false], m.to_a
+    x[2] = UNDEF
+    assert_equal [true, true, false], m.to_a
+    assert_equal [UNDEF, UNDEF, 20], v.to_a
+    y = CA_INT32([10, 20, 30])
+    w = y[i].mask.dup
+    GC.start
+    w[2] = true
+    assert_equal [10, UNDEF, 30], y.to_a
+  end
+
   # Both axes of a grid, and the axes of a mapping.
   def test_grid_holes_on_two_axes
     x = CA_INT32([[10, 20, 30], [40, 50, 60], [70, 80, 90]])

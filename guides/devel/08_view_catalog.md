@@ -210,7 +210,10 @@ masked (the grid's mask grid returns true there) and takes no write. The
 descriptor engine has no hole, so a grid with holes is delivered through its
 own transfers (one batch of parent addresses with the holes left out of a
 write), declines `fold_stride`, and is routed to the kernel iterator as
-`SRC_ATTACH` (`ca_grid_has_holes`). A new door that takes integer positions
+`SRC_ATTACH` (`ca_grid_has_holes`). Showing the holes gives a parent that has
+no mask none: the mask grid reads an all-false stand-in held by the grid, and
+gives way to the parent's own mask once the parent has one or a true is
+written outside the holes. A new door that takes integer positions
 answers the same way: the read gives `UNDEF` at the masked position, the
 write leaves it alone, as `project` and `gather_nd` do.
 

@@ -42,7 +42,7 @@ typedef struct {
   uint8_t         *holes;
 } cag_axis_t;
 
-typedef struct {
+typedef struct _CAGrid {
   int16_t   obj_type;
   int8_t    data_type;
   int8_t    ndim;
@@ -62,6 +62,14 @@ typedef struct {
      holes read as masked.  The data grid's holes read the cell at index 0
      of each holed axis, as project and gather_nd do. */
   int8_t       holes_read_masked;
+  /* A grid with holes over a parent that has no mask: the all-false mask
+     its mask grid reads instead, so that showing the holes gives the
+     parent no mask.  Owned by this grid; NULL otherwise. */
+  CArray      *mask_standin;
+  /* On a mask grid: the grid whose mask it is, which holds the stand-in
+     and the parent whose mask replaces it.  A Ruby copy of the mask keeps
+     that grid alive (rb_ca_mask_array sets masked_array). */
+  struct _CAGrid *mask_owner;
 } CAGrid;
 
 static size_t
@@ -223,6 +231,8 @@ ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
   ca->attach    = 0;
   ca->nosync    = 0;
   ca->holes_read_masked = 0;
+  ca->mask_standin      = NULL;
+  ca->mask_owner        = NULL;
 
   for (k = 0; k < ndim; k++) ca->dim[k] = protos[k].count;
 
@@ -313,7 +323,7 @@ ca_grid_inherit_mask (VALUE view)
 /* holes_read_masked is the copied grid's: a copy of a mask grid is one. */
 static CAGrid *
 ca_grid_new_as (CArray *parent, int8_t ndim, cag_axis_t *protos,
-                int8_t holes_read_masked)
+                int8_t holes_read_masked, CAGrid *mask_owner)
 {
   CAGrid *ca;
   ca_grid_check_protos(parent, ndim, protos);
@@ -321,6 +331,7 @@ ca_grid_new_as (CArray *parent, int8_t ndim, cag_axis_t *protos,
   ca = (CAGrid *) ca_array_alloc(CA_OBJ_GRID, ndim);
   ca_grid_setup(ca, parent, ndim, protos, 0);
   ca->holes_read_masked = holes_read_masked;
+  ca->mask_owner        = mask_owner;
   ca_fill_or_free((CArray *) ca, ca_grid_inherit_mask, (VALUE) ca);
   return ca;
 }
@@ -328,7 +339,7 @@ ca_grid_new_as (CArray *parent, int8_t ndim, cag_axis_t *protos,
 CAGrid *
 ca_grid_new (CArray *parent, int8_t ndim, cag_axis_t *protos)
 {
-  return ca_grid_new_as(parent, ndim, protos, 0);
+  return ca_grid_new_as(parent, ndim, protos, 0, NULL);
 }
 
 CAGrid *
@@ -347,6 +358,7 @@ free_ca_grid (void *ap)
   CAGrid *ca = (CAGrid *) ap;
   if ( ca != NULL ) {
     ca_free(ca->mask);
+    ca_free(ca->mask_standin);
     if ( ! (ca->flags & CA_FLAG_SHARE_INDEX) ) {
       int8_t k;
       for (k = 0; k < ca->ndim; k++) {
@@ -381,7 +393,8 @@ static void *
 ca_grid_func_clone (void *ap)
 {
   CAGrid *ca = (CAGrid *) ap;
-  return ca_grid_new_as(ca->parent, ca->ndim, ca->axes, ca->holes_read_masked);
+  return ca_grid_new_as(ca->parent, ca->ndim, ca->axes, ca->holes_read_masked,
+                        ca->mask_owner);
 }
 
 /* Per-axis parent-index lookup.  STRIDE = one multiply, INDEX = one
@@ -393,6 +406,25 @@ cag_parent_index_for (const cag_axis_t *ax, ca_size_t i)
     return ax->start + i * ax->step;
   }
   return ax->indices[i];
+}
+
+/* A mask grid reading its owner's stand-in gives way to the parent's own
+   mask once the parent has one, or by making it when a true is about to be
+   written.  Returns 1 while the stand-in is still read: it is all false,
+   so a write of nothing but false to it is a write of nothing. */
+static int
+cag_mask_reads_standin (CAGrid *m, int write_true)
+{
+  CAGrid *o = m->mask_owner;
+  if ( o == NULL || o->mask_standin == NULL || m->parent != o->mask_standin ) {
+    return 0;
+  }
+  if ( write_true || ca_has_mask(o->parent) ) {
+    ca_create_mask(o->parent);
+    m->parent = o->parent->mask;
+    return 0;
+  }
+  return 1;
 }
 
 /* What the GET of a hole writes when it reads no parent cell: true in a
@@ -440,7 +472,7 @@ static void
 ca_grid_holed_xfer (CAGrid *ca, ca_size_t n, const ca_size_t *addrs,
                     char *data, int dir)
 {
-  CArray        *parent = ca->parent;
+  CArray        *parent;
   ca_size_t      bytes  = ca->bytes;
   volatile VALUE h_addr = 0, h_hole = 0, h_data = 0;
   ca_size_t     *paddrs;
@@ -450,6 +482,23 @@ ca_grid_holed_xfer (CAGrid *ca, ca_size_t n, const ca_size_t *addrs,
   if ( n <= 0 ) {
     return;
   }
+  if ( dir == CA_XFER_GET ) {
+    cag_mask_reads_standin(ca, 0);
+  }
+  else if ( ca->mask_owner ) {
+    /* a mask grid: written trues outside the holes need the parent's mask */
+    int any = 0;
+    for (i = 0; i < n && ! any; i++) {
+      if ( data[i] ) {
+        ca_addr2index((CArray *) ca, addrs ? addrs[i] : i, idx);
+        any = ! cag_parent_addr(ca, idx, &m);
+      }
+    }
+    if ( cag_mask_reads_standin(ca, any) ) {
+      return;
+    }
+  }
+  parent = ca->parent;
   paddrs = ALLOCV_N(ca_size_t, h_addr, n);
   hole   = ALLOCV_N(uint8_t, h_hole, n);
   for (i = 0; i < n; i++) {
@@ -515,6 +564,12 @@ ca_grid_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
       cag_hole_cells(ca, (char *) data, 1);
       return;
     }
+  }
+  if ( cag_mask_reads_standin(ca, dir == CA_XFER_PUT && *(char *) data) ) {
+    if ( dir == CA_XFER_GET ) {
+      *(boolean8_t *) data = 0;
+    }
+    return;
   }
   ca_xfer_index(ca->parent, idx0, data, dir);
 }
@@ -959,6 +1014,9 @@ ca_grid_holed_fill (CAGrid *ca, void *ptr)
   if ( ca->elements <= 0 ) {
     return;
   }
+  if ( cag_mask_reads_standin(ca, *(char *) ptr) ) {
+    return;
+  }
   paddrs = ALLOCV_N(ca_size_t, holder, ca->elements);
   for (i = 0; i < ca->elements; i++) {
     ca_addr2index((CArray *) ca, i, idx);
@@ -1009,12 +1067,32 @@ static void
 ca_grid_func_create_mask (void *ap)
 {
   CAGrid *ca = (CAGrid *) ap;
+  CArray *mparent;
+  int     holed = cag_has_holes(ca);
 
-  ca_create_mask(ca->parent);
+  /* A grid with holes shows them without giving a parent that has no mask
+     one: its mask grid reads an all-false stand-in until a true is written
+     outside the holes (cag_mask_reads_standin). */
+  if ( holed && ! ca_has_mask(ca->parent) ) {
+    if ( ! ca->mask_standin ) {
+      CArray *z = carray_new(CA_BOOLEAN, ca->parent->ndim, ca->parent->dim,
+                             0, NULL);
+      MEMZERO(z->ptr, boolean8_t, z->elements);
+      if ( ca_is_readonly(ca->parent) ) {
+        ca_set_flag(z, CA_FLAG_READ_ONLY);
+      }
+      ca->mask_standin = z;
+    }
+    mparent = ca->mask_standin;
+  }
+  else {
+    ca_create_mask(ca->parent);
+    mparent = ca->parent->mask;
+  }
 
-  ca->mask = (CArray *) ca_grid_new_share(ca->parent->mask,
-                                          ca->ndim, ca->axes);
-  ((CAGrid *) ca->mask)->holes_read_masked = (int8_t) cag_has_holes(ca);
+  ca->mask = (CArray *) ca_grid_new_share(mparent, ca->ndim, ca->axes);
+  ((CAGrid *) ca->mask)->holes_read_masked = (int8_t) holed;
+  ((CAGrid *) ca->mask)->mask_owner = holed ? ca : NULL;
 }
 
 ca_operation_function_t ca_grid_func = {
@@ -1269,6 +1347,7 @@ rb_ca_grid_initialize_copy (VALUE self, VALUE other)
   /* Copy the axes: the source may be collected before the copy. */
   ca_grid_setup(ca, cs->parent, cs->ndim, cs->axes, 0);
   ca->holes_read_masked = cs->holes_read_masked;
+  ca->mask_owner        = cs->mask_owner;
   ca_grid_inherit_mask((VALUE) ca);
 
   return self;
