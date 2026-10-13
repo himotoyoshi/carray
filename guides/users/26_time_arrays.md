@@ -270,6 +270,14 @@ The full table:
 | `td / Integer` | `CATimedelta`      | scaling                                     |
 | `td / td2`     | `CArray`           | their ratio as float64 (90 s / 1 m is 1.5)  |
 
+Either operand may also be a single value instead of an array; it meets every cell. A duration is a `CATimedelta::Element` or a String that reads as one (`"3 days"`); a time is a `CATime::Element`, a `Time`, a `Date` or any other String (`"2024-01-02"`):
+
+```ruby
+dt + "3 days"        # three days later
+dt - dt.min          # the time since the first one, a CATimedelta
+dt - "2024-01-02"    # the time since that day
+```
+
 ### Cross-unit arithmetic
 
 The operands may carry different units; arithmetic reconciles them, so no manual conversion is needed. The rules:

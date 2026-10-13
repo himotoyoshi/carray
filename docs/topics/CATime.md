@@ -352,6 +352,20 @@ a + wk               # => CATime    2024-06-22  (instant + duration = instant)
 | `td / Integer`  | `CATimedelta`       | scaling                                    |
 | `td / td`       | `CArray` (Float)    | ratio; a plain Float array                 |
 
+**One value against an array.** Either operand may be a single value instead
+of an array; it meets every cell, as a number does in an arithmetic operator.
+A duration is a `CATimedelta::Element` or a String that reads as one
+(`"3 days"`, `"30 minutes"`); a time is a `CATime::Element`, a `Time`, a
+`Date` or any other String (`"2024-01-02"`). The same rules apply as between
+arrays: the time is the anchor, and a finer duration is truncated.
+
+```ruby
+dt + "3 days"              # three days later
+dt - dt.min                # the time since the first one, a CATimedelta
+dt - "2024-01-02"          # the time since that day
+dt.min + td                # instants anchored at the first time
+```
+
 ### 5.2 Cross-unit arithmetic
 
 Arithmetic reconciles operands that carry different units (the same lossless

@@ -106,6 +106,41 @@ module CATimeUnitAlgebra
     end
   end
 
+  # A single value an operator meets an array with, as a one-cell array
+  # marked scalar (a CScalar) of its kind, or nil when it is not one: a
+  # duration -- a CATimedelta::Element, or a String that reads as one
+  # ("3 days") -- or an instant -- a CATime::Element, a Time, a Date, or any
+  # other String.  An instant that lands on the +unit+ grid is given in that
+  # unit, so a day array minus "2024-01-02" answers in days.
+  def scalar_operand(x, unit)
+    require 'date'
+    case x
+    when CATimedelta::Element
+      CATimedelta.wrap(CScalar.int64 { x.value }, unit: x.unit)
+    when String
+      res = begin
+              CATime::Resolution.parse(x)
+            rescue ArgumentError
+              nil
+            end
+      return CATimedelta.wrap(CScalar.int64 { res.count }, unit: res.base) if res
+      scalar_instant(CATimeLiteral.exact_instant(x), unit)
+    when CATime::Element
+      CATime.wrap(CScalar.int64 { x.value }, unit: x.unit)
+    when Time, Date
+      scalar_instant(CATimeLiteral.exact_instant(x), unit)
+    end
+  end
+
+  def scalar_instant(t, unit)
+    v = begin
+          convert_instant!(t.parent, t.unit, unit)[0]
+        rescue ArgumentError
+          return CATime.wrap(CScalar.int64 { t.parent[0] }, unit: t.unit)
+        end
+    CATime.wrap(CScalar.int64 { v }, unit: unit)
+  end
+
   # seconds- (fixed) or months- (calendar) per base tick.
   def base_ratio(base)
     FIXED[base] || CALENDAR[base]
@@ -604,8 +639,10 @@ class CATime
       when Element
         u = CATimeUnitAlgebra.diff_unit(unit, other.unit)
         CATimedelta::Element.new(instant_in(u) - other.instant_in(u), u)
-      when CATimedelta::Element
+      when CATimedelta::Element, CATimedelta
         shifted_by_duration(other, -1)
+      when CATime
+        -(other - self)
       else
         raise TypeError, "CATime::Element - #{other.class} is not allowed"
       end
@@ -626,6 +663,8 @@ class CATime
     # the duration is converted into it (truncated toward zero when finer; a
     # cross-group calendar duration raises).  Mirrors the array CATime +/-.
     def shifted_by_duration(td, sign)
+      # An array of durations gives an array of instants, anchored here.
+      return sign > 0 ? td + self : (-td) + self if td.is_a?(CATimedelta)
       unless td.is_a?(CATimedelta::Element)
         raise TypeError,
               "CATime::Element #{sign > 0 ? '+' : '-'} #{td.class} is not " \
@@ -801,6 +840,13 @@ class CATimedelta
     private
 
     def combined_with_duration(other, sign)
+      # An array gives an array: durations by durations, and instants for a
+      # duration added to times (subtracting times from a duration is not
+      # defined).
+      case other
+      when CATimedelta then return sign > 0 ? other + self : -(other - self)
+      when CATime      then return other + self if sign > 0
+      end
       unless other.is_a?(Element)
         raise TypeError,
               "CATimedelta::Element #{sign > 0 ? '+' : '-'} #{other.class} is not allowed"
@@ -874,21 +920,26 @@ class CATime
   #   anchor, so the result keeps `self`'s unit and the duration is converted
   #   into it (a duration finer than `self`'s unit is truncated to it; a
   #   cross-group calendar duration raises).  Adding two datetimes is
-  #   ill-defined.
-  #   @param other [CATimedelta]
+  #   ill-defined.  A single duration -- a {CATimedelta::Element} or a String
+  #   such as `"3 days"` -- is added to every cell.
+  #   @param other [CATimedelta, CATimedelta::Element, String]
   #     (or a MemoryView producer whose +to_ca+ gives one, such as an Arrow
   #     duration array)
   #   @return [CATime]
   #   @raise [TypeError] on a non-timedelta operand.
   def +(other)
     given, other = other, CATimeUnitAlgebra.operand(other)
+    other = CATimeUnitAlgebra.scalar_operand(other, unit) || other
     case other
     when CATimedelta
-      (parent + CATimeUnitAlgebra.convert_scale_trunc(other.parent, other.unit, unit)).time(unit: unit)
+      d = CATimeUnitAlgebra.convert_scale_trunc(other.parent, other.unit, unit)
+      d = d[0] if other.scalar?
+      (parent + d).time(unit: unit)
     when CATime
       raise TypeError, "CATime + CATime is ill-defined"
     else
-      raise TypeError, "CATime + #{given.class} is not allowed (use CATimedelta)"
+      raise TypeError, "CATime + #{given.class} is not allowed: add a duration " \
+                       "(a CATimedelta, a CATimedelta::Element or a String such as \"3 days\")"
     end
   end
 
@@ -896,24 +947,32 @@ class CATime
   #   Subtracting a {CATimedelta} yields a {CATime} at `self`'s unit (the
   #   duration is converted into it, truncated when finer); subtracting
   #   another {CATime} yields a {CATimedelta} at the finer of the two
-  #   units (cross-group falls to the fixed unit).
-  #   @param other [CATimedelta, CATime]
+  #   units (cross-group falls to the fixed unit).  A single duration (a
+  #   {CATimedelta::Element}, `"3 days"`) or time (a {CATime::Element}, a
+  #   `Time`, a `Date`, `"2024-01-02"`) is subtracted from every cell.
+  #   @param other [CATimedelta, CATime, CATimedelta::Element, CATime::Element, Time, Date, String]
   #     (or a MemoryView producer whose +to_ca+ gives one, such as an Arrow
   #     duration or timestamp array)
   #   @return [CATime, CATimedelta]
   #   @raise [TypeError] on an unsupported operand.
   def -(other)
     given, other = other, CATimeUnitAlgebra.operand(other)
+    other = CATimeUnitAlgebra.scalar_operand(other, unit) || other
     case other
     when CATimedelta
-      (parent - CATimeUnitAlgebra.convert_scale_trunc(other.parent, other.unit, unit)).time(unit: unit)
+      d = CATimeUnitAlgebra.convert_scale_trunc(other.parent, other.unit, unit)
+      d = d[0] if other.scalar?
+      (parent - d).time(unit: unit)
     when CATime
       u = CATimeUnitAlgebra.diff_unit(unit, other.unit)
       a = CATimeUnitAlgebra.convert_instant!(parent, unit, u)
       b = CATimeUnitAlgebra.convert_instant!(other.parent, other.unit, u)
+      b = b[0] if other.scalar?
       (a - b).timedelta(unit: u)
     else
-      raise TypeError, "CATime - #{given.class} is not allowed"
+      raise TypeError, "CATime - #{given.class} is not allowed: subtract a duration " \
+                       "(a CATimedelta, a CATimedelta::Element or a String such as \"3 days\") " \
+                       "or a time (a CATime, a CATime::Element, a Time, a Date or a String)"
     end
   end
 
@@ -1454,14 +1513,18 @@ class CATimedelta
   #   @raise [TypeError] on incompatible operands.
   def +(other)
     given, other = other, CATimeUnitAlgebra.operand(other)
+    other = CATimeUnitAlgebra.scalar_operand(other, unit) || other
     case other
     when CATimedelta
       u = common_duration_unit(other.unit)
       a = CATimeUnitAlgebra.convert_scale!(parent, unit, u)
       b = CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
+      b = b[0] if other.scalar?
       (a + b).timedelta(unit: u)
     when CATime
-      other + self  # commutative -> time's unit
+      return other + self unless other.scalar?   # commutative -> time's unit
+      d = CATimeUnitAlgebra.convert_scale_trunc(parent, unit, other.unit)
+      (d + other.parent[0]).time(unit: other.unit)
     else
       raise TypeError, "CATimedelta + #{given.class} is not allowed"
     end
@@ -1477,11 +1540,13 @@ class CATimedelta
   #   @raise [TypeError] on a non-timedelta operand.
   def -(other)
     given, other = other, CATimeUnitAlgebra.operand(other)
+    other = CATimeUnitAlgebra.scalar_operand(other, unit) || other
     case other
     when CATimedelta
       u = common_duration_unit(other.unit)
       a = CATimeUnitAlgebra.convert_scale!(parent, unit, u)
       b = CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
+      b = b[0] if other.scalar?
       (a - b).timedelta(unit: u)
     else
       raise TypeError, "CATimedelta - #{given.class} is not allowed"

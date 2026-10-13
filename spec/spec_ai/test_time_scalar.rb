@@ -263,4 +263,26 @@ class TestDatetimeScalar < Test::Unit::TestCase
     assert_equal [1.5, 1.0], r.to_a
     assert_equal [1.5, 1.0], (a / CA_INT64([1, 1]).timedelta(unit: :m)).to_a
   end
+
+  # A single duration or time meets every cell of an array, on either side,
+  # by the rules arrays follow (the time is the anchor).
+  def test_one_value_against_an_array
+    t = CArray.time(%w[2024-01-01 2024-01-05], unit: :D)
+    three = CATimedelta::Element.new(3, :D)
+    days = ->(x) { x.to_a.map(&:to_s) }
+    assert_equal %w[2024-01-04 2024-01-08], days.(t + three)
+    assert_equal %w[2024-01-04 2024-01-08], days.(t + "3 days")
+    assert_equal %w[-4D 0D], days.(t - t.max)
+    assert_equal %w[-1D 3D], days.(t - "2024-01-02")
+    assert_equal %w[0D 4D], days.(t - Time.utc(2024, 1, 1))
+    assert_equal %w[2024-01-04 2024-01-08], days.(three + t)
+    assert_equal %w[0D -4D], days.(t[0] - t)
+    m = t.reshape(2, 1)
+    assert_equal [2, 1], (m + "1 day").shape
+    td = CA_INT64([1, 2]).timedelta(unit: :h)
+    assert_equal %w[90m 150m], days.(td + "30 minutes")
+    assert_raise(TypeError) { t + Time.utc(2024, 1, 1) }
+    err = assert_raise(TypeError) { t + 3 }
+    assert_match(/add a duration/, err.message)
+  end
 end

@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: a time or duration array can be added to or subtracted from a
+  single value: `t + "3 days"`, `t - t.min`, `t - "2024-01-02"`,
+  `t - Time.utc(2024, 1, 1)`, `t.min + durations`. A duration is a
+  `CATimedelta::Element` or a String that reads as one; a time is a
+  `CATime::Element`, a `Time`, a `Date` or another String. These raised
+  `TypeError` before. A bare number is still refused, since it has no unit.
+
 - New: the slab, block, segment, categorical and axis-group iterators have
   `order`: each cell's rank among the cells of its own piece, int64, as
   `CArray#order` ranks the piece alone, with its keywords (`descending:`,
