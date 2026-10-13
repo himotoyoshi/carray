@@ -47,6 +47,23 @@ class CAIterator
     end
   end
 
+  # A one-cell (1, 1) array of the kind `value` holds, for asking the core
+  # what a reduction or scan of it answers in: its data type, cell width and,
+  # for a Face, its Face.  A member that answers by a route of its own
+  # (a fused kernel, a fold by offset) takes its output type from here, so
+  # the route and the core cannot disagree.  A Face is a view of the values
+  # themselves rather than a blank -- a Face cannot be allocated from its
+  # surface data type alone, and a zeroed record is not a valid cell for every
+  # one (a const string's record indexes a shared pool) -- so a Face with no
+  # cell has nothing to ask with, and this is nil.
+  def self.core_probe (value) # :nodoc:
+    unless value.face?
+      return CArray.new(value.data_type, [1, 1], bytes: value.bytes)
+    end
+    return nil if value.elements.zero?
+    value.reshape(value.elements)[[0]].reshape(1, 1)
+  end
+
   def self.reduce_keywords (op, kw) # :nodoc:
     if kw.key?(:axis)
       raise ArgumentError, "#{op}: unknown keyword: :axis (the iterator sets the axes)"

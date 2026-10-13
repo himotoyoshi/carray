@@ -119,8 +119,8 @@ class CACategoricalIterator < CASegmentIterator
       # is nothing to gather — an empty index into an empty source is out of
       # range — so build the empty grouped buffer directly.
       @grouped  = nvalid > 0 ? value.reshape(value.elements)[@perm].copy
-                             : CArray.new(value.data_type, [0], bytes: value.bytes)
-      @empty    = CArray.new(grouped.data_type, [0], bytes: grouped.bytes)
+                             : value.reshape(value.elements)[0...0].copy
+      @empty    = @grouped[0...0]         # an empty category is the values' own kind
     else
       # Shape mismatch: only per-fiber axis: dispatch could still work.  With a
       # 1-D value there is no fiber structure to broadcast into, so a mismatch

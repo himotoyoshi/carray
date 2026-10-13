@@ -58,8 +58,8 @@ class CASegmentIterator < CAIterator
     @offsets   = @bounds[0...-1].copy                # the starts, for the kernels
     @elements  = @k > 0 ? (@bounds[1..-1] - @bounds[0...-1]) : CArray.int64(0)
     @grouped   = finish > origin ? value.reshape(value.elements)[origin...finish].copy
-                                 : CArray.new(value.data_type, [0], bytes: value.bytes)
-    @empty     = CArray.new(@grouped.data_type, [0], bytes: @grouped.bytes)
+                                 : value.reshape(value.elements)[0...0].copy
+    @empty     = @grouped[0...0]          # an empty segment is the values' own kind
   end
 
   # @overload inspect
@@ -153,7 +153,7 @@ class CASegmentIterator < CAIterator
   def sum(axis: nil)
     return axis_sum(axis) if axis
     m = moments
-    return per_segment(core_reduce_type(:sum)) { |s| s.sum } unless m
+    return per_segment(core_reduce_kind(:sum)) { |s| s.sum } unless m
     m[:sum].copy                    # the moments sum IS the core fold (empty -> 0.0)
   end
 
@@ -167,7 +167,7 @@ class CASegmentIterator < CAIterator
   #   @return [CArray]
   def accumulate(axis: nil)
     return axis_by_masked_copy(axis, :accumulate, core_reduce_type(:accumulate)) if axis
-    per_segment(core_reduce_type(:accumulate)) { |s| s.accumulate }
+    per_segment(core_reduce_kind(:accumulate)) { |s| s.accumulate }
   end
 
   # @overload max
@@ -177,7 +177,7 @@ class CASegmentIterator < CAIterator
   def max(axis: nil)
     return axis_moments(axis, :max)[:max] if axis
     m = moments
-    m ? m[:max].copy : per_segment(core_reduce_type(:max)) { |s| s.max }
+    m ? m[:max].copy : per_segment(core_reduce_kind(:max)) { |s| s.max }
   end
 
   # @overload min
@@ -187,7 +187,7 @@ class CASegmentIterator < CAIterator
   def min(axis: nil)
     return axis_moments(axis, :min)[:min] if axis
     m = moments
-    m ? m[:min].copy : per_segment(core_reduce_type(:min)) { |s| s.min }
+    m ? m[:min].copy : per_segment(core_reduce_kind(:min)) { |s| s.min }
   end
 
   # @overload mean
@@ -196,7 +196,7 @@ class CASegmentIterator < CAIterator
   def mean(axis: nil)
     return axis_mean(axis) if axis
     m = moments
-    return per_segment(core_reduce_type(:mean)) { |s| s.mean } unless m
+    return per_segment(core_reduce_kind(:mean)) { |s| s.mean } unless m
     cnt = m[:count]
     out = m[:sum] / cnt.float64      # count 0 -> NaN, masked next
     out[cnt.eq(0)] = UNDEF           # empty / all-masked category -> MASKED
@@ -221,7 +221,7 @@ class CASegmentIterator < CAIterator
   def percentile (p, axis: nil)
     return axis_order_stat(axis, :percentile, p) if axis
     unless MONOID_TYPES.include?(grouped.data_type)
-      return per_segment(core_reduce_type(:percentile, p)) { |s| s.percentile(p) }
+      return per_segment(core_reduce_kind(:percentile, p)) { |s| s.percentile(p) }
     end
     out = CArray.float64(@k)
     grouped.send(:__reduceat_percentile__, @offsets, p.to_f, out)
@@ -251,7 +251,7 @@ class CASegmentIterator < CAIterator
   def variance(axis: nil)
     return axis_by_masked_copy(axis, :variance) if axis
     m = moments
-    return per_segment(core_reduce_type(:variance)) { |s| s.variance } unless m
+    return per_segment(core_reduce_kind(:variance)) { |s| s.variance } unless m
     cnt   = m[:count]
     means = m[:sum] / cnt.float64    # per-segment mean (garbage where count 0/1,
     out   = CArray.float64(@k)       #   ignored by the kernel's n<2 guards)
@@ -267,7 +267,7 @@ class CASegmentIterator < CAIterator
   def stddev(axis: nil)
     return axis_by_masked_copy(axis, :stddev) if axis
     m = moments
-    return per_segment(core_reduce_type(:stddev)) { |s| s.stddev } unless m
+    return per_segment(core_reduce_kind(:stddev)) { |s| s.stddev } unless m
     variance.sqrt                    # sqrt propagates the n<2 mask
   end
 
@@ -278,7 +278,7 @@ class CASegmentIterator < CAIterator
   #   @return [CArray]
   def prod(axis: nil)
     return axis_prod(axis) if axis
-    return per_segment(core_reduce_type(:prod)) { |s| s.prod } unless MONOID_TYPES.include?(grouped.data_type)
+    return per_segment(core_reduce_kind(:prod)) { |s| s.prod } unless MONOID_TYPES.include?(grouped.data_type)
     out = CArray.float64(@k)
     grouped.send(:__reduceat_prod__, @offsets, out)
     out
@@ -365,17 +365,19 @@ class CASegmentIterator < CAIterator
 
   # @overload variancep
   #   Per-segment POPULATION variance (ddof=0) as float64, matching
-  #   `CArray#variancep`: empty / all-masked -> MASKED, single value -> 0.0.
+  #   `CArray#variancep`: empty / all-masked -> MASKED, single value -> 0.0
+  #   (NaN when that value is a NaN or an infinity).
   #   Derived from the sample variance (variancep = variance * (n-1) / n), so it
   #   reuses the centred two-pass kernel with no extra walk.
   #   @return [CArray]
   def variancep(axis: nil)
     return axis_by_masked_copy(axis, :variancep) if axis
     m = moments
-    return per_segment(core_reduce_type(:variancep)) { |s| s.variancep } unless m
+    return per_segment(core_reduce_kind(:variancep)) { |s| s.variancep } unless m
     cnt = m[:count]
     vp  = variance * (cnt - 1).float64 / cnt.float64
-    vp[cnt.eq(1)] = 0.0                   # one value: defined, unlike variance
+    one = cnt.eq(1)                       # one value: defined, unlike variance --
+    vp[one] = (m[:sum] - m[:sum])[one]    # 0.0, or NaN for a NaN or an infinity
     vp
   end
 
@@ -385,7 +387,7 @@ class CASegmentIterator < CAIterator
   def stddevp(axis: nil)
     return axis_by_masked_copy(axis, :stddevp) if axis
     m = moments
-    return per_segment(core_reduce_type(:stddevp)) { |s| s.stddevp } unless m
+    return per_segment(core_reduce_kind(:stddevp)) { |s| s.stddevp } unless m
     variancep.sqrt
   end
 
@@ -729,7 +731,7 @@ class CASegmentIterator < CAIterator
   # The core's scan of one cell of the value: the scan answers in its data
   # type and Face. A scan the core refuses raises here, in the core's words.
   def core_scan_answer (op)
-    (@core_scan_answer ||= {})[op] ||= core_probe.public_send(op)
+    (@core_scan_answer ||= {})[op] ||= CAIterator.core_probe(@value).public_send(op)
   end
 
   # Whether the axis-group scan kernel gives the core's answer. It reads
@@ -897,7 +899,7 @@ class CASegmentIterator < CAIterator
   def edge_values (op)
     n = grouped.elements
     if n.zero? || (@value.face? && ! face_output?)
-      return per_segment(core_reduce_type(op)) { |s| s.public_send(op) }
+      return per_segment(core_reduce_kind(op)) { |s| s.public_send(op) }
     end
     slot = CArray.int64(n).seq!
     if grouped.has_mask?
@@ -989,20 +991,18 @@ class CASegmentIterator < CAIterator
   # per-fiber form -- and `accumulate(axis:)`, the one axis: member that needs
   # this, is exactly the case that would have found it missing.
   def core_reduce_type (op, *args)
-    (@core_reduce_type ||= {})[[op, args]] ||=
-      @value.face? && @value.elements.zero? ?
-        CA_OBJECT : core_probe.public_send(op, *args, axis: 1).data_type
+    kind = core_reduce_kind(op, *args)
+    kind ? kind.data_type : CA_OBJECT
   end
 
-  # A one-cell array of the same kind as the values, so the core answers about
-  # the same thing the segment slices will hand back. For a Face that is a view
-  # of the values themselves rather than a blank: a Face cannot be allocated
-  # from its surface data type alone, and a blank storage array is not a valid
-  # Face for every one of them -- a const string's record indexes a shared
-  # pool, so a zeroed record points nowhere.
-  def core_probe
-    return CArray.new(@value.data_type, [1, 1], bytes: @value.bytes) unless @value.face?
-    @value.reshape(@value.elements)[[0]].reshape(1, 1)
+  # The core's answer itself for the one-cell probe, or nil for a Face with no
+  # cell to probe.  Its class is the one the per-segment answers come in, which
+  # for a Face need not be the values' own (a CATime's spread is a CATimedelta).
+  def core_reduce_kind (op, *args)
+    memo = (@core_reduce_kind ||= {})
+    return memo[[op, args]] if memo.key?([op, args])
+    probe = CAIterator.core_probe(@value)
+    memo[[op, args]] = probe && probe.public_send(op, *args, axis: 1)
   end
 
   # Whether an output can be built by lifting one. A Face is filled by writing
@@ -1020,15 +1020,22 @@ class CASegmentIterator < CAIterator
   # segment's members — the mask carries the "insufficient present data" contract
   # for free (an all-masked segment reduces like an empty one; identity-bearing
   # reductions return their identity, ratios return UNDEF).
-  def per_segment (data_type)
-    out = if ! @value.face? || data_type != @value.data_type
-            bytes = (data_type == @value.data_type) ? @value.bytes : 0
+  def per_segment (kind)
+    # a data type the values' own Face answers in names that Face
+    kind = @value if ! kind.is_a?(CArray) && @value.face? && kind == @value.data_type
+    data_type = kind.is_a?(CArray) ? kind.data_type : kind
+    out = if kind.nil?
+            CArray.new(CA_OBJECT, [@k])
+          elsif ! (kind.is_a?(CArray) && kind.face?)
+            bytes = if kind.is_a?(CArray) then kind.bytes
+                    elsif data_type == @value.data_type then @value.bytes
+                    else 0 end
             CArray.new(data_type, [@k], bytes: bytes)
-          elsif face_output?
-            # the core answered in the values' own Face, so the output is one
-            # too: CATime#min hands back a CATime::Element, which only a
-            # CATime has anywhere to put
-            @value.__send__(:__blank_like__, [@k])
+          elsif ! kind.read_only?
+            # the core answered in a Face, so the output is one too:
+            # CATime#min hands back a CATime::Element, which only a CATime
+            # has anywhere to put
+            kind.__send__(:__blank_like__, [@k])
           else
             # a read-only Face cannot be filled, so its answers are collected
             # as the surface objects they already are

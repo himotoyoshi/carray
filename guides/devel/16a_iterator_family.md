@@ -369,3 +369,15 @@ A new member (or a companion gem adding one) must keep:
    compares with the piece size. `spec/spec_ai/test_reduce_present_count_matrix.rb`
    checks every member against the core and fails for a member it cannot
    build.
+8. **Take an output type from the core, never from a table of your own.**
+   A member that answers by a route of its own (a fused kernel, a fold by
+   offset) builds its output in the type the core gives for the same
+   reduction, asked of `CAIterator.core_probe(value)` — a one-cell array of
+   the values' kind, which for a Face is a view of the values themselves —
+   so the route and the core cannot drift apart. Reading the class of the
+   core's answer, not only its data type, matters for a Face: a `CATime`'s
+   spread comes back a `CATimedelta`. `each` yields a piece of a Face as
+   that Face. `spec/spec_ai/test_iterator_answers_core.rb` compares every
+   reduction of every member with the core over each piece `each` yields
+   (values and data type, across payloads, masks and empty pieces), and
+   fails for a member it cannot build.

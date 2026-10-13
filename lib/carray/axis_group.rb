@@ -791,7 +791,8 @@ class CAGroupIterator
   # askable. Asking a one-cell array of the same data type lets the core's own
   # refusal through, unworded by us.
   def boolean_payload! (op)
-    CArray.new(value.data_type, [1], bytes: value.bytes).public_send(op)
+    probe = CAIterator.core_probe(value)
+    probe.public_send(op) if probe
     nil
   end
 
@@ -883,7 +884,7 @@ class CAGroupIterator
   def kernel_scans? (op)
     return false if value.face? || value.complex?
     return true if value.object? || op == :cumcount
-    core = CArray.new(value.data_type, [1], bytes: value.bytes).public_send(op).data_type
+    core = CAIterator.core_probe(value).public_send(op).data_type
     kernel = [:cumsum, :cumprod].include?(op) ? CA_FLOAT64 : value.data_type
     core == kernel
   end

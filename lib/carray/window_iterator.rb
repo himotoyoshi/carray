@@ -541,6 +541,12 @@ class CAWindowIterator < CAIterator
                   :min  => :pmin!, :max  => :pmax!,
                   :all  => :and!,  :any  => :or! }.freeze
 
+  # A boolean accumulates as the core's does, by parity, so its kernel is xor.
+  def offset_fold_kernel (op)
+    return :xor! if op == :accumulate && @source.data_type == CA_BOOLEAN
+    OFFSET_FOLD.fetch(op)
+  end
+
   # Widest window this path takes on any one axis.
   OFFSET_FOLD_MAX_WIDTH = 5
 
@@ -582,7 +588,7 @@ class CAWindowIterator < CAIterator
   # Walks the window offsets, accumulating each shifted plane into the result.
   def accumulate_offsets (op, base = nil, kernel = nil, data_type = nil)
     base      ||= offset_fold_base(op)
-    kernel    ||= OFFSET_FOLD.fetch(op)
+    kernel    ||= offset_fold_kernel(op)
     data_type ||= offset_fold_data_type(op)
     accumulator = nil
     offset_grid.each do |offset|
@@ -733,7 +739,7 @@ class CAWindowIterator < CAIterator
   def offset_fold_data_type (op)
     @offset_fold_data_type ||= {}
     @offset_fold_data_type[op] ||=
-      CArray.new(@source.data_type, [1, 1], bytes: @source.bytes).send(op, axis: [1]).data_type
+      CAIterator.core_probe(@source).public_send(op, axis: [1]).data_type
   end
 
   # Every offset within the window, as a list of per-axis positions into the
