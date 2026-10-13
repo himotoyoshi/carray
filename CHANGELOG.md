@@ -36,6 +36,24 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `CArray.time` reads a date written by its day of the year
+  (`"2024-015"`, `%j`), its ISO week (`"2024-W03-1"`, `%G-W%V-%u`) or its
+  week of the year (`%U` / `%W` with a weekday) as that date; it used to
+  give January 1. A clock field out of range (`"10:75"`, `"25:00"`,
+  `"10:20:61"`) raises instead of carrying into the next field. `24:00` and
+  the leap second `:60` are still accepted.
+
+- Fix: a time on a tick that does not divide a day (`"7 hours"`,
+  `"36 hours"`, `"7 seconds"`) converts to months and years by its date.
+  `to_unit(:M)` / `to_unit(:Y)` gave 1970, and storing such a value into a
+  month or year array stored 1970.
+
+- Fix: a Ruby Array given to a comparison of a `CATime` or `CATimedelta`
+  (`eq`, `<`, `<=>`, `mask_eq`, ...) is compared cell by cell, and given to
+  `count` counts each of its values. Every cell used to be compared with the
+  Array's first value. A nested Array keeps its shape; an Array of the wrong
+  length raises.
+
 - Fix: a face-mode `CAObject` (`CAObject.new(..., parent: p, face: true)`)
   over a masked parent no longer leaks its mask, about 100 to 200 bytes
   per object.
