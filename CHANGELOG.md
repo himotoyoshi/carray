@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: copying the view that `sort` or `partition` returns without `axis:`
+  (`a.sort.copy`, `a.partition(k).copy`) is as fast as with `axis:` again,
+  about a third less time than in 3.0.3. More generally, reading a flattened
+  or reshaped array through an index (`a.flatten[idx]`) no longer pays a
+  division per cell.
+
 - Change: `order(descending: true)` (the default `method: :ordinal`) keeps
   tied cells in their original order, as the ascending ranks do:
   `[5, 3, 5, 1, 5]` gives `[0, 3, 1, 4, 2]`, was `[2, 3, 1, 4, 0]`. The same

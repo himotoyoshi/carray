@@ -624,7 +624,7 @@ ca_stride_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
   ca_size_t composed_base;
   ca_size_t rbytes;
   ca_size_t *paddrs;
-  ca_size_t  i, base;
+  ca_size_t  i;
   int8_t     k;
   int        all_aligned = 1;
   volatile VALUE holder;
@@ -633,18 +633,12 @@ ca_stride_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
   ca_stride_compose_to_root(ca, &root, composed_strides, &composed_base);
   rbytes = root->bytes;
 
-  /* Fast path: identity transform detection -- when the addr remap composed_base +
-     Σ idx[k]*composed_strides[k] reduces to an identity mapping over the
-     root's flat byte space (= simple reshape, same bytes, row-major
-     composed_strides), forward addrs as-is to root without the ALLOCV +
-     per-cell remap loop.  Cascades through chain a[idx_2d] (= outer
-     reshape -> CAGrid -> inner reshape -> entity): outer CARefer is a
-     simple reshape so addrs pass through, then CAGrid Y.1.b fast path
-     triggers on the recursive call, then inner CARefer simple reshape
-     pass-through to entity.  Detection is O(ndim) + O(n).  */
-  if ( n == ca->elements
-       && ca->bytes == rbytes && composed_base == 0
-       && ca_xfer_addrs_is_sequential_run(n, addrs, &base) && base == 0 ) {
+  /* Identity: same cell size, no offset, row-major composed strides (a
+     simple reshape / flatten of the root).  A view address is then the
+     root address, whatever the addresses are, so the list goes through
+     as-is.  Cascades through chains such as a[idx_2d] (outer reshape ->
+     CAGrid -> inner reshape -> entity). */
+  if ( ca->bytes == rbytes && composed_base == 0 ) {
     ca_size_t s = rbytes;
     int is_identity = 1;
     for ( k = ca->ndim - 1; k >= 0; k-- ) {
@@ -657,36 +651,51 @@ ca_stride_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
     }
   }
 
-  paddrs = ALLOCV_N(ca_size_t, holder, n);
-  for ( i = 0; i < n; i++ ) {
-    ca_size_t idx[CA_RANK_MAX];
-    ca_size_t off = composed_base;
-    ca_addr2index((CArray *) ca, addrs[i], idx);
+  /* Whole-cell strides: translate in cell units, with no per-cell division. */
+  if ( ca->bytes == rbytes && composed_base % rbytes == 0 ) {
     for ( k = 0; k < ca->ndim; k++ ) {
-      off += idx[k] * composed_strides[k];
+      if ( composed_strides[k] % rbytes != 0 ) { all_aligned = 0; break; }
     }
-    if ( ca->bytes == rbytes && off % rbytes == 0 ) {
-      paddrs[i] = off / rbytes;
-    }
-    else {
-      all_aligned = 0;
-      break;
-    }
+  }
+  else {
+    all_aligned = 0;
   }
 
   if ( all_aligned ) {
-    ca_xfer_addrs(root, n, paddrs, data, dir);
-  }
-  else {
-    /* byte-mismatched reinterpret: deliver cell by cell via xfer_index
-       (still no whole-view attach -- delegates one cell at a time). */
-    for ( i = 0; i < n; i++ ) {
-      ca_size_t idx[CA_RANK_MAX];
-      ca_addr2index((CArray *) ca, addrs[i], idx);
-      ca_stride_func_xfer_index(ca, idx, d + i * ca->bytes, dir);
+    ca_size_t esteps[CA_RANK_MAX];
+    ca_size_t ebase = composed_base / rbytes;
+    for ( k = 0; k < ca->ndim; k++ ) {
+      esteps[k] = composed_strides[k] / rbytes;
     }
+    paddrs = ALLOCV_N(ca_size_t, holder, n);
+    if ( ca->ndim == 1 ) {
+      for ( i = 0; i < n; i++ ) {
+        paddrs[i] = ebase + addrs[i] * esteps[0];
+      }
+    }
+    else {
+      for ( i = 0; i < n; i++ ) {
+        ca_size_t idx[CA_RANK_MAX];
+        ca_size_t off = ebase;
+        ca_addr2index((CArray *) ca, addrs[i], idx);
+        for ( k = 0; k < ca->ndim; k++ ) {
+          off += idx[k] * esteps[k];
+        }
+        paddrs[i] = off;
+      }
+    }
+    ca_xfer_addrs(root, n, paddrs, data, dir);
+    ALLOCV_END(holder);
+    return;
   }
-  ALLOCV_END(holder);
+
+  /* Byte-mismatched reinterpret: deliver cell by cell via xfer_index
+     (still no whole-view attach -- delegates one cell at a time). */
+  for ( i = 0; i < n; i++ ) {
+    ca_size_t idx[CA_RANK_MAX];
+    ca_addr2index((CArray *) ca, addrs[i], idx);
+    ca_stride_func_xfer_index(ca, idx, d + i * ca->bytes, dir);
+  }
 }
 
 /* Optimised region delivery.  Reached when ca->ptr == NULL (the central dispatcher handles the alias / attached case).
