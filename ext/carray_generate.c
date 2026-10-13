@@ -80,6 +80,17 @@ rb_ca_where (VALUE self)
 
 /* ----------------------------------------------------------------- */
 
+/* A number that is not an Integer (a Float, a Rational, a BigDecimal) makes
+   the progression a real one: every cell is offset + step*i computed in
+   double, and an integer array takes it as a store takes a float (cut
+   toward zero; the run is checked to fit before anything is written). */
+static int
+ca_seq_is_real (VALUE v)
+{
+  return ! NIL_P(v) && ! RB_INTEGER_TYPE_P(v) && ! RB_TYPE_P(v, T_COMPLEX)
+      && RTEST(rb_obj_is_kind_of(v, rb_cNumeric));
+}
+
 /* Fill the whole array in row-major order with `step*i + offset`. */
 #define proc_seq_bang(type, from, to)       \
   {                                         \
@@ -90,9 +101,8 @@ rb_ca_where (VALUE self)
         *p++ = (type) to(i);                     \
       }                                   \
     }                                     \
-    else if ( rb_obj_is_kind_of(rstep, rb_cFloat) ||              \
-              rb_obj_is_kind_of(roffset, rb_cFloat) ) {            \
-      type offset = (NIL_P(roffset)) ? (type) 0 : (type) from(roffset);  \
+    else if ( ca_seq_is_real(rstep) || ca_seq_is_real(roffset) ) { \
+      double offset = (NIL_P(roffset)) ? 0 : NUM2DBL(roffset);    \
       double step = (NIL_P(rstep)) ? 1 : NUM2DBL(rstep);          \
       for (i=0; i<ca->elements; i++) {    \
         *p++ = (type) to(step*i+offset);         \
@@ -118,9 +128,8 @@ rb_ca_where (VALUE self)
   {                                                                     \
     type *p = (type *)ca->ptr;                                          \
     ca_size_t o, k, in;                                                 \
-    if ( rb_obj_is_kind_of(rstep, rb_cFloat) ||                         \
-         rb_obj_is_kind_of(roffset, rb_cFloat) ) {                      \
-      type offset = (NIL_P(roffset)) ? (type) 0 : (type) from(roffset); \
+    if ( ca_seq_is_real(rstep) || ca_seq_is_real(roffset) ) {           \
+      double offset = (NIL_P(roffset)) ? 0 : NUM2DBL(roffset);          \
       double step = (NIL_P(rstep)) ? 1 : NUM2DBL(rstep);                \
       for (o=0; o<outer_size; o++) {                                    \
         for (k=0; k<len; k++) {                                         \
@@ -227,10 +236,6 @@ ca_seq_bang_object_body (VALUE arg)
   VALUE *p;
   ca_size_t i;
 
-  if ( ca_has_mask(ca) ) {
-    ca_clear_mask(ca);                            /* clear all mask */
-  }
-
   if ( axis < 0 ) {                               /* flat fill */
     p = (VALUE *)ca->ptr;
     if ( rb_obj_is_kind_of(roffset, rb_cFloat) ||
@@ -320,6 +325,10 @@ ca_seq_bang_object_body (VALUE arg)
     }
   }
 
+  /* Cleared last, so a fill that raises leaves the mask as it was. */
+  if ( ca_has_mask(ca) ) {
+    ca_clear_mask(ca);
+  }
   return Qnil;
 }
 
@@ -344,8 +353,9 @@ rb_ca_seq_bang_object (VALUE self, VALUE roffset, VALUE rstep, int axis)
   return self;
 }
 
-/* The numeric fill converts offset and step before it writes a cell, so
-   a raise there leaves nothing to push back: an allocate window. */
+/* The numeric fill runs in an allocate window, which clears an entity's
+   mask as it opens (an entity has no separate buffer), so nothing in it may
+   raise: offset and step are checked to be numbers before it opens. */
 static VALUE
 ca_seq_bang_numeric_body (VALUE arg)
 {
@@ -399,6 +409,45 @@ ca_seq_check_integer_args (CArray *ca, VALUE roffset, VALUE rstep)
   }
 }
 
+/* A real progression on an integer array: each cell takes offset + step*i
+   cut toward zero, as a store takes a float, so the first and the last
+   value (the extremes of a linear run) must fit the type, and NaN raises
+   as it does in a store.  Checked before the fill writes anything. */
+static void
+ca_seq_check_real_run (CArray *ca, VALUE roffset, VALUE rstep, ca_size_t n)
+{
+  int8_t dt = ca->data_type;
+  double offset = NIL_P(roffset) ? 0.0 : NUM2DBL(roffset);
+  double step   = NIL_P(rstep)   ? 1.0 : NUM2DBL(rstep);
+  double ends[2];
+  double lo, hi_excl;
+  int k;
+  if ( n == 0 ) return;
+  ends[0] = offset;
+  ends[1] = step * (double) (n - 1) + offset;
+  switch ( dt ) {
+  case CA_INT8:   lo = INT8_MIN;  hi_excl = (double) INT8_MAX + 1;   break;
+  case CA_UINT8:  lo = 0;         hi_excl = (double) UINT8_MAX + 1;  break;
+  case CA_INT16:  lo = INT16_MIN; hi_excl = (double) INT16_MAX + 1;  break;
+  case CA_UINT16: lo = 0;         hi_excl = (double) UINT16_MAX + 1; break;
+  case CA_INT32:  lo = INT32_MIN; hi_excl = (double) INT32_MAX + 1;  break;
+  case CA_UINT32: lo = 0;         hi_excl = (double) UINT32_MAX + 1; break;
+  case CA_INT64:  lo = -ldexp(1.0, 63); hi_excl = ldexp(1.0, 63);    break;
+  default:        lo = 0;         hi_excl = ldexp(1.0, 64);          break;
+  }
+  for (k = 0; k < 2; k++) {
+    double t = trunc(ends[k]);
+    if ( isnan(ends[k]) || ( step != 0.0 && isnan(step) ) ) {
+      rb_raise(rb_eFloatDomainError, "%s: the run has NaN",
+               ca_calling_method_name());
+    }
+    if ( ! ( t >= lo && t < hi_excl ) ) {
+      rb_raise(rb_eRangeError, "%s: value %g is out of range for %s",
+               ca_calling_method_name(), ends[k], ca_type_name[dt]);
+    }
+  }
+}
+
 /* CArray#seq!(init_val=0, step=1, axis: nil) -- arithmetic-progression
    fill, in place.  Without `axis:` the fill runs in row-major order
    over the whole array; with `axis: k` the progression runs along axis
@@ -428,8 +477,32 @@ rb_ca_seq_bang_method (int argc, VALUE *argv, VALUE self)
     return rb_ca_seq_bang_object(self, roffset, rstep, axis);
   }
 
+  {
+    VALUE args[2];
+    const char *names[2] = { "offset", "step" };
+    int k;
+    args[0] = roffset;
+    args[1] = rstep;
+    for (k = 0; k < 2; k++) {
+      VALUE v = args[k];
+      if ( NIL_P(v) ) continue;
+      if ( ! RTEST(rb_obj_is_kind_of(v, rb_cNumeric)) ||
+           ( RB_TYPE_P(v, T_COMPLEX) && ! ca_is_complex_type(ca) ) ) {
+        rb_raise(rb_eTypeError, "%s: %s must be a %snumber (got %"PRIsVALUE")",
+                 ca_calling_method_name(), names[k],
+                 ca_is_complex_type(ca) ? "" : "real ", rb_inspect(v));
+      }
+    }
+  }
+
   if ( ca_is_integer_type(ca) ) {
-    ca_seq_check_integer_args(ca, roffset, rstep);
+    if ( ca_seq_is_real(roffset) || ca_seq_is_real(rstep) ) {
+      ca_seq_check_real_run(ca, roffset, rstep,
+                            axis < 0 ? ca->elements : ca->dim[axis]);
+    }
+    else {
+      ca_seq_check_integer_args(ca, roffset, rstep);
+    }
   }
 
   {

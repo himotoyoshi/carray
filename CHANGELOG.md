@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: `seq` and `seq!` on an integer array given a Float, Rational or
+  BigDecimal `init_val` or `step` make each cell `init_val + step*i` cut
+  toward zero, as a store takes a float: `int32.seq(0.5, 0.5)` is
+  `[0, 1, 1, 2]`, where the offset used to be cut first (`[0, 0, 1, 1]`)
+  and a Rational step was cut to an integer (`seq(0, 1/2r)` was all
+  zeros). Such a run whose first or last value does not fit the type
+  raises `RangeError`, and NaN raises `FloatDomainError`. An argument that
+  is not a number raises `TypeError` and leaves the array and its mask as
+  they were; the mask used to be cleared first.
+
 - Change: `nsmallest`, `nlargest` and their `_index` forms break ties by
   position for every type, as `order` and `sort_index` do:
   `nsmallest_index(k)` is the first k of `sort_index`. Integer arrays put
