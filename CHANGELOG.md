@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `nlargest`, `nsmallest`, their `_index` forms, `partition`,
+  `sort_by_key`, `max_by_key`, `min_by_key` and `range` ordered a
+  CAConstString by its storage offsets and a record array by its bytes. They
+  now order them as `sort` does: by string, and by the struct's `order_by:`
+  members; a struct that declares no order raises, as it does for `sort`.
+  The `*_by_key` methods also refuse a key of another shape, and answer UNDEF
+  instead of raising when no key cell can be compared.
+
 - Change: `scatter_*!`, `put_nd`, `elem_store`, `elem_min` and
   `elem_max` convert a scalar value the way `self[i] = v` does, so a value
   that does not fit the type now raises (`RangeError`, `FloatDomainError`

@@ -172,31 +172,10 @@ rb_ca_s_sort_addr_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
     if ( elements != NUM2SIZE(rb_ca_elements(argv[j])) ) {
       rb_raise(rb_eArgError, "elements mismatch");
     }
-    /* Face gate: an ORDERABLE Face sorts by its storage, so it descends to
-       it (attach / comparator / template output then run on plain storage,
-       which also avoids a face-lifted NULL-ptr index output).  A fixlen
-       storage that is not ORDERABLE (CAConstString's offsets, a record's
-       bytes) has no order in its bytes; the Face's own order stands in for
-       it, as a dense rank, so ties stay ties for the next key.  A Face that
-       has no order (CARecord without order_by:) raises there.  Any other
-       storage raises here. */
     TypedData_Get_Struct(argv[j], CArray, &carray_data_type, ca_j);
     if ( ca_is_face(ca_j) ) {
-      int orderable = ca_test_flag(ca_j, CA_FLAG_FACE_ORDERABLE_STORAGE);
-      VALUE stripped = rb_ca_strip_face_value(argv[j]);
-      CArray *sc;
-      TypedData_Get_Struct(stripped, CArray, &carray_data_type, sc);
-      if ( sc->data_type == CA_FIXLEN && ! orderable ) {
-        VALUE opts = rb_hash_new();
-        rb_hash_aset(opts, ID2SYM(rb_intern("method")), ID2SYM(rb_intern("dense")));
-        argv[j] = rb_funcallv_kw(argv[j], rb_intern("order"), 1, &opts,
-                                 RB_PASS_KEYWORDS);
-        continue;
-      }
-      if ( ! orderable ) {
-        ca_face_refuse_order("sort_addr", argv[j], "order");
-      }
-      argv[j] = stripped;
+      argv[j] = ca_order_key(argv[j], "sort_addr");
+      continue;
     }
     {
       CArray *k;
@@ -536,6 +515,38 @@ rb_ca_axis2addr (int argc, VALUE *argv, VALUE self)
   return rb_ca_axis2addr_c(self, vindices, vaxis);
 }
 
+
+/* The array the order of v is read from, for a method that orders v's
+   cells (a sort, a selection, a ranking, an extremum by key).  A plain
+   array is its own key.  An ORDERABLE Face orders by its storage, so the
+   key is the storage.  A Face whose storage is fixlen and not ORDERABLE
+   (CAConstString's offsets, a record's bytes) has no order in its bytes;
+   its own order stands in, as a dense rank, so ties stay ties and a
+   masked cell stays masked.  A Face that has no order (a CARecord without
+   order_by:) raises in that order; any other Face raises here. */
+VALUE
+ca_order_key (VALUE v, const char *name)
+{
+  CArray *ca, *sc;
+  VALUE stripped;
+  int orderable;
+  TypedData_Get_Struct(v, CArray, &carray_data_type, ca);
+  if ( ! ca_is_face(ca) ) {
+    return v;
+  }
+  orderable = ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE);
+  stripped = rb_ca_strip_face_value(v);
+  TypedData_Get_Struct(stripped, CArray, &carray_data_type, sc);
+  if ( sc->data_type == CA_FIXLEN && ! orderable ) {
+    VALUE opts = rb_hash_new();
+    rb_hash_aset(opts, ID2SYM(rb_intern("method")), ID2SYM(rb_intern("dense")));
+    return rb_funcallv_kw(v, rb_intern("order"), 1, &opts, RB_PASS_KEYWORDS);
+  }
+  if ( ! orderable ) {
+    ca_face_refuse_order(name, v, "order");
+  }
+  return stripped;
+}
 
 /* ===== sort / sort_copy (value & view surface, sibling of the
    sort_addr / axis2addr block above). =============== */

@@ -535,6 +535,41 @@ rb_ca_search_nearest_addr_kw (int argc, VALUE *argv, VALUE self)
 
 /* ---- sort_by_key family ---------------------------------------------- */
 
+/* The key orders self's cells one for one, so it has self's shape. */
+static void
+ca_by_key_check_shape (VALUE self, VALUE rkey, const char *name)
+{
+  CArray *ca, *ck;
+  int8_t i;
+  rb_check_carray_object(rkey);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(rkey, CArray, &carray_data_type, ck);
+  if ( ca->ndim == ck->ndim ) {
+    for (i = 0; i < ca->ndim; i++) {
+      if ( ca->dim[i] != ck->dim[i] ) break;
+    }
+    if ( i == ca->ndim ) return;
+  }
+  rb_raise(rb_eArgError, "%s: the key's shape %"PRIsVALUE" differs from "
+           "the array's %"PRIsVALUE, name,
+           rb_funcall(rkey, rb_intern("shape"), 0),
+           rb_funcall(self, rb_intern("shape"), 0));
+}
+
+/* self at the addresses an extremum by key found.  A fiber with no cell to
+   compare has a masked (or UNDEF) address and answers UNDEF. */
+static VALUE
+ca_by_key_fetch (VALUE self, VALUE addrs)
+{
+  if ( addrs == CA_UNDEF ) {
+    return CA_UNDEF;
+  }
+  if ( rb_obj_is_carray(addrs) && RTEST(rb_ca_has_mask(addrs)) ) {
+    return rb_funcall(self, rb_intern("project"), 1, addrs);
+  }
+  return rb_ca_fetch(self, addrs);
+}
+
 /* sort_by_key(key, axis: 0) -- gather self at key.sort_addr(axis:). */
 static VALUE
 rb_ca_sort_by_key (int argc, VALUE *argv, VALUE self)
@@ -545,6 +580,7 @@ rb_ca_sort_by_key (int argc, VALUE *argv, VALUE self)
   if ( NIL_P(raxis) ) {
     raxis = INT2FIX(0);
   }
+  ca_by_key_check_shape(self, rkey, "sort_by_key");
   VALUE addrs = rb_ca_sort_addr_c(rkey, raxis, 0, 1);  /* masked_last=1 (:last), unchanged default */
   return rb_ca_fetch(self, addrs);
 }
@@ -556,9 +592,11 @@ rb_ca_max_by_key (int argc, VALUE *argv, VALUE self)
   VALUE rkey, rkw = Qnil, raxis = Qnil;
   rb_scan_args(argc, argv, "1:", &rkey, &rkw);
   rb_scan_options(rkw, "axis", &raxis);
-  if ( RTEST(rb_ca_is_empty(self)) ) {
-    return rb_const_get(rb_cObject, rb_intern("UNDEF"));
+  ca_by_key_check_shape(self, rkey, "max_by_key");
+  if ( NIL_P(raxis) && RTEST(rb_ca_is_empty(self)) ) {
+    return CA_UNDEF;
   }
+  rkey = ca_order_key(rkey, "max_by_key");
 
   VALUE addrs;
 
@@ -571,7 +609,7 @@ rb_ca_max_by_key (int argc, VALUE *argv, VALUE self)
     rb_hash_aset(kw, ID2SYM(id_axis), raxis);
     addrs = rb_funcallv_kw(rkey, rb_intern("max_addr"), 1, &kw, RB_PASS_KEYWORDS);
   }
-  return rb_ca_fetch(self, addrs);
+  return ca_by_key_fetch(self, addrs);
 }
 
 /* min_by_key(key, axis: nil) -- self[key.min_addr(axis:)] (or UNDEF if empty). */
@@ -581,9 +619,11 @@ rb_ca_min_by_key (int argc, VALUE *argv, VALUE self)
   VALUE rkey, rkw = Qnil, raxis = Qnil;
   rb_scan_args(argc, argv, "1:", &rkey, &rkw);
   rb_scan_options(rkw, "axis", &raxis);
-  if ( RTEST(rb_ca_is_empty(self)) ) {
-    return rb_const_get(rb_cObject, rb_intern("UNDEF"));
+  ca_by_key_check_shape(self, rkey, "min_by_key");
+  if ( NIL_P(raxis) && RTEST(rb_ca_is_empty(self)) ) {
+    return CA_UNDEF;
   }
+  rkey = ca_order_key(rkey, "min_by_key");
 
   VALUE addrs;
 
@@ -596,7 +636,7 @@ rb_ca_min_by_key (int argc, VALUE *argv, VALUE self)
     rb_hash_aset(kw, ID2SYM(id_axis), raxis);
     addrs = rb_funcallv_kw(rkey, rb_intern("min_addr"), 1, &kw, RB_PASS_KEYWORDS);
   }
-  return rb_ca_fetch(self, addrs);
+  return ca_by_key_fetch(self, addrs);
 }
 
 /* ---- take_along_axis / put_along_axis -------------------------------- */
@@ -656,7 +696,12 @@ static VALUE
 rb_ca_range_method (VALUE self)
 {
   VALUE mm_argv[1] = { Qnil };
-  VALUE pair = rb_ca_minmax_ki(0, mm_argv, self);
+  CArray *ca;
+  VALUE pair;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  /* A Face answers its own minmax (in its order, with its elements). */
+  pair = ca_is_face(ca) ? rb_funcall(self, rb_intern("minmax"), 0)
+                        : rb_ca_minmax_ki(0, mm_argv, self);
   VALUE lo = rb_ary_entry(pair, 0);
   VALUE hi = rb_ary_entry(pair, 1);
   return rb_range_new(lo, hi, 0);
