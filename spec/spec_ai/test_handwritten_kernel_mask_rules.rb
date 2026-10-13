@@ -132,3 +132,23 @@ class TestPutWithMaskedIndices < Test::Unit::TestCase
   end
 
 end
+
+class TestRandomFillClearsTheMask < Test::Unit::TestCase
+
+  # Every cell gets a value, as with seq! and fill.
+  def test_random_and_randomn
+    m = CA_INT32([1, UNDEF, 3])
+    m.random!(10)
+    assert_equal 0, m.count_masked
+    f = CA_FLOAT64([1, UNDEF, 3])
+    f.randomn!
+    assert_equal 0, f.count_masked
+  end
+
+  def test_through_a_view
+    r = CA_FLOAT64([1, UNDEF, 3, UNDEF])
+    r[0..1].random!
+    assert_equal [false, false, false, true], r.is_masked.to_a
+  end
+
+end

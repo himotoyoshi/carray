@@ -26,7 +26,8 @@ class CArray
   #   any range argument.  Complex arrays sample real and imaginary
   #   parts independently from the same range.  An integer array takes
   #   Integer bounds whose every value fits its type (the whole range
-  #   of the type included); a float array takes finite bounds.
+  #   of the type included); a float array takes finite bounds.  Every
+  #   cell gets a value, so the mask is cleared, as by `seq!` or `fill`.
   #
   #   @param low [Numeric] lower bound (inclusive).
   #   @param high [Numeric] upper bound (exclusive).
@@ -57,7 +58,7 @@ class CArray
   #   Fills `self` with standard normal `N(0, 1)` samples via
   #   Box-Muller and returns `self`. Restricted to float / complex
   #   data types; complex fills real and imaginary parts as two
-  #   independent normals per cell.
+  #   independent normals per cell.  The mask is cleared.
   #   @param rng [Random, nil] RNG instance; nil uses the per-ractor
   #     default RNG.
   #   @return [self]

@@ -102,3 +102,22 @@ class TestRandomBounds < Test::Unit::TestCase
   end
 
 end
+
+class TestBinEdgesAreBoundaries < Test::Unit::TestCase
+
+  def test_refused_edges
+    v = CA_FLOAT64([0.5])
+    me = CA_FLOAT64([0, 1, 2])
+    me[1] = UNDEF
+    [me, CA_FLOAT64([2, 1, 0]), CA_FLOAT64([0, Float::NAN, 2])].each do |e|
+      assert_raise(ArgumentError) { v.bin_to(e) }
+      assert_raise(ArgumentError) { v.histogram1d(edges: e) }
+    end
+  end
+
+  def test_equal_and_infinite_edges_are_kept
+    assert_equal [0, 2, 2], CA_FLOAT64([0.5, 1, 1.5]).bin_to(CA_FLOAT64([0, 1, 1, 2])).to_a
+    assert_equal [0, 1], CA_FLOAT64([-1e300, 0.5]).bin_to(CA_FLOAT64([-Float::INFINITY, 0, 1])).to_a
+  end
+
+end
