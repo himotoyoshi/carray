@@ -158,14 +158,16 @@ describe "CArray#project" do
                            [88,99,11]])
     }
 
-    # For CArray#[idx], ArgumentError is raised if idx has masked element.
-    expect { 
+    # For CArray#[idx], a masked element of idx reads as masked, as in project.
+    is_asserted_by { 
       # idx with mask
       idx = CA_SIZE([[1,2,3],
                      [4,_,6],
                      [7,8,0]])
-      a[idx] 
-    }.to raise_error(ArgumentError)
+      a[idx] == CA_DOUBLE([[_ ,33,44],
+                           [55,_ ,77],
+                           [88,99,11]])
+    }
 
   end
 

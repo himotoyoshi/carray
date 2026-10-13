@@ -1022,7 +1022,9 @@ extern VALUE rb_ca_remap_new (VALUE cary, VALUE rmapper);
      (b) Otherwise -> normalize chain (a.flatten[mapper.flatten]
          .reshape).  A 1-D mapper is already routed to CAGrid upstream.
 
-   Both routes raise on a masked mapper. */
+   A masked mapper cell selects nothing: the cell keeps its position and
+   reads as masked (a CAGrid hole); the same-shape fast path is left to a
+   mapper with no masked cell. */
 static VALUE
 rb_ca_fancy_index_chain (VALUE self, VALUE rmapper)
 {
@@ -1034,12 +1036,9 @@ rb_ca_fancy_index_chain (VALUE self, VALUE rmapper)
   TypedData_Get_Struct(self,    CArray, &carray_data_type, ca);
   TypedData_Get_Struct(rmapper, CArray, &carray_data_type, cm);
 
-  if ( ca_is_any_masked(cm) ) {
-    rb_raise(rb_eArgError, "mapper in ca[mapper] should not be masked");
-  }
-
   /* (a) same-shape fast path: ndim + per-axis dim + CA_SIZE data_type. */
   if ( cm->data_type == CA_SIZE
+    && ! ca_is_any_masked(cm)
     && cm->ndim == ca->ndim
     && memcmp(cm->dim, ca->dim, ca->ndim * sizeof(ca_size_t)) == 0 ) {
     return rb_ca_remap_new(self, rmapper);

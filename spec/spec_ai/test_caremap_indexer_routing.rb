@@ -63,11 +63,13 @@ class TestCARemapIndexerRouting < Test::Unit::TestCase
     assert_equal CAGrid, ref[idx].class
   end
 
-  def test_masked_mapper_raises
+  # A masked mapper cell selects nothing: the cell keeps its place and reads
+  # as masked.
+  def test_masked_mapper_reads_masked_at_its_place
     ref = CArray.float64(2, 3).seq
-    idx = mk_idx([2, 3], [0, 1, 2, 3, 4, 5])
+    idx = mk_idx([2, 3], [5, 1, 2, 3, 4, 0])
     idx[0, 0] = UNDEF
-    assert_raise(ArgumentError) { ref[idx] }
+    assert_equal [[UNDEF, 1.0, 2.0], [3.0, 4.0, 0.0]], ref[idx].to_a
   end
 
   # ------------------------------------------------------- semantic parity

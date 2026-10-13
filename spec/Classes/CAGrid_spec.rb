@@ -41,7 +41,8 @@ describe "TestCArrayCAGrid " do
     a = CArray.int(3,3).seq
     i = CA_INT([0,1,2])
     i[0] = UNDEF
-    is_asserted_by { CA_INT([[3, 4, 5], [6, 7, 8]]) == a.grid(i, nil) }
+    _ = UNDEF
+    is_asserted_by { CA_INT([[_, _, _], [3, 4, 5], [6, 7, 8]]) == a.grid(i, nil) }
 
     # ---
     a = CArray.int(3,3).seq

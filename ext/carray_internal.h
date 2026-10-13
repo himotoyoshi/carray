@@ -200,6 +200,11 @@ void    ca_fill_or_detach (int n, CArray **list, VALUE (*fill)(VALUE), VALUE arg
 
 VALUE   ca_view_inherit_mask (VALUE view);
 
+/* Whether a CAGrid has a hole: a position whose index cell was masked,
+   which selects no parent cell.  The descriptor engine has no hole, so
+   such a grid is delivered through its own transfers. */
+int     ca_grid_has_holes (void *ap);
+
 /* The same for the mask a CAWindow / CAShift with an axis of MASK bounds
    makes for itself (ca_obj_window.c). */
 

@@ -456,8 +456,9 @@ class CABlockIterator < CAIterator
     src   = @source.reshape(@source.elements)
     empty = addr.is_masked
     return src[addr].copy unless empty.any
-    # A masked index drops the cell rather than masking it, so an empty tile
-    # needs a placeholder address.  Pointing it at a masked cell of the source
+    # A masked index would read as masked, but gathering by one gives the
+    # source a mask, so an empty tile takes a placeholder address instead.
+    # Pointing it at a masked cell of the source
     # carries the mask through the gather, which a read-only Face (whose copy
     # cannot be written) needs.  Otherwise mask the placeholder afterwards.
     if fill_value.nil? && src.has_mask? && (hole = src.is_masked.where).elements > 0

@@ -376,6 +376,13 @@ ca_iter_route_source (CArray         *src,
   uint8_t kind = ca_iter_classify_source(src);
   if ( kind != CA_ITER_SRC_DESCRIPTOR ) return kind;
 
+  /* A grid with holes (masked index cells) is not described by the engine
+     either: its holes are delivered by its own transfers. */
+  if ( ca_func[src->obj_type].attach == ca_grid_func.attach
+       && ca_grid_has_holes(src) ) {
+    return CA_ITER_SRC_ATTACH;
+  }
+
   /* The descriptor walk reads the parent's memory, which such a parent
      only has after a whole materialise -- however few cells the view
      selects.  Deliver through the view's own transfer instead: SRC_ATTACH

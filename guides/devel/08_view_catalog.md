@@ -204,6 +204,16 @@ a Range-typed axis emits a STRIDE
 descriptor, so a `nil`-only axis costs no ALLOC. `rb_ca_grid(*args)` is
 the Ruby method.
 
+A masked cell of an index array selects nothing and keeps its position: it
+becomes a **hole** of the INDEX axis (`cag_axis_t.holes`). A hole reads as
+masked (the grid's mask grid returns true there) and takes no write. The
+descriptor engine has no hole, so a grid with holes is delivered through its
+own transfers (one batch of parent addresses with the holes left out of a
+write), declines `fold_stride`, and is routed to the kernel iterator as
+`SRC_ATTACH` (`ca_grid_has_holes`). A new door that takes integer positions
+answers the same way: the read gives `UNDEF` at the masked position, the
+write leaves it alone, as `project` and `gather_nd` do.
+
 **CASelectAxis** (runtime) — per-axis selection. Drives the descriptor
 framework via `ca_select_axis_describe_axes`. `rb_ca_select_axis(*args)`
 / `rb_ca_select_axis_eligible_p` (predicate).

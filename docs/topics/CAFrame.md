@@ -352,6 +352,8 @@ df[CA_INT64([2, 0, 1])]    # integer row gather (reorder / repeat)
 
 Ranges are **positional only** — endpoints must be integers, and a non-integer Range raises. To select a range of labels, use [`filter`](#filter--rows-matching-a-condition) with `f.index`.
 
+A masked cell of an integer row selector selects no row, but keeps its place: the sub-frame has a row there whose cells, index included, are all masked. A masked cell of a boolean selector selects no row and adds none.
+
 ### First and last rows — `head`, `tail`
 
 `head(n)` and `tail(n)` return the first / last `n` rows as a sub-frame (`n` defaults to 5). `n` larger than `nrow` yields the whole frame; `n` of 0 yields an empty frame; a negative `n` raises.
