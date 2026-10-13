@@ -46,6 +46,9 @@ class CArray
     end
     raise ArgumentError, "bin: vmin > vmax" if vmin > vmax
 
+    unless bins.nil? || bins.is_a?(Integer)
+      raise TypeError, "bin: bins: must be an Integer (got #{bins.inspect})"
+    end
     n = bins || ((vmax - vmin).to_f / step).round
     raise ArgumentError, "bin: n must be >= 1" if n < 1
 
@@ -120,8 +123,12 @@ class CArray
     # under -> -1, in-range -> 0..N-1, over -> N.
     out = src.send(:histbin_ki, e, include_max) - 1
 
-    out[:eq, -1] = lfill.nil? ? UNDEF : lfill          # under
-    out[:eq, n]  = ufill.nil? ? UNDEF : ufill          # over
+    # Both sides are found before either is written, so a fill that equals
+    # the other side's index (lfill: n) is not taken for it.
+    under = out.eq(-1)
+    over  = out.eq(n)
+    out[under] = lfill.nil? ? UNDEF : lfill
+    out[over]  = ufill.nil? ? UNDEF : ufill
     out
   end
 

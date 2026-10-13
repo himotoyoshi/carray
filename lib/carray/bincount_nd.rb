@@ -78,8 +78,13 @@ class CArray
     #     accumulators; `nil` for pure counts (int64).
     #   @return [BincountND]
     def initialize (lengths:, fiber_shape: [], weights_data_type: nil)
-      @lengths = lengths.map(&:to_i)
-      raise ArgumentError, "lengths must be a non-empty list" if @lengths.empty?
+      raise ArgumentError, "lengths must be a non-empty list" if lengths.empty?
+      lengths.each_with_index do |l, k|
+        unless l.is_a?(Integer)
+          raise TypeError, "lengths[#{k}] must be an Integer (got #{l.inspect})"
+        end
+      end
+      @lengths = lengths.dup
       @lengths.each_with_index do |l, k|
         raise ArgumentError, "lengths[#{k}] must be >= 1" if l < 1
       end
@@ -345,6 +350,10 @@ class CArray
   #   @return [BincountND]
   def bincount_nd (lengths:, axis: [-2, -1], weights: nil)
     raise ArgumentError, "lengths must be an Array of per-dim extents" unless lengths.is_a?(Array)
+    axis = [-2, -1] if axis.nil?
+    unless axis.is_a?(Array) && axis.size == 2
+      raise ArgumentError, "bincount_nd: axis: is a [sample, channel] pair (got #{axis.inspect})"
+    end
     sample_ax  = normalize_axis(axis[0], "bincount_nd sample axis")
     channel_ax = normalize_axis(axis[1], "bincount_nd channel axis")
     fiber_shape = shape.dup

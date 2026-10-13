@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: arguments of the binning, counting and random methods are
+  checked instead of cut or wrapped. `random!` on an integer array takes
+  Integer bounds whose values all fit the type (`int8.random!(0, 1000)` and
+  `random!(1.5)` raise; the whole int64 and uint64 ranges now work), and on
+  a float array finite bounds. `bin(bins:)`, `bincount(length:)` and
+  `bincount_nd(lengths:)` take Integers, `bincount(length:)` a non-negative
+  one. `bin_to(lfill: n)` (n the number of bins) wrote `ufill` under the
+  range. `histogram`, `histogram1d` and `bincount_nd` take `axis: nil` as
+  the default.
+
 - Fix: `windows(on:)` with a uint64 key above 2**63 - 1, or with a time
   key whose widths need a finer grid late in the time range, wrapped the
   key and gave wrong windows; such keys are now measured from the smallest

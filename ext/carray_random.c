@@ -361,19 +361,55 @@ rb_ca_random_bang(int argc, VALUE *argv, VALUE self)
     int is_integer_type = (ca->data_type >= CA_INT8
                             && ca->data_type <= CA_UINT64);
     if (is_integer_type) {
-      low_long  = NUM2LONG(low_val);
-      high_long = NUM2LONG(high_val);
-      if (high_is_closed) high_long += 1;
-      if (low_long >= high_long) {
+      /* The bounds stay Ruby Integers until they are known to fit: the
+         last value drawn is high (closed) or high - 1, and every value
+         from low to it must be one of the type's.  The draw is low plus
+         an offset up to last - low, which holds even the whole int64 or
+         uint64 range. */
+      VALUE last, type_min, type_max;
+      if (!RB_INTEGER_TYPE_P(low_val) || !RB_INTEGER_TYPE_P(high_val)) {
+        rb_raise(rb_eTypeError,
+                 "random: an integer array takes Integer bounds "
+                 "(got %"PRIsVALUE", %"PRIsVALUE")",
+                 rb_inspect(low_val), rb_inspect(high_val));
+      }
+      last = high_is_closed ? high_val
+                            : rb_funcall(high_val, '-', 1, INT2FIX(1));
+      if (RTEST(rb_funcall(low_val, '>', 1, last))) {
         rb_raise(rb_eArgError,
                  "random: low must be less than high "
-                 "(got low=%ld, high=%ld)",
-                 low_long, high_long);
+                 "(got low=%"PRIsVALUE", high=%"PRIsVALUE")",
+                 low_val, high_val);
       }
-      limit = (unsigned long)(high_long - low_long) - 1;
+      switch (ca->data_type) {
+      case CA_INT8:   type_min = INT2FIX(INT8_MIN);   type_max = INT2FIX(INT8_MAX);   break;
+      case CA_UINT8:  type_min = INT2FIX(0);          type_max = INT2FIX(UINT8_MAX);  break;
+      case CA_INT16:  type_min = INT2FIX(INT16_MIN);  type_max = INT2FIX(INT16_MAX);  break;
+      case CA_UINT16: type_min = INT2FIX(0);          type_max = INT2FIX(UINT16_MAX); break;
+      case CA_INT32:  type_min = LL2NUM(INT32_MIN);   type_max = LL2NUM(INT32_MAX);   break;
+      case CA_UINT32: type_min = INT2FIX(0);          type_max = ULL2NUM(UINT32_MAX); break;
+      case CA_INT64:  type_min = LL2NUM(INT64_MIN);   type_max = LL2NUM(INT64_MAX);   break;
+      default:        type_min = INT2FIX(0);          type_max = ULL2NUM(UINT64_MAX); break;
+      }
+      if (RTEST(rb_funcall(low_val, '<', 1, type_min)) ||
+          RTEST(rb_funcall(last, '>', 1, type_max))) {
+        rb_raise(rb_eRangeError,
+                 "random: the values %"PRIsVALUE"..%"PRIsVALUE" are not all %s "
+                 "(%"PRIsVALUE"..%"PRIsVALUE")",
+                 low_val, last, ca_type_name[ca->data_type], type_min, type_max);
+      }
+      low_long = RTEST(rb_funcall(low_val, '<', 1, INT2FIX(0)))
+               ? (long) NUM2LL(low_val) : (long) NUM2ULL(low_val);
+      limit = (unsigned long) NUM2ULL(rb_funcall(last, '-', 1, low_val));
+      (void) high_long;
     } else {
       low_dbl  = NUM2DBL(low_val);
       high_dbl = NUM2DBL(high_val);
+      if (!isfinite(low_dbl) || !isfinite(high_dbl)) {
+        rb_raise(rb_eArgError,
+                 "random: the bounds are finite numbers "
+                 "(got low=%g, high=%g)", low_dbl, high_dbl);
+      }
       if (low_dbl >= high_dbl) {
         rb_raise(rb_eArgError,
                  "random: low must be less than high "
