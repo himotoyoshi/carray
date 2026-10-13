@@ -55,9 +55,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 - Fix: `UNDEF` returned from a `reduce_slab` block masks that cell of the
   result. It was written as 0.
 
+- New: `CAFrame#join_asof` takes `by:`, columns that must match exactly:
+  `obs.join_asof(radar, on: "time", by: "station")` matches each row to the
+  nearest time among the rows of the same station. `by:` takes one name or
+  several; a row with a masked `by:` cell matches nothing.
+
 - New: `CAFrame#join` takes several key columns, `on: ["station", "date"]`.
   Rows match when every key column matches; a row with any key cell masked
-  matches nothing. `join_asof` still takes one key.
+  matches nothing.
 
 - New: a `CAFrame` group has the short form of `sum` / `mean` / `min` /
   `max` for more reductions: `prod`, `accumulate`, `median`, `variance`,
