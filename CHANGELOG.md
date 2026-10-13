@@ -36,6 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: `valid_index?` and `valid_addr?` accept a negative index or
+  address, counting from the end as `[]` does: `a.valid_addr?(-1)` is
+  true for a non-empty `a`. They answer whether the index names a cell,
+  which is what every door that takes an index already does with it.
+
+- Fix: a block index whose start counts from the end, or whose step runs
+  backwards, read and wrote past the array: `a[[-1, 2]]` on a length-6
+  array returned the last cell and a cell after it, and `a[[1, 2, -2]]`
+  a cell before the first. Such a block now raises IndexError, as
+  `a[[0, 7]]` always did. A C extension calling `ca_parse_range` gets the
+  same check.
+
 - New: a time or duration array can be added to or subtracted from a
   single value: `t + "3 days"`, `t - t.min`, `t - "2024-01-02"`,
   `t - Time.utc(2024, 1, 1)`, `t.min + durations`. A duration is a
