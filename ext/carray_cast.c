@@ -2175,6 +2175,36 @@ ca_check_integer_fits (VALUE v, int8_t dt)
   }
 }
 
+/* The store reader for an integer cell: the value as an Integer, refused
+   when it does not fit the cell's type, as an operator refuses it.  A
+   store raises where an array cast (to_type) keeps the C conversion.  A
+   non-Integer goes through Integer() (1.5 is 1; nil and NaN raise). */
+VALUE
+ca_obj2integer_fitting (VALUE v, int8_t data_type)
+{
+  VALUE integer = RB_INTEGER_TYPE_P(v) ? v : rb_Integer(v);
+  if ( FIXNUM_P(integer) ) {
+    long x = FIX2LONG(integer);
+    int fits;
+    switch ( data_type ) {
+    case CA_INT8:   fits = ( x >= INT8_MIN  && x <= INT8_MAX );   break;
+    case CA_UINT8:  fits = ( x >= 0         && x <= UINT8_MAX );  break;
+    case CA_INT16:  fits = ( x >= INT16_MIN && x <= INT16_MAX );  break;
+    case CA_UINT16: fits = ( x >= 0         && x <= UINT16_MAX ); break;
+    case CA_INT32:  fits = ( x >= INT32_MIN && x <= INT32_MAX );  break;
+    case CA_UINT32: fits = ( x >= 0         && (unsigned long) x <= UINT32_MAX ); break;
+    case CA_INT64:  fits = 1;                                     break;
+    case CA_UINT64: fits = ( x >= 0 );                            break;
+    default:        fits = 1;                                     break;
+    }
+    if ( fits ) {
+      return integer;
+    }
+  }
+  ca_check_integer_fits(integer, data_type);
+  return integer;
+}
+
 /* A Ruby Integer operand against an integer array is taken in the array's
    own data type, refused when it does not fit (ca_check_integer_fits).
    Widening instead would make the result's type depend on a scalar's

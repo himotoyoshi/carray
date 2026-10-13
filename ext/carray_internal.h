@@ -372,6 +372,7 @@ long        ca_integer_arg (VALUE v, const char *arg, const char *name);
 ca_size_t   ca_shape_elements (int8_t ndim, const ca_size_t *dim, ca_size_t bytes);
 void        ca_check_index_array (VALUE v);
 void        ca_check_integer_fits (VALUE v, int8_t data_type);
+VALUE       ca_obj2integer_fitting (VALUE v, int8_t data_type);
 int         ca_integer_range_side (VALUE v, int8_t data_type);
 int         ca_bincmp_integer_prepare (volatile VALUE *self, volatile VALUE *other,
                                        int op_id, int *signed_side);

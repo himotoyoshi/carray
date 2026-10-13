@@ -478,9 +478,17 @@ OBJECT.each do |type1|
         read_ok   = "( RB_TYPE_P(*p1, T_STRING) ? " \
                     "ca_decimal_string_to(*p1, #{type_name}, p2) : " \
                     "( #{conv_ok}(*p1, &tmp) ? ( *p2 = (#{ctype2}) tmp, 1 ) : 0 ) )"
+        # A store refuses an integer the cell cannot hold
+        # (ca_obj2integer_fitting); to_type, above, keeps the C conversion.
+        store_conv = if INTEGER.include?(type2)
+                       num = [CA_UINT8, CA_UINT16, CA_UINT32, CA_UINT64].include?(type2) ? "rb_num2ull" : "NUM2LL"
+                       "#{num}(ca_obj2integer_fitting(*p1, #{type_name}))"
+                     else
+                       "#{conv}(*p1)"
+                     end
         read      = "if ( RB_TYPE_P(*p1, T_STRING) ) { " \
                     "ca_decimal_string_store(*p1, #{type_name}, p2); } " \
-                    "else { *p2 = (#{ctype2}) #{conv}(*p1); }"
+                    "else { *p2 = (#{ctype2}) #{store_conv}; }"
       else
         read_ok   = "( #{conv_ok}(*p1, &tmp) ? ( *p2 = (#{ctype2}) tmp, 1 ) : 0 )"
         read      = "*p2 = (#{ctype2}) #{conv}(*p1);"
