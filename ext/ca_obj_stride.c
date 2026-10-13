@@ -457,6 +457,8 @@ ca_stride_compose_to_root (CAStride *leaf,
 
    "Identity compose-fold" semantics:
      - cand->bytes == root->bytes      (no byte reinterpret)
+     - cand->data_type == root->data_type (no type reinterpret: a caller
+       may read the root's cells as typed values)
      - composed_base == 0
      - composed_strides[k] match row-major over cand->dim with cand->bytes
 
@@ -485,6 +487,7 @@ ca_resolve_attached_root_via_identity (CArray *cand)
   ca_stride_compose_to_root(cs, &root, composed_strides, &composed_base);
   if ( !root->ptr ) return cand;
   if ( cs->bytes != root->bytes ) return cand;
+  if ( cs->data_type != root->data_type ) return cand;
   if ( composed_base != 0 ) return cand;
 
   s = root->bytes;
