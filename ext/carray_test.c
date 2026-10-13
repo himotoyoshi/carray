@@ -200,8 +200,9 @@ rb_ca_is_type (VALUE arg, int type)
    live in ca_obj_record.c; signatures stay in carray.h for cross-file
    extern use. */
 
-/* CArray#valid_index?(*idx) — 1 if the index tuple is in range, else 0.
- * The number of indices must equal ndim (raises otherwise). */
+/* CArray#valid_index?(*idx) -- whether self[*idx] names a cell: a negative
+ * index counts from the end of its axis, as it does at every door.  The
+ * number of indices must equal ndim (raises otherwise). */
 static VALUE
 rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
 {
@@ -217,6 +218,9 @@ rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
   }
   for (i=0; i<ca->ndim; i++) {
     idx = NUM2SIZE(argv[i]);
+    if ( idx < 0 ) {
+      idx += ca->dim[i];
+    }
     if ( idx < 0 || idx >= ca->dim[i] ) {
       return Qfalse;
     }
@@ -225,7 +229,8 @@ rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
   return Qtrue;
 }
 
-/* CArray#valid_addr?(addr) — 1 if addr is in range 0...elements, else 0. */
+/* CArray#valid_addr?(addr) -- whether addr names a cell: a negative address
+ * counts from the end. */
 static VALUE
 rb_ca_is_valid_addr (VALUE self, VALUE raddr)
 {
@@ -234,6 +239,9 @@ rb_ca_is_valid_addr (VALUE self, VALUE raddr)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   addr = NUM2SIZE(raddr);
+  if ( addr < 0 ) {
+    addr += ca->elements;
+  }
   if ( addr < 0 || addr >= ca->elements ) {
     return Qfalse;
   }
