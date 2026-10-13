@@ -375,6 +375,16 @@ class CASlabIterator < CAIterator
     @reference.lag(n, axis: single_scan_axis(:lag))
   end
 
+  # @overload strip_mask(method:)
+  #   Per-slab fill of the masked cells along the slab axis, as
+  #   `reference.strip_mask(method:, axis: slab_axis)`: `:forward` / `:ffill`
+  #   or `:backward` / `:bfill`. A multi-axis slab raises, as the scans do.
+  #   @return [CArray] reference-shaped
+  def strip_mask (method:)
+    CAIterator.hold_backward?(method)
+    @reference.strip_mask(method: method, axis: single_scan_axis(:strip_mask))
+  end
+
   # @overload order(descending: false, method: :ordinal, kind: :quick)
   #   Per-slab rank of each cell along the slab axis (int64), as
   #   `reference.order(axis: slab_axis, ...)`. A multi-axis slab has no

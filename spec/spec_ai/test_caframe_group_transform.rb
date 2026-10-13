@@ -84,6 +84,48 @@ class TestCAFrameGroupTransform < Test::Unit::TestCase
     assert_raise(TypeError) { grp.lag("temp", 1) }   # n is a keyword, 1 is not a column name
   end
 
+  # fill(name, :ffill / :bfill) fills a column in place from the rows of the
+  # same group, and leaves a row in no group as it is.
+  def test_fill
+    df = frame
+    df["temp"][1] = UNDEF          # osaka's first row: nothing to carry in osaka
+    df["temp"][2] = UNDEF
+    df["temp"][4] = UNDEF
+    df["temp"][5] = UNDEF          # its key is masked: in no group
+    grp = df.group_by("station")
+    assert_same grp, grp.fill("temp", :ffill)
+    # tokyo: 10, _, _ -> 10, 10, 10; osaka: _, 22 stays, not carried from tokyo
+    assert_equal [10.0, UNDEF, 10.0, 22.0, 10.0, UNDEF], df["temp"].to_a
+  end
+
+  def test_fill_backward_and_n_dimensional
+    df = frame
+    df["wind"][0, 1] = UNDEF
+    df["wind"][2, 1] = UNDEF
+    df.group_by("station").fill("wind", :bfill)
+    # tokyo's column 1 is _, _, 41 down its rows 0, 2, 4
+    assert_equal [41.0, 41.0, 41.0], [df["wind"][0, 1], df["wind"][2, 1], df["wind"][4, 1]]
+  end
+
+  def test_fill_time_column
+    df = frame
+    df["time"][4] = UNDEF
+    df.group_by("station").fill("time", :ffill)
+    assert_equal "2024-01-03", df["time"][4].to_s
+  end
+
+  def test_fill_constant_and_refusals
+    df = frame
+    df["temp"][5] = UNDEF
+    df.group_by("station").fill("temp", 0.0)        # as CAFrame#fill: every masked cell
+    assert_equal 0.0, df["temp"][5]
+    grp = df.group_by("station")
+    assert_raise(ArgumentError) { grp.fill("temp", :linear) }
+    assert_raise(ArgumentError) { grp.fill("temp", :zero) }
+    assert_raise(KeyError) { grp.fill("nope", :ffill) }
+    assert_raise(FrozenError) { frame.freeze.group_by("station").fill("temp", :ffill) }
+  end
+
   def test_resample_groups
     t  = CArray.time_range("2024-01-01T00:00", "2024-01-01T05:00", unit: :h)
     df = CAFrame.new("time" => t, "v" => CA_FLOAT64([1, 2, 3, 4, 5, 6])).set_index("time")

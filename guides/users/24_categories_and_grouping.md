@@ -849,6 +849,7 @@ Every reduction returns a length-`k` `CArray` aligned to `cat.labels` unless not
 | `nunique` | int64 | distinct present members; none = `0` |
 | `lag(n)` | source-shaped | the value `n` steps earlier among the category's members; none = `UNDEF` |
 | `order` | source-shaped int64 | each cell's rank among the category's members, as `CArray#order` |
+| `strip_mask(method: :ffill)` / `:bfill` | source-shaped | each masked cell filled from the category's members; nothing to carry = `UNDEF` |
 | `min_index` / `max_index` | int64 | group-local position of the min / max |
 | `min_addr` / `max_addr` | int64 | flat source address of the min / max |
 | `sort_addr` | int64 | length-`nvalid`, source addresses that sort each group, group-major |

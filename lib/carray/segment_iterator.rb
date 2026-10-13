@@ -603,6 +603,44 @@ class CASegmentIterator < CAIterator
     out
   end
 
+  # @overload strip_mask(method:)
+  #   Returns the values with each masked cell filled from its segment, as
+  #   `CArray#strip_mask(method:)` fills a 1-D array: `:forward` (`:ffill`)
+  #   carries the segment's last present value forward, `:backward`
+  #   (`:bfill`) its next one back. A fill never reaches across into another
+  #   segment, so a masked cell with nothing to carry in its segment stays
+  #   masked; a cell in no segment is UNDEF. The value is not modified.
+  #   @param method [Symbol] `:forward`, `:ffill`, `:backward` or `:bfill`.
+  #   @return [CArray] source-shaped
+  def strip_mask (method:, axis: nil)
+    backward = CAIterator.hold_backward?(method)
+    return axis_hold(method, axis) if axis
+    if @value.face? && ! face_output?
+      return scatter_segments(->(shape) { blank_like(@value, shape) }) { |s| s.strip_mask(method: method) }
+    end
+    out = blank_like(@value, @src_shape)
+    out[] = UNDEF
+    m = grouped.elements
+    return out if m.zero?
+    # For each cell, the present cell its value comes from: the nearest one at
+    # or before it (forward) or at or after it (backward), kept when it lies
+    # in the cell's own segment.
+    slot = CArray.int64(m).seq!
+    slot[grouped.is_masked] = backward ? m : -1 if grouped.has_mask?
+    seg = CArray.segment_index(offsets: @bounds)
+    if backward
+      source = slot.reverse.cummin.reverse
+      found  = source.lt(@bounds[seg + 1])
+    else
+      source = slot.cummax
+      found  = source.ge(@bounds[seg])
+    end
+    filled = grouped[source.pmin(m - 1).pmax(0)].copy
+    filled[found.not] = UNDEF
+    out.reshape(@value.elements)[perm] = filled
+    out
+  end
+
   # @overload order(descending: false, method: :ordinal, kind: :quick)
   #   Returns each cell's rank among the members of its segment, source-shaped
   #   int64, as `CArray#order` ranks a 1-D array: `0` is the smallest, ties
@@ -1037,6 +1075,10 @@ class CASegmentIterator < CAIterator
   end
 
   def axis_order (*)
+    raise NotImplementedError, "#{self.class} has no axis: form"
+  end
+
+  def axis_hold (*)
     raise NotImplementedError, "#{self.class} has no axis: form"
   end
 

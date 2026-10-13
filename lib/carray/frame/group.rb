@@ -394,6 +394,49 @@ class GroupedFrame
     define_method(op) { |*names| transform_columns(op, names, [], {}) }
   end
 
+  # Fill the masked cells of a column from the rows of the same group, in
+  # place, as +CAFrame#fill+ does for the whole column: +:ffill+ carries the
+  # group's last present value forward in row order, +:bfill+ its next one
+  # back. A fill never reaches across into another group, so a cell with
+  # nothing to carry in its group stays masked, and a row whose key is
+  # masked (in no group) is left as it is. A constant fills every masked
+  # cell, as +CAFrame#fill+ does. Returns self.
+  #
+  #   df.group_by("station").fill("temp", :ffill)
+  #
+  # Sort the frame first (+sort_by_key("time")+) when its rows are not in
+  # time order.
+  #
+  # @param name [String] the column.
+  # @param method_or_value [Symbol, Object] +:ffill+, +:bfill+, or a constant.
+  # @return [GroupedFrame] self
+  # @raise [ArgumentError] for +:linear+, which within groups is not
+  #   provided, or another Symbol.
+  def fill (name, method_or_value)
+    case method_or_value
+    when :ffill, :bfill
+      @frame.__send__(:refuse_if_frozen)
+      key = @frame.__send__(:column_key, name, "fill")
+      col = @frame[key]
+      # A row in no group is UNDEF in the fill, so writing it changes nothing.
+      held = group_transform(col, :strip_mask, [], { method: method_or_value })
+      target = col.is_masked
+      col[target] = held[target] if target.any
+    when :linear
+      raise ArgumentError,
+            "fill(#{name.inspect}, :linear): an interpolation within each group " \
+            "is not provided; use :ffill or :bfill, or interpolate one group at a " \
+            "time with CAFrame#fill"
+    when Symbol
+      raise ArgumentError,
+            "fill: unknown method #{method_or_value.inspect} " \
+            "(:ffill | :bfill, or a constant fill value)"
+    else
+      @frame.fill(name, method_or_value)
+    end
+    self
+  end
+
   # Keep the rows of the groups the block chooses. The block receives the
   # grouped frame and returns a boolean CArray with one value per group,
   # built from the group reductions, as +CAFrame#filter+'s block returns one

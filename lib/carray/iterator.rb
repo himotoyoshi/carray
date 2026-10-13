@@ -32,6 +32,21 @@ class CAIterator
   # The keywords a member passes on to a core reduction over its own axes.
   # The member sets `axis:`, so one from the caller is refused; the rest go
   # to the core, which checks them.
+  # Whether a fill method carries values backward: :forward / :ffill carry
+  # them forward, :backward / :bfill back. A member fills within its own
+  # pieces by holding the nearest present value; :linear, which needs a
+  # coordinate, is the core's alone.
+  def self.hold_backward? (method) # :nodoc:
+    case method
+    when :forward, :ffill   then false
+    when :backward, :bfill  then true
+    else
+      raise ArgumentError,
+            "strip_mask: method must be :forward, :ffill, :backward or :bfill " \
+            "within a piece (got #{method.inspect})"
+    end
+  end
+
   def self.reduce_keywords (op, kw) # :nodoc:
     if kw.key?(:axis)
       raise ArgumentError, "#{op}: unknown keyword: :axis (the iterator sets the axes)"
@@ -244,13 +259,21 @@ class CAIterator
   #   @return [CArray] shaped like the source.
   #   @raise [NotImplementedError] for a member whose pieces overlap, where a
   #     cell has no single position within a piece.
+  # @!method strip_mask(method:)
+  #   Returns a source-shaped array with each masked cell filled from its own
+  #   piece, as `CArray#strip_mask(method:)` fills: `:forward` (`:ffill`)
+  #   carries the last present value forward, `:backward` (`:bfill`) the next
+  #   one back, never across into another piece.
+  #   @param method [Symbol] `:forward`, `:ffill`, `:backward` or `:bfill`.
+  #   @return [CArray] shaped like the source.
+  #   @raise [NotImplementedError] for a member whose pieces overlap.
   # @!method order(descending: false, method: :ordinal, kind: :quick)
   #   Returns a source-shaped int64 array of each cell's rank among the cells
   #   of its piece, as `CArray#order` ranks them (`0` the smallest).
   #   @return [CArray] shaped like the source.
   #   @raise [NotImplementedError] for a member whose pieces overlap, where a
   #     cell has no single rank.
-  [:map, :sort_addr, :order,
+  [:map, :sort_addr, :order, :strip_mask,
    :cumsum, :cumprod, :cummax, :cummin, :cumcount, :lag].each do |name|
     define_method(name) do |*, **, &_blk|
       raise NotImplementedError, "#{self.class} does not provide ##{name} (optional)"

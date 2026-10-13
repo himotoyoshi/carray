@@ -541,6 +541,16 @@ class CACategoricalIterator < CASegmentIterator
     end
   end
 
+  # #strip_mask(method:) along an axis (case A): each group's positions along
+  # the axis filled along it, fiber by fiber.
+  def axis_hold (method, axis)
+    axis = checked_axis(axis, :strip_mask)
+    classified_along!(:strip_mask, axis)
+    each_group_along(axis, ->(shape) { blank_like(@value, shape) }) do |g|
+      g.strip_mask(method: method, axis: axis)
+    end
+  end
+
   # #order along an axis (case A): each group's positions along the axis
   # ranked along it, fiber by fiber.
   def axis_order (axis, **kw)
@@ -586,7 +596,7 @@ class CACategoricalIterator < CASegmentIterator
           "positions along axis #{axis} (shape [#{n}]); got shape " \
           "#{@cat.codes.shape.inspect}"
   end
-  private :axis_scan, :axis_lag, :axis_order, :axis_map, :each_group_along, :classified_along!
+  private :axis_scan, :axis_lag, :axis_order, :axis_hold, :axis_map, :each_group_along, :classified_along!
 
   # Axis-aware wsum + wmean fused (single kernel call, both outputs).  Returns
   # [wsum_ca, wmean_ca].  Weights must match source shape exactly (explicit

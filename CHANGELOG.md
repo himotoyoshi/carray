@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: masked cells can be filled within each group. The slab, block,
+  segment, categorical and axis-group iterators have
+  `strip_mask(method: :ffill)` / `:bfill` (also `:forward` / `:backward`),
+  which fill from the same piece only and return a new array, and a
+  `CAFrame` group has `fill(name, :ffill)` / `:bfill`, which fills the
+  column in place: `df.group_by("station").fill("temp", :ffill)`. A cell
+  with nothing to carry in its group stays masked. `:linear` within groups
+  is not provided.
+
 - Change: `CArray.time` without `unit:` reads the values in the finest
   unit they show, where it always used `:s`: dates alone give `:D`, a
   fraction of a second `:ms` / `:us` / `:ns` (it was cut off before), a

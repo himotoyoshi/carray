@@ -591,6 +591,25 @@ class CAGroupIterator
     scan_by_core(:lag, n)
   end
 
+  # @overload strip_mask(method:, axis: :group)
+  #   Per-group fill of the masked cells, counting a group's members in
+  #   row-major position order along the grouped axes (per band), as the
+  #   scans do: `:forward` / `:ffill` or `:backward` / `:bfill`, never across
+  #   into another group. Without :group it is the value's own
+  #   `strip_mask(method:, axis:)`.
+  #   @return [CArray] source-shaped
+  def strip_mask (method:, axis: nil)
+    has_group, fused = AxisGroup.parse_axis(axis)
+    return value.strip_mask(method: method, axis: axis) unless has_group
+    CAIterator.hold_backward?(method)
+    unless fused.empty?
+      raise ArgumentError,
+            "axis_group strip_mask: folding a band into a fill (axis: [:group, k]) " \
+            "is not supported; a fill preserves the source shape"
+    end
+    scan_by_core(:strip_mask, method: method)
+  end
+
   # @overload order(axis: :group, descending: false, method: :ordinal, kind: :quick)
   #   Per-group rank of each cell among its group's members (int64, `0` the
   #   smallest; per band), as `CArray#order` ranks them; a cell in no group is

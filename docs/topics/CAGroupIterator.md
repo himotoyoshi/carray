@@ -132,7 +132,9 @@ empty-group `max` reduces to `UNDEF`).
 `lag(n, axis: :group)` follows the same order: each cell gets the value `n`
 steps earlier among its group's members (per band), `UNDEF` where there is none,
 so a lag never reaches another group. `order(axis: :group)` ranks each cell
-among its group's members (per band), with the keywords of `CArray#order`.
+among its group's members (per band), with the keywords of `CArray#order`, and
+`strip_mask(method: :ffill, axis: :group)` / `:bfill` fill the masked cells from
+the group's members.
 
 ```ruby
 # per-station running total through the year, kept in the [station, month] grid

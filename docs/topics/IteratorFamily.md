@@ -50,6 +50,13 @@ piece's own order (`UNDEF` for a piece with none), and `nunique` counts its
 distinct present values (0 for none); like the core ones they take no
 `min_count:` or `fill_value:`.
 
+A member whose pieces do not overlap also fills masked cells within each
+piece: `strip_mask(method: :forward)` (`:ffill`) carries a piece's last present
+value forward and `:backward` (`:bfill`) its next one back, as
+`CArray#strip_mask(method:)` does, never across into another piece. A cell with
+nothing to carry in its piece stays masked. `:linear`, which needs a coordinate
+a piece does not have, is the core's alone.
+
 `each` / `reduce` are the escape hatch for a statistic not in the named list:
 `each { |piece| … }` yields each piece (an `Enumerator` with no block);
 `reduce { |piece| … }` folds each piece to one value, and `reduce(init) { |acc,
@@ -73,6 +80,7 @@ a piece *is*.
 | `cumsum` / `cumprod` / `cummax` / `cummin` / `cumcount` (per-cell running scan) | ✓ | — ⁴ | ✓ | ✓ | ✓ ⁵ | ✓ |
 | `lag(n)` (the value `n` steps earlier in the same piece) | ✓ ⁶ | — ⁴ | ✓ | ✓ | ✓ ⁵ | ✓ |
 | `order` (each cell's rank within its piece) | ✓ ⁶ | — ⁴ | ✓ | ✓ | ✓ ⁵ | ✓ |
+| `strip_mask(method: :forward / :backward)` (fill within the piece) | ✓ ⁶ | — ⁴ | ✓ | ✓ | ✓ ⁵ | ✓ |
 
 1. Window order statistics, `first` / `last` and `nunique` leave the UNDEF
    margin of the default `:skip` out of each window, as they leave out any
@@ -88,11 +96,12 @@ a piece *is*.
    address, so a scatter-back (`map`), a per-cell running scan (`cumsum` etc.,
    a cell would land in many windows with no single running value), a
    per-cell source `sort_addr`, a `lag` (a cell has no single position to
-   step back from) and an `order` (no single rank) are all ill-defined; use `reduce` for a custom per-window
+   step back from), an `order` (no single rank) and a fill (no single value
+   to be filled with) are all ill-defined; use `reduce` for a custom per-window
    fold, and `CArray#lag(n, axis:)` / `CArray#order(axis:)` along an axis.
-5. A group's scans, `lag` and `order` take `axis: :group`; its `cumcount` is the running member
+5. A group's scans, `lag`, `order` and `strip_mask` take `axis: :group`; its `cumcount` is the running member
    ordinal within each group.
-6. A slab's `lag` and `order` run along its one slab axis (a multi-axis slab
+6. A slab's `lag`, `order` and `strip_mask` run along its one slab axis (a multi-axis slab
    raises, as its scans do); its `lag` is a view of the source, as
    `CArray#lag` is, where the other members return a new array.
 

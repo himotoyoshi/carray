@@ -1003,6 +1003,7 @@ df["total"] = grp.cumsum("rain")                  # running total per station
 - They are called as the reductions are: given names, one name gives the `CArray` and several an `Array` of them; without names they give a frame of every column whose type has the operation (the keys left out), on the frame's rows and index.
 - **"Back" means earlier rows of the frame.** Rows that are not in time order give the previous row, not the previous time: sort first, with `sort_by_key("time")`.
 - `lag` takes its step as `n:`, since the positional arguments are column names.
+- **Filling gaps per group.** `grp.fill("temp", :ffill)` fills the masked cells of a column in place from the earlier rows of the same group (`:bfill` from the later ones), as [`fill`](#masking-and-filling-cells) does for the whole column. A fill never reaches across into another group, so a station's first rows stay masked when it has nothing to carry, and a row whose key is masked is left as it is. A constant fills every masked cell, as `fill` does; `:linear` within groups is not provided.
 - An N-D column runs along the rows, keeping its trailing shape. A row whose key is masked belongs to no group, so its cells are `UNDEF`. They work for `resample` as well, within each time bin.
 
 ### Keeping whole groups — `filter`
@@ -1725,6 +1726,7 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | refuse an hourly mean that has too few readings | [`mean(min_count:)`](#the-same-reduction-for-every-column) |
 | the change since a station's previous reading | [`group_by(...).lag`](#values-within-a-group--lag-order-running-values) |
 | a rank or a running total within each station | [`group_by(...).order` / `cumsum`](#values-within-a-group--lag-order-running-values) |
+| fill each station's gaps from its own earlier readings | [`group_by(...).fill(name, :ffill)`](#values-within-a-group--lag-order-running-values) |
 
 ### Combining
 

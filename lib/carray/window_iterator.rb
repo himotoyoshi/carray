@@ -1110,6 +1110,18 @@ class CAWindowIterator < CAIterator
           "source.lag(n, axis:) for the lag along an axis."
   end
 
+  # @!method strip_mask
+  #   Not supported for a window iterator: a cell belongs to many overlapping
+  #   windows, so it has no single value to be filled with. Use
+  #   `source.strip_mask(method:, axis:)` for a fill along an axis.
+  #   @raise [NotImplementedError]
+  def strip_mask (*, **)
+    raise NotImplementedError,
+          "#{self.class} has no strip_mask: a cell belongs to many overlapping " \
+          "windows, so it has no single fill; use source.strip_mask(method:, axis:) " \
+          "for a fill along an axis."
+  end
+
   # @!method order
   #   Not supported for a window iterator: a cell belongs to many overlapping
   #   windows, so it has no single rank. Use `source.order(axis:)` for the

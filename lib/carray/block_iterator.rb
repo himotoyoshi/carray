@@ -724,6 +724,17 @@ class CABlockIterator < CAIterator
     tile_wise { |rows, axis| rows.lag(n, axis: axis) }
   end
 
+  # @overload strip_mask(method:)
+  #   Per-tile fill of the masked cells, counting the tile's cells row-major:
+  #   `:forward` / `:ffill` or `:backward` / `:bfill`. A fill never reaches
+  #   into another tile, so a masked cell with nothing to carry in its tile
+  #   stays masked.
+  #   @return [CArray] source-shaped
+  def strip_mask (method:)
+    CAIterator.hold_backward?(method)
+    tile_wise { |rows, axis| rows.strip_mask(method: method, axis: axis) }
+  end
+
   # @overload order(descending: false, method: :ordinal, kind: :quick)
   #   Per-tile rank of each cell among the tile's cells (int64, `0` the
   #   smallest), as `CArray#order` ranks them; a partial edge tile ranks only

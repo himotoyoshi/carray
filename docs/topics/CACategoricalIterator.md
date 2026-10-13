@@ -278,6 +278,11 @@ grp.lag        #  => [UNDEF, UNDEF, 10.0, 20.0, 11.0]
 v - grp.lag    #  => the change since the previous member of the same category
 ```
 
+`strip_mask(method: :ffill)` / `strip_mask(method: :bfill)` fill each masked
+cell from its category's members (the last present one before it, or the next
+one after it), never from another category; a cell with nothing to carry
+stays masked, and the value itself is not modified.
+
 `order` ranks each cell among its category's members (int64, `0` the
 smallest), with the keywords of `CArray#order` (`descending:`, `method:
 :ordinal` or `:dense`, `kind:`); a masked cell, and a cell in no category, is
