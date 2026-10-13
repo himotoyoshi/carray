@@ -1099,8 +1099,9 @@ static int ca_layout_is_contiguous (int8_t ndim, const ca_size_t *dim,
    composes a source down to its root.
 
    Entities hold their own buffer.  A CAStride-family root is one the fold
-   declined to walk through (a byte reinterpret, say); its own attach folds
-   onward as it always has, so leave that chain alone.  What is left is the
+   declined to walk through (a reshape over a transpose); its own attach
+   folds onward from itself, so the answer is the one for the root it folds
+   to.  What is left is the
    boundary views that compute or fetch their contents -- CAObject, the lazy
    per-element transforms, whatever a companion gem installed -- and of those,
    only the ones with an xfer_stride slot can answer a region request at all.
@@ -1112,7 +1113,17 @@ ca_root_lends_no_memory (void *ap)
   CArray *root = (CArray *) ap;
 
   if ( ca_is_entity(root) ) return 0;
-  if ( ca_func[root->obj_type].attach == ca_stride_func.attach ) return 0;
+  if ( ca_func[root->obj_type].attach == ca_stride_func.attach ) {
+    /* The fold stopped at a CAStride (a reshape over a transpose).  Its
+       own attach folds onward from itself, so it lends memory exactly when
+       the root it folds to does: over a computed root, attaching it
+       produces all of it. */
+    CArray   *below;
+    ca_size_t cs[CA_RANK_MAX];
+    ca_size_t base;
+    ca_stride_compose_to_root((CAStride *) root, &below, cs, &base);
+    return ca_root_lends_no_memory(below);
+  }
   return ca_func[root->obj_type].xfer_stride != NULL;
 }
 
