@@ -112,6 +112,18 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
     assert_match(/:temp/, err.message)
   end
 
+  # A misspelt keyword next to a name or a map is named as one; it used to
+  # read as a second map ("a name and a type, or a map, not both").
+  def test_a_misspelt_keyword_is_named
+    df = frame
+    err = assert_raise(ArgumentError) { df.cast("temp", :float64, on_erorr: :mask) }
+    assert_match(/\Acast: unknown keyword: :on_erorr/, err.message)
+    err = assert_raise(ArgumentError) { df.cast({ "temp" => :float64 }, on_erorr: :mask) }
+    assert_match(/unknown keyword: :on_erorr/, err.message)
+    err = assert_raise(ArgumentError) { df.cast({ "temp" => :float64 }, "count" => :int32) }
+    assert_match(/not both/, err.message)
+  end
+
   def test_a_raise_leaves_the_frame_as_it_was
     df = frame
     before = df.column_names.to_h { |n| [n, df[n]] }

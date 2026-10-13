@@ -333,6 +333,13 @@ class CAFrame
     # keywords next to on_error:.
     unless map.empty?
       unless name_or_map.nil?
+        # Symbol keys next to a name or a map are a misspelt keyword
+        # (on_erorr:), not a second map; :default is a map key.
+        if map.keys.all?(Symbol) && !map.key?(:default)
+          raise ArgumentError,
+                "#{label}: unknown keyword#{map.size > 1 ? 's' : ''}: " \
+                "#{map.keys.map(&:inspect).join(', ')} (the keyword is on_error:)"
+        end
         raise ArgumentError, "#{label} takes a name and a type, or a map, not both"
       end
       name_or_map = map
