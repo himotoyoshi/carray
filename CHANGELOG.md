@@ -48,6 +48,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   `a[[0, 7]]` always did. A C extension calling `ca_parse_range` gets the
   same check.
 
+- New: a `CAFrame` group has `lag`, `order` and the running values
+  `cumsum`, `cumprod`, `cummax`, `cummin`, `cumcount`, computed among the
+  rows of each row's own group and kept on the frame's rows:
+  `df["temp"] - df.group_by("station").lag("temp")` is the change since
+  the station's previous row. They take column names as `mean` does, and
+  `lag` its step as `n:`. "Previous" is the previous row, so sort a frame
+  that is not in time order first.
+
 - New: a time or duration array can be added to or subtracted from a
   single value: `t + "3 days"`, `t - t.min`, `t - "2024-01-02"`,
   `t - Time.utc(2024, 1, 1)`, `t.min + durations`. A duration is a

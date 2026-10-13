@@ -983,6 +983,28 @@ df["rain_share"] = df["rain"] / grp.sum("rain", keep_rows: true)
 - A row whose key is masked belongs to no group, so its cells are `UNDEF`.
 - It works for `resample` as well: each row gets the result of its time bin.
 
+### Values within a group — `lag`, `order`, running values
+
+Some values are not one per group but one per row, computed among the rows of the row's own group: the value some rows back, a rank, a running total. These keep the frame's rows by nature, so they take no `keep_rows:`:
+
+```ruby
+grp = df.group_by("station")
+df["dtemp"] = df["temp"] - grp.lag("temp")       # change since the station's previous row
+df["rank"]  = grp.order("temp", descending: true) # 0 for the station's warmest
+df["total"] = grp.cumsum("rain")                  # running total per station
+```
+
+| method | each row gets |
+|---|---|
+| `lag(n: 1)` | the value `n` rows back in its group, `UNDEF` where there is none; a negative `n` looks ahead |
+| `order(descending:, method:, kind:)` | its rank among its group's rows (int64, `0` the smallest), as `CArray#order` |
+| `cumsum` `cumprod` `cummax` `cummin` `cumcount` | the running value of its group up to and including it |
+
+- They are called as the reductions are: given names, one name gives the `CArray` and several an `Array` of them; without names they give a frame of every column whose type has the operation (the keys left out), on the frame's rows and index.
+- **"Back" means earlier rows of the frame.** Rows that are not in time order give the previous row, not the previous time: sort first, with `sort_by_key("time")`.
+- `lag` takes its step as `n:`, since the positional arguments are column names.
+- An N-D column runs along the rows, keeping its trailing shape. A row whose key is masked belongs to no group, so its cells are `UNDEF`. They work for `resample` as well, within each time bin.
+
 ### Time bins — `resample`
 
 `resample(name, unit)` groups the rows into **time bins** of length `unit` along a time column (or the time index). It returns a `GroupedFrame`, so every reduction above applies:
@@ -1685,6 +1707,8 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | hourly values labelled by the end of the hour, as for precipitation | [`resample(..., label: :right)`](#time-bins--resample) |
 | a row for every hour, `UNDEF` where there was no data | [`resample(..., fill: true)`](#time-bins--resample) |
 | refuse an hourly mean that has too few readings | [`mean(min_count:)`](#the-same-reduction-for-every-column) |
+| the change since a station's previous reading | [`group_by(...).lag`](#values-within-a-group--lag-order-running-values) |
+| a rank or a running total within each station | [`group_by(...).order` / `cumsum`](#values-within-a-group--lag-order-running-values) |
 
 ### Combining
 

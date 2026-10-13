@@ -344,9 +344,100 @@ class GroupedFrame
     end
   end
 
+  # Values computed within each group and kept on the frame's rows, in row
+  # order: the value some rows back in the same group, a rank among the
+  # group's rows, a running statistic. A row in no group is UNDEF. Without
+  # names they give a frame of every column whose type has the operation
+  # (the key columns left out), on the frame's rows and index; given names,
+  # the CArray (one) or the Array of them (several), as +df[...]+ returns
+  # columns. An N-D column runs along the rows.
+  #
+  #   df["dtemp"] = df["temp"] - grp.lag("temp")   # change since the station's previous row
+  #   grp.order("temp", descending: true)          # rank within the station
+  #   grp.cumsum("rain")                           # running total per station
+  #
+  # "Previous" is the previous row of the frame: sort the frame first
+  # (+sort_by_key("time")+) when its rows are not in time order.
+  #
+  # @!method lag(*names, n: 1)
+  #   Returns each row's value +n+ rows back in its own group, UNDEF where
+  #   the group has none, as +CArray#lag+; a negative +n+ looks ahead.
+  #   @return [CAFrame, CArray, Array<CArray>]
+  # @!method order(*names, descending: false, method: :ordinal, kind: :quick)
+  #   Returns each row's rank among its group's rows (int64, 0 the
+  #   smallest), as +CArray#order+ ranks them.
+  #   @return [CAFrame, CArray, Array<CArray>]
+  # @!method cumsum(*names)
+  #   Returns the running sum within each group, as +CArray#cumsum+.
+  #   @return [CAFrame, CArray, Array<CArray>]
+  # @!method cumprod(*names)
+  #   Returns the running product within each group.
+  #   @return [CAFrame, CArray, Array<CArray>]
+  # @!method cummax(*names)
+  #   Returns the running maximum within each group.
+  #   @return [CAFrame, CArray, Array<CArray>]
+  # @!method cummin(*names)
+  #   Returns the running minimum within each group.
+  #   @return [CAFrame, CArray, Array<CArray>]
+  # @!method cumcount(*names)
+  #   Returns the running count of present values within each group (int64).
+  #   @return [CAFrame, CArray, Array<CArray>]
+  def lag (*names, n: 1)
+    transform_columns(:lag, names, [n], {})
+  end
+
+  def order (*names, descending: false, method: :ordinal, kind: :quick)
+    transform_columns(:order, names, [], { descending: descending, method: method, kind: kind })
+  end
+
+  [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
+    define_method(op) { |*names| transform_columns(op, names, [], {}) }
+  end
+
   # @return [String]
   def inspect
     "#<GroupedFrame ngroup=#{ngroup} by=#{@axis_name.inspect}>"
+  end
+
+  # A within-group transform of the named columns, or of every column whose
+  # type has it. The arguments are checked by the core first: below, a
+  # refusal reads as "this type has no such operation", and a wrong keyword
+  # would otherwise leave every column out without a word.
+  private def transform_columns(op, names, args, keywords)
+    CArray.float64(1).public_send(op, *args, **keywords)
+    unless names.empty?
+      results = names.map do |name|
+        col = @frame[@frame.__send__(:column_key, name, op)]
+        group_transform(col, op, args, keywords)
+      end
+      return results.size == 1 ? results.first : results
+    end
+    cols = {}
+    @frame.column_names.each do |name|
+      next if @key_names.include?(name)
+      col = @frame[name]
+      next unless transforms?(col, op, args, keywords)
+      cols[name] = group_transform(col, op, args, keywords)
+    end
+    CAFrame.new(cols, axis_name: @frame.axis_name, index: @frame.index)
+  end
+
+  # A column's within-group transform: an N-D column runs along the rows.
+  private def group_transform(col, op, args, keywords)
+    it = col.group_by_category(@cat)
+    keywords = keywords.merge(axis: 0) if col.ndim > 1
+    it.public_send(op, *args, **keywords)
+  end
+
+  # Whether the column's type has the transform, asked of the core on its
+  # first row, as answers? asks for a reduction.
+  private def transforms?(col, op, args, keywords)
+    probe = col.elements > 0 ? col[0..0, *[nil] * (col.ndim - 1)] : col
+    keywords = keywords.merge(axis: 0) if col.ndim > 1
+    probe.public_send(op, *args, **keywords)
+    true
+  rescue CArray::DataTypeError, TypeError, ArgumentError
+    false
   end
 
   # Each result gets its own index.
