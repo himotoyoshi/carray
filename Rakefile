@@ -70,6 +70,11 @@ task :runtime_error_check do
   ruby "utils/check_runtime_errors.rb" or exit($?.exitstatus)
 end
 
+desc "Check that a buffer for an array's cells is valid before it is published"
+task :cell_buffer_check do
+  ruby "utils/check_cell_buffers.rb" or exit($?.exitstatus)
+end
+
 desc "Check that every attach window opened by hand says why it is safe"
 task :attach_window_check do
   ruby "utils/check_attach_windows.rb" or exit($?.exitstatus)
@@ -277,7 +282,7 @@ task :build_c_extension_examples => [
 
 desc "Run spec_ai tests (ruby -I ext -I lib)"
 task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_parts_check,
-                  :runtime_error_check, :index_error_check,
+                  :runtime_error_check, :index_error_check, :cell_buffer_check,
                   :build_ext, :build_mv_borrower, :build_mock_unattachable,
                   :build_xfer_smoke, :build_author_surface_smoke] do
   # macOS 13+ ships MallocZeroOnFree which zeros freed blocks -- masks any

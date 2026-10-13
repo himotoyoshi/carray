@@ -154,6 +154,24 @@ calling `rb_gc_mark` on each — so the contained Ruby objects survive
 collection. For numeric arrays there is nothing to mark; `ca_mark`
 returns immediately. The mask sibling is also marked (cascade).
 
+`rb_gc_mark` trusts what it is given, and `ca_mark` marks a view's
+`ca->ptr` from the moment the pointer is set. A fresh buffer that will
+hold object cells must therefore contain valid `VALUE`s before it is
+published, even if the code that fills it never calls Ruby today:
+
+- a buffer for an array's cells is allocated with `ca_alloc_cells(ca)`
+  (`carray_internal.h`), which starts object cells as `nil`. `rake
+  cell_buffer_check` (`utils/check_cell_buffers.rb`) reports a `ptr`
+  assigned straight from an allocator unless it carries a
+  `/* cells: ... */` note saying why its cells are valid;
+- any other fresh `VALUE` buffer is cleared with `ca_object_cells_clear`
+  before it is held (`ca_gc_hold_push` for a hold nested in the current
+  call, `ca_gc_hold_buffer` for one released in any order).
+
+`spec/spec_ai/test_object_cells_gc_matrix.rb` lists every view class,
+either with a recipe that builds it with object cells or with the reason
+it has none, and runs the recipes under `GC.stress`.
+
 `ca_free` dispatches to `ca_func[obj_type].free_object`. The four
 variants you see across `ca_obj_*.c`:
 
