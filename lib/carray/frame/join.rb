@@ -7,6 +7,7 @@
 # The frame layer just distributes that address to every column.
 
 require "carray/methods/is_in"   # promote_value_set, for align's Array reference
+require "carray/methods/locate_addr"   # nearest_refuse_bytes, for join_asof
 
 class CAFrame
   # Default disambiguation for non-key columns present on both sides (§12-C):
@@ -78,6 +79,10 @@ class CAFrame
     plan = join_name_plan(other, [on, *exact], suffixes)
     lkey = join_key(self[on], on, "join_asof")
     rkey = join_key(other[on], on, "join_asof")
+    [lkey, rkey].each do |key|
+      key.__send__(:nearest_refuse_bytes, key, "join_asof: the on: key #{on.inspect}",
+                   "join on it exactly with join")
+    end
     addr = if exact.empty?
              lkey.locate_nearest_addr(rkey, direction: direction, tolerance: tolerance)
            else

@@ -143,6 +143,7 @@ class CArray
             "locate_nearest_addr: direction must be :round / :floor / " \
             ":ceil (got #{direction.inspect})"
     end
+    [self, ref].each { |key| nearest_refuse_bytes(key) }
     return CArray.int64(*shape) if elements == 0
     # A masked reference value matches nothing, as in locate_addr: sorting
     # puts the masked ones last, and only the others are searched.  A NaN
@@ -180,6 +181,22 @@ class CArray
       idx[dist > nearest_tolerance(tolerance, dist)] = UNDEF
     end
     idx
+  end
+
+  # A key held as fixed-length bytes (raw fixlen, or a fixlen string) has
+  # no nearest: the search counts keys as numbers.  A Face whose storage is
+  # a number (a time) is searched by that number.
+  # +subject+ and +remedy+ let a caller (CAFrame#join_asof) say it in its
+  # own words.
+  private def nearest_refuse_bytes(key, subject = nil, remedy = "match exact values with locate_addr")
+    # A Face whose cells encode the value (a const string, a categorical)
+    # is refused later by its own reconcile, which says why.
+    return unless key.is_a?(CArray) && key.__send__(:__orderable_storage__)
+    storage = key.face? ? key.__send__(:__face_storage__) : key
+    return unless storage.data_type == CA_FIXLEN
+    subject ||= "locate_nearest_addr: a #{key.face? ? key.class.name : 'fixlen'} key"
+    raise CArray::DataTypeError,
+          "#{subject} is held as fixed-length bytes, which have no nearest; #{remedy}"
   end
 
   # The keys locate_nearest_addr orders by: the storage of the sorted

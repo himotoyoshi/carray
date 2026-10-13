@@ -38,9 +38,9 @@
   _EX macro variant + thin wrapper, new catalog macro) — that is how
   the surface evolves within 3.x.  Changing or removing a FROZEN name
   is a 3.x breaking change: update the doc contract AND the guard in
-  the same commit.  (PROPOSAL_T1_KERNEL_ITERATOR.md;
-  devel/MEMO_KERNEL_ITERATOR_OOP_PATH.vev4.md for the planned engine
-  overhaul this contract insulates against.)
+  the same commit.  The engine behind these names may be rewritten
+  within 3.x; this contract is what keeps such a rewrite invisible to
+  kernel authors.
 
   --------------------------------------------------------------------------- */
 
