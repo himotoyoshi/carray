@@ -46,6 +46,14 @@ refused, since its length would depend on the unit the key is stored in), and
 a number for a numeric key. A month or a year has no fixed length, so it
 measures only a key stored in months or years.
 
+A float key is compared with the bounds exactly, as `is_between` compares.
+On a decimal grid the bound and the key may differ in the last bit: with keys
+`i * 0.1` and `before: 0.3`, the window of the key `1.0` runs from `0.7` and
+the key `7 * 0.1` (`0.7000000000000001`) falls inside it, so that window
+holds one key more than its neighbours, and `is_complete`, which accepts a key
+within a relative `1e-9` of a grid point, reports it incomplete. Keep such a
+grid as integers (count in tenths) or as times.
+
 **Rows and masks.** The keys need not be sorted; the answers come in the
 order of the values. A value whose key (or `by:` key) is masked, or a float
 key that is NaN or infinite, is in no window and has no window: its answers

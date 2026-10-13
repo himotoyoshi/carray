@@ -184,7 +184,10 @@ class CAKeyWindowIterator < CAIterator
   #   Returns whether each window holds exactly the keys of the `interval`
   #   grid that starts at the row's own key: every grid point once (several
   #   rows at one point count once) and no key off the grid.  UNDEF for a
-  #   row with no window.  Needs `interval:`.
+  #   row with no window.  Needs `interval:`.  A float key is on the grid
+  #   within a relative 1e-9; the window itself compares a float key with
+  #   its bounds exactly, so on a decimal grid (keys i * 0.1) a key that
+  #   misses a bound in the last bit can make a window hold one key more.
   #   @return [CArray] boolean
   def is_complete
     unless @complete

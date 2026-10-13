@@ -154,6 +154,15 @@ class TestKeyWindows < Test::Unit::TestCase
     end
   end
 
+  # A float key is compared with the bounds exactly: on a decimal grid a key
+  # that misses a bound in the last bit falls inside the window.
+  def test_a_float_key_meets_the_bounds_exactly
+    k = CArray.float64(11) { |i| i * 0.1 }
+    w = CArray.float64(11).seq!.windows(on: k, before: 0.3, interval: 0.1)
+    assert_equal [1, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4], w.elements.to_a
+    assert_equal false, w.is_complete[10]
+  end
+
   # An infinite float key, as a NaN one, is in no window and has none.
   def test_an_infinite_key_is_in_no_window
     inf = Float::INFINITY
