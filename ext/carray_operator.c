@@ -496,11 +496,16 @@ ca_mask_overlay_or_body (VALUE arg)
 {
   ca_mask_overlay_or_t *o = (ca_mask_overlay_or_t *) arg;
   boolean8_t *ms;
+  /* Locals, not o->ma / o->elements: a store through a boolean8_t may alias
+     *o, so reading them through o reloads both every iteration and keeps
+     the loop from vectorizing. */
+  boolean8_t *ma = o->ma;
+  ca_size_t elements = o->elements;
   ca_size_t j;
-  o->scratch = ca_lazy_arena_acquire(o->elements);
+  o->scratch = ca_lazy_arena_acquire(elements);
   ms = (boolean8_t *) o->scratch;
   ca_xfer_all(o->mask, o->scratch, CA_XFER_GET);
-  for ( j = 0; j < o->elements; j++ ) o->ma[j] |= ms[j];
+  for ( j = 0; j < elements; j++ ) ma[j] |= ms[j];
   return Qnil;
 }
 

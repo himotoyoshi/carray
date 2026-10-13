@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: arithmetic on a masked array (`a + 1.0`, `a.add!(1)` and the like)
+  is as fast as in 3.0.2 again. Since 3.0.3 combining the operands' masks
+  took about a quarter longer (0.4 ms more per million cells).
+
 - Fix: `windows(on:).bounds` with a time key reports the bounds the windows
   were cut at when the width is not a whole number of the key's unit (a
   "15 minutes" width on a 10-minute key, "6 months" on a year key): the
