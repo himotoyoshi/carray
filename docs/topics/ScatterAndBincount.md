@@ -40,10 +40,14 @@ self.scatter_replace!(addrs, vals)  # self[addrs[i]]  = vals[i]  (last-write-win
   of length `self.elements`; multi-dimensional targets work through their
   flat address space (`i0 * s0 + i1 * s1 + …`, C-order).
 - `addrs` — a CArray of any integer type (coerced to `CA_SIZE`) or a
-  Ruby `Array`. Values must be in `0 ... self.elements` — out-of-range
-  raises `IndexError`.
+  Ruby `Array`. A negative address counts from the end; one out of range
+  raises `IndexError`. A float CArray is refused, as `self[addrs]`
+  refuses it.
 - `vals` — a CArray with `vals.elements == addrs.elements`, coerced to
-  `self.data_type`, or a Numeric scalar broadcast to every address.
+  `self.data_type`, or a scalar broadcast to every address (any Numeric,
+  `true` / `false` for a boolean target, or `UNDEF`). A scalar is
+  converted as `self[i] = v` converts it: a value that does not fit the
+  type raises.
 
 ### 1.1 Duplicate addresses accumulate (sequential, unbuffered)
 
@@ -423,8 +427,8 @@ For each unique key, keep the *first* value's index:
 ```ruby
 keys       = CA_INT32([2, 0, 2, 1, 0, 2])
 k          = keys.max + 1
-first_seen = CA_INT64(k).fill(Float::INFINITY.to_i)  # sentinel = "no key yet"
-idx        = CA_INT64(keys.elements).seq             # [0, 1, 2, 3, 4, 5]
+first_seen = CArray.int64(k).fill(2**63 - 1)        # sentinel = "no key yet"
+idx        = CArray.int64(keys.elements).seq        # [0, 1, 2, 3, 4, 5]
 first_seen.scatter_min!(keys, idx)
 first_seen.to_a                                       # => [1, 3, 0]
 ```

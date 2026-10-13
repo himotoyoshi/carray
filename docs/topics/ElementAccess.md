@@ -41,14 +41,14 @@ Every `elem_*` method accepts `idx` in two shapes:
 - **`Array<Integer>`** — one index per axis, length `self.ndim`.
 
 ```ruby
-a = CA_INT32(3, 4).seq                # 0..11 row-major
+a = CArray.int32(3, 4).seq            # 0..11 row-major
 a.elem_fetch(5)                       # => 5   (flat)
 a.elem_fetch([1, 1])                  # => 5   (per-axis)
 ```
 
-Out-of-range values raise `IndexError`. Negative indices are **not**
-accepted (this is a hot path — the indexer's `-1 == last` sugar is not
-performed). Convert to positive at the call site if you need it.
+A negative index counts from the end, as it does for `[]`. Out-of-range
+values raise `IndexError`, and so do an index that is not an Integer
+(`1.5`) and a per-axis Array whose length is not `self.ndim`.
 
 Prefer the flat form when you already have a flat address (`bincount`
 output positions, `sort_index` outputs). Prefer the per-axis form when
@@ -237,8 +237,8 @@ is the direct spelling.
 A few edge cases where `elem_*` behaves identically but the wording
 differs slightly from the indexer path:
 
-- **Empty array** — `elem_fetch` returns `nil` on `self.empty?`. The
-  indexer would raise; `elem_fetch` is the tolerant form.
+- **Empty array** — `elem_fetch` raises `IndexError` on an empty array,
+  as the indexer does: no index names a cell.
 - **Object arrays** — `elem_fetch` / `elem_store` on `CA_OBJECT` handle
   arbitrary Ruby values, same as the indexer. `elem_incr` / `_decr`
   / `_min` / `_max` require a numeric data type (raise

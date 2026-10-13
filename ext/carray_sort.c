@@ -443,13 +443,14 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
   TypedData_Get_Struct(vindices, CArray, &carray_data_type, idx_ca);
 
   /* axis normalization + range check. */
-  int axis_raw = NIL_P(vaxis) ? 0 : (int) ca_axis_integer(vaxis, NULL);
-  int axis = (axis_raw < 0) ? ((int) ca->ndim + axis_raw) : axis_raw;
-  if ( axis < 0 || axis >= ca->ndim ) {
+  long axis_raw = NIL_P(vaxis) ? 0 : ca_axis_integer(vaxis, NULL);
+  long axis_l = (axis_raw < 0) ? ((long) ca->ndim + axis_raw) : axis_raw;
+  if ( axis_l < 0 || axis_l >= ca->ndim ) {
     rb_raise(rb_eArgError,
-             "%s: axis %d out of range for ndim %d",
+             "%s: axis %ld out of range for ndim %d",
              ca_calling_method_name(), axis_raw, (int) ca->ndim);
   }
+  int axis = (int) axis_l;
 
   /* Shape rule: indices.ndim == self.ndim, dims match except at axis. */
   if ( idx_ca->ndim != ca->ndim ) {
@@ -470,10 +471,11 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
 
   /* indices data_type: integer kind accepted; cast to CA_SIZE if needed
      (zero-copy when already CA_SIZE via to_type identity). */
+  ca_check_index_array(vindices);
   if ( ! ca_is_integer_type(idx_ca) ) {
     rb_raise(rb_eArgError,
-             "%s: indices data_type must be integer kind (got %d)",
-             ca_calling_method_name(), (int) idx_ca->data_type);
+             "%s: indices data_type must be integer kind (got %s)",
+             ca_calling_method_name(), ca_type_name[idx_ca->data_type]);
   }
   volatile VALUE vidx_cast = vindices;
   CArray         *idx_cast = idx_ca;

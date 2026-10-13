@@ -110,7 +110,7 @@ class TestAxis2Addr < Test::Unit::TestCase
 
   def test_indices_data_type_float_rejected
     a = CA_FLOAT64([10, 20, 30])
-    assert_raise(ArgumentError) { a.axis2addr(CA_FLOAT64([1.0])) }
+    assert_raise(IndexError) { a.axis2addr(CA_FLOAT64([1.0])) }
   end
 
   def test_pairs_with_min_index_for_direct_gather

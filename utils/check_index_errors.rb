@@ -26,10 +26,10 @@ COUNTS = {
   "ca_obj_tile.c" => 1,
   "ca_obj_window.c" => 1,
   "carray_access.c" => 18,
-  "carray_element.c" => 1,
+  "carray_element.c" => 2,
   "carray_index_classifier.c" => 13,
   "carray_test.c" => 1,
-  "carray_utils.c" => 3,
+  "carray_utils.c" => 4,
 }.freeze
 
 failures = []

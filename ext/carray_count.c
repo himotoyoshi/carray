@@ -351,6 +351,20 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     /* A Float query on an integer array is compared as a float, as `eq`
        compares and `search` searches: 1.5 must not match 1.  An Integer
        query keeps the array's type and is refused when it does not fit. */
+    if ( ca_is_integer_type(src) && ! RB_INTEGER_TYPE_P(rval)
+         && ! RB_FLOAT_TYPE_P(rval) && ! RB_TYPE_P(rval, T_COMPLEX)
+         && rb_obj_is_kind_of(rval, rb_cNumeric) ) {
+      /* A Rational or BigDecimal query: an integral one is the Integer it
+         equals; any other is compared as a float, like a Float query,
+         rather than cut to the array's type. */
+      VALUE ival = rb_funcall(rval, rb_intern("to_i"), 0);
+      VALUE *nargv = ALLOCA_N(VALUE, argc);
+      MEMCPY(nargv, argv, VALUE, argc);
+      nargv[0] = RTEST(rb_funcall(rval, rb_intern("=="), 1, ival))
+               ? ival : rb_funcall(rval, rb_intern("to_f"), 0);
+      argv = nargv;
+      rval = nargv[0];
+    }
     if ( ca_is_integer_type(src) && RB_FLOAT_TYPE_P(rval) ) {
       self = rb_ca_wrap_readonly(self, INT2NUM(CA_FLOAT64));
     }

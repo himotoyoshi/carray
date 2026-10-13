@@ -126,10 +126,12 @@ class TestAtFamily < Test::Unit::TestCase
     assert_equal([1, 2, 3], a.to_a)
   end
 
-  def test_scatter_add_int8_overflow_silent_truncate
+  # A scalar is converted as `self[i] = v` converts it: one that does not
+  # fit the type raises before any cell changes.
+  def test_scatter_add_int8_scalar_out_of_range_raises
     a = CA_INT8([0, 0, 0])
-    a.scatter_add!(CA_SIZE([0]), 300)  # 300 mod 256 = 44
-    assert_equal(44, a[0])
+    assert_raise(RangeError) { a.scatter_add!(CA_SIZE([0]), 300) }
+    assert_equal([0, 0, 0], a.to_a)
   end
 
   # ---- §2.1: empty addrs is a no-op ----

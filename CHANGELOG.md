@@ -36,6 +36,20 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: `scatter_*!`, `put_nd`, `elem_store`, `elem_min` and
+  `elem_max` convert a scalar value the way `self[i] = v` does, so a value
+  that does not fit the type now raises (`RangeError`, `FloatDomainError`
+  for NaN into an integer type) instead of wrapping: `int8.scatter_add!([0],
+  300)` used to add 44. `scatter_*!` also take an Integer above the fixnum
+  range, a Rational, or a BigDecimal as one value for every address, and
+  `scatter_replace!(addrs, UNDEF)` masks the cells. Index arrays and element
+  indices are read as `self[idx]` reads them: a float index array (to
+  `scatter_*!`, `project`, `take_along_axis`) or a Float element index
+  raises IndexError instead of being cut to an integer, and a uint64 index
+  of 2**63 or more is out of range instead of counting from the end.
+  `count` with a Rational or BigDecimal query compares it as a number
+  instead of cutting it to the array's type.
+
 - Fix: three methods read or wrote outside their memory. `project` (and
   `take_along_axis` with a masked index) on an object array computed
   lazily could crash in the garbage collector. `bincount_nd` with a uint64
