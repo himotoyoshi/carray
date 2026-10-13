@@ -310,7 +310,9 @@ class CArray
   #
   #   `min` may not exceed `max` (in any cell, when a bound is an
   #   array); equal bounds give every unmasked cell that value.
-  #   A NaN bound bounds nothing.
+  #   A NaN in a bound array leaves that cell unbounded on that side,
+  #   as `nil` does for the whole side.  A bound is never UNDEF or
+  #   masked: a missing bound is not read as either, so fill it first.
   #
   #   Boundary is strict `[min, max]`: values equal to a bound
   #   remain unchanged in both the clamped and filled variants.
@@ -325,7 +327,8 @@ class CArray
   #   @param ufill [Object, nil] override above-range fill.
   #   @return [CArray] new CArray with clamped or filled values.
   #   @raise [ArgumentError] when both `min` and `max` are `nil`,
-  #     or when `min` exceeds `max`.
+  #     when either is `UNDEF` or has a masked cell, or when `min`
+  #     exceeds `max`.
   #   @example
   #     a.clip(0, 10)                          # strict clamp
   #     a.clip(0, 10, -1)                      # both ends -> -1
@@ -333,6 +336,15 @@ class CArray
   def clip(min, max=nil, fill_value=nil, lfill: nil, ufill: nil)
     if min.nil? && max.nil?
       raise ArgumentError, "clip: at least one of (min, max) must be given"
+    end
+    [min, max].each do |bound|
+      undefined = UNDEF.equal?(bound) ||
+                  (bound.is_a?(CArray) && bound.any_masked?) ||
+                  (bound.is_a?(Array) && bound.flatten.any? { |v| UNDEF.equal?(v) })
+      next unless undefined
+      raise ArgumentError, "clip: a bound can not be UNDEF or masked " \
+                           "(fill the bound first; a NaN bound leaves its cell " \
+                           "unbounded, and UNDEF as the fill masks the cells out of range)"
     end
     return __face_clip__(min, max, fill_value, lfill, ufill) if face?
     if !min.nil? && !max.nil?

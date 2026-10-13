@@ -230,11 +230,13 @@ class TestFaceOrderingGate < Test::Unit::TestCase
     assert_equal [2, 4], axis.bsearch(q).to_a
   end
 
-  def test_bsearch_fine_to_coarse_with_remainder_raises
-    # axis :s, query :ns with a sub-second remainder -- lossy, so raise.
+  def test_bsearch_fine_to_coarse_with_remainder_meets_in_the_finer_unit
+    # axis :s, query :ns with a sub-second remainder: the two meet in :ns,
+    # so the query off the second grid matches nothing.
     axis = CArray.int64(6) { |i| T0 + i * 3600 }.time(unit: :s)
     q    = CArray.int64(2) { |i| (T0 + [2, 4].to_a[i] * 3600) * 10**9 + [0, 500_000_000].to_a[i] }.time(unit: :ns)
-    assert_raise(ArgumentError) { axis.bsearch(q) }
+    assert_equal [2, UNDEF], axis.bsearch(q).to_a
+    assert_equal [2, 4], axis.search_nearest(q).to_a
   end
 
   def test_bsearch_cross_group_calendar_coarsens_on_boundary
@@ -244,9 +246,11 @@ class TestFaceOrderingGate < Test::Unit::TestCase
     axis = CArray.int64(3) { |i| 672 + i }.time(unit: :M)   # 2026-01,02,03
     onb  = CArray.int64(1) { |_| 20454 }.time(unit: :D)     # 2026-01-01 (month start)
     assert_equal [0], axis.bsearch(onb).to_a
-    # a :D query NOT on a month boundary cannot coarsen to :M -> raises
+    # a :D query NOT on a month boundary meets the axis in days: it matches
+    # no month start, and its nearest is January
     off  = CArray.int64(1) { |_| 20460 }.time(unit: :D)     # 2026-01-07
-    assert_raise(ArgumentError) { axis.bsearch(off) }
+    assert_equal [UNDEF], axis.bsearch(off).to_a
+    assert_equal [0], axis.search_nearest(off).to_a
   end
 
   def test_bsearch_cross_group_calendar_widens_to_fixed
@@ -277,10 +281,11 @@ class TestFaceOrderingGate < Test::Unit::TestCase
     assert_equal [0, 1], axis.bsearch(q).to_a
   end
 
-  def test_timedelta_fine_to_coarse_remainder_raises
+  def test_timedelta_fine_to_coarse_remainder_meets_in_the_finer_unit
     td = CArray.int64(4) { |i| i * 60 }.timedelta(unit: :s)
     q  = CArray.int64(1) { |_| 60_500 }.timedelta(unit: :ms)   # 60.5 s
-    assert_raise(ArgumentError) { td.bsearch(q) }
+    assert_equal [UNDEF], td.bsearch(q).to_a
+    assert_equal [1], td.search_nearest(q).to_a
   end
 
   def test_to_comparable_rejects_foreign_class
@@ -329,14 +334,12 @@ class TestFaceOrderingGate < Test::Unit::TestCase
     assert_equal [5.5, 6.0], axis.linear_section(q).to_a
   end
 
-  def test_linear_section_cross_unit_sub_unit_remainder_raises
-    # A :ms query with sub-second precision on a :s axis truncates on the
-    # unit alignment (same to_comparable path as search), so it raises --
-    # the fractional-nearest tolerance is a GRID-cell concept, not a licence
-    # to drop query resolution below the axis unit.
+  def test_linear_section_cross_unit_sub_unit_remainder_is_kept
+    # A :ms query with sub-second precision on a :s axis meets the axis in
+    # :ms, so its half second is kept in the fractional index.
     axis = CArray.int64(24) { |i| T0 + i * 3600 }.time(unit: :s)
     q    = CArray.int64(1) { |_| (T0 + 5 * 3600) * 1000 + 500 }.time(unit: :ms)  # +0.5 s
-    assert_raise(ArgumentError) { axis.linear_section(q) }
+    assert_in_delta 5 + 0.5 / 3600, axis.linear_section(q), 1e-12
   end
 
   def test_gate_widens_calendar_query_to_fixed_axis

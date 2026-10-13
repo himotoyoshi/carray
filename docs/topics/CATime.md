@@ -19,8 +19,9 @@ representation.
 The epoch is fixed at **1970-01-01 UTC** and the calendar is proleptic
 Gregorian; parsing is UTC by default and does not depend on the Ruby
 `DateTime` class (it uses `Date._parse` plus an internal civil-date
-kernel). Reference-time calendars (NetCDF CF conventions and the like)
-are left to external gems. CATime is its own type — an integer index
+kernel). Counts from another reference time (a NetCDF CF `units`
+attribute) convert in core; non-standard calendars (CF `360_day`,
+`noleap`, …) are left to external gems. CATime is its own type — an integer index
 on a tick grid, with its own vocabulary; the appendix gives a correspondence table
 for migrating existing time code.
 
@@ -106,12 +107,17 @@ CArray.time_range("2024-06-15T10:00", "2024-06-16T00:00", unit: "10 minutes")
 CArray.time_range("2024-06-15", "2024-06-18", unit: :h, step: "1 day")
 
 # Build from a value or a collection of values (Strings / Times / DateTimes /
-# Unix-seconds Integers). A single literal gives a 1-element result; a Ruby
+# Integers). A single literal gives a 1-element result; a Ruby
 # Array or a CArray gives a same-shape result parsed per cell.
 CArray.time("2024-06-15", unit: :D)                  # 1-element
 CArray.time(%w[2024-01-15 2024-02-15 2024-03-15], unit: :D)   # Ruby Array
 CArray.time(CA_OBJECT(%w[2024-01-15 2024-02-15]), unit: :D)   # CArray
 CArray.time(%w[15/01/2024 20/06/2024], format: "%d/%m/%Y", unit: :D)
+
+# An Integer counts ticks of the unit from the epoch: seconds by default,
+# minutes with unit: :m.
+CArray.time(CA_INT64([0, 10, 60]), unit: :m)       # 00:00, 00:10, 01:00
+CArray.time(1700000000)                            # 2023-11-14T22:13:20Z
 
 # A time element is an instant already, so it needs no parsing: a `floor` /
 # `ceil` / `to_unit` answer feeds straight back in, as a start or an origin.
@@ -125,7 +131,7 @@ Without `unit:`, `CArray.time` reads the values in the finest unit they
 show, so nothing they hold is cut off: text written to the day is `:D`, to
 the second `:s`, with a fraction `:ms` / `:us` / `:ns` by its digits (as
 `CAFrame#parse_to_time` reads text); with `format:`, the finest field the
-format writes; a Unix-seconds Integer `:s`; a `Time` the finest its value
+format writes; an Integer `:s`; a `Time` the finest its value
 needs; a `Date` `:D`. Mixed values take the finest of them.
 
 ```ruby
@@ -150,7 +156,10 @@ explicit timezone suffix such as `"+09:00"` is respected.
 Parsing uses Ruby's own date parser under the hood — `Date._parse` for
 the flexible default and `Date._strptime` when you pass `format:` — so
 any string `Date.parse` / `Time.strptime` accepts works here, and
-`Time` / `DateTime` / Unix-seconds `Integer` values are taken directly.
+`Time` / `DateTime` values are taken directly. An `Integer` counts ticks of
+`unit:` from the epoch (Unix seconds when `unit:` is not given); with
+`format:` it is read as the digits it is written with
+(`CArray.time(20240101, format: "%Y%m%d")`).
 Passing `format:` switches from the flexible heuristic to strict pattern
 matching against that `strftime`-style template (e.g. `"%d/%m/%Y"`) —
 what you want for an unambiguous day/month order or a non-ISO layout.
@@ -389,9 +398,18 @@ machinery as comparison and search, §5.3 / §10.3) — no manual conversion:
   `:D` time + a 5 h duration is + 0 days; + 30 h is + 1 day).
 - **`dt - dt2`** and **`td ± td2`**: a duration at the **finer** of the two
   units (both widen exactly).
-- **cross-group** (a fixed unit with a calendar `:Y`/`:M` one): a calendar
-  duration has no fixed ratio to seconds, so `dt(:s) + td(:M)` and
-  `td(:M) + td(:s)` **raise** — that step is calendar arithmetic (§11).
+- **a month or year on a fixed grid**: `dt(:D) + td(:M)` moves each date as
+  Ruby's `Date#>>` does — the year and month move, the day stays unless the
+  new month is shorter (then it is that month's last day), and the time of
+  day stays: `2024-01-31 + 1 month` is `2024-02-29`. The grid has to divide a
+  day into whole ticks (`:D`, `:h`, `"10 minutes"`, …); on `:W`, `"3 days"` or
+  `"7 hours"` a month would leave the grid, so it **raises**. A month is not a
+  fixed step, as with `Date#>>`: `+ 1 month - 1 month` need not undo it
+  (`2024-01-31` comes back as `2024-01-29`), `+ 1 month + 1 month` need not
+  equal `+ 2 months`, and two dates can land on the same day.
+- **other cross-group pairs**: a calendar duration has no fixed ratio to
+  seconds, so `td(:M) + td(:s)` and a fixed duration on a month or year grid
+  (`dt(:M) + td(:D)`) **raise**.
 - **overflow**: widening a wide range into a fine unit (e.g. a millennium-
   spanning difference resolved to `:ns`) can exceed `int64`; it **raises**
   rather than silently wrapping.
@@ -421,14 +439,13 @@ element-wise, boolean-CArray-returning comparisons.
 Comparison results are plain `bool` or `int` CArrays — they no longer
 carry time semantics.
 
-The two operands may carry **different units**. The left-hand side (the
-reference) reconciles the right-hand operand into its own unit through
-`to_comparable` — the same lossless-cast rule as cross-unit search (§10.3) —
-so a value that does not land exactly on the left operand's grid raises rather
-than being silently truncated. `<=>` is composed from `<` and `>`, so it
-inherits the same behaviour. Because the left operand drives the conversion, a
-right-hand `Time` / `DateTime` / `Element` is accepted too (`dt < Time.utc(…)`),
-lifted into the left operand's unit.
+The two operands may carry **different units**. They meet as cross-unit
+search does (§10.3): in the left operand's unit when the right-hand values sit
+on its grid, and otherwise in the finer unit the two share, so an instant off
+the grid is compared as the instant it is — never floored onto the grid.
+`<=>` is composed from `<` and `>`, so it inherits the same behaviour. Because
+the left operand drives the conversion, a right-hand `Time` / `DateTime` /
+`Element` / `String` is accepted too (`dt < Time.utc(…)`).
 
 ### 5.4 Cross-unit comparison
 
@@ -439,9 +456,9 @@ dt_ms = CArray.int64(2) {|i| [10000, 20000][i] }.time(unit: :ms)  # 10s, 20s
 dt_ms < dt_s      # OK: :s lifted to :ms (coarser → finer is always exact)
 dt_s  < dt_ms     # OK: 10000/20000 ms are whole seconds
 
-dt_bad = CArray.int64(2) {|i| [10500, 20000][i] }.time(unit: :ms)  # 10.5s
-dt_s < dt_bad
-# => ArgumentError: cannot align time unit :ms to :s without loss
+dt_off = CArray.int64(2) {|i| [10500, 20000][i] }.time(unit: :ms)  # 10.5s
+dt_s < dt_off     # => [true, false]: 10 s < 10.5 s, compared in :ms
+dt_s.eq(dt_off)   # => [false, true]
 ```
 
 Comparison, search, and arithmetic all **reconcile** cross-unit operands
@@ -490,8 +507,8 @@ The surface of `CATime::Element`:
   `CATimedelta::Element` (elapsed duration, in the finer unit — or the fixed
   unit across the calendar boundary), and `s ± td` → `CATime::Element`
   (advance by a duration, keeping the time's unit — a finer duration is
-  truncated to it). A cross-group step (`:s` time + `:M` duration) is
-  calendar arithmetic — use `to_date` + `Date#next_month` / `#next_year`.
+  truncated to it). A month or year duration moves a `:s` time as
+  `Date#>>` moves a date, as for an array (§5).
 
 Calendar breakdown is delegated to Ruby `Date` / `Time` rather than
 reimplemented — a single scalar pays one object's cost, so the vectorized
@@ -521,6 +538,10 @@ dt.yday      # => CArray [167, 168, ...]         (1..366)
 dt.jd        # Julian Day Number
 dt.ajd       # Astronomical Julian Day (Float)
 dt.is_leap   # boolean CArray
+dt.days_in_month   # => CArray [30, 30, ...]     (28..31; dt.day.eq(dt.days_in_month) is a month end)
+dt.quarter   # => CArray [2, 2, ...]             (1..4, January to March is 1)
+dt.iso_week  # => CArray [24, 24, 25, ...]       (ISO 8601 week, Monday to Sunday, 1..53)
+dt.iso_year  # => CArray [2024, ...]             (the year an ISO week is counted in)
 ```
 
 Each accessor returns a plain `Integer`, `Float`, or `bool` CArray —
@@ -791,8 +812,10 @@ family (§10.2) and the comparison operators (§5.3): before any `bsearch` /
 into its own unit through it — which is why it is documented here, at the
 base of §10.
 
-The operand may carry a **different unit** from the axis. The reference axis
-brings it into its own unit, losslessly:
+The operand may carry a **different unit** from the axis. When every operand
+value sits on the axis's grid, the axis brings the operand into its own unit
+and is used as it is; otherwise the two meet in the finer unit they share, so
+a query off the grid finds nothing rather than a neighbour it was floored to:
 
 ```ruby
 axis_h = CArray.time_series("2024-06-15", count: 72, unit: :h)  # hourly
@@ -824,10 +847,13 @@ The cast rules (operand → axis unit):
   - `:W` is the one exception both ways: month / year starts are not aligned to
     a week grid, so `:Y`/`:M` ↔ `:W` raises.
 
-A `:ns` query whose value is half a second past an `:s` grid point cannot be
-aligned to `:s` without dropping precision, so it raises rather than silently
-truncating. (This is the search / comparison gate; `dt ± td` arithmetic converts the
-duration into the time's unit — §5.2.)
+These are the rules of `to_comparable` itself, which raises on a value it
+cannot bring into the axis's unit without loss. A search or a comparison does
+not need that: a `:ns` query half a second past an `:s` grid point is compared
+in `:ns`, so `bsearch` finds nothing for it and `search_nearest` the nearest
+second. An assignment does need it — the value has to land on the array's
+grid — so `dt[0] = ...` raises on a value off the grid. (`dt ± td` arithmetic
+converts the duration into the time's unit — §5.2.)
 
 ### 10.4 Coordinate lookup — `locate_addr` and `locate_nearest_addr`
 
@@ -864,15 +890,13 @@ t.linear_fetch(CA_FLOAT64([0.0, 2.5]))
 ```
 
 The query side needs nothing special: `linear_section` accepts a `CATime`, an
-`Element`, a Ruby `Time` / `Date` / `DateTime` or a `String` and reconciles the unit through
-`to_comparable` (§10.3), exactly as search does. Reconciliation is lossless,
-though, so a query at a *finer* resolution than the axis has to land on the
-axis's grid — `05:00` against a `2 h` axis raises rather than sit between two
-ticks. Widen the axis first, and both halves then work on the fine grid:
+`Element`, a Ruby `Time` / `Date` / `DateTime` or a `String` and meets it in a
+unit as search does (§10.3), so a query at a *finer* resolution than the
+axis keeps its precision — `05:00` against a `2 h` axis sits between two
+ticks:
 
 ```ruby
-tf = t.to_unit(:h)
-tf.linear_section(CArray.time(["2024-06-15T05:00"], unit: :h))   # => 2.5
+t.linear_section(CArray.time(["2024-06-15T05:00"], unit: :h))   # => 2.5
 ```
 
 `linear_fetch` returns times, so it returns a `CATime` **on the same unit as
@@ -1053,6 +1077,24 @@ dt.snap(g, direction: :floor)     # same as dt.floor(g)
 dt.snap(g)                        # :round is the default, as in CArray#snap
 dt.snap(g, direction: :nearest)   # => ArgumentError
 ```
+
+`end_of` takes the same arguments and gives the other end of the bucket: its
+**last tick on the array's own grid**, one tick before the next head. A day
+array's month ends on its last day, a second array's at 23:59:59 of it:
+
+```ruby
+d = CArray.time(%w[2024-02-10 2024-03-31], unit: :D)
+d.end_of(unit: :M)                                  # => 2024-02-29, 2024-03-31
+d.end_of(unit: "1 year", origin: "2000-04-01")      # => 2024-03-31 (a fiscal year from April)
+CArray.time(%w[2024-02-10T05:06:07], unit: :s).end_of(unit: :M)   # => 2024-02-29T23:59:59Z
+
+# month ends as a series
+CArray.time_range("2024-01-01", "2024-06-01", unit: :M).to_unit(:D).end_of(unit: :M)
+# => 2024-01-31, 2024-02-29, 2024-03-31, 2024-04-30, 2024-05-31, 2024-06-30
+```
+
+The bucket has to be a whole number of the array's ticks: `end_of(unit: "6 hours")`
+on a day array raises, since a 6-hour bucket has no last day.
 
 ### 11.4 `is_righttime` — the on-grid guard
 
@@ -1363,11 +1405,13 @@ UNDEF.
 
 ### 15.2 Fixed by design
 
-- The epoch is **1970-01-01 UTC**, fixed.
-  Arbitrary reference times — as used by NetCDF CF conventions — are
-  delegated to external gems. (Integer bucketing / matching against a grid
-  is provided in core by the step system, §11; only non-standard calendars
-  stay external.)
+- The epoch is **1970-01-01 UTC**, fixed. A count from another reference
+  time — a NetCDF CF `units` attribute such as `"hours since 1990-01-01"` —
+  converts in core: `CATime::Grid.parse` reads the attribute, and
+  `CArray#time(unit:, origin:)` / `CAFrame#to_time` rebase the counts onto
+  the epoch (§2.3, §11). Only **non-standard calendars** (CF `360_day`,
+  `noleap` and the like) stay with external gems: CATime's calendar is the
+  proleptic Gregorian one.
 - Storage is **`int64`**, fixed. The parent's `data_type` must match.
   The *surface* is `CA_FIXLEN` for both classes (the NonNumeric gate), so
   the numeric kernels do not dispatch on them: `sqrt(dur)` and a variance
@@ -1479,6 +1523,8 @@ operation to the (often quite different) CArray way of doing it.
 | `arr.dt.dayofweek`                            | `dt.weekday`  (Sun=0..Sat=6)                                 |
 | `arr.dt.strftime('%Y-%m-%d')`                 | `dt.strftime("%Y-%m-%d")`                                    |
 | `arr.dt.is_leap_year`                         | `dt.is_leap`                                                 |
+| `arr.dt.quarter`                              | `dt.quarter`                                                 |
+| `arr.dt.isocalendar()` (year, week)           | `dt.iso_year`, `dt.iso_week`                                 |
 | `arr.min()`                                   | `dt.min`  (returns `CATime::Element`)                   |
 | `arr.mean()`                                  | `dt.mean`                                                    |
 | `arr1 - arr2`  (time − time)          | `dt1 - dt2`  (returns `CATimedelta`)                         |
@@ -1493,6 +1539,9 @@ operation to the (often quite different) CArray way of doing it.
 | `s.dt.floor('3h')`                            | `dt.floor(unit: "3 hours")`  (§11.3)                               |
 | `s.dt.ceil('D')` / `s.dt.round('h')`          | `dt.ceil(unit: :D)` / `dt.round(unit: :h)`                               |
 | `s.dt.to_period('M')` (period bucket)         | `dt.floor(unit: "1 month")` → `CATime` (§11.6)               |
+| `s + pd.offsets.MonthEnd(0)`, `to_period('M').end_time` | `dt.end_of(unit: "1 month")` (§11.3)                |
+| `s + pd.DateOffset(months=1)`                 | `dt + "1 month"` (as `Date#>>`; §5)                          |
+| `s.dt.days_in_month`                          | `dt.days_in_month`                                           |
 | `s.groupby(s.dt.to_period('M'))`              | `vals.group_by_category(dt.floor(unit: "1 month").categorize(sort_labels: true))` (§11.9) |
 | `df.resample('D')` (regular bucketing)        | `dt.timesteps(unit: "1 day", origin:)` + `group_by` (§11.10); true reindexing = `time_series` + `align` |
 

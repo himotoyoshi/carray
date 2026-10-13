@@ -122,6 +122,14 @@ O(operands × faces). A new Face author writes one method and receives every
 operand type its `case` chooses to accept; **coverage is per-Face** (time
 accepts `Time`/`DateTime`; timedelta, being a duration, does not).
 
+A comparison does not have to land on the reference's grid, so a Face with a
+unit may also define `comparable_pair(operand)`, which returns the reference
+and the operand in one unit: the reference's own when the operand sits on its
+grid (the reference is not converted), and otherwise the finer unit the two
+share, so a value off the grid is compared as the value it is rather than
+refused. The time Faces define both; `to_comparable` stays the rule for an
+assignment, which has to land on the grid.
+
 `to_comparable` is a semantic conversion (unit arithmetic), so it is a Ruby
 method, not a flag. The split is deliberate:
 
@@ -138,7 +146,11 @@ per-method Ruby override**. One C part, `ca_face_reconcile_operand` in
 an operand against a Face -- search, `linear_section`, `count(v)`, the
 comparison operators, the value-hash family and a bulk store into a unit
 Face -- so a pair of arrays is taken by all of them or refused by all of
-them:
+them.  The doors that compare (all but the store) go through
+`ca_face_reconcile_pair`, which asks `comparable_pair` first when the
+reference defines it and otherwise falls to `ca_face_reconcile_operand`.
+UNDEF passes through unreconciled: it is undefined in every space, and the
+door answers it as it does for a plain array.
 
 ```
 reference (self):
@@ -155,6 +167,8 @@ operand (query / rhs), driven by the reference:
                                        raise for a Face whose storage
                                        encodes its values in order (a time)
                                                                      (direct)
+    reference with comparable_pair  -> reference.comparable_pair(operand):
+       (a comparing door)              both in one unit, the operand stripped
     reference a non-COMPARABLE Face -> reference.to_comparable(operand), strip
                                        (ANY operand type: Face CArray, Element,
                                        Time, DateTime, ...; raises if the

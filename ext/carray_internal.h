@@ -388,6 +388,12 @@ VALUE       ca_fill_as (VALUE fill, int8_t data_type);
 void    ca_face_register_memory_view (int obj_type, int exportable);
 int     ca_face_memory_view_exportable (CArray *ca);
 
+/* The reference and the operand of a comparison brought into one space (see
+   ca_obj_face.c).  *pref may be replaced by a converted copy and stays a
+   Face; the caller strips it. */
+void    ca_face_reconcile_pair (volatile VALUE *pref, volatile VALUE *poperand,
+                                const char *name);
+
 /* ---- Empty regions ---------------------------------------------------------
 
    A region with a zero count on some axis has no cells.  The per-cell walks

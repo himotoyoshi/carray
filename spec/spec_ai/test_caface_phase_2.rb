@@ -175,8 +175,12 @@ class TestCAFacePhase2 < Test::Unit::TestCase
     # a coarser duration widens exactly
     r3 = CArray.int64(3) { 0 }.time(unit: :h) + CArray.int64(3) { 1 }.timedelta(unit: :D)
     assert_equal [24, 24, 24], r3.ticks.to_a       # 1 day = 24 h
-    # but a cross-group (fixed time + calendar duration) still raises
-    assert_raise(ArgumentError) { dt + CArray.int64(3) { 1 }.timedelta(unit: :M) }
+    # a calendar duration moves the date by months, as Date#>> does
+    # (1970-01-01T00:16:40 + 1 month), keeping the time of day
+    assert_equal [2678400 + 1000] * 3, (dt + CArray.int64(3) { 1 }.timedelta(unit: :M)).ticks.to_a
+    # but not on a grid a month would leave, nor a fixed duration on a calendar grid
+    assert_raise(ArgumentError) { CArray.int64(3) { 0 }.time(unit: :W) + CArray.int64(3) { 1 }.timedelta(unit: :M) }
+    assert_raise(ArgumentError) { CArray.int64(3) { 0 }.time(unit: :M) + CArray.int64(3) { 1 }.timedelta(unit: :D) }
   end
 
   def test_datetime_widens_integer_receiver_but_raises_on_float

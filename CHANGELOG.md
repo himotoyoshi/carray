@@ -45,6 +45,69 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   whether it holds every point of the key's grid (`is_complete`).
   `CAFrame#windows(on: "time", ...)` does the same for a frame's columns.
 
+- Change: `CArray.time` reads an Integer as a count of ticks of `unit:`
+  from the epoch: `CArray.time(CA_INT64([0, 10]), unit: :m)` is 00:00 and
+  00:10, as `CA_INT64([0, 10]).time(unit: :m)` is. It read every Integer as
+  Unix seconds and cut it down to the unit. Without `unit:` nothing changes
+  (the unit is seconds); to read Unix seconds onto another unit, convert
+  after reading: `CArray.time(secs).to_unit(:m)`. An Integer given as an
+  `origin:`, an `epoch:` or a start of `time_series` / `time_range` is still
+  an instant in Unix seconds.
+
+- New: `CATime#end_of(unit:, origin:)` gives each time the last tick of its
+  bucket on the array's own grid, as `floor` gives its head: a day array's
+  `end_of(unit: :M)` is the last day of the month, a second array's
+  23:59:59 of it, and `origin:` makes fiscal years and quarters. A bucket
+  that is not a whole number of the grid's ticks raises.
+  `CATime#days_in_month` gives the length of each time's month.
+
+- New: `CATime#quarter` (1..4) and the ISO 8601 week, `iso_week` (1..53)
+  with `iso_year`, the year a week is counted in, which differs from the
+  calendar year in the few days around New Year whose week belongs to the
+  neighbouring year.
+
+- Change: a month or year duration can be added to or subtracted from a
+  time on a day, hour, minute or finer grid, and moves each date as Ruby's
+  `Date#>>` does: the day stays unless the new month is shorter (then it is
+  that month's last day), and the time of day stays, so
+  `2024-01-31 + 1 month` is `2024-02-29`. It raised `ArgumentError` before.
+  A grid a month would leave (`:W`, `"3 days"`, `"7 hours"`) still raises,
+  as does a day duration on a month grid. As with `Date#>>`, a month is not
+  a fixed step: `+ 1 month - 1 month` need not undo it.
+
+- Change: `clip` refuses a bound that is `UNDEF` or has a masked cell,
+  with `ArgumentError`; fill the bound first. A masked bound cell gave a
+  masked result, and `clip(UNDEF, nil)` an `:object` array with every cell
+  masked. A NaN in a bound array still leaves its cell unbounded, as `nil`
+  does a whole side. To mask the cells out of range, pass `UNDEF` as the
+  fill (`clip(0, 10, UNDEF)`, `lfill:` / `ufill:`).
+
+- Change: `search`, `bsearch` and `search_nearest` (and their `_addr`
+  forms) find nothing for an `UNDEF` query or a masked cell of a query
+  array: `nil`, or `UNDEF` in that cell of the result. They searched the
+  value under the mask, so `CA_INT64([0, 1, 2]).search(UNDEF)` gave 0.
+
+- Change: a time array (`CATime`, `CATimedelta`) compares with a value off
+  its grid in the finer unit the two share, where it raised
+  `ArgumentError`: `days.eq("2024-01-03T05:00")` is all false, `<` orders
+  by the instant, `bsearch` finds nothing, `search_nearest` and
+  `linear_section` give the nearest cell and the fractional position.
+  This holds for the operators, `count(v)`, `mask_eq`, the searches,
+  `linear_section`, `is_in`, the set operations and `locate_addr`. An
+  assignment still raises for a value off the grid.
+
+- New: `CATime#pmax` / `#pmin` (and `maximum` / `minimum` / `fmax` /
+  `fmin`) give the later / earlier time cell by cell, against a time
+  array, an element, a `Time`, a `Date` or a String. They were refused for
+  a time array and returned an `:object` array mixing `Time` and elements
+  for a `Time`.
+
+- Fix: a `CATimedelta` takes durations in a Ruby Array or an `:object`
+  array in `is_in`, the set operations, `locate_addr` and `to_comparable`,
+  as a `CATime` takes times; it raised `TypeError`. `UNDEF` given to the
+  search family or `is_in` of a time array answers as for a plain array
+  instead of raising `TypeError`.
+
 - Fix: the reductions of the iterators answer as the core reduction does
   over each piece in more cases. `quantile` of a categorical, segment or
   axis-group iterator is NaN at a position next to a NaN, where it skipped

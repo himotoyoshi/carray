@@ -158,28 +158,30 @@ class CArray
       return fixlen_widened_with(values)
     end
     # A Face that reconciles operands (CATime) reads a bare Array as values
-    # of its own kind -- instants written as Time / String / elements.
-    if values.is_a?(Array) && face? && respond_to?(:to_comparable)
-      return [self, to_comparable(values)]
+    # of its own kind -- instants written as Time / String / elements -- and
+    # meets them as a comparison does (comparable_pair).
+    if values.is_a?(Array) && face? && respond_to?(:comparable_pair)
+      return comparable_pair(values)
     end
     # A single value (a Time, an element, a bare number) is a set of one,
     # read the same way; a bare number is refused like any other operand
     # that is not of its kind.
     if !values.is_a?(CArray) && !values.is_a?(Range) && face? &&
-       respond_to?(:to_comparable)
-      return [self, to_comparable([values])]
+       respond_to?(:comparable_pair)
+      return comparable_pair([values])
     end
     # ...and so does an array of values that are not of its kind (an object
     # column of Time values, a string column).
-    if values.is_a?(CArray) && respond_to?(:to_comparable) &&
-       !values.respond_to?(:to_comparable)
-      return [self, values_in_face(self, values) || to_comparable([])]
+    if values.is_a?(CArray) && respond_to?(:comparable_pair) &&
+       !values.respond_to?(:comparable_pair)
+      return comparable_pair(values)
     end
     # The same from the other side: values of a time array looked for in an
     # array that is not one.
-    if values.is_a?(CArray) && values.respond_to?(:to_comparable) &&
-       !respond_to?(:to_comparable)
-      return [values_in_face(values, self) || values.to_comparable([]), values]
+    if values.is_a?(CArray) && values.respond_to?(:comparable_pair) &&
+       !respond_to?(:comparable_pair)
+      set, own = values.comparable_pair(self)
+      return [own, set]
     end
     # A Face whose storage is not of its surface type.  When its cells are
     # its values, the set meets it as it would meet an array of the storage
@@ -272,20 +274,6 @@ class CArray
 
   def widen_fixlen_string (x, w)
     x.bytes == w ? x : x.to_fixlen_string(bytes: w)
-  end
-
-  # The values of +other+, which has no to_comparable, read as values of +face+'s
-  # kind (instants written as Time / Date / String for a time key), in an
-  # array of +other+'s shape; a masked cell stays masked.  nil when every
-  # cell is masked: there is nothing to read.
-  private def values_in_face(face, other)
-    return face.to_comparable(other) if other.is_a?(Array)
-    vals = other.flatten.to_a
-    filler = vals.find { |v| !UNDEF.equal?(v) }
-    return nil if filler.equal?(nil) && vals.all? { |v| UNDEF.equal?(v) }
-    out = face.to_comparable(vals.map { |v| UNDEF.equal?(v) ? filler : v })
-    out[other.is_masked.flatten] = UNDEF if other.has_mask?
-    out.reshape(*other.shape)
   end
 
   def coerce_self (t)

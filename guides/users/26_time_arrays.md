@@ -82,7 +82,7 @@ With a `step:` wider than one tick, the phase is anchored at `start` and `last` 
 
 ### From values: `CArray.time`
 
-`CArray.time` builds an array from a value or a collection of values — strings, Ruby `Time` / `DateTime` objects, or Unix-seconds integers. A single literal gives a 1-element result; a Ruby `Array` or a CArray gives a same-shape result parsed per cell.
+`CArray.time` builds an array from a value or a collection of values — strings, Ruby `Time` / `DateTime` objects, or integers. An integer counts ticks of `unit:` from the epoch — seconds when there is no `unit:`, so `CArray.time(CA_INT64([0, 10]), unit: :m)` is 00:00 and 00:10. A single literal gives a 1-element result; a Ruby `Array` or a CArray gives a same-shape result parsed per cell.
 
 ```ruby
 CArray.time("2024-06-15", unit: :D)                            # 1-element
@@ -91,7 +91,7 @@ CArray.time(CA_OBJECT(%w[2024-01-15 2024-02-15]), unit: :D)    # CArray
 CArray.time(%w[15/01/2024 20/06/2024], format: "%d/%m/%Y", unit: :D)
 ```
 
-Without `unit:`, the values are read in the finest unit they show, so nothing they hold is cut off: text written to the day comes back in `:D`, to the second in `:s`, and with a fraction in `:ms`, `:us` or `:ns` by its digits — the same reading `parse_to_time` gives a frame's text column. With `format:`, it is the finest field the format writes; a Unix-seconds Integer is `:s`, a `Time` the finest its value needs, a `Date` `:D`.
+Without `unit:`, the values are read in the finest unit they show, so nothing they hold is cut off: text written to the day comes back in `:D`, to the second in `:s`, and with a fraction in `:ms`, `:us` or `:ns` by its digits — the same reading `parse_to_time` gives a frame's text column. With `format:`, it is the finest field the format writes; an Integer is `:s`, a `Time` the finest its value needs, a `Date` `:D`.
 
 ```ruby
 CArray.time(%w[2024-01-15 2024-02-15]).unit   # => D
@@ -291,7 +291,8 @@ The operands may carry different units; arithmetic reconciles them, so no manual
 
 - **`dt ± td`** (instant ± duration): the instant is the anchor, so the result keeps `dt`'s unit and the duration is converted into it. A coarser duration widens exactly; a **finer** one is **truncated** to `dt`'s grid.
 - **`dt - dt2`** and **`td ± td2`**: the result takes the **finer** of the two units (both operands widen exactly).
-- **cross-group**: a calendar duration (`:Y` / `:M`) has no fixed ratio to seconds, so `dt(:s) + td(:M)` raises — that step is calendar arithmetic; use the step system below.
+- **a month or year on a fixed grid**: `dt(:D) + td(:M)` moves each date as Ruby's `Date#>>` does — the day stays unless the new month is shorter, so `2024-01-31 + 1 month` is `2024-02-29` — and keeps the time of day. A grid a month would leave (`:W`, `"3 days"`, `"7 hours"`) raises. As with `Date#>>`, a month is not a fixed step: `+ 1 month - 1 month` need not come back to where it started.
+- **other cross-group pairs**: a calendar duration has no fixed ratio to seconds, so `td(:M) + td(:s)` and `dt(:M) + td(:D)` raise.
 - **overflow**: widening a wide range into a fine unit (a millennium-spanning difference resolved to `:ns`) can exceed `int64`; it raises rather than silently wrapping.
 
 ```ruby
@@ -314,7 +315,7 @@ dt1 <=> dt2     # => CArray of -1 / 0 / 1
 
 As on any CArray, element-wise equality is `#eq` / `#ne` — `dt1 == dt2` is whole-array structural equality returning a single `true` / `false`. Comparison results are plain `bool` or `int` arrays; they no longer carry time semantics.
 
-The two operands may carry **different units**. The left-hand side (the reference) reconciles the right-hand operand into its own unit, losslessly: a coarser operand widens exactly, and a finer operand is accepted only when every value lands exactly on the coarser grid. A value that cannot be aligned without loss raises rather than being silently truncated:
+The two operands may carry **different units**. They meet in the left-hand side's unit when the right-hand values sit on its grid, and otherwise in the finer unit the two share, so an instant off the grid is compared as the instant it is, never floored onto the grid:
 
 ```ruby
 dt_s   = CArray.int64(2) { |i| [10, 20][i] }.time(unit: :s)
@@ -323,8 +324,8 @@ dt_ms  = CArray.int64(2) { |i| [10000, 20000][i] }.time(unit: :ms)  # 10s, 20s
 dt_ms < dt_s     # OK: :s lifted to :ms (coarser → finer is always exact)
 dt_s  < dt_ms    # OK: 10000 / 20000 ms are whole seconds
 
-dt_bad = CArray.int64(2) { |i| [10500, 20000][i] }.time(unit: :ms)  # 10.5 s
-dt_s < dt_bad    # => raises ArgumentError (not a whole multiple of :s)
+dt_off = CArray.int64(2) { |i| [10500, 20000][i] }.time(unit: :ms)  # 10.5 s
+dt_s < dt_off    # => [true, false]: 10 s < 10.5 s, compared in :ms
 ```
 
 Because the left operand drives the conversion, a right-hand Ruby `Time` / `DateTime` / `CATime::Element` is accepted too — `dt < Time.utc(2024, 6, 17)` lifts the `Time` into `dt`'s unit.
@@ -359,7 +360,7 @@ dt[3] - dt[1]        # => CATimedelta::Element "2D"  (elapsed duration)
 dt[0] + gap_element  # => CATime::Element            (advance by a duration)
 ```
 
-A cross-group step on an element (a `:s` instant plus a `:M` duration) raises — for calendar stepping on a single value, go through `to_date` and Ruby's `Date#next_month` / `#next_year`.
+A month or year duration moves an element as it moves an array, as `Date#>>` moves a date.
 
 ## Field accessors
 
@@ -508,7 +509,7 @@ q = CArray.time_series("2024-06-17", count: 2, unit: :D)
 axis.bsearch(q)                       # => [2, 3]
 ```
 
-The query may carry a **different unit** — the axis reconciles it into its own unit with the same lossless rules as comparison:
+The query may carry a **different unit**, met as in a comparison — a query off the axis grid finds nothing rather than a neighbour:
 
 ```ruby
 axis_h = CArray.time_series("2024-06-15", count: 72, unit: :h)  # hourly
@@ -768,7 +769,7 @@ td[2].to_seconds   # => Rational (exact)
 
 `to_seconds` returns an **exact** Rational for a fixed-length unit but raises for `:Y` / `:M` — a month has no exact second count. Use `to_seconds_approx` for a nominal 30.5-day / 365.25-day estimate when an approximation is acceptable.
 
-Ordering and search work the same as for `CATime` — the reference duration reconciles a cross-unit operand losslessly. Coverage is narrower, though: a timedelta axis accepts another timedelta array or a `CATimedelta::Element`, but **not** a Ruby `Time` or `DateTime`. Those name absolute instants, not durations, so they raise — a duration has no meaningful conversion from an instant.
+Ordering and search work the same as for `CATime`, including a cross-unit operand off the grid. Coverage is narrower, though: a timedelta axis accepts another timedelta array or a `CATimedelta::Element`, but **not** a Ruby `Time` or `DateTime`. Those name absolute instants, not durations, so they raise — a duration has no meaningful conversion from an instant.
 
 ## Masks
 
@@ -794,7 +795,7 @@ dt.strip_mask(0)     # => CATime with masked cells filled (0 = the epoch)
 - Time is an integer index on a tick grid: `int64` ticks × a resolution (count × base), counted from the 1970-01-01 UTC epoch.
 - `CArray.time_series` / `time_range` build regular grids; `CArray.time` parses values (strict by default, `on_error: :mask` to soften); `raw.time(unit:)` wraps an existing integer array zero-copy, with `origin:` to rebase relative indices.
 - `CATime` is an instant, `CATimedelta` a duration; the algebra is instant − instant = duration, instant ± duration = instant, and instant + instant raises.
-- Cross-unit operands are reconciled losslessly — exact widening is automatic, lossy narrowing raises (except `dt ± td`, where a finer duration truncates to the instant's grid).
+- Cross-unit operands of a comparison or a search meet in the finer unit when one is off the other's grid; an assignment has to land on the array's grid and raises otherwise (and in `dt ± td` a finer duration truncates to the instant's grid).
 - Elements (`CATime::Element`) carry `(value, unit)`, print unit-aware, compare by instant, and convert via `to_time` / `to_date` / `to_datetime`.
 - Field accessors (`year` … `is_leap`) and `strftime` return plain arrays, computed by vectorized civil-date algebra.
 - Every reduction reports on the array's own unit — `min` / `max` exactly, `mean` / `median` / `percentile` / `stddev` rounded to the nearest tick, with `to_unit` first when you want a finer answer; `sum` / `variance` raise.
