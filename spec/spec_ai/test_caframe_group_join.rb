@@ -1133,6 +1133,23 @@ class TestCAFrameJoinNDKey < Test::Unit::TestCase
     assert_match(/join_asof: the key "wind" has shape \[3, 2\]/, e.message)
   end
 
+  # A raw fixlen key is a cell-width blob: keys of different widths share
+  # no value, and the join says so by the column (it named the set
+  # operation it runs, `union`).  A fixlen string compares as strings.
+  def test_join_refuses_raw_fixlen_keys_of_different_widths
+    l = CAFrame.new("k" => CA_FIXLEN(["ab", "cd"], bytes: 2), "t" => CA_FLOAT64([1, 2]))
+    r = CAFrame.new("k" => CA_FIXLEN(["ab", "zz"], bytes: 4), "t" => CA_FLOAT64([1, 2]))
+    [:left, :inner, :outer, :right].each do |how|
+      e = assert_raise(CArray::DataTypeError) { l.join(r, on: "k", how: how) }
+      assert_match(/\Ajoin: the key "k" is fixlen 2 bytes wide on the left and 4 on the right/, e.message)
+    end
+    e = assert_raise(CArray::DataTypeError) { l.join_asof(r, on: "t", by: "k") }
+    assert_match(/\Ajoin_asof: the key "k" is fixlen 2 bytes wide/, e.message)
+    ls = CAFrame.new("k" => CArray.fixlen_string(["ab", "cd"], bytes: 2))
+    rs = CAFrame.new("k" => CArray.fixlen_string(["ab", "zz"], bytes: 4))
+    assert_equal ["ab", "cd", "zz"], ls.join(rs, on: "k", how: :outer)["k"].to_a
+  end
+
   def test_align_refuses_nd_key_and_nd_reference
     e = assert_raise(ArgumentError) { @left.align("wind", CA_FLOAT64([1.2])) }
     assert_match(/align: the key "wind" has shape \[3, 2\]/, e.message)

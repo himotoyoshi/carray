@@ -45,6 +45,7 @@ class CAFrame
     names = join_key_names(on, "join", "on:")
     lkeys = names.map { |name| join_key(self[name], name, "join") }
     rkeys = names.map { |name| join_key(other[name], name, "join") }
+    join_check_key_widths(names, lkeys, rkeys, "join")
     plan  = join_name_plan(other, names, suffixes)
 
     unless %i[left inner outer right].include?(how)
@@ -80,8 +81,10 @@ class CAFrame
     addr = if exact.empty?
              lkey.locate_nearest_addr(rkey, direction: direction, tolerance: tolerance)
            else
-             _, lcode, rcode, k = join_codes(exact.map { |name| join_key(self[name], name, "join_asof") },
-                                             exact.map { |name| join_key(other[name], name, "join_asof") })
+             lexact = exact.map { |name| join_key(self[name], name, "join_asof") }
+             rexact = exact.map { |name| join_key(other[name], name, "join_asof") }
+             join_check_key_widths(exact, lexact, rexact, "join_asof")
+             _, lcode, rcode, k = join_codes(lexact, rexact)
              join_asof_by(lkey, rkey, lcode, rcode, k, direction, tolerance)
            end
     join_by_addr(other, [on, *exact], addr, plan)
@@ -220,6 +223,19 @@ class CAFrame
     raise ArgumentError,
           "#{verb}: the key #{on.inspect} has shape #{col.shape.inspect}, not one value per row; " \
           "#{verb} on one of its components (e.g. df[name][nil, 0])"
+  end
+
+  # A fixlen key holds a cell-width blob, so a left key and a right key of
+  # different widths share no value.  Refuse it here, naming the column,
+  # rather than from inside the set operation the join runs.
+  private def join_check_key_widths(names, lkeys, rkeys, verb)
+    names.zip(lkeys, rkeys) do |name, l, r|
+      next unless l.data_type == CA_FIXLEN && r.data_type == CA_FIXLEN
+      next if l.face? || r.face? || l.bytes == r.bytes
+      raise CArray::DataTypeError,
+            "#{verb}: the key #{name.inspect} is fixlen #{l.bytes} bytes wide on the left " \
+            "and #{r.bytes} on the right; a fixlen value is a cell-width blob, so the widths must match"
+    end
   end
 
   # The key column names of a join: one name, or an Array of names.
