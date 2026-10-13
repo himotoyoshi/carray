@@ -268,6 +268,16 @@ ca_face_lift (VALUE view, VALUE face_parent)
          && ! ca_test_flag(view_ca, CA_FLAG_MULTI_PARENTS) ) {
       ((CAView *) view_ca)->parent = ((CAView *) fp)->parent;   /* C pointer: one level */
       rb_ca_set_parent(view, rb_ca_parent(face_parent));        /* @parent ivar: lockstep */
+      /* The view's mask was built over the Face's mask, which the Face
+         owns and frees with itself.  Once the view no longer keeps the
+         Face alive, move the mask down the same level.  The Face's mask
+         is a same-shape refer of its parent's mask, so the mask view
+         addresses the same cells there. */
+      if ( view_ca->mask && fp->mask && ca_is_view(fp->mask)
+           && ((CAView *) fp->mask)->parent == ((CAView *) fp)->parent->mask
+           && ((CAView *) view_ca->mask)->parent == fp->mask ) {
+        ((CAView *) view_ca->mask)->parent = ((CAView *) fp)->parent->mask;
+      }
     }
   }
 
