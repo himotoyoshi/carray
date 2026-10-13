@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: in an object array, `unique`, `nunique`, `value_counts`,
+  `mask_duplicates`, `is_mode`, `is_in` and the set operations take two
+  Complex values with a NaN part as one value when their parts match with
+  every NaN as one, as a complex array already did. Each such value was
+  counted apart. A Float NaN was already one value.
+
 - Fix: a complex array's `linear_fetch` and `strip_mask(method: :linear)` /
   `unmask(method: :linear)` dropped the imaginary part; both parts are now
   interpolated. `linear_section`, `elem_min` and `elem_max` refuse a complex

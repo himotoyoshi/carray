@@ -25,6 +25,7 @@ class TestValueHashSameValue < Test::Unit::TestCase
       out[CArray.data_type_name(t)] = a
     end
     out["object"] = CA_OBJECT(REALS)
+    out["object complex"] = CA_OBJECT(REALS.map { |x| Complex(x, x) })
     out
   end
 

@@ -50,7 +50,8 @@
   (Float#eql? treats them equal).  The object lane adds one deviation from Ruby
   Hash, aligning it with the numeric lane: every Float NaN collapses to one
   distinct value (a NaN takes a fixed canonical key and matches any stored Float
-  NaN), where Ruby Hash would keep distinct NaN objects apart.
+  NaN), where Ruby Hash would keep distinct NaN objects apart, and a Complex
+  with a NaN part is one value with any Complex whose parts match it that way.
   __factorize_appearance__ and the discovery members (unique, value_counts,
   mask_duplicates) all cover the numeric / object / fixlen lanes.
 
@@ -513,25 +514,84 @@ fz_is_float_nan (VALUE v)
   return RB_FLOAT_TYPE_P(v) && isnan(RFLOAT_VALUE(v));
 }
 
+/* True when v holds a NaN that eql? would keep apart from an equal value:
+   a Float NaN, or a Complex with a Float NaN part. */
+static int
+fz_obj_has_nan (VALUE v)
+{
+  if ( fz_is_float_nan(v) ) {
+    return 1;
+  }
+  return RB_TYPE_P(v, T_COMPLEX)
+         && ( fz_is_float_nan(rb_complex_real(v))
+              || fz_is_float_nan(rb_complex_imag(v)) );
+}
+
+/* A part of a NaN-bearing value: every NaN is one value, the rest go by
+   eql?, as in Ruby Hash. */
+static uint64_t
+fz_obj_part_key (VALUE v)
+{
+  return fz_is_float_nan(v) ? FZ_NAN_KEY_DOUBLE : (uint64_t) NUM2LL(rb_hash(v));
+}
+
+static int
+fz_obj_part_eql (VALUE a, VALUE b)
+{
+  if ( fz_is_float_nan(a) || fz_is_float_nan(b) ) {
+    return fz_is_float_nan(a) && fz_is_float_nan(b);
+  }
+  return rb_eql(a, b);
+}
+
+/* The hash key of an object cell.  A NaN-bearing value is keyed part by
+   part with every NaN as one value, so it matches the numeric lane: all
+   NaN are one value, and a complex value is one value when its parts are. */
+static uint64_t
+fz_obj_key (VALUE v, int has_nan)
+{
+  if ( ! has_nan ) {
+    return (uint64_t) NUM2LL(rb_hash(v));
+  }
+  if ( RB_TYPE_P(v, T_COMPLEX) ) {
+    return fz_obj_part_key(rb_complex_real(v)) * 31u
+           ^ fz_obj_part_key(rb_complex_imag(v)) ^ 0x9e3779b97f4a7c15ULL;
+  }
+  return FZ_NAN_KEY_DOUBLE;
+}
+
+/* Whether a stored cell is the same value as v (has_nan from fz_obj_has_nan). */
+static int
+fz_obj_same (VALUE stored, VALUE v, int has_nan)
+{
+  if ( ! has_nan ) {
+    return rb_eql(stored, v);
+  }
+  if ( RB_TYPE_P(v, T_COMPLEX) ) {
+    return RB_TYPE_P(stored, T_COMPLEX)
+           && fz_obj_part_eql(rb_complex_real(stored), rb_complex_real(v))
+           && fz_obj_part_eql(rb_complex_imag(stored), rb_complex_imag(v));
+  }
+  return fz_is_float_nan(stored);
+}
+
 /* Object-lane intern: key = rb_hash(v) (lossy), collision re-check via rb_eql.
    Matches Ruby Hash distinctness (`hash` + `eql?`) element for element, with one
    value-based exception aligning with the numeric lane: every Float NaN collapses
    to a single distinct value (Ruby Hash keeps distinct NaN objects apart via
-   eql?, but the discovery family unifies them).  A NaN takes a fixed canonical
-   key and matches any stored Float NaN, so its second and later occurrences fold
-   into the first. */
+   eql?, but the discovery family unifies them), and so does a Complex whose
+   parts are the same with every NaN as one (fz_obj_key / fz_obj_same). */
 static int32_t
 fz_hash_intern_obj (fz_hash *h, VALUE v, int *is_new)
 {
   if ( (h->n + 1) * 10 >= h->cap * 7 ) { fz_hash_grow(h); }   /* load factor 0.7 */
-  int v_nan = fz_is_float_nan(v);
-  uint64_t key = v_nan ? FZ_NAN_KEY_DOUBLE
-                       : (uint64_t) NUM2LL(rb_hash(v));
+  int v_nan = fz_obj_has_nan(v);
+  uint64_t key = fz_obj_key(v, v_nan);
   ca_size_t mask = h->cap - 1;
   ca_size_t slot = FZ_HOME(h, key);
   while ( h->used[slot] ) {
     if ( h->key[slot] == key &&
-         ( v_nan ? fz_is_float_nan(h->val[slot]) : rb_eql(h->val[slot], v) ) ) {
+         fz_obj_same(h->val[slot], v, v_nan) ) {
       *is_new = 0; return h->code[slot];
     }
     slot = (slot + 1) & mask;
@@ -622,14 +682,13 @@ fz_hash_lookup (fz_hash *h, uint64_t key, int32_t *code_out)
 static int
 fz_hash_lookup_obj (fz_hash *h, VALUE v, int32_t *code_out)
 {
-  int v_nan = fz_is_float_nan(v);
-  uint64_t key = v_nan ? FZ_NAN_KEY_DOUBLE
-                       : (uint64_t) NUM2LL(rb_hash(v));
+  int v_nan = fz_obj_has_nan(v);
+  uint64_t key = fz_obj_key(v, v_nan);
   ca_size_t mask = h->cap - 1;
   ca_size_t slot = FZ_HOME(h, key);
   while ( h->used[slot] ) {
     if ( h->key[slot] == key &&
-         ( v_nan ? fz_is_float_nan(h->val[slot]) : rb_eql(h->val[slot], v) ) ) {
+         fz_obj_same(h->val[slot], v, v_nan) ) {
       if ( code_out ) { *code_out = h->code[slot]; }
       return 1;
     }
