@@ -193,6 +193,42 @@ class TestIntegerEdges < Test::Unit::TestCase
     assert_false CA_FLOAT64([1.5, 2.5]).to_type(:int32).has_mask?
   end
 
+  # Every other way to an integer cell (a cast view, a store, fake,
+  # wrap_readonly, clip_<type>) refuses an unmasked NaN before writing
+  # anything.  A masked NaN (mask_invalid keeps it under the mask) is
+  # skipped and reads UNDEF.
+  def test_an_unmasked_nan_is_refused_on_the_way_to_an_integer_cell
+    f = CA_FLOAT64([1.5, Float::NAN, 3.0])
+    assert_raise(FloatDomainError) { f.as_type(:int32).to_a }
+    assert_raise(FloatDomainError) { f.as_type(:int32)[1] }
+    assert_equal 1, f.as_type(:int32)[0]
+    assert_raise(FloatDomainError) { f.fake(:int32).to_a }
+    assert_raise(FloatDomainError) { CArray.wrap_readonly(f, CA_INT32).to_a }
+    assert_raise(FloatDomainError) { CA_FLOAT32([Float::NAN]).as_uint8.to_a }
+    assert_raise(FloatDomainError) { CA_CMPLX128([Complex(1, Float::NAN)]).as_int32.to_a }
+    a = CArray.int32(3).fill(9)
+    assert_raise(FloatDomainError) { a[] = f }
+    assert_equal [9, 9, 9], a.to_a, "nothing is written before the refusal"
+  end
+
+  def test_a_masked_nan_reads_undef_on_the_way_to_an_integer_cell
+    f = CA_FLOAT64([1.5, Float::NAN, 3.0]).mask_invalid
+    assert_equal [1, UNDEF, 3], f.as_type(:int32).to_a
+    assert_equal [1, UNDEF, 3], f.as_type(:int32).copy.to_a
+    assert_equal UNDEF, f.as_type(:int32)[1]
+    assert_equal [1, UNDEF, 3], f.fake(:int32).to_a
+    assert_equal [1, UNDEF, 3], CArray.wrap_readonly(f, CA_INT32).to_a
+    a = CArray.int32(3)
+    a[] = f
+    assert_equal [1, UNDEF, 3], a.to_a
+  end
+
+  def test_refused_nan_casts_leave_the_lazy_arena_usable
+    f = CA_FLOAT64([Float::NAN])
+    100.times { assert_raise(FloatDomainError) { f.as_int32.to_a } }
+    assert_equal [2.0, 3.0], (CA_FLOAT64([1, 2]).lazy + 1).copy.to_a
+  end
+
   # -- a Range with an excluded end ------------------------------------
 
   # The cells are the steps that start before the end, whether or not the

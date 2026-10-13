@@ -104,6 +104,10 @@ class CArray
   #   `infinity` (optional sign, any case) are kept as NaN / ±Infinity for
   #   float types. A cell that is not a String goes through `Integer()` /
   #   `Float()` as before.
+  #
+  #   From a float or complex array to an integer type, a NaN cell (in
+  #   either part) becomes UNDEF. A finite value outside the integer type
+  #   is converted as the machine's C converts it.
   #   @param data_type [Symbol, Integer, Class, String] target element type.
   #   @param bytes [Integer, nil] element width in bytes, required for
   #     `:fixlen`.
@@ -209,6 +213,10 @@ class CArray
   #   target. Use {#to_type} instead for parse-with-mask (an unparseable
   #   cell becomes UNDEF). The `CA_<TYPE>(obj)` construction shorthands
   #   take this same non-masking path.
+  #   From a float or complex array to an integer type, reading a NaN cell
+  #   raises FloatDomainError, as storing NaN into an integer array does; a
+  #   masked NaN cell (left by {#mask_invalid}) reads UNDEF. {#to_type}
+  #   makes a NaN cell UNDEF instead.
   #   A Face refuses: reinterpreting its storage would hand back the
   #   bytes its surface exists to hide (the serial instead of the time, the
   #   descriptor instead of the string), and no view decodes a surface. Take
@@ -220,6 +228,8 @@ class CArray
   #   @return [CAFake]
   #   @raise [TypeError] when `self` is a Face and the request would read its
   #     storage under another type.
+  #   @raise [FloatDomainError] when a NaN cell that is not masked is read
+  #     into an integer type.
   def as_type(data_type, bytes: nil); end
 
   # @overload as_boolean

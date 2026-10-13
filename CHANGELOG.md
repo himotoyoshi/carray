@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: reading a NaN into an integer cell through `as_type` (and
+  `as_int32` etc.), `fake`, `CArray.wrap_readonly`, `clip_int32` etc., or
+  storing a float array into an integer array (`ints[] = floats`), raises
+  `FloatDomainError`, as storing a single NaN already did. It wrote a value
+  that depended on the machine (`0` on ARM). A masked NaN (as left by
+  `mask_invalid`) reads UNDEF. `to_type` is unchanged: a NaN cell becomes
+  UNDEF. `clip_uint64` gave `0` for NaN and now raises too.
+
 - Change: NaN comes after the numbers in descending order too, as it
   already did ascending: `order(descending: true)`, `sort_by_key(..., order:
   :desc)`, and `order(descending: true)` on groups put NaN last instead of

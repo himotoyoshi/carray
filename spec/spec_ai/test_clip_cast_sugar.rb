@@ -7,8 +7,8 @@
 #
 # Test matrix (AC1-AC5):
 #   - AC1: byte parity with literal composition for each dtype
-#   - AC2: cross-platform consistent values for negative / overflow / NaN
-#   - AC3: NaN behavior inherited from clip (not newly pinned)
+#   - AC2: cross-platform consistent values for negative / overflow
+#   - AC3: NaN is refused (FloatDomainError) unless masked
 #   - AC4: existing as_<dtype> / clip / CAFake surfaces unchanged
 #   - AC5: mask carry from clip
 
@@ -124,15 +124,21 @@ class TestClipCastSugar < Test::Unit::TestCase
     assert_equal [0], a.clip_uint32.to_a
   end
 
-  # --- AC3: NaN behavior is inherited from clip, not separately pinned ---
+  # --- AC3: a NaN has no integer: refused unless it is masked ---
 
-  def test_nan_behavior_matches_clip_composition
-    # We don't pin a specific NaN policy in this phase; we only require
-    # that clip_<dtype>(NaN) == clip(MIN, MAX).as_<dtype>(NaN).
-    a = CA_DOUBLE([Float::NAN])
-    assert_equal a.clip(0, UINT8_MAX).as_uint8.to_a,    a.clip_uint8.to_a
-    assert_equal a.clip(0, UINT32_MAX).as_uint32.to_a,  a.clip_uint32.to_a
-    assert_equal a.clip(INT8_MIN, INT8_MAX).as_int8.to_a, a.clip_int8.to_a
+  def test_nan_is_refused_by_every_clip_cast
+    a = CA_DOUBLE([1.0, Float::NAN])
+    %i[clip_int8 clip_uint8 clip_int16 clip_uint16
+       clip_int32 clip_uint32 clip_int64 clip_uint64].each do |m|
+      assert_raise(FloatDomainError, m.to_s) { a.send(m).to_a }
+    end
+  end
+
+  def test_masked_nan_is_undef_in_every_clip_cast
+    a = CA_DOUBLE([1.0, Float::NAN]).mask_invalid
+    %i[clip_int8 clip_uint8 clip_int32 clip_uint64].each do |m|
+      assert_equal [1, UNDEF], a.send(m).to_a, m.to_s
+    end
   end
 
   # --- AC4: existing surfaces unchanged ---
