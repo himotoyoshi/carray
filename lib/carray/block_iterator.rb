@@ -721,21 +721,37 @@ class CABlockIterator < CAIterator
     unless n.is_a?(Integer)
       raise TypeError, "lag: n must be an Integer (got #{n.class})"
     end
-    out = nil
-    # Each region has whole tiles of one size, so the steps are counted over
-    # the cells a tile has rather than over the padding of a partial one.
-    each_region do |strip_ranges, tiles, _out_ranges|
-      view   = @source[*strip_ranges].block_view(*tiles)
-      grid   = view.shape[0, @sndim]
-      lagged = view.copy.reshape(*grid, tiles.inject(1, :*))
-                   .lag(n, axis: @sndim).reshape(*grid, *tiles)
-      out ||= lag_output(lagged)
-      out[*strip_ranges].block_view(*tiles)[] = lag_values(out, lagged)
-    end
-    out || @source.copy
+    tile_wise { |rows, axis| rows.lag(n, axis: axis) }
+  end
+
+  # @overload order(descending: false, method: :ordinal, kind: :quick)
+  #   Per-tile rank of each cell among the tile's cells (int64, `0` the
+  #   smallest), as `CArray#order` ranks them; a partial edge tile ranks only
+  #   the cells it has. The keywords are those of `CArray#order`.
+  #   @return [CArray] source-shaped
+  def order (**kw)
+    tile_wise { |rows, axis| rows.order(axis: axis, **kw) }
   end
 
   private
+
+  # A source-shaped result built tile by tile: the block gets a region's
+  # tiles as rows (one tile's cells, row-major, along +axis+) and gives back
+  # rows of the same shape. Each region has whole tiles of one size, so a
+  # partial edge tile is its own cells rather than cells and padding.
+  def tile_wise
+    out = nil
+    each_region do |strip_ranges, tiles, _out_ranges|
+      view  = @source[*strip_ranges].block_view(*tiles)
+      grid  = view.shape[0, @sndim]
+      found = yield(view.copy.reshape(*grid, tiles.inject(1, :*)), @sndim)
+                .reshape(*grid, *tiles)
+      out ||= tile_output(found)
+      out[*strip_ranges].block_view(*tiles)[] = tile_values(out, found)
+    end
+    # a source with no cells has no region; its one-cell rows give the type
+    out || yield(@source.copy.reshape(*@source.shape, 1), @sndim).reshape(*@source.shape)
+  end
 
   # Drive a within-tile segment scan: scan each tile flattened row-major and
   # scatter back to a source-shaped result.  The output data type is taken from the
@@ -759,9 +775,10 @@ class CABlockIterator < CAIterator
     pout[*@sndim.times.map { |i| 0...@source.shape[i] }].copy
   end
 
-  # A source-shaped array that can hold what #lag gives: of its kind, or an
-  # object array for a read-only Face, which cannot be written cell by cell.
-  def lag_output (lagged)
+  # A source-shaped array that can hold what #tile_wise gives: of its kind,
+  # or an object array for a read-only Face, which cannot be written cell by
+  # cell.
+  def tile_output (lagged)
     if lagged.face? && lagged.read_only?
       CArray.object(*@source.shape)
     else
@@ -769,9 +786,9 @@ class CABlockIterator < CAIterator
     end
   end
 
-  # The lagged values as +out+ can hold them: a Face going into an object
-  # array goes as its surface values, not its storage.
-  def lag_values (out, lagged)
+  # The values as +out+ can hold them: a Face going into an object array
+  # goes as its surface values, not its storage.
+  def tile_values (out, lagged)
     return lagged unless out.data_type == CA_OBJECT && lagged.face?
     CArray.object(*lagged.shape) { lagged.to_a }
   end

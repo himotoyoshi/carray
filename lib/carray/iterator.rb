@@ -244,7 +244,13 @@ class CAIterator
   #   @return [CArray] shaped like the source.
   #   @raise [NotImplementedError] for a member whose pieces overlap, where a
   #     cell has no single position within a piece.
-  [:map, :sort_addr,
+  # @!method order(descending: false, method: :ordinal, kind: :quick)
+  #   Returns a source-shaped int64 array of each cell's rank among the cells
+  #   of its piece, as `CArray#order` ranks them (`0` the smallest).
+  #   @return [CArray] shaped like the source.
+  #   @raise [NotImplementedError] for a member whose pieces overlap, where a
+  #     cell has no single rank.
+  [:map, :sort_addr, :order,
    :cumsum, :cumprod, :cummax, :cummin, :cumcount, :lag].each do |name|
     define_method(name) do |*, **, &_blk|
       raise NotImplementedError, "#{self.class} does not provide ##{name} (optional)"

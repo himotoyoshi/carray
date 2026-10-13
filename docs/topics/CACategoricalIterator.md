@@ -278,6 +278,15 @@ grp.lag        #  => [UNDEF, UNDEF, 10.0, 20.0, 11.0]
 v - grp.lag    #  => the change since the previous member of the same category
 ```
 
+`order` ranks each cell among its category's members (int64, `0` the
+smallest), with the keywords of `CArray#order` (`descending:`, `method:
+:ordinal` or `:dense`, `kind:`); a masked cell, and a cell in no category, is
+`UNDEF`.
+
+```ruby
+grp.order      #  => [0, 0, 1, 1, 2]
+```
+
 ## N-dimensional value and categorical
 
 `value` and `cat` may be N-dimensional; both are read flat, so the result is

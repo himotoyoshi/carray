@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: the slab, block, segment, categorical and axis-group iterators have
+  `order`: each cell's rank among the cells of its own piece, int64, as
+  `CArray#order` ranks the piece alone, with its keywords (`descending:`,
+  `method: :ordinal` or `:dense`, `kind:`). `it.order` ranks a station's
+  readings among that station's only. The window iterator refuses it.
+
 - Fix: reading a few cells of a view over a CAObject or a lazy expression
   no longer makes it produce all of its cells when the view goes through a
   reshape or flatten of a transpose (`r.transpose.flatten[idx]`), or reads

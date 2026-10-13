@@ -591,6 +591,22 @@ class CAGroupIterator
     scan_by_core(:lag, n)
   end
 
+  # @overload order(axis: :group, descending: false, method: :ordinal, kind: :quick)
+  #   Per-group rank of each cell among its group's members (int64, `0` the
+  #   smallest; per band), as `CArray#order` ranks them; a cell in no group is
+  #   UNDEF. Without :group it is the value's own `order`.
+  #   @return [CArray] source-shaped
+  def order (axis: nil, **kw)
+    has_group, fused = AxisGroup.parse_axis(axis)
+    return value.order(axis: axis, **kw) unless has_group
+    unless fused.empty?
+      raise ArgumentError,
+            "axis_group order: folding a band into an order (axis: [:group, k]) " \
+            "is not supported; an order preserves the source shape"
+    end
+    scan_by_core(:order, **kw)
+  end
+
   # ---- materialize path: order statistics + generic iteration ------------
   #
   # These need every member of a group held together, so (unlike the scatter
@@ -855,12 +871,12 @@ class CAGroupIterator
 
   # A scan the kernel does not answer as the core does: each group block is
   # grouped through the composite categorical, whose scans are the core's.
-  def scan_by_core (op, *args)
+  def scan_by_core (op, *args, **kw)
     ccat, _kd, gslots, bslots, gaxes = composite_layout
-    return value.group_by_category(ccat).public_send(op, *args) if bslots.empty?
+    return value.group_by_category(ccat).public_send(op, *args, **kw) if bslots.empty?
     out = nil
     each_band_block(ccat, gslots, bslots, gaxes) do |val_idx, _oi, _co, gi|
-      result = gi.public_send(op, *args)
+      result = gi.public_send(op, *args, **kw)
       out ||= blank_of(result, value.shape)
       out[*val_idx] = result
     end

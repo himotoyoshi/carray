@@ -164,6 +164,9 @@ a = CArray.int32(3, 5).seq
 a.blocks(2, 2).lag[nil, 4]   # => [UNDEF, 4, UNDEF]   (the edge tiles 2x1 and 1x1)
 ```
 
+`order` ranks each cell among its tile's cells (int64, `0` the smallest), with
+the keywords of `CArray#order`; a partial edge tile ranks only the cells it has.
+
 ## Winner address and sorting
 
 Because tiles do not overlap, every tile cell is a real source cell, so the

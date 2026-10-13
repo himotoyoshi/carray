@@ -603,6 +603,48 @@ class CASegmentIterator < CAIterator
     out
   end
 
+  # @overload order(descending: false, method: :ordinal, kind: :quick)
+  #   Returns each cell's rank among the members of its segment, source-shaped
+  #   int64, as `CArray#order` ranks a 1-D array: `0` is the smallest, ties
+  #   are broken by position (`:ordinal`) or share a rank (`:dense`), and
+  #   `descending:` reverses the order. A masked cell, and a cell in no
+  #   segment, is UNDEF.
+  #   @return [CArray]
+  def order (axis: nil, descending: false, method: :ordinal, kind: :quick)
+    return axis_order(axis, descending: descending, method: method, kind: kind) if axis
+    out = CArray.int64(*@src_shape)
+    out[] = UNDEF
+    # The keywords are checked by the core, on no cells, so a segment
+    # iterator refuses what CArray#order refuses.
+    CArray.int64(0).order(descending: descending, method: method, kind: kind)
+    # The core ranks every value once, so the order and the ties are its own.
+    ranks = grouped.order(method: :dense, kind: kind)
+    m = grouped.elements
+    return out if m.zero?
+    seg     = CArray.segment_index(offsets: @bounds)
+    present = ranks.is_not_masked
+    # One key per cell, segment first and a masked cell last in its segment;
+    # a stable sort keeps tied cells in their order.
+    key     = seg * (m + 1) + ranks.strip_mask(m)
+    sorted  = key.sort_index(kind: :stable)
+    first   = @bounds[seg[sorted]]           # where each sorted cell's segment starts
+    local   = CArray.int64(m)
+    if method == :dense
+      skey = key[sorted]
+      step = CArray.int64(m)
+      step[] = 1
+      step[1..-1] = skey[1..-1].ne(skey[0...-1]).int64 if m > 1
+      run = step.cumsum.int64
+      local[sorted] = run - run[first]
+    else
+      local[sorted] = CArray.int64(m).seq! - first
+    end
+    local[present.not] = UNDEF
+    local = (count_not_masked[seg] - 1) - local if descending
+    out.reshape(@value.elements)[perm] = local
+    out
+  end
+
   private
 
   # The contiguous copy every reduction works from. On a CACategoricalIterator
@@ -991,6 +1033,10 @@ class CASegmentIterator < CAIterator
   end
 
   def axis_lag (*)
+    raise NotImplementedError, "#{self.class} has no axis: form"
+  end
+
+  def axis_order (*)
     raise NotImplementedError, "#{self.class} has no axis: form"
   end
 

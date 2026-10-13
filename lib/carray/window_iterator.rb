@@ -1108,6 +1108,18 @@ class CAWindowIterator < CAIterator
           "source.lag(n, axis:) for the lag along an axis."
   end
 
+  # @!method order
+  #   Not supported for a window iterator: a cell belongs to many overlapping
+  #   windows, so it has no single rank. Use `source.order(axis:)` for the
+  #   rank along an axis.
+  #   @raise [NotImplementedError]
+  def order (*, **)
+    raise NotImplementedError,
+          "#{self.class} has no order: a cell belongs to many overlapping windows, " \
+          "so it has no single rank; use source.order(axis:) for the rank along " \
+          "an axis."
+  end
+
   private
 
   # Yield every anchor index (the output iteration space) as an index Array of

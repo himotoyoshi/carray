@@ -72,6 +72,7 @@ a piece *is*.
 | `sort_addr` (per-piece sort → source addresses) | ✓ | — ⁴ | ✓ | ✓ | ✓ | ✓ |
 | `cumsum` / `cumprod` / `cummax` / `cummin` / `cumcount` (per-cell running scan) | ✓ | — ⁴ | ✓ | ✓ | ✓ ⁵ | ✓ |
 | `lag(n)` (the value `n` steps earlier in the same piece) | ✓ ⁶ | — ⁴ | ✓ | ✓ | ✓ ⁵ | ✓ |
+| `order` (each cell's rank within its piece) | ✓ ⁶ | — ⁴ | ✓ | ✓ | ✓ ⁵ | ✓ |
 
 1. Window order statistics, `first` / `last` and `nunique` leave the UNDEF
    margin of the default `:skip` out of each window, as they leave out any
@@ -86,14 +87,14 @@ a piece *is*.
 4. A window's pieces overlap and its margin cells are padding with no source
    address, so a scatter-back (`map`), a per-cell running scan (`cumsum` etc.,
    a cell would land in many windows with no single running value), a
-   per-cell source `sort_addr` and a `lag` (a cell has no single position to
-   step back from) are all ill-defined; use `reduce` for a custom per-window
-   fold, and `CArray#lag(n, axis:)` for a lag along an axis.
-5. A group's scans and `lag` take `axis: :group`; its `cumcount` is the running member
+   per-cell source `sort_addr`, a `lag` (a cell has no single position to
+   step back from) and an `order` (no single rank) are all ill-defined; use `reduce` for a custom per-window
+   fold, and `CArray#lag(n, axis:)` / `CArray#order(axis:)` along an axis.
+5. A group's scans, `lag` and `order` take `axis: :group`; its `cumcount` is the running member
    ordinal within each group.
-6. A slab's `lag` steps along its one slab axis (a multi-axis slab raises, as
-   its scans do) and is a view of the source, as `CArray#lag` is; the other
-   members return a new array.
+6. A slab's `lag` and `order` run along its one slab axis (a multi-axis slab
+   raises, as its scans do); its `lag` is a view of the source, as
+   `CArray#lag` is, where the other members return a new array.
 
 **Reductions vs per-cell surface.** The reductions collapse a piece to one value
 (output = the piece grid). `map` and the scans (`cumsum` …) instead write **one

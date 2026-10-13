@@ -375,6 +375,15 @@ class CASlabIterator < CAIterator
     @reference.lag(n, axis: single_scan_axis(:lag))
   end
 
+  # @overload order(descending: false, method: :ordinal, kind: :quick)
+  #   Per-slab rank of each cell along the slab axis (int64), as
+  #   `reference.order(axis: slab_axis, ...)`. A multi-axis slab has no
+  #   single sort axis, so it raises, as sort_addr does.
+  #   @return [CArray] reference-shaped
+  def order (**kw)
+    @reference.order(axis: single_sort_axis(:order), **CAIterator.reduce_keywords(:order, kw))
+  end
+
   private
 
   # The single slab axis for the order surface (core sort takes one integer
