@@ -71,9 +71,11 @@ class CAWindowIterator < CAIterator
   #   `:nearest` / `:truncate`).  `fill_value:` is a constant margin value
   #   (an escape for `:constant` padding); when given it overrides `:skip`.
   #
-  #   For backward compatibility `initialize(window_view)` accepts a CAWindow
-  #   view (the old `CAWindowIterator.new(a.window(...))` form): the geometry
-  #   (offset ranges, bounds, fill value) is read back from the view.
+  #   For backward compatibility `initialize(window_view)` with no ranges
+  #   accepts a CAWindow view (the old `CAWindowIterator.new(a.window(...))`
+  #   form): the geometry (offset ranges, bounds, fill value) is read back
+  #   from the view.  Given ranges, a CAWindow view is rolled over like any
+  #   other array.
   #
   #   @param source [CArray, CAWindow] the array to roll over, or a CAWindow
   #     view to read the geometry from.
@@ -81,7 +83,7 @@ class CAWindowIterator < CAIterator
   #   @param bounds [Symbol] `:skip` / `:nearest` / `:truncate`.
   #   @param fill_value [Object, nil] constant margin value, overriding :skip.
   def initialize (source, *ranges, bounds: :skip, fill_value: nil)
-    if source.is_a?(CArray) && source.obj_type == CA_OBJ_WINDOW
+    if ranges.empty? && source.is_a?(CArray) && source.obj_type == CA_OBJ_WINDOW
       # Backward-compat: read geometry from a CAWindow view built by #window.
       # start[i] = lo, shape[i] (window width) = w, so hi = lo + w - 1.
       win     = source

@@ -234,6 +234,16 @@ class TestWindowIterator30BackwardCompat < Test::Unit::TestCase
     assert_equal a.windows(-1..1, fill_value: 0.0).sum.to_a,
                  CAWindowIterator.new(kernel).sum.to_a
   end
+
+  # Given ranges, a CAWindow view is an array like any other: the windows
+  # roll over its own cells, not over the array it was cut from.
+  def test_windows_over_a_window_view_roll_over_the_view
+    a = CArray.int32(2).seq
+    w = a.window(-1..2)
+    assert_equal w.copy.windows(-1..1).sum.to_a, w.windows(-1..1).sum.to_a
+    e = CArray.int32(0).window(-1..1)
+    assert_equal [3], e.windows(-1..1).mean.shape
+  end
 end
 
 
