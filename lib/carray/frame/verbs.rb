@@ -938,6 +938,7 @@ class CAFrame
     @columns.keys.each_with_index do |key, i|
       coerced = promoted[i]
       next if coerced.equal?(cols[i])
+      # coerce: the type promote_list chose
       @columns[key] = cols[i].to_type(coerced.data_type)
     end
   end

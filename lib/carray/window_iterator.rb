@@ -573,6 +573,7 @@ class CAWindowIterator < CAIterator
       divisor = counts.copy
       divisor[counts.eq(0)] = 1
     end
+    # coerce: the mean's fixed compute type
     accumulate_offsets(:sum).to_type(offset_fold_data_type(:mean)) / divisor
   end
 

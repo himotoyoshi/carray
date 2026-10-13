@@ -251,6 +251,7 @@ fz_face_reconcile (VALUE reference, VALUE operand, const char *name)
     }
     GetCArray(operand, op);
     if ( op->data_type != ca->data_type ) {
+      /* coerce: the callers have met both sides at result_type already */
       operand = rb_ca_to_type(operand, INT2NUM(ca->data_type), Qnil);
     }
     return fz_complex_key(operand);

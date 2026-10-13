@@ -164,6 +164,7 @@ class CArray
       #  midpoints go the same way as numpy's integer linspace).
       float_out = CArray.new(CA_FLOAT64, [n]).span(x1.to_f..x2.to_f)
       return float_out if data_type == CA_FLOAT64
+      # coerce: the type the caller asked for
       float_out.floor.to_type(data_type)
     end
 

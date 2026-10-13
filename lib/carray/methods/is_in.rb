@@ -224,8 +224,10 @@ class CArray
       # set for not matching self.  Same rule the scalar operand of a
       # comparison follows: a String standing in for a cell is padded to the
       # cell's width.
+      # coerce: a fixlen or object set holds values of self's kind (see above)
       [self, elems.to_ca.to_type(data_type, bytes: bytes)]
     elsif data_type == CA_OBJECT
+      # coerce: an object set holds values of self's kind
       [self, elems.to_ca.to_type(data_type)]
     elsif elems.any? { |v| v.is_a?(String) || v.is_a?(Symbol) }
       # A String is a value, which result_type would read as the name of a

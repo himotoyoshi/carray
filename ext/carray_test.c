@@ -249,6 +249,7 @@ rb_ca_has_same_shape (VALUE self, VALUE other)
 {
   CArray *ca, *cb;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  /* coerce: only the shape is compared */
   cb = ca_wrap_readonly(other, ca->data_type);
   return ca_has_same_shape(ca, cb) ? Qtrue : Qfalse;
 }

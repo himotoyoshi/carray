@@ -321,6 +321,7 @@ class CArray
 
       if weights
         raise ArgumentError, "weights given but accumulator is unweighted" unless @weighted
+        # coerce: the accumulator's type, declared by weights_data_type:
         weights = CArray.wrap_readonly(weights, @counts_data_type)
         expected_w_shape = chunk.shape.dup
         expected_w_shape.delete_at(channel_ax)

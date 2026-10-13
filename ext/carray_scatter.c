@@ -243,6 +243,7 @@
     else                          { vl = (rvals == Qtrue) ? 1 : 0; v_is_float = 0; } \
   } \
   else { \
+    /* coerce: a store into the receiver */ \
     rvals = rb_ca_wrap_readonly(rvals, INT2NUM(ca->data_type)); \
     TypedData_Get_Struct(rvals, CArray, &carray_data_type, cv); \
     if ( ca_shares_root(cv, ca) ) { \
