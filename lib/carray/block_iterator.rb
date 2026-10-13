@@ -814,7 +814,7 @@ class CABlockIterator < CAIterator
       if pshape == @source.shape.to_a
         @source
       else
-        pad = CArray.new(@source.data_type, pshape, bytes: @source.bytes)
+        pad = @source.__send__(:__blank_like__, pshape)   # a Face stays one
         pad[] = UNDEF
         pad[*@sndim.times.map { |i| 0...@source.shape[i] }] = @source
         pad

@@ -30,6 +30,7 @@
 #include "carray.h"
 #include "carray_internal.h"   /* ca_attach_window, ca_calling_method_name, ca_axis_integer */
 #include "carray_slab.h"
+#include "ca_obj_face.h"
 
 /* Forward declarations: per-form loop bodies are defined later in this
    file and take a state pointer directly. */
@@ -626,10 +627,26 @@ ca_map_slab_cast_body (VALUE arg)
   return Qnil;
 }
 
+/* What the block sees of the slab: the slab view itself, or, over a Face,
+   the slab view under that Face, as `a[...]` would give it.  The slab
+   view is moved per slab in place, and the Face reads through it, so one
+   is built per walk. */
+static VALUE
+ca_slab_piece (ca_slab_iter_state_t *st)
+{
+  CArray *src;
+  TypedData_Get_Struct(st->self, CArray, &carray_data_type, src);
+  if ( ! ca_is_face(src) ) {
+    return st->slab_view;
+  }
+  return ca_face_lift(st->slab_view, st->self);
+}
+
 static VALUE
 ca_slab_run_map (ca_slab_iter_state_t *st)
 {
   CArray *src;
+  volatile VALUE piece;
   CArray *out;
   uint32_t flags_in;
   uint32_t flags_out;
@@ -715,6 +732,7 @@ ca_slab_run_map (ca_slab_iter_state_t *st)
     TypedData_Get_Struct(st->output_slab_view, CAWrap,
                          &cawrap_data_type, out_slab_cw);
 
+    piece = ca_slab_piece(st);
     while ( ca_iter_state_next_slab_axes(st->t1,     &p_in,  &m_in) &&
             ca_iter_state_next_slab_axes(st->t1_out, &p_out, &m_out) ) {
       VALUE result;
@@ -732,7 +750,7 @@ ca_slab_run_map (ca_slab_iter_state_t *st)
                              ? st->own_out_scratch : p_out;
         out_slab_cw->ptr = write_target;
 
-        result = rb_yield(st->slab_view);
+        result = rb_yield(piece);
 
         /* Strict shape check. */
         if ( rb_obj_is_kind_of(result, rb_cCArray) ) {
@@ -902,6 +920,7 @@ static VALUE
 ca_slab_run_reduce_slab (ca_slab_iter_state_t *st)
 {
   CArray *src;
+  volatile VALUE piece;
   CArray *out;
   ca_size_t fiber_len;
   char *p_in;
@@ -927,13 +946,14 @@ ca_slab_run_reduce_slab (ca_slab_iter_state_t *st)
   scratch = (st->out_bytes <= (ca_size_t) sizeof(buf))
               ? buf : ALLOCV_N(char, scratch_holder, st->out_bytes);
 
+  piece = ca_slab_piece(st);
   while ( ca_iter_state_next_slab_axes(st->t1, &p_in, &m_in) ) {
     VALUE result;
 
     ca_slab_advance_slab_view(st, slab_cs, carrier_cw,
                               src, p_in, m_in, in_alias);
 
-    result = rb_yield(st->slab_view);
+    result = rb_yield(piece);
 
     /* Strict scalar contract: block must return a scalar Ruby value
        (Numeric / Object / etc.).  A CArray is a
@@ -968,6 +988,7 @@ static VALUE
 ca_slab_run_reduce_fiber (ca_slab_iter_state_t *st)
 {
   CArray *src;
+  volatile VALUE piece;
   CArray *out;
   ca_size_t fiber_len;
   char *p_in;
@@ -993,6 +1014,7 @@ ca_slab_run_reduce_fiber (ca_slab_iter_state_t *st)
   scratch = (st->out_bytes <= (ca_size_t) sizeof(buf))
               ? buf : ALLOCV_N(char, scratch_holder, st->out_bytes);
 
+  piece = ca_slab_piece(st);
   while ( ca_iter_state_next_slab_axes(st->t1, &p_in, &m_in) ) {
     VALUE acc;
     ca_size_t i;
@@ -1010,7 +1032,7 @@ ca_slab_run_reduce_fiber (ca_slab_iter_state_t *st)
       ca_size_t total = st->t1->slab_elements;
       for ( i = 0; i < total; i++ ) {
         VALUE x;
-        x = rb_ca_fetch_index(st->slab_view, kidx);
+        x = rb_ca_fetch_index(piece, kidx);
         acc = rb_yield_values(2, acc, x);
         /* Increment kidx[] row-major. */
         for ( k = slab_cs->ndim - 1; k >= 0; k-- ) {
@@ -1049,6 +1071,7 @@ static VALUE
 ca_slab_run_each (ca_slab_iter_state_t *st)
 {
   CArray *src;
+  volatile VALUE piece;
   char *p_in;
   boolean8_t *m_in;
   CAStride *slab_cs;
@@ -1082,10 +1105,11 @@ ca_slab_run_each (ca_slab_iter_state_t *st)
     TypedData_Get_Struct(st->carrier, CAWrap, &cawrap_data_type, carrier_cw);
   }
 
+  piece = ca_slab_piece(st);
   while ( ca_iter_state_next_slab_axes(st->t1, &p_in, &m_in) ) {
     ca_slab_advance_slab_view(st, slab_cs, carrier_cw,
                               src, p_in, m_in, in_alias);
-    rb_yield(st->slab_view);    /* return value discarded */
+    rb_yield(piece);    /* return value discarded */
   }
 
   return st->self;
