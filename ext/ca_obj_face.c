@@ -1134,7 +1134,10 @@ ca_face_reconcile_comparison (volatile VALUE *pself, volatile VALUE *pother)
   }
 
   {
-    int other_was_scalar = ! RTEST(rb_obj_is_carray(other));
+    /* A Ruby Array is a list of values (to_comparable reads it cell by
+       cell), not one value, so it keeps the length it was given. */
+    int other_was_scalar = ! RTEST(rb_obj_is_carray(other))
+                           && ! RB_TYPE_P(other, T_ARRAY);
     volatile VALUE ref = self, op = other;
     ca_face_reconcile_pair(&ref, &op, "comparison");
     /* The reconcile lifts a scalar operand to a length-1 array; unwrap it

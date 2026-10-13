@@ -549,6 +549,9 @@ module CATimeOperandValues
     return operand if operand.is_a?(self.class)
     case operand
     when Array
+      # A nested Array keeps its shape; reading it row by row would land
+      # each row as one value.
+      return lift_operand(CA_OBJECT(operand)) if operand.any?(Array)
       lifted = operand.map { |v| UNDEF.equal?(v) ? nil : lift_operand(v) }
       units  = lifted.compact.map(&:unit)
       u = units.empty? ? unit : units.reduce { |a, b| common_unit(a, b) }
