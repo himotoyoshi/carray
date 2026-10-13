@@ -17,6 +17,41 @@ class CAFrame
     GroupedFrame.new(self, cat, axis, keys.grep(String), key: key)
   end
 
+  # Whether each row repeats an earlier row: a boolean column, true for the
+  # second and later rows with the same values in the named columns (every
+  # column when none are named), false for the first. Values compare as
+  # group_by compares keys (NaN is one value, -0.0 is 0.0), and a row with a
+  # masked cell in those columns is never a duplicate, as a masked key is in
+  # no group. The index is not compared.
+  #
+  #   df[df.is_duplicate.not]                # the rows without repeats
+  #   df.is_duplicate("station", "time")     # repeats of the pair
+  #
+  # @param names [Array<String>] the columns to compare; default every column.
+  # @return [CArray] boolean, one value per row.
+  # @raise [KeyError] for a name that is no column.
+  # @raise [ArgumentError] when a compared column is N-D, or there is no
+  #   column to compare.
+  def is_duplicate(*names)
+    names = names.map { |n| column_key(n, "is_duplicate") }
+    names = column_names if names.empty?
+    raise ArgumentError, "is_duplicate: the frame has no column to compare" if names.empty?
+    cols = names.map do |n|
+      col = @columns.fetch(n) { raise KeyError, "is_duplicate: no column #{n.inspect}" }
+      unless col.ndim == 1
+        raise ArgumentError,
+              "is_duplicate: #{n.inspect} has shape #{col.shape.inspect}, not one value " \
+              "per row; compare one of its components (df[#{n.inspect}][nil, 0])"
+      end
+      col
+    end
+    codes = (cols.size == 1 ? cols.first.categorize : composite_categorical(cols)).codes
+    seen  = codes.mask_duplicates
+    out   = seen.is_masked
+    out   = out & codes.is_not_masked if codes.has_mask?
+    out
+  end
+
   # Group rows into time bins of length +unit+ along the time column (or the
   # time index) +name+, for the reductions GroupedFrame offers:
   #

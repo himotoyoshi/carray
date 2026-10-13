@@ -502,6 +502,20 @@ df.sort_by { |f| f["temp"].order(descending: true, method: :dense) } # a descend
 
 `sort_by` also takes `masked_position:`. For a descending key, use `col.order(descending: true, method: :dense)` as above; it works for any type, where negating a value does not, and it keeps ties as ties when several keys are combined. (`sort_by_key` builds its descending keys the same way.)
 
+### Repeated rows — `is_duplicate`
+
+`is_duplicate(*names)` tells which rows repeat an earlier one: a boolean column, `true` for the second and later rows with the same values in the named columns (every column when none are named), `false` for the first. Pass its negation as a row key to keep one row of each:
+
+```ruby
+df[df.is_duplicate.not]                    # one row of each, the first
+df.is_duplicate("station", "time")         # repeats of the pair only
+df.is_duplicate.count(true)                # how many rows repeat an earlier one
+```
+
+- Values compare as [`group_by`](#keys-and-groups) compares keys: NaN is one value, and `-0.0` and `0.0` are one value.
+- A row with a masked cell in the compared columns is never a duplicate, as a row with a masked key belongs to no group.
+- The index is not compared, and an N-D column cannot be: compare one of its components.
+
 ---
 
 ## Editing columns

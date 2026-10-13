@@ -321,6 +321,20 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     assert_equal 'sum: column "station" (object) has no sum', err.message
   end
 
+  def test_is_duplicate_marks_later_repeats
+    df = CAFrame.new("a" => CA_INT32([1, 1, 2, 1, 2, 1]),
+                     "b" => CA_OBJECT(%w[x x y z y x]),
+                     "f" => CA_FLOAT64([Float::NAN, Float::NAN, 0.0, 1, -0.0, 3]))
+    df["a"][5] = UNDEF
+    assert_equal [false, true, false, false, true, false], df.is_duplicate.to_a
+    assert_equal [false, true, false, true, true, false], df.is_duplicate("a").to_a
+    assert_equal [false, true, false, false, true, false], df.is_duplicate("f").to_a
+    assert_equal 4, df[df.is_duplicate("a", "b").not].nrow
+    assert_raise(TypeError) { df.is_duplicate(:a) }
+    assert_raise(KeyError) { df.is_duplicate("zz") }
+    assert_raise(ArgumentError) { CAFrame.new("v" => CArray.float64(3, 2)).is_duplicate }
+  end
+
   def test_keep_rows_keeps_the_index
     df = CAFrame.new({ "k" => CA_OBJECT(%w[a b a]), "v" => CA_FLOAT64([1, 2, 5]) }, index: CA_INT32([7, 8, 9]), axis_name: "id")
     m = df.group_by("k").mean(keep_rows: true)

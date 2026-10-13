@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: `CAFrame#is_duplicate(*names)` gives a boolean column, true for the
+  rows that repeat an earlier row in the named columns (every column when
+  none are named); `df[df.is_duplicate.not]` keeps one row of each. A row
+  with a masked cell in those columns is never a duplicate.
+
 - Fix: `CAFrame.from_records` with records that spell one column both as a
   Symbol and as a String (`{ :temp => 1, "temp" => 2 }`, or `temp:` in one
   record and `"temp"` in another) kept one of the values and dropped the
