@@ -325,7 +325,7 @@ class CArray
   #   @param ufill [Object, nil] override above-range fill.
   #   @return [CArray] new CArray with clamped or filled values.
   #   @raise [ArgumentError] when both `min` and `max` are `nil`,
-  #     or when `min` exceeds `max`.
+  #     when either is `UNDEF`, or when `min` exceeds `max`.
   #   @example
   #     a.clip(0, 10)                          # strict clamp
   #     a.clip(0, 10, -1)                      # both ends -> -1
@@ -333,6 +333,10 @@ class CArray
   def clip(min, max=nil, fill_value=nil, lfill: nil, ufill: nil)
     if min.nil? && max.nil?
       raise ArgumentError, "clip: at least one of (min, max) must be given"
+    end
+    if UNDEF.equal?(min) || UNDEF.equal?(max)
+      raise ArgumentError, "clip: a bound can not be UNDEF " \
+                           "(pass UNDEF as the fill to mask the cells out of range)"
     end
     return __face_clip__(min, max, fill_value, lfill, ufill) if face?
     if !min.nil? && !max.nil?
