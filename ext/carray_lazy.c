@@ -80,10 +80,6 @@ ca_lazy_marker_setup (CALazyMarker *ca, CArray *parent)
 
   memcpy(ca->dim, parent->dim, parent->ndim * sizeof(ca_size_t));
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask(ca);
-  }
-
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
   }
@@ -105,8 +101,10 @@ ca_lazy_marker_setup (CALazyMarker *ca, CArray *parent)
 CALazyMarker *
 ca_lazy_marker_new (CArray *parent)
 {
+  /* check: the setup checks nothing */
   CALazyMarker *ca = ALLOC(CALazyMarker);
   ca_lazy_marker_setup(ca, parent);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -831,6 +829,7 @@ rb_ca_lazy_marker_initialize_copy (VALUE self, VALUE other)
   ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CALazyMarker, &calazy_marker_data_type, cs);
   ca_lazy_marker_setup(ca, cs->parent);
+  ca_view_inherit_mask((VALUE) ca);
   return self;
 }
 

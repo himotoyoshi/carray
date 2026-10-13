@@ -6,7 +6,7 @@
 # and everything the setup allocated.  The constructor asks afterwards,
 # under ca_fill_or_free: ca_view_inherit_mask (carray_internal.h).
 #
-# This check reads the functions of ext/ca_obj_*.c whose name ends in
+# This check reads the functions of ext/*.c whose name ends in
 # _setup, _setup_view or _setup_i and reports a call of
 #
 #   ca_has_mask(   ca_create_mask(   ca_update_mask(   ca_setup_mask(
@@ -44,7 +44,7 @@ end
 
 paths =
   if ARGV.empty?
-    Dir[File.join(ROOT, "ext", "ca_obj_*.c")].sort
+    Dir[File.join(ROOT, "ext", "*.c")].sort.reject { |p| p =~ %r{/carray_kernels_} }
   else
     ARGV.flat_map { |a| File.directory?(a) ? Dir[File.join(a, "**", "*.c")].sort : [a] }
   end

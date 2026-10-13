@@ -32,6 +32,7 @@ class TestViewParentMaskRaiseCleanup < Test::Unit::TestCase
     "b[0..0, nil, nil, nil, nil, nil, nil, nil]",
     "b.reshape(256)",
     "b.shift(*[1] * 8, fill_value: UNDEF)",
+    "b.lazy",
   ]
 
   def test_raises
