@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: `is_in`, `intersection`, `difference` and `union` refuse a Range
+  (`ArgumentError`). They read it as the set of its steps, so
+  `float_array.is_in(2..4)` missed 2.5, a float or endless Range raised,
+  and a long one built every step. Pass the values as an Array
+  (`a.is_in((1..3).to_a)`), or compare an interval as
+  `(a >= lo) & (a <= hi)`. `locate_addr` and `CAFrame#align` still take a
+  Range as the list of its steps.
+
 - Fix: `is_in` with a single value (`float_array.is_in(2)`) compared in the
   object lane, so a float array never found an Integer; the set operations
   (`intersection` and the others) did the same. A single value is now a set

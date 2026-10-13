@@ -42,9 +42,19 @@ class TestIsIn < Test::Unit::TestCase
     assert_equal [false, true, true], f.is_in([2, 3]).to_a
   end
 
-  def test_range_argument
+  # A Range reads as an interval, which the set of its steps is not (2.5 is
+  # not in [2, 3, 4]), so it is refused; its values go in as an Array.
+  def test_a_range_is_refused
     a = CA_INT32([1, 2, 3, 4, 5])
-    assert_equal [true, true, true, false, false], a.is_in(1..3).to_a
+    err = assert_raise(ArgumentError) { a.is_in(1..3) }
+    assert_equal "is_in: a Range is not taken as a set; pass its values as an Array " \
+                 "((1..3).to_a), or compare an interval as (a >= lo) & (a <= hi)", err.message
+    assert_equal [true, true, true, false, false], a.is_in((1..3).to_a).to_a
+    assert_raise(ArgumentError) { CA_FLOAT64([2.5]).is_in(2..4) }
+    assert_raise(ArgumentError) { a.intersection(1..2) }
+    assert_raise(ArgumentError) { a.difference(1..2) }
+    assert_raise(ArgumentError) { a.union(1..2) }
+    assert_raise(ArgumentError) { CA_OBJECT(%w[a b]).categorize.is_in("a".."b") }
   end
 
   def test_empty_set_all_false
@@ -187,10 +197,9 @@ class TestIsIn < Test::Unit::TestCase
     assert_equal 0, a.intersection(b).elements
   end
 
-  def test_set_ops_coerce_and_range_and_view
+  def test_set_ops_coerce_and_view
     a = CA_INT32([[1, 2, 3], [4, 5, 6]])
     assert_equal [2, 3], a[0, nil].intersection([2, 3, 9]).to_a   # view + Array
-    assert_equal [1, 2], a[0, nil].intersection(1..2).to_a        # Range
     f = CA_DOUBLE([1.0, 2.0, 3.0])
     assert_equal [2.0, 3.0], f.intersection([2, 3, 9]).to_a       # dtype coerce
   end

@@ -48,6 +48,7 @@
 # ----------------------------------------------------------------------------
 
 require "carray"
+require "carray/methods/is_in"   # refuse_range_set, for the set-valued verbs
 
 # Categorical column: dense integer codes plus a label vocabulary, so each
 # element is an index into a small set of categories.  Structurally the same
@@ -446,6 +447,7 @@ class CACategorical < CAObject
   #   @param values [Array, CArray, CACategorical] labels to test against.
   #   @return [CArray]
   def is_in (values)
+    refuse_range_set(values, "is_in")
     wanted = label_list(values).filter_map { |l| @labels.index(l) }
     codes.is_in(CArray.int64(wanted.size) { |i| wanted[i] })
   end
@@ -453,18 +455,21 @@ class CACategorical < CAObject
   # @overload intersection(other, sort: false)
   #   @return [CArray] object CArray of the labels present in both.
   def intersection (other, sort: false)
+    refuse_range_set(other, "intersection")
     unique.intersection(label_array(other), sort: sort)
   end
 
   # @overload difference(other, sort: false)
   #   @return [CArray] object CArray of the labels only `self` has.
   def difference (other, sort: false)
+    refuse_range_set(other, "difference")
     unique.difference(label_array(other), sort: sort)
   end
 
   # @overload union(other, sort: false)
   #   @return [CArray] object CArray of the labels of either side.
   def union (other, sort: false)
+    refuse_range_set(other, "union")
     unique.union(label_array(other), sort: sort)
   end
 

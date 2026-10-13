@@ -103,11 +103,12 @@ class TestFaceOperandReconcile < Test::Unit::TestCase
   def test_comparable_face_meets_a_set_as_its_storage_type_would
     plain = PlainTicks.new(CA_INT64([3, 1]))
     base  = CA_INT64([3, 1])
-    [CA_INT64([3, 9]), CA_FLOAT64([3.0, 9.5]), [3, 9], 3, (2..3)].each do |set|
+    [CA_INT64([3, 9]), CA_FLOAT64([3.0, 9.5]), [3, 9], 3, (2..3).to_a].each do |set|
       assert_equal base.is_in(set).to_a, plain.is_in(set).to_a, set.inspect
       assert_equal base.intersection(set).to_a, plain.intersection(set).to_a, set.inspect
     end
     assert_kind_of PlainTicks, plain.intersection(CA_INT64([3, 9]))
+    assert_raise(ArgumentError) { plain.is_in(2..3) }
   end
 
   def test_time_takes_a_single_value_as_a_set_of_one

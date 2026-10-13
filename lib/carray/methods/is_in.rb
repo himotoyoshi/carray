@@ -5,7 +5,7 @@ class CArray
   #   each cell whose value appears in the set `values`.
   #
   #   `values` is treated as a set, not as an operand to broadcast: it
-  #   may be any shape (or an Array / Range) and is flattened to a
+  #   may be any shape (or an Array) and is flattened to a
   #   single seen-set, so its shape need not match `self`. Only one
   #   argument is accepted; to test a few immediate values pass an
   #   Array (`a.is_in([0, -1])`). A single value is a set of one, as
@@ -47,8 +47,10 @@ class CArray
   #   For a per-fiber "does this fiber contain any of these values"
   #   reduction, compose with {#any}: `a.is_in(values).any(axis: k)`.
   #
-  #   @param values [CArray, Array, Range] the set to test membership
+  #   @param values [CArray, Array] the set to test membership
   #     against. Promoted with `self` to a common data type.
+  #   @raise [ArgumentError] for a Range, which reads as an interval rather
+  #     than the set of its steps.
   #   Between two time arrays the question is about instants, not ticks:
   #   `values` is reconciled into `self`'s unit first, so a `:D` array and an
   #   `:h` array match on the instants they share.  The same holds for the set
@@ -56,6 +58,7 @@ class CArray
   #
   #   @return [CArray] boolean CArray of the same shape as `self`.
   def is_in (values)
+    refuse_range_set(values, "is_in")
     a, b = promote_value_set(values)
     a.__send__(:__is_in__, b)
   end
@@ -70,11 +73,12 @@ class CArray
   #   always flat, like {#unique}, because the distinct values of a
   #   fiber vary in number.
   #
-  #   @param other [CArray, Array, Range] promoted with `self`.
+  #   @param other [CArray, Array] promoted with `self` (a Range is refused, as by {#is_in}).
   #   @param sort [Boolean] when true, return the values sorted
   #     ascending instead of in first-appearance order.
   #   @return [CArray] 1-D CArray of the common distinct values.
   def intersection (other, sort: false)
+    refuse_range_set(other, "intersection")
     a, b = promote_value_set(other)
     r = a.__send__(:__intersection__, b)
     r = r.to_unit(unit) if !a.equal?(self) && respond_to?(:in_common_unit_with)
@@ -86,10 +90,11 @@ class CArray
   #   absent from `other`, in `self`'s first-appearance order.
   #   See {#intersection} for the shared semantics and options.
   #
-  #   @param other [CArray, Array, Range] promoted with `self`.
+  #   @param other [CArray, Array] promoted with `self` (a Range is refused, as by {#is_in}).
   #   @param sort [Boolean] when true, return the values sorted ascending.
   #   @return [CArray] 1-D CArray of the self-only distinct values.
   def difference (other, sort: false)
+    refuse_range_set(other, "difference")
     a, b = promote_value_set(other)
     r = a.__send__(:__difference__, b)
     r = r.to_unit(unit) if !a.equal?(self) && respond_to?(:in_common_unit_with)
@@ -104,17 +109,28 @@ class CArray
   #   holds the values of both ({#intersection} and {#difference} answer in
   #   `self`'s unit, since their values are `self`'s).
   #
-  #   @param other [CArray, Array, Range] promoted with `self`.
+  #   @param other [CArray, Array] promoted with `self` (a Range is refused, as by {#is_in}).
   #   @param sort [Boolean] when true, return the values sorted ascending
   #     (a merged, ordered set — e.g. a common time axis).
   #   @return [CArray] 1-D CArray of the combined distinct values.
   def union (other, sort: false)
+    refuse_range_set(other, "union")
     a, b = promote_value_set(other)
     r = a.__send__(:__union__, b)
     sort ? r.sort : r
   end
 
   private
+
+  # A Range reads as an interval in Ruby, which a set of its steps is not
+  # (2.5 is not in [2, 3, 4]), so the set-valued verbs refuse one rather
+  # than answer for the steps.
+  def refuse_range_set (values, verb)
+    return unless values.is_a?(Range)
+    raise ArgumentError,
+          "#{verb}: a Range is not taken as a set; pass its values as an Array " \
+          "((#{values.inspect}).to_a), or compare an interval as (a >= lo) & (a <= hi)"
+  end
 
   # Reconcile a set-valued argument with self to a common data_type via
   # CArray.result_type (the single-source promotion rule the eager binop and
