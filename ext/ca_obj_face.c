@@ -206,6 +206,23 @@ ca_face_relift_entity (VALUE face, VALUE result)
   return lifted;
 }
 
+/* A lift moves a view built on a wrapper (a Face or the lazy marker) one
+ * level down, onto what the wrapper wraps, so the view no longer keeps the
+ * wrapper alive.  The view's mask was built over the wrapper's mask, which
+ * the wrapper owns and frees with itself; move it down the same level.
+ * The wrapper's mask is a same-shape refer of its parent's mask, so the
+ * mask view addresses the same cells there. */
+static void
+ca_lift_move_mask_down (CArray *view_ca, CArray *wp)
+{
+  CArray *below = ((CAView *) wp)->parent;
+  if ( view_ca->mask && wp->mask && ca_is_view(wp->mask)
+       && ((CAView *) wp->mask)->parent == below->mask
+       && ((CAView *) view_ca->mask)->parent == wp->mask ) {
+    ((CAView *) view_ca->mask)->parent = below->mask;
+  }
+}
+
 /* ca_face_lift(view, face_parent) — at the tail of user-facing entry
  * points (`ca[...]` etc.), when the operand was a Face, re-wrap the
  * resulting view as a Face of the same subclass.  Thin wrapper over
@@ -268,16 +285,7 @@ ca_face_lift (VALUE view, VALUE face_parent)
          && ! ca_test_flag(view_ca, CA_FLAG_MULTI_PARENTS) ) {
       ((CAView *) view_ca)->parent = ((CAView *) fp)->parent;   /* C pointer: one level */
       rb_ca_set_parent(view, rb_ca_parent(face_parent));        /* @parent ivar: lockstep */
-      /* The view's mask was built over the Face's mask, which the Face
-         owns and frees with itself.  Once the view no longer keeps the
-         Face alive, move the mask down the same level.  The Face's mask
-         is a same-shape refer of its parent's mask, so the mask view
-         addresses the same cells there. */
-      if ( view_ca->mask && fp->mask && ca_is_view(fp->mask)
-           && ((CAView *) fp->mask)->parent == ((CAView *) fp)->parent->mask
-           && ((CAView *) view_ca->mask)->parent == fp->mask ) {
-        ((CAView *) view_ca->mask)->parent = ((CAView *) fp)->parent->mask;
-      }
+      ca_lift_move_mask_down(view_ca, fp);
     }
   }
 
@@ -364,6 +372,7 @@ ca_lazy_marker_lift (VALUE view, VALUE marker)
        && ! ca_test_flag(view_ca, CA_FLAG_MULTI_PARENTS) ) {
     ((CAView *) view_ca)->parent = ((CAView *) mp)->parent;  /* C pointer */
     rb_ca_set_parent(view, rb_ca_parent(marker));            /* @parent ivar */
+    ca_lift_move_mask_down(view_ca, mp);
   }
 
   return rb_ca_lazy_marker_new(view);

@@ -1,9 +1,10 @@
-# A view taken through a Face is moved one level down when it is lifted: its
-# parent becomes the Face's parent, so the view no longer keeps the Face
-# alive.  Its mask must move with it.  The mask was built over the Face's
-# mask, which the Face frees with itself; left there, the view's mask read
-# freed memory once the intermediate Face was collected (wrong mask bits,
-# then crashes in each_slab and the kernel iterator).
+# A view taken through a Face, or through the lazy marker of `.lazy`, is
+# moved one level down when it is lifted: its parent becomes the wrapper's
+# parent, so the view no longer keeps the wrapper alive.  Its mask must move
+# with it.  The mask was built over the wrapper's mask, which the wrapper
+# frees with itself; left there, the view's mask read freed memory once the
+# intermediate wrapper was collected (wrong mask bits, then crashes in
+# each_slab and the kernel iterator).
 
 require "test/unit"
 require "carray"
@@ -58,6 +59,23 @@ class TestFaceLiftMaskParent < Test::Unit::TestCase
                      pieces.map(&:count_masked)
       end
     end
+  end
+
+  def test_view_mask_outlives_intermediate_lazy_marker
+    a = CArray.float64(20).seq
+    a[1] = UNDEF
+    a[6] = UNDEF
+    want = a.reshape(4, 5)[nil, 1..3].is_masked.to_a
+    got = under_gc_stress { a.lazy.reshape(4, 5)[nil, 1..3].is_masked.to_a }
+    assert_equal want, got
+  end
+
+  def test_lazy_view_mask_stays_read_only
+    a = CArray.float64(20).seq
+    a[1] = UNDEF
+    v = a.lazy.reshape(4, 5)[nil, 1..3]
+    GC.start
+    assert_raise(RuntimeError) { v.mask[0, 0] = 1 }
   end
 
 end

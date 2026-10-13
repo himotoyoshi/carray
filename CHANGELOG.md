@@ -36,11 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
-- Fix: a view taken from a masked Face (`CATime`, `CATimedelta`, ...) and
-  kept after the intermediate Face was dropped, such as
-  `t.reshape(4, 5)[nil, 1..3]`, could read its mask from freed memory once
-  the garbage collector ran. The mask came out wrong, and `each_slab` or
-  the iterator reductions over such a view could crash.
+- Fix: a view taken from a masked Face (`CATime`, `CATimedelta`, ...) or
+  from a masked array through `.lazy`, and kept after the intermediate
+  array was dropped, such as `t.reshape(4, 5)[nil, 1..3]` or
+  `a.lazy.reshape(4, 5)[nil, 1..3]`, could read its mask from freed memory
+  once the garbage collector ran. The mask came out wrong, and reading it,
+  `each_slab` or the iterator reductions over such a view could crash.
 
 - New: `windows(on:, before:, after:)` bounds each window by a width of a
   key -- a time, a duration or a number -- instead of a count of cells:
