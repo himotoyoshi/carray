@@ -246,4 +246,23 @@ class TestIntegerEdges < Test::Unit::TestCase
   def test_signed_overflow_wraps_in_the_recorded_build_flags
     assert_include CArray::BUILD_FLAGS.split, "-fwrapv"
   end
+
+  # -- seq ------------------------------------------------------------
+
+  # An integer array refuses a first value or an Integer step it cannot
+  # hold.  Taken modulo the type, int32.seq(0, 2**40) was all zeros.  An
+  # unsigned array takes a negative step, and a run past the end of the
+  # type wraps as integer arithmetic does.
+  def test_seq_refuses_a_first_value_or_step_the_type_cannot_hold
+    assert_raise(RangeError) { CArray.int32(3).seq(0, 2**40) }
+    assert_raise(RangeError) { CArray.int32(2, 2).seq(0, 2**40, axis: 0) }
+    assert_raise(RangeError) { CArray.int8(3).seq(300, 1) }
+    assert_raise(RangeError) { CArray.int8(3).seq(300.0, 1) }
+    assert_raise(RangeError) { CArray.uint8(2).seq(-1, 1) }
+    assert_raise(RangeError) { CArray.uint8(2).seq!(10, -256) }
+    assert_equal [10, 9, 8, 7], CArray.uint8(4).seq(10, -1).to_a
+    assert_equal [0, 2**64 - 1], CArray.uint64(2).seq(0, -1).to_a
+    assert_equal [120, 125, -126, -121], CArray.int8(4).seq(120, 5).to_a
+    assert_equal [1, 1, 2], CArray.int8(3).seq(1.5, 0.5).to_a
+  end
 end

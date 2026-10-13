@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: `seq` and `seq!` on an integer array raise `RangeError` when the
+  first value does not fit the type (`int8.seq(300)`), or an Integer step
+  is larger than the type can hold (`int32.seq(0, 2**40)` came out all
+  zeros). An unsigned array still takes a negative step, and a run that
+  passes the end of the type still wraps.
+
 - Change: reading a NaN into an integer cell through `as_type` (and
   `as_int32` etc.), `fake`, `CArray.wrap_readonly`, `clip_int32` etc., or
   storing a float array into an integer array (`ints[] = floats`), raises

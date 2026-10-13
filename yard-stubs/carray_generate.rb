@@ -49,6 +49,10 @@ class CArray
   #   @return [self]
   #   @raise [ArgumentError] if `axis` is out of range or not a single
   #     integer.
+  #   @raise [RangeError] for an integer array, if `init_val` does not fit
+  #     its type, or an Integer `step` is larger than the type can hold. An
+  #     unsigned array takes a negative step (a descending run). A run that
+  #     passes the end of the type wraps, as integer arithmetic does.
   def seq!(*); end
 
   # @overload seq(init_val = 0, step = 1, axis: nil)
