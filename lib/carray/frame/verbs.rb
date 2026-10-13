@@ -854,9 +854,18 @@ class CAFrame
 
   # nil, UNDEF and a blank String are missing values.
   # Every present cell is true or false in some case, and one is present.
+  # The first present cell settles most columns, so the distinct words are
+  # gathered only when it is one.
   private def boolean_word_column?(col)
+    first = nil
+    col.each { |v| unless missing_text?(v) then first = v; break end }
+    return false unless first && boolean_word?(first)
     words = time_text_of(col).unique.to_a.reject { |v| missing_text?(v) }
-    !words.empty? && words.all? { |v| %w[true false].include?(v.to_s.strip.downcase) }
+    words.all? { |v| boolean_word?(v) }
+  end
+
+  private def boolean_word?(cell)
+    %w[true false].include?(cell.to_s.strip.downcase)
   end
 
   private def missing_text?(cell)
