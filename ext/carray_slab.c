@@ -916,6 +916,31 @@ ca_slab_reduce_setup (ca_slab_iter_state_t *st, CArray **out_src,
 /* Per-slab block form: block receives the slab CArray, returns a
    scalar; each scalar is cast into the corresponding output cell.
    (`init:` absent ⇒ this path) */
+/* Write one reduced value into the reduction output.  UNDEF from the
+   block masks the cell, as storing UNDEF into an array does; obj2ptr
+   would read it as 0. */
+static void
+ca_slab_store_reduced (ca_slab_iter_state_t *st, CArray *out,
+                       ca_size_t out_idx, VALUE value, char *scratch)
+{
+  char *dst = out->ptr + out_idx * st->out_bytes;
+  if ( value == CA_UNDEF ) {
+    if ( out->mask == NULL ) {
+      ca_create_mask(out);
+    }
+    ((boolean8_t *) out->mask->ptr)[out_idx] = 1;
+    if ( out->data_type == CA_OBJECT ) {
+      *(VALUE *) dst = INT2FIX(0);
+    }
+    else {
+      memset(dst, 0, st->out_bytes);
+    }
+    return;
+  }
+  rb_ca_obj2ptr(st->output, value, scratch);
+  memcpy(dst, scratch, st->out_bytes);
+}
+
 static VALUE
 ca_slab_run_reduce_slab (ca_slab_iter_state_t *st)
 {
@@ -972,8 +997,7 @@ ca_slab_run_reduce_slab (ca_slab_iter_state_t *st)
                res->elements == 1 ? "" : "s");
     }
 
-    rb_ca_obj2ptr(st->output, result, scratch);
-    memcpy(out->ptr + out_idx * st->out_bytes, scratch, st->out_bytes);
+    ca_slab_store_reduced(st, out, out_idx, result, scratch);
     out_idx++;
   }
 
@@ -1043,8 +1067,7 @@ ca_slab_run_reduce_fiber (ca_slab_iter_state_t *st)
       (void) fiber_len;
     }
 
-    rb_ca_obj2ptr(st->output, acc, scratch);
-    memcpy(out->ptr + out_idx * st->out_bytes, scratch, st->out_bytes);
+    ca_slab_store_reduced(st, out, out_idx, acc, scratch);
     out_idx++;
   }
 
