@@ -127,11 +127,18 @@ CAFrame.from_csv("raw.csv", header: false)               # names c0, c1, ...
 
 `column_names:` names the columns. Given alone, the file is taken to have no header line; given with `header:`, it replaces the names on that line. There have to be as many names as the file has columns -- those of the header line, or else of the first record -- or it raises `ArgumentError`.
 
-`columns:` reads only some of the columns, in the order given: names of the header or of `column_names:`, or indexes from 0 (Integers and Ranges, `0..2`, `3..`). The fields of the others are passed over without being made into Strings, so a few columns of a wide file take little more time and memory than a narrow file would. `types:` and `missing:` then name the columns selected.
+`columns:` reads only some of the columns, in the order given: names of the header or of `column_names:` (with no header, the names `c0`, `c1`, ...), or indexes from 0 (Integers and Ranges, `0..2`, `3..`). The fields of the others are passed over without being made into Strings, so a few columns of a wide file take little more time and memory than a narrow file would. `types:` and `missing:` then name the columns selected.
 
 ```ruby
 CAFrame.from_csv("wide.csv", columns: %w[date temp rh])
 CAFrame.from_csv("raw.csv", header: false, columns: [0, 3])   # names c0, c3
+```
+
+To name the columns read, give `columns:` a Hash: its keys select as above (a name or an index, not a Range) and its values are the names the frame gives the columns. `types:` and `missing:` then use the new names. `column_names:` stays the names of the file's columns, so the two do not overlap.
+
+```ruby
+CAFrame.from_csv("raw.csv", header: false, columns: { 2 => "code", "c7" => "area" },
+                 types: { "code" => :categorical })
 ```
 
 For anything else, pass a **reading block**. It is given the reader, which reads in the order the block says, with `skip(n)` / `header` / `header(name)` / `column_names(...)` / `columns(...)` / `data`:

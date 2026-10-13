@@ -132,6 +132,10 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
         assert_equal [%w[b c d], %w[2 6], %w[3 7], %w[4 8]], cells(read(wide, columns: 1..))
         assert_equal [%w[d a], %w[4 8], %w[1 5]], cells(read(wide, columns: [3, "a"]))
         assert_equal [%w[c1 c3], %w[2 6], %w[4 8]], cells(read("1,2,3,4\n5,6,7,8\n", header: false, columns: [1, 3]))
+        # A Hash selects by its keys and names the columns with its values.
+        assert_equal [%w[x y], %w[3 7], %w[1 5]], cells(read(wide, columns: { "c" => "x", 0 => "y" }))
+        assert_equal [%w[code area], %w[4 8], %w[2 6]], cells(read("1,2,3,4\n5,6,7,8\n", header: false, columns: { "c3" => "code", 1 => "area" }))
+        assert_equal [%w[n], [4, 8]], cells(read(wide, columns: { "d" => "n" }, types: { "n" => :int64 }))
         # Without a header the default names select too.
         assert_equal [%w[c3 c0], %w[4 8], %w[1 5]], cells(read("1,2,3,4\n5,6,7,8\n", header: false, columns: %w[c3 c0]))
         assert_equal [%w[y], %w[2 6]], cells(read("1,2,3,4\n5,6,7,8\n", column_names: %w[w y x z], columns: %w[y]))
@@ -154,6 +158,11 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
     err = assert_raise(KeyError) { read("1,2\n", header: false, columns: %w[c01]) }
     assert_equal 'from_csv: columns: names no column "c01" (with no header the columns are c0, c1, ...)', err.message
     assert_raise(KeyError) { read(wide, columns: %w[c0]) }
+    err = assert_raise(ArgumentError) { read(wide, columns: { 0..1 => "x" }) }
+    assert_match(/not a Range/, err.message)
+    assert_raise(ArgumentError) { read(wide, columns: { 0 => :x }) }
+    err = assert_raise(ArgumentError) { read(wide, columns: { 0 => "x", 1 => "x" }) }
+    assert_equal 'from_csv: columns: names "x" more than once', err.message
     assert_raise(ArgumentError) { read(wide, columns: []) }
     assert_raise(ArgumentError) { read(wide, columns: [-1]) }
     assert_raise(KeyError) { read(wide, columns: %w[a], types: { "b" => :int32 }) }

@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: `CAFrame.from_csv(path, columns: { 2 => "code", "c7" => "area" })`
+  selects columns by the Hash's keys (names or indexes, as `columns:` takes
+  them) and names them with its values; `types:` and `missing:` use the new
+  names. `column_names:` still names the file's columns.
+
 - New: the `sum` / `mean` / `min` / `max` of `CAFrame#group_by` and
   `resample` take column names and return those columns as `df[...]` does:
   `grp.mean("temp")` is a CArray, `grp.max("temp", "rh")` an Array of two.

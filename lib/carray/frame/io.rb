@@ -58,13 +58,16 @@ class CAFrame
   #             and Ranges), in the order the frame has them; the others are
   #             read past without a String made for their fields. Without a
   #             header the columns are named c0, c1, ..., and those names
-  #             select too
+  #             select too. A Hash selects by its keys and names the columns
+  #             with its values: { 2 => "code", "c7" => "area" }; types: and
+  #             missing: then use the new names
   #
   #   CAFrame.from_csv("obs.csv", header: 2)            # a title above
   #   CAFrame.from_csv("obs.csv", header: 0, data: 3)   # units on lines 1-2
   #   CAFrame.from_csv("big.csv", data: 1..100)         # the first 100 lines
   #   CAFrame.from_csv("raw.csv", column_names: %w[date temp rh])
   #   CAFrame.from_csv("wide.csv", columns: %w[date temp])
+  #   CAFrame.from_csv("raw.csv", header: false, columns: { 0 => "date", 3 => "temp" })
   #
   # A block, given the reader, reads in any other order with +skip+ /
   # +header+ / +header(name)+ / +column_names+ / +columns+ / +data+ (see

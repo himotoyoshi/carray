@@ -401,7 +401,17 @@ class CAFrame
     # indexes of the file's columns from 0 (Integers or Ranges), in the order
     # the frame is to have them. The fields of the others are read past, so
     # a few columns of a wide file cost little more than a narrow file.
+    #
+    # A Hash selects by its keys, as above (a name or an index, not a Range),
+    # and names the columns read with its values:
+    #
+    #   r.columns(2 => "code", "c7" => "area1")
     def columns(*selection)
+      @renames = nil
+      if selection.size == 1 && selection[0].is_a?(Hash)
+        @renames = column_renames(selection[0])
+        selection = selection[0].keys
+      end
       selection = selection.flatten
       if selection.empty?
         raise ArgumentError, "from_csv: columns: names no column"
@@ -416,6 +426,25 @@ class CAFrame
       end
       @selection = selection
       self
+    end
+
+    # The new names a Hash given to +columns+ holds, checked.
+    private def column_renames(map)
+      map.each do |key, name|
+        if key.is_a?(Range)
+          raise ArgumentError, "from_csv: columns: a Hash selects one column per key, " \
+                               "not a Range (got #{key.inspect})"
+        end
+        unless name.is_a?(String)
+          raise ArgumentError, "from_csv: columns: a Hash names each column with a " \
+                               "String (got #{name.inspect} for #{key.inspect})"
+        end
+      end
+      dup = map.values.tally.select { |_, k| k > 1 }.keys
+      unless dup.empty?
+        raise ArgumentError, "from_csv: columns: names #{dup.first.inspect} more than once"
+      end
+      map.values
     end
 
     # The indexes of the selected columns, in the order asked for, among
@@ -721,7 +750,7 @@ class CAFrame
       return [@names, rows] unless @selection
       ncol = @names ? @names.size : (rows.map(&:size).max || 0)
       indexes = selected_indexes(@names, ncol)
-      names = indexes.map { |j| @names ? @names[j] : "c#{j}" }
+      names = @renames || indexes.map { |j| @names ? @names[j] : "c#{j}" }
       [names, rows.map { |r| r.values_at(*indexes) }]
     end
 
@@ -729,7 +758,7 @@ class CAFrame
     private def table_result
       return [@names, @table] unless @selection
       indexes = selected_indexes(@names, @table_ncol)
-      names = indexes.map { |j| @names ? @names[j] : "c#{j}" }
+      names = @renames || indexes.map { |j| @names ? @names[j] : "c#{j}" }
       kept = @table_keep || (0...@table_ncol).to_a
       order = indexes.map { |j| kept.index(j) }
       table =
