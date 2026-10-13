@@ -1069,6 +1069,23 @@ ca_mv_acquire_body (VALUE arg)
    validation aborts.  Pass NULL for the data cleanup args if not
    applicable (e.g. mask validated for a stack-allocated data view in
    the copy path). */
+typedef struct {
+  VALUE             src;
+  rb_memory_view_t *view;
+  bool              got;
+} ca_mv_mask_get_t;
+
+/* A producer's get can raise (a CArray producer builds its format through
+   Ruby), so it runs under rb_protect for the caller to clean up. */
+static VALUE
+ca_mv_mask_get_body (VALUE arg)
+{
+  ca_mv_mask_get_t *g = (ca_mv_mask_get_t *) arg;
+  g->got = rb_memory_view_get(g->src, g->view, RUBY_MEMORY_VIEW_STRIDES) ||
+           rb_memory_view_get(g->src, g->view, RUBY_MEMORY_VIEW_SIMPLE);
+  return Qnil;
+}
+
 static ca_mv_imported_holder_t *
 ca_mv_acquire_mask_view (VALUE mask_src, int8_t data_ndim,
                          const ca_size_t *data_dim,
@@ -1079,7 +1096,7 @@ ca_mv_acquire_mask_view (VALUE mask_src, int8_t data_ndim,
   rb_memory_view_t *mv;
   int i;
 
-# define MV_MASK_CLEANUP_AND_RAISE(msg, ...) do {                          \
+# define MV_MASK_CLEANUP() do {                                            \
     if (holder) {                                                          \
       if (holder->valid) { rb_memory_view_release(&holder->view); }        \
       xfree(holder);                                                       \
@@ -1091,6 +1108,9 @@ ca_mv_acquire_mask_view (VALUE mask_src, int8_t data_ndim,
       data_holder_to_free_on_fail->valid = false;                          \
       xfree(data_holder_to_free_on_fail);                                  \
     }                                                                      \
+  } while (0)
+# define MV_MASK_CLEANUP_AND_RAISE(msg, ...) do {                          \
+    MV_MASK_CLEANUP();                                                     \
     rb_raise(rb_eArgError, msg, ##__VA_ARGS__);                            \
   } while (0)
 
@@ -1101,8 +1121,16 @@ ca_mv_acquire_mask_view (VALUE mask_src, int8_t data_ndim,
      path (release frees view->item_desc.components unconditionally). */
   memset(&holder->view, 0, sizeof(holder->view));
 
-  if (! rb_memory_view_get(mask_src, &holder->view, RUBY_MEMORY_VIEW_STRIDES)) {
-    if (! rb_memory_view_get(mask_src, &holder->view, RUBY_MEMORY_VIEW_SIMPLE)) {
+  {
+    ca_mv_mask_get_t g;
+    int tag = 0;
+    g.src = mask_src;  g.view = &holder->view;  g.got = false;
+    rb_protect(ca_mv_mask_get_body, (VALUE) &g, &tag);
+    if (tag) {
+      MV_MASK_CLEANUP();
+      rb_jump_tag(tag);
+    }
+    if (! g.got) {
       MV_MASK_CLEANUP_AND_RAISE("mask: object does not support MemoryView");
     }
   }
@@ -1162,6 +1190,7 @@ ca_mv_acquire_mask_view (VALUE mask_src, int8_t data_ndim,
   }
 
 # undef MV_MASK_CLEANUP_AND_RAISE
+# undef MV_MASK_CLEANUP
   return holder;
 }
 
