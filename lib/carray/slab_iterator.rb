@@ -174,6 +174,27 @@ class CASlabIterator < CAIterator
     RUBY
   end
 
+  # @!method first
+  #   Per-slab first present value, in row-major order over the slab axes;
+  #   UNDEF for a slab with none.
+  #   @return [CArray] one value per slab
+  # @!method last
+  #   Per-slab last present value; UNDEF for a slab with none.
+  #   @return [CArray] one value per slab
+  # @!method nunique
+  #   Per-slab number of distinct present values (int64); 0 for a slab with
+  #   none.
+  #   @return [CArray] one count per slab
+  #
+  # These take no `min_count:` or `fill_value:`, as the core ones do not.
+  [:first, :last, :nunique].each do |op|
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def #{op} (**kw)
+        @reference.#{op}(axis: @slab_axes, **CAIterator.reduce_keywords(:#{op}, kw))
+      end
+    RUBY
+  end
+
   # @overload count(v = <none>)
   #   Per-slab count, delegating to `reference.count(..., axis: slab_axes)`.
   #   No argument counts present (non-masked) cells; `count(UNDEF)` counts

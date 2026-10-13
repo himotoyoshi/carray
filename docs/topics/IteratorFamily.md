@@ -33,6 +33,7 @@ variance  stddev  all  any
 variancep  stddevp  minmax                                # tier 2
 wsum  wmean                                               # weighted
 median  percentile  quantile                             # tier 3 (order statistics)
+first  last  nunique                                     # position / distinct
 count  count_not_masked  count_masked  elements          # count family
 each  reduce                                             # generic iteration
 ```
@@ -44,6 +45,10 @@ contract are the core's, unchanged — the iterator adds no new semantics. `all`
 `any` require a boolean payload, as `CArray#all` / `#any` do. `accumulate` is
 `sum` kept in the source's own data type, wrapping at its width, where `sum`
 answers in the type the core promotes to (float64 for an integer source).
+`first` / `last` are the first and last present values of a piece, in the
+piece's own order (`UNDEF` for a piece with none), and `nunique` counts its
+distinct present values (0 for none); like the core ones they take no
+`min_count:` or `fill_value:`.
 
 `each` / `reduce` are the escape hatch for a statistic not in the named list:
 `each { |piece| … }` yields each piece (an `Enumerator` with no block);
@@ -59,6 +64,7 @@ a piece *is*.
 |---|:--:|:--:|:--:|:--:|:--:|:--:|
 | tier 1 / 2, `minmax`, `wsum` / `wmean` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `median` / `percentile` / `quantile` | ✓ | ✓ ¹ | ✓ | ✓ | ✓ | ✓ |
+| `first` / `last` / `nunique` | ✓ | ✓ ¹ | ✓ | ✓ | ✓ | ✓ |
 | count family, `elements`, `each` / `reduce` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `min_index` / `max_index` (position **within** a piece) | ✓ | ✓ | ✓ | ✓ | — ² | ✓ |
 | `min_addr` / `max_addr` (flat **source** address of the winner) | ✓ | ✓ ³ | ✓ | ✓ | ✓ | ✓ |
@@ -66,8 +72,9 @@ a piece *is*.
 | `sort_addr` (per-piece sort → source addresses) | ✓ | — ⁴ | ✓ | ✓ | ✓ | ✓ |
 | `cumsum` / `cumprod` / `cummax` / `cummin` / `cumcount` (per-cell running scan) | ✓ | — ⁴ | ✓ | ✓ | ✓ ⁵ | ✓ |
 
-1. Window order statistics leave the UNDEF margin of the default `:skip` out
-   of each window, as they leave out any masked cell.
+1. Window order statistics, `first` / `last` and `nunique` leave the UNDEF
+   margin of the default `:skip` out of each window, as they leave out any
+   masked cell.
 2. A group preserves source order, so a *within-group* index is weak; the group
    offers the flat **source address** (`min_addr` / `max_addr`) instead — the
    `_addr` vs `_index` split (a group indexes back into the original array).

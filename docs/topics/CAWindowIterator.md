@@ -115,6 +115,7 @@ array (or a shrunk one under `:truncate`):
 | position | `min_index` `max_index` (index within the window) |
 | weighted | `wsum(weights)` `wmean(weights)` (weights shaped like one window) |
 | order statistics | `median` `percentile(*p)` `quantile` — see [below](#order-statistics) |
+| first / distinct | `first` `last` (first / last present value, row-major within the window) · `nunique` (distinct present values) |
 | counting | `count` / `count_not_masked` / `count_masked` / `count(v)` · `elements` |
 
 `elements` is the (constant) window size; `count_not_masked` is the effective

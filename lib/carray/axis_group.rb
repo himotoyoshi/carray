@@ -614,6 +614,41 @@ class CAGroupIterator
     order_stat(:quantile, [], kw)
   end
 
+  # @overload first(axis: :group)
+  #   Per-group first present value, in row-major position order along the
+  #   grouped axes (per band); UNDEF for a group with none. Without :group it
+  #   is the value's own `first`.
+  #   @return [CArray]
+  # @overload last(axis: :group)
+  #   Per-group last present value; UNDEF for a group with none.
+  #   @return [CArray]
+  # @overload nunique(axis: :group)
+  #   Per-group number of distinct present values (int64); 0 for a group with
+  #   none.
+  #   @return [CArray]
+  #
+  # These take no `min_count:` or `fill_value:`, as the core ones do not. A
+  # group is gathered whole, so folding a band into one (axis: [:group, k]) is
+  # not supported, as for the order statistics.
+  [:first, :last, :nunique].each do |op|
+    define_method(op) do |**kw|
+      has_group, fused = AxisGroup.parse_axis(kw[:axis])
+      return value.public_send(op, **kw) unless has_group
+      unless fused.empty?
+        raise NotImplementedError,
+              "axis_group: folding a band into #{op} (axis: [:group, k]) is not " \
+              "supported; #{op} gathers every member of a group"
+      end
+      unknown = kw.keys - [:axis]
+      unless unknown.empty?
+        raise ArgumentError,
+              "#{op}: unknown keyword#{unknown.size > 1 ? "s" : ""}: " +
+              unknown.map(&:inspect).join(", ")
+      end
+      composite_order(op, [])
+    end
+  end
+
   # @overload sort_addr
   #   Per-group sorted flat source addresses (group-major). Any grouping (single
   #   or composite group slots, rank-1 or rank-N, flat or band-preserving) is

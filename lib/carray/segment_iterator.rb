@@ -304,6 +304,47 @@ class CASegmentIterator < CAIterator
     aa ? aa[:any] : per_segment(CA_BOOLEAN) { |s| s.any }
   end
 
+  # @overload first
+  #   Returns the first present value of each segment, in the value's data
+  #   type (matching `CArray#first`).  A segment with no present value is
+  #   UNDEF.
+  #   @return [CArray]
+  def first (axis: nil)
+    return axis_by_core(axis, :first) if axis
+    edge_values(:first)
+  end
+
+  # @overload last
+  #   Returns the last present value of each segment, in the value's data
+  #   type (matching `CArray#last`).  A segment with no present value is
+  #   UNDEF.
+  #   @return [CArray]
+  def last (axis: nil)
+    return axis_by_core(axis, :last) if axis
+    edge_values(:last)
+  end
+
+  # @overload nunique
+  #   Returns the number of distinct present values in each segment as int64,
+  #   with the distinctness of `CArray#nunique` (every NaN is one value,
+  #   -0.0 is 0.0).  A segment with no present value counts 0.
+  #   @return [CArray]
+  def nunique (axis: nil)
+    return axis_by_core(axis, :nunique) if axis
+    out = CArray.int64(@k)
+    return out if grouped.elements.zero?
+    # Each cell's value becomes a code, so a distinct (segment, value) pair is
+    # a distinct int64 key; the keys' segments, counted, are the answer.
+    values = grouped.categorize
+    width  = [values.labels.size, 1].max
+    keys   = CArray.segment_index(offsets: @bounds) * width + values.codes.int64
+    owners = keys.unique / width
+    return out if owners.elements.zero?
+    counts = owners.bincount
+    out[0...counts.elements] = counts
+    out
+  end
+
   # ---- tier 2 (fused / population / position) ------------------------------
 
   # @overload minmax
@@ -735,6 +776,36 @@ class CASegmentIterator < CAIterator
     out
   end
 
+  # The value at the first or last present cell of each segment, UNDEF for a
+  # segment with none.  Every segment's position is found at once: for each
+  # grouped slot, the nearest present slot at or after it (a running minimum
+  # taken from the end) or at or before it (a running maximum), read at the
+  # segment's first or last slot and kept when it falls inside the segment.
+  # A read-only Face cannot take UNDEF cell by cell, so its answers are
+  # collected segment by segment, as its other reductions are.
+  def edge_values (op)
+    n = grouped.elements
+    if n.zero? || (@value.face? && ! face_output?)
+      return per_segment(core_reduce_type(op)) { |s| s.public_send(op) }
+    end
+    slot = CArray.int64(n).seq!
+    if grouped.has_mask?
+      slot[grouped.is_masked] = (op == :first) ? n : -1
+    end
+    lo, hi = @bounds[0...-1], @bounds[1..-1]
+    if op == :first
+      nearest = slot.reverse.cummin.reverse
+      at = nearest[lo.pmin(n - 1)]
+    else
+      nearest = slot.cummax
+      at = nearest[(hi - 1).pmax(0)]
+    end
+    found = at.ge(lo) & at.lt(hi)
+    out = grouped[at.pmin(n - 1).pmax(0)].copy
+    out[found.not] = UNDEF
+    out
+  end
+
   # The members of segment `c` as a CArray slice of the grouped copy.  An empty
   # segment (zero-width segment) yields the shared empty array — a zero-length
   # slice cannot be taken directly, and an empty array carries the same reduction
@@ -859,6 +930,10 @@ class CASegmentIterator < CAIterator
   end
 
   # ---- no axis: form -------------------------------------------------------
+
+  def axis_by_core (*)
+    raise NotImplementedError, "#{self.class} has no axis: form"
+  end
 
   def axis_by_masked_copy (*)
     raise NotImplementedError, "#{self.class} has no axis: form"

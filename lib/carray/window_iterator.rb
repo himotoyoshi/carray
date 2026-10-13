@@ -472,6 +472,28 @@ class CAWindowIterator < CAIterator
     RUBY
   end
 
+  # @!method first
+  #   Rolling first present value, in row-major order within the window;
+  #   UNDEF for a window with none (the UNDEF margin of `:skip` is not
+  #   present, so a window over the edge starts at its first source cell).
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @!method last
+  #   Rolling last present value; UNDEF for a window with none.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @!method nunique
+  #   Rolling number of distinct present values (int64); 0 for a window with
+  #   none.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  #
+  # These take no `min_count:` or `fill_value:`, as the core ones do not.
+  [:first, :last, :nunique].each do |op|
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def #{op} (**kw)
+        sliding_view.#{op}(axis: @window_axes, **CAIterator.reduce_keywords(:#{op}, kw))
+      end
+    RUBY
+  end
+
   # @overload min_addr
   #   Rolling flat SOURCE address of the window minimum — which source cell holds
   #   it, so `source.reshape(source.elements)[sw.min_addr]` are the window minima.

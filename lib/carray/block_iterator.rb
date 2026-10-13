@@ -319,6 +319,23 @@ class CABlockIterator < CAIterator
     define_method(op) { |**kw| fold(op, **CAIterator.reduce_keywords(op, kw)) }
   end
 
+  # @!method first
+  #   Per-tile first present value, in row-major order within the tile;
+  #   UNDEF for a tile with none.
+  #   @return [CArray] tile-grid shaped
+  # @!method last
+  #   Per-tile last present value; UNDEF for a tile with none.
+  #   @return [CArray] tile-grid shaped
+  # @!method nunique
+  #   Per-tile number of distinct present values (int64); 0 for a tile with
+  #   none.
+  #   @return [CArray] tile-grid shaped
+  #
+  # These take no `min_count:` or `fill_value:`, as the core ones do not.
+  [:first, :last, :nunique].each do |op|
+    define_method(op) { |**kw| fold(op, **CAIterator.reduce_keywords(op, kw)) }
+  end
+
   # A Face's minimum and maximum are cells of the Face, so they are gathered
   # from the source by the winner's address.  Assembling the per-region results
   # instead copies the Face's storage into an array that no longer knows it is

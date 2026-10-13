@@ -110,6 +110,7 @@ array:
 | position | `min_index` `max_index` (flat index within the tile) |
 | weighted | `wsum(weights)` `wmean(weights)` (weights shaped like one full tile) |
 | order statistics | `median` `percentile(*p)` `quantile` |
+| first / distinct | `first` `last` (first / last present value, row-major within the tile) · `nunique` (distinct present values) |
 | counting | `count` / `count_not_masked` / `count_masked` / `count(v)` · `elements` |
 
 - `elements` is the (constant) tile size `Π bᵢ`; `count_not_masked` is the number

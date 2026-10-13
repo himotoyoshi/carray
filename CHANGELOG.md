@@ -44,6 +44,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   way (`time:CATime[D]`, `<CAConstString(3)`). To test a column's storage
   type, use `df[name].parent.data_type`.
 
+- New: every iterator (slab, block, window, segment, categorical and axis
+  group) has `first`, `last` and `nunique`: the first and last present
+  value of each piece (UNDEF for none) and its number of distinct present
+  values (0 for none). A `CAFrame` group reduction reaches them too, so
+  `df.resample("time", "1 hour").aggregate("open" => ["v", :first], ...)`
+  keeps the column's type. Like the core ones, they take no `min_count:`
+  or `fill_value:`.
+- Change: `CArray#nunique(axis:)` takes an Array of axes, and naming every
+  axis returns an Integer, as `sum(axis:)` does. Before, a 1-D
+  `a.nunique(axis: 0)` returned a one-element CArray; read it as an
+  Integer, or pass `keep_axis: true` to keep an array.
+
 - Change: storing an integer that an integer cell cannot hold raises
   `RangeError`, as an operator already did (`int8_array + 300`). Before,
   `CA_INT8([300])`, `a[0] = 300`, `a[] = [-1]` on an unsigned array,

@@ -61,6 +61,8 @@ itself, not restated here.
 | `min_addr` / `max_addr` | int64 | flat source address of the min / max (indexes back into the raveled source) |
 | `sort_addr` | int64 | length-`nvalid` flat source addresses that sort each group, group-major (see below) |
 | `all` / `any` | boolean | boolean value data type only (as for `CArray#all` / `#any`) |
+| `first` / `last` | as `CArray#first` / `#last` | the first / last present member, in source order; `UNDEF` for a category with none |
+| `nunique` | int64 | distinct present members, as `CArray#nunique` counts them; 0 for a category with none |
 
 `prod`, `all`, `any`, and `count(v)` are currently per-group fallbacks (they
 delegate to the CArray reduction over each category's members); a fused kernel

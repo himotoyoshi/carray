@@ -58,6 +58,7 @@ g.accumulate(axis: :group)   g.prod(axis: :group)      g.max(axis: :group)
 g.variance(axis: :group)     g.stddev(axis: :group)    g.minmax(axis: :group)
 g.wsum(w, axis: :group)      g.wmean(w, axis: :group)
 g.median(axis: :group)       g.percentile(90, axis: :group)   g.quantile(axis: :group)
+g.first(axis: :group)        g.last(axis: :group)             g.nunique(axis: :group)
 g.count(axis: :group)        g.count_masked(axis: :group)     g.elements(axis: :group)
 g.min_addr(axis: :group)     g.max_addr(axis: :group)
 ```

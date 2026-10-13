@@ -127,6 +127,18 @@ class CAIterator
   #   Returns the five-number summary of each piece,
   #   `[min, Q1, median, Q3, max]`.
   #   @return [Array<CArray>] five arrays, one per position.
+  # @!method first
+  #   Returns the first present value of each piece, in the piece's own
+  #   order; a piece with no present value is UNDEF.
+  #   @return [CArray] one value per piece, in the source's data type.
+  # @!method last
+  #   Returns the last present value of each piece; a piece with no present
+  #   value is UNDEF.
+  #   @return [CArray] one value per piece, in the source's data type.
+  # @!method nunique
+  #   Returns the number of distinct present values in each piece, as
+  #   `CArray#nunique` counts them; a piece with none counts 0.
+  #   @return [CArray] `:int64`, one count per piece.
   # @!method count(value = nil)
   #   Returns a count per piece: with no argument the cells that are not
   #   masked, with `UNDEF` the masked cells, and with any other value the
@@ -161,6 +173,7 @@ class CAIterator
     :min_index, :max_index, :min_addr, :max_addr,                     # position
     :wsum, :wmean,                                                    # weighted
     :median, :percentile, :quantile,                                 # tier 3
+    :first, :last, :nunique,                                          # position / distinct
     :count, :count_not_masked, :count_masked, :elements,             # count family
     :each, :reduce,                                                   # generic iterate
   ].freeze

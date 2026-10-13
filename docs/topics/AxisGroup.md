@@ -320,6 +320,10 @@ They currently cover a flat grouping and a band-preserving grouping with a
 single rank-1 group axis; a rank-N categorical or a multi-group-slot
 composite is a follow-up.
 
+`first` / `last` (the first and last present member of a group, in
+row-major position order along the grouped axes) and `nunique` (its distinct
+present members) also gather each group whole, the same way.
+
 ---
 
 ## 4. Labels: reading the coordinates back

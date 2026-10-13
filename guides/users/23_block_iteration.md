@@ -273,6 +273,8 @@ Built with `a.blocks(sz0, sz1, …)` — one tile size per axis (an Integer, or 
 | `median` | median |
 | `percentile(*p)` | percentile(s) — one grid, or an array of grids for several `p` |
 | `quantile` | five-number summary `[min, Q1, median, Q3, max]` (five grids) |
+| `first` / `last` | first / last present value, row-major within the tile |
+| `nunique` | distinct present values (int64) |
 | `min_index` / `max_index` | tile-local flat position of the winner |
 | `wsum(weights)` | weighted sum (`weights` shaped like one full tile) |
 | `wmean(weights)` | weighted mean |

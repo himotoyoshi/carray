@@ -54,6 +54,7 @@ sum  accumulate  prod  mean  min  max                     # tier 1
 variance  stddev  all  any
 variancep  stddevp  minmax                                # tier 2
 median  percentile  quantile                              # tier 3 (order statistics)
+first  last  nunique                                      # position / distinct
 wsum  wmean                                               # weighted
 count  count_not_masked  count_masked  elements           # count family
 each  reduce                                              # generic iteration
