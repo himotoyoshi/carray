@@ -944,7 +944,7 @@ module MkKernel
   # is up to the body (= value-returning search variants).
   def self.search(name, source:, output:, body:,
                   no_match: "-1", no_match_check: nil, undef_no_match: false,
-                  mask_self: :raise, mask_query: :ignore, runtime_args: nil,
+                  mask_self: :raise, runtime_args: nil,
                   fallback: :raise, semantics: :fiber_local)
     raise "search: unknown semantics #{semantics} (expected :fiber_local or :view_flat)" \
       unless %i[fiber_local view_flat].include?(semantics)
@@ -956,12 +956,10 @@ module MkKernel
     raise "search: no_match must be a String" unless no_match.is_a?(String)
     raise "search: unknown mask_self #{mask_self} (expected :raise | :skip | :ignore)" \
       unless %i[raise skip ignore].include?(mask_self)
-    # mask_query: what a masked query cell means.  :ignore reads the value
-    # under the mask (the historical behaviour).  :undef treats the query as
-    # having no answer and marks the corresponding output cell UNDEF, so an
-    # undetermined query cannot silently become a determined result.
-    raise "search: unknown mask_query #{mask_query} (expected :ignore | :undef)" \
-      unless %i[ignore undef].include?(mask_query)
+    # A masked query cell (or a scalar UNDEF query) has no answer: its output
+    # cell is UNDEF, so an undetermined query cannot become a determined
+    # result from the value that happens to sit under the mask.  There is no
+    # option to read under the mask.
     raise "search: unknown fallback #{fallback} (expected :raise)" \
       unless fallback == :raise
 
@@ -1026,7 +1024,6 @@ module MkKernel
       no_match_check:  no_match_check,
       undef_no_match:  undef_no_match,
       mask_self:       mask_self,
-      mask_query:      mask_query,
       runtime_args:    runtime_args || [],
       fallback:        fallback,
       semantics:       semantics,
@@ -5175,56 +5172,41 @@ module MkKernel
     # flat array path.  op_mask is lazily allocated on the first no-match.
     undef_nm = k[:undef_no_match]
     nm_cond  = "result == (#{oi[:c]})(#{no_match})"
-    # mask_query: :undef -- a masked query cell yields a masked output cell,
-    # so an undetermined query cannot be answered from the value that happens
-    # to sit under the mask.  Shares op_mask with undef_no_match.
-    undef_q  = (k[:mask_query] == :undef)
-    # op_mask declaration (only when an output cell can be masked);
-    # content-only (the heredoc carries indentation).
-    op_mask_decl = (undef_nm || undef_q) \
-      ? "boolean8_t *op_mask = NULL;   /* lazily allocated on the first masked output cell */" \
-      : "/* (no masked output cell) */"
+    # A masked query cell yields a masked output cell, so an undetermined
+    # query cannot be answered from the value that happens to sit under the
+    # mask.  Shares op_mask with undef_no_match.
+    op_mask_decl = "boolean8_t *op_mask = NULL;   /* lazily allocated on the first masked output cell */"
 
     # Case A scalar UNDEF query (also reached by the A1 single-element
     # reduction when that element is masked): every output cell is
     # undetermined, so short-circuit before the query is coerced to a number.
-    undef_query_a = if undef_q
-                      <<~C.chomp
-                        if ( rval == CA_UNDEF ) {
-                              int8_t  undef_axes[1] = { (int8_t) axis };
-                              VALUE   voutu = rb_ca_new_reduced(self, undef_axes, 1, #{oi[:ca]}, 0);
-                              CArray *cou;
-                              GetCArray(voutu, cou);
-                              MEMZERO((#{oi[:c]} *) cou->ptr, #{oi[:c]}, cou->elements);
-                              ca_create_mask(cou);
-                              memset(cou->mask->ptr, 1, (size_t) cou->elements);
-                              if ( ca->ndim == 1 ) { return Qnil; }
-                              return voutu;
-                            }
-                      C
-                    else
-                      "/* (mask_query: :ignore) */"
-                    end
+    undef_query_a = <<~C.chomp
+      if ( rval == CA_UNDEF ) {
+            int8_t  undef_axes[1] = { (int8_t) axis };
+            VALUE   voutu = rb_ca_new_reduced(self, undef_axes, 1, #{oi[:ca]}, 0);
+            CArray *cou;
+            GetCArray(voutu, cou);
+            MEMZERO((#{oi[:c]} *) cou->ptr, #{oi[:c]}, cou->elements);
+            ca_create_mask(cou);
+            memset(cou->mask->ptr, 1, (size_t) cou->elements);
+            if ( ca->ndim == 1 ) { return Qnil; }
+            return voutu;
+          }
+    C
 
     # Case B/C query mask base.  NULL when the query carries no mask.
-    cv_mask_decl_bc = undef_q \
-      ? "boolean8_t *cv_mask_base = ca_has_mask(cv) ? (boolean8_t *) cv->mask->ptr : NULL;" \
-      : "/* (mask_query: :ignore) */"
+    cv_mask_decl_bc = "boolean8_t *cv_mask_base = ca_has_mask(cv) ? (boolean8_t *) cv->mask->ptr : NULL;"
 
     # Per-cell guard wrapping the body + write in case B/C.  A masked query
     # cell skips the body entirely and marks the output cell instead.
-    undef_query_open_bc = if undef_q
-                            <<~C.chomp
-                              if ( cv_mask_base && cv_mask_base[val_offset / cv->bytes] ) {
-                                    if ( ! op_mask ) { ca_create_mask(co); op_mask = (boolean8_t *) co->mask->ptr; }
-                                    op_mask[flat] = 1;
-                                    op[flat] = (#{oi[:c]}) 0;   /* undetermined query; the mask bit is what counts */
-                                  } else {
-                            C
-                          else
-                            "/* (mask_query: :ignore) */"
-                          end
-    undef_query_close_bc = undef_q ? "}" : "/* (mask_query: :ignore) */"
+    undef_query_open_bc = <<~C.chomp
+      if ( cv_mask_base && cv_mask_base[val_offset / cv->bytes] ) {
+            if ( ! op_mask ) { ca_create_mask(co); op_mask = (boolean8_t *) co->mask->ptr; }
+            op_mask[flat] = 1;
+            op[flat] = (#{oi[:c]}) 0;   /* undetermined query; the mask bit is what counts */
+          } else {
+    C
+    undef_query_close_bc = "}"
 
     # Per-cell write block for case A (scalar query).  `out_i` is the output
     # cursor, `co` the output CArray.  When undef_no_match: a no-match masks
@@ -8188,7 +8170,6 @@ MkKernel.search :linear_section_binary,
   no_match:       "NAN",
   no_match_check: "isnan(op[0])",
   mask_self:      :raise,
-  mask_query:     :undef,
   body: <<~C,
     result = NAN;
     if ( slab_n <= 1 ) {
@@ -8280,7 +8261,6 @@ MkKernel.search :linear_section_linear,
   no_match:       "NAN",
   no_match_check: "isnan(op[0])",
   mask_self:      :raise,
-  mask_query:     :undef,
   body: <<~C,
     result = NAN;
     if ( slab_n <= 1 ) {
@@ -8323,7 +8303,6 @@ MkKernel.search :linear_fetch,
   no_match:       "NAN",
   no_match_check: "isnan(op[0])",
   mask_self:      :raise,
-  mask_query:     :undef,
   body: <<~C,
     result = NAN;
     if ( slab_n >= 1 && query_val >= 0.0 && query_val <= (double)(slab_n - 1) ) {
