@@ -332,6 +332,24 @@ non-contiguous middle view, a small leaf), `view.copy` /
 `view.dump_binary` runs 1.5×–tens-of-times faster than per-link attach,
 because only the root is ever read.
 
+### A root with no memory to lend
+
+When the root is not an entity but computes its cells (a CAObject over a
+file, a lazy expression), attaching it means producing all of it. Such a
+root is never attached to serve a view: the view owns its buffer and asks
+the root for the cells it covers through the transfer slots
+(`ca_root_lends_no_memory` / `ca_parent_lends_no_memory` decide this). A
+fold that stops at a CAStride (a reshape over a transpose) is judged by the
+root that CAStride folds to, since its own attach folds on from there. A
+view that reads the root in another width (`field`, a refer to another
+data type) asks for the root elements its cells lie in and cuts its bytes
+out of them.
+
+So reading a view, through its attach or its transfers, never asks the
+root for more than the view covers. `spec/spec_ai/test_view_read_footprint.rb`
+checks this for every view class carray defines, as the parent of small
+views, over a root that counts what it is asked for.
+
 ## Sequential-address detection
 
 When `xfer_addrs` receives a list that happens to be a contiguous run,
