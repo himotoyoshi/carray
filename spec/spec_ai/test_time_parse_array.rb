@@ -100,4 +100,22 @@ class TestTimeParseArray < Test::Unit::TestCase
       CArray.time(CA_OBJECT(["9999-12-31"]), unit: :ns, format: "%Y-%m-%d", on_error: :mask)
     end
   end
+
+  # With a format, an Integer is the digits it is written with, not Unix
+  # seconds; %s and %Q read the seconds and milliseconds since the epoch.
+  def test_a_format_reads_integers_as_their_digits
+    f = "%Y%m%d"
+    assert_equal ["2000-01-01", "2024-02-29"],
+                 CArray.time(CA_INT64([20000101, 20240229]), format: f, unit: :D).to_a.map(&:to_s)
+    x = CA_INT32([20000101, 20240229])
+    x[1] = UNDEF
+    assert_equal ["2000-01-01", UNDEF], CArray.time(x, format: f, unit: :D).to_a.map { |v| UNDEF.equal?(v) ? v : v.to_s }
+    assert_equal ["2000-01-01"], CArray.time(20000101, format: f, unit: :D).to_a.map(&:to_s)
+    assert_equal ["2000-01-01"], CArray.time([20000101], format: f, unit: :D).to_a.map(&:to_s)
+    assert_equal ["1970-01-02"], CArray.time(CA_INT64([86400]), unit: :D).to_a.map(&:to_s)
+    assert_equal ["2023-11-14T22:13:20Z"],
+                 CArray.time(CA_INT64([1700000000]), format: "%s", unit: :s).to_a.map(&:to_s)
+    assert_equal ["2023-11-14T22:13:20.123Z"],
+                 CArray.time("1700000000123", format: "%Q", unit: :ms).to_a.map(&:to_s)
+  end
 end

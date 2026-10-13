@@ -1811,9 +1811,19 @@ module CATimeLiteral
   # "201909" is a valid YYMMDD to Ruby (2020-19-09, which landed on 2021-07),
   # and "2019-02-31" landed on 2019-03-03.  A missing finer field is not an
   # error -- a year or a year-month names the head of that period.
+  # %s and %Q give the seconds since the epoch, not the date's fields;
+  # they are spelled out as the UTC date and time they name.
+  def epoch_fields(h)
+    return h unless h && h[:seconds] && !h[:year]
+    t = Time.at(h[:seconds]).utc
+    frac = h[:seconds] - h[:seconds].floor
+    { year: t.year, mon: t.month, mday: t.day, hour: t.hour, min: t.min,
+      sec: t.sec, sec_fraction: frac.zero? ? nil : Rational(frac), leftover: h[:leftover] }.compact
+  end
+
   def parse_date_fields(spec, format)
     h =
-      if format                             then Date._strptime(spec, format)
+      if format                             then epoch_fields(Date._strptime(spec, format))
       elsif spec =~ /\A(\d{4})-(\d{1,2})\z/ then { year: $1.to_i, mon: $2.to_i }
       elsif spec =~ /\A(\d{4})\z/           then { year: $1.to_i }
       elsif (hour = hour_only_fields(spec)) then hour
@@ -2142,6 +2152,22 @@ module CATimeLiteral
     raise RangeError, "time #{cells[i].inspect} does not fit int64 ticks of #{res}"
   end
 
+  # +x+ with each Integer replaced by its decimal digits as a String, for a
+  # format to read; a masked cell stays masked.
+  def integers_as_text(x)
+    case x
+    when Integer then x.to_s
+    when CArray
+      return x if x.face? || !(x.integer? || x.data_type == CA_OBJECT)
+      text = CArray.object(*x.shape)
+      cells = x.flatten.to_a
+      cells.each_with_index { |v, i| text[i] = v.is_a?(Integer) ? v.to_s : v }
+      text = text.reshape(*x.shape) if x.ndim > 1
+      text
+    else x
+    end
+  end
+
   # Single-literal build for {.time}: a 1-element CATime, honouring
   # the on_error policy (raise, or a masked cell).
   def to_time_array(literal, res, format, on_error)
@@ -2234,6 +2260,8 @@ class CArray
   #     Ruby Array of literals, or a CArray of literals.
   #   @param unit [Resolution, Symbol, String] target grid resolution.
   #   @param format [String, nil] optional strptime format for String input.
+  #     With a format, an Integer is read as its decimal digits
+  #     (`CArray.time(20240101, format: "%Y%m%d")`), not as Unix seconds.
   #   @param on_error [:raise, :mask] parse-failure policy (default `:raise`).
   #   @return [CATime] shape `[1]` for a literal, else `x`'s shape.
   #   @raise [ArgumentError] on an unparseable value when `on_error: :raise`.
@@ -2248,6 +2276,9 @@ class CArray
       raise ArgumentError, "on_error: must be :raise or :mask (got #{on_error.inspect})"
     end
     x = CA_OBJECT(x) if x.is_a?(Array)   # Ruby Array of literals -> object CArray
+    # With a format, an Integer is the digits it is written with (20240101
+    # read as "%Y%m%d"), not Unix seconds: a format describes text.
+    x = CATimeLiteral.integers_as_text(x) if format
     unless x.is_a?(CArray)
       return CATimeLiteral.to_time_array(x, res, format, on_error)
     end

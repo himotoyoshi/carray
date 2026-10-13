@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `CArray.time` with `format:` read an Integer as Unix seconds, so
+  `CArray.time(CA_INT64([20000101]), format: "%Y%m%d")` gave 1970-08-20.
+  With a format, an Integer is now read as its digits. `%s` and `%Q`
+  (seconds and milliseconds since the epoch) are now read, for Integers
+  and Strings alike; they raised before.
+
 - Fix: dividing a `CATimedelta` array by another truncated the ratio to
   an integer (90 s / 60 s gave 1). It is now a float64 array (1.5), the
   two durations brought to a common unit first.
