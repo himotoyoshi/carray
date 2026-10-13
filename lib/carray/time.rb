@@ -2128,6 +2128,7 @@ module CATimeLiteral
       elsif (hour = hour_only_fields(spec)) then hour
       else                                       Date._parse(spec)
       end
+    h = resolve_day_of_year(h, spec) if h
     unless h && h[:year]
       raise ArgumentError, "cannot parse time #{spec.inspect}"
     end
@@ -2152,9 +2153,62 @@ module CATimeLiteral
       raise ArgumentError,
             "cannot parse time #{spec.inspect}: hour 24 is only 24:00:00"
     end
+    # A clock field out of range is refused rather than carried into the
+    # next one ("10:75" is not 11:15).  Second 60 is the leap second.
+    { hour: 24, min: 59, sec: 60 }.each do |key, top|
+      v = h[key]
+      next if v.nil? || (0..top).cover?(v)
+      raise ArgumentError,
+            "cannot parse time #{spec.inspect}: #{key} #{v} is out of range"
+    end
     h
   end
   private_class_method :parse_date_fields
+
+  # The month and day of a date written by its day of the year ("2024-015",
+  # %j), its ISO week ("2024-W03-1", %G-W%V-%u) or its week of the year
+  # (%U / %W with a weekday).  Date._parse and Date._strptime return those
+  # fields as they are written; left alone, the date would fall back to
+  # January 1.
+  def resolve_day_of_year(h, spec)
+    return h if h[:mon] || h[:mday]
+    date =
+      if h[:yday] && h[:year]
+        unless Date.valid_ordinal?(h[:year], h[:yday], Date::GREGORIAN)
+          raise ArgumentError,
+                "cannot parse time #{spec.inspect}: year #{h[:year]} has no day #{h[:yday]}"
+        end
+        Date.ordinal(h[:year], h[:yday], Date::GREGORIAN)
+      elsif h[:cwyear] && h[:cweek]
+        wd = h[:cwday] || 1
+        unless Date.valid_commercial?(h[:cwyear], h[:cweek], wd, Date::GREGORIAN)
+          raise ArgumentError,
+                "cannot parse time #{spec.inspect}: ISO year #{h[:cwyear]} " \
+                "has no week #{h[:cweek]}, day #{wd}"
+        end
+        Date.commercial(h[:cwyear], h[:cweek], wd, Date::GREGORIAN)
+      elsif h[:year] && (h[:wnum0] || h[:wnum1])
+        jan1 = Date.new(h[:year], 1, 1, Date::GREGORIAN)
+        wday = h[:wday] || (h[:cwday] && h[:cwday] % 7)
+        # Week 1 begins on the first Sunday (%U) or Monday (%W) of the year;
+        # the days before it are week 0.
+        if h[:wnum0]
+          first = jan1 + (7 - jan1.wday) % 7
+          d = first + (h[:wnum0] - 1) * 7 + (wday || 0)
+        else
+          first = jan1 + (8 - jan1.wday) % 7
+          d = first + (h[:wnum1] - 1) * 7 + ((wday || 1) + 6) % 7
+        end
+        unless d.year == h[:year]
+          raise ArgumentError,
+                "cannot parse time #{spec.inspect}: the week and weekday fall outside #{h[:year]}"
+        end
+        d
+      end
+    return h unless date
+    h.merge(year: date.year, mon: date.month, mday: date.day)
+  end
+  private_class_method :resolve_day_of_year
 
   # "YYYY-MM-DDThh" with an optional zone ("Z", "+hh", "+hhmm", "+hh:mm").
   def hour_only_fields(spec)
