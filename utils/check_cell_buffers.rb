@@ -30,7 +30,7 @@ def sites (path)
   lines = File.readlines(path, encoding: "UTF-8")
   lines.each_with_index.filter_map do |line, i|
     next unless line =~ ASSIGN
-    next if line =~ %r{^\s*(?:/\*|\*|//)}
+    next if line =~ %r{^\s*(?:/\*|//|\*(?:\s|/|$))}
     noted = line =~ NOTE || (i > 0 && lines[i - 1] =~ NOTE)
     [i + 1, line.strip] unless noted
   end

@@ -33,7 +33,7 @@ def sites (path)
   depth = 0
   lines.each_with_index do |line, i|
     function = Regexp.last_match(1) if depth == 0 && line =~ /^([A-Za-z_]\w*)\s*\(/
-    if function.to_s =~ SETUP && line =~ CALL && line !~ %r{^\s*(?:/\*|\*|//)}
+    if function.to_s =~ SETUP && line =~ CALL && line !~ %r{^\s*(?:/\*|//|\*(?:\s|/|$))}
       noted = line =~ NOTE || (i > 0 && lines[i - 1] =~ NOTE)
       found << [i + 1, function, line.strip] unless noted
     end
