@@ -4499,16 +4499,21 @@ module MkKernel
       io.puts "       gaps ordinal would have spent on the tie are never used, so a"
       io.puts "       later out_r stays <= the ordinal r at that position, preserving"
       io.puts "       both the ascending order and (via the order() method's"
-      io.puts "       (n-1)-out_r descending transform) the descending order.  NaN"
-      io.puts "       cells never tie with each other under dense (IEEE754 x != x). */"
+      io.puts "       descending transform) the descending order.  NaN cells tie"
+      io.puts "       with each other, as sort_addr and the value-hash family treat"
+      io.puts "       every NaN as one value. */"
       io.puts "    ca_size_t out_r = 0;"
       io.puts "    for ( ca_size_t r = 0; r < #{rank_n}; r++ ) {"
       io.puts "      if ( r > 0 ) {"
       io.puts "        if ( dense ) {"
       if is_object
-        io.puts "          if ( ! ca_obj_equal(buf[r].v, buf[r - 1].v) ) out_r++;"
+        io.puts "          if ( ! ( ( CA_OBJ_ISNAN(buf[r].v) && CA_OBJ_ISNAN(buf[r - 1].v) )"
+        io.puts "                   || ca_obj_equal(buf[r].v, buf[r - 1].v) ) ) out_r++;"
       elsif is_fixlen
         io.puts "          if ( memcmp(buf[r].vp, buf[r - 1].vp, (size_t) buf[r].nb) != 0 ) out_r++;"
+      elsif FLOAT_DTYPES.include?(src)
+        io.puts "          if ( buf[r].v != buf[r - 1].v"
+        io.puts "               && ! ( isnan(buf[r].v) && isnan(buf[r - 1].v) ) ) out_r++;"
       else
         io.puts "          if ( buf[r].v != buf[r - 1].v ) out_r++;"
       end

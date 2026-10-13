@@ -220,9 +220,19 @@ class TestRankIndex < Test::Unit::TestCase
     addr = CArray.sort_addr(a.order(descending: true, method: :dense), b)
     assert_equal [1, 2], b[addr].to_a
 
-    # Contrast: :ordinal (default) never ties, so the b key is ignored.
+    # Contrast: :ordinal (default) never ties, so the b key is ignored and
+    # the tied cells stay in their original order.
+    b = CA_INT32([2, 1])
     addr_ordinal = CArray.sort_addr(a.order(descending: true), b)
     assert_equal [2, 1], b[addr_ordinal].to_a
+  end
+
+  def test_order_ordinal_descending_keeps_ties_in_order
+    a = CA_INT32([5, 3, 5, 1, 5])
+    assert_equal [0, 3, 1, 4, 2], a.order(descending: true).to_a
+    assert_equal [0, 3, 1, 4, 2], a.order(descending: true, kind: :stable).to_a
+    a[0] = UNDEF
+    assert_equal [UNDEF, 2, 0, 3, 1], a.order(descending: true).to_a
   end
 
   def test_order_dense_descending_group_order_and_ties
@@ -233,6 +243,32 @@ class TestRankIndex < Test::Unit::TestCase
     # Overall group order still runs 5 > 4 > 3 > 2 (ranks ascending 0..).
     values_by_rank = desc_dense.to_a.zip(a.to_a).sort_by(&:first).map(&:last)
     assert_equal [5, 4, 4, 3, 2], values_by_rank
+  end
+
+  def test_dense_nan_is_one_value
+    nan = Float::NAN
+    assert_equal [1, 1, 0], CA_FLOAT64([nan, nan, 1.0]).order(method: :dense).to_a
+    assert_equal [1, 1, 0], CA_FLOAT32([nan, nan, 1.0]).order(method: :dense).to_a
+    assert_equal [1, 1, 0], CA_OBJECT([nan, nan, 1.0]).order(method: :dense).to_a
+    assert_equal [0, 0, 1], CA_FLOAT64([nan, nan, 1.0]).order(method: :dense, descending: true).to_a
+  end
+
+  def test_order_dense_descending_has_no_gaps
+    assert_equal [1, 1, 0], CA_INT32([1, 1, 2]).order(descending: true, method: :dense).to_a
+    assert_equal [0, 0, 1, 0], CA_FLOAT64([1, 1, 0, 1]).order(descending: true, method: :dense).to_a
+    a = CA_INT32([5, 4, 3, 4, 2])
+    a[2] = UNDEF
+    assert_equal [0, 1, UNDEF, 1, 2], a.order(descending: true, method: :dense).to_a
+    b = CA_INT32([[1, 1, 2], [7, 7, 7]])
+    assert_equal [[1, 1, 0], [0, 0, 0]], b.order(axis: 1, descending: true, method: :dense).to_a
+  end
+
+  def test_order_dense_descending_nan_ties_reach_the_next_key
+    nan = Float::NAN
+    a = CA_FLOAT64([nan, 1, nan, nan, 1])
+    b = CA_INT32([3, 9, 1, 2, 0])
+    addr = CArray.sort_addr(a.order(descending: true, method: :dense), b)
+    assert_equal [1, 2, 3, 0, 9], b[addr].to_a
   end
 
   def test_order_dense_unknown_method_raises

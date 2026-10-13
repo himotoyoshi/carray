@@ -153,6 +153,44 @@ class TestKeyWindows < Test::Unit::TestCase
       end
     end
   end
+
+  # An infinite float key, as a NaN one, is in no window and has none.
+  def test_an_infinite_key_is_in_no_window
+    inf = Float::INFINITY
+    v = CA_FLOAT64([1, 10, 100, 1000])
+    w = v.windows(on: CA_FLOAT64([-inf, 0, 1, inf]), before: inf, exclude: nil)
+    assert_equal [UNDEF, 1, 2, UNDEF], w.elements.to_a
+    assert_equal [UNDEF, 10.0, 110.0, UNDEF], w.sum.to_a
+  end
+
+  # A width the key's unit does not divide gives bounds on the finer unit,
+  # the bounds the windows were cut at.
+  def test_bounds_on_a_unit_finer_than_the_key
+    t = CArray.time(["2024-01-01 00:00", "2024-01-01 00:10"], unit: "10 minutes")
+    lower, = CA_FLOAT64([1, 2]).windows(on: t, before: "15 minutes").bounds
+    assert_equal %w[2023-12-31T23:45:00Z 2023-12-31T23:55:00Z], lower.to_a.map(&:to_s)
+    y = CArray.time(%w[2020 2021], unit: :Y)
+    lower, = CA_FLOAT64([1, 2]).windows(on: y, before: "6 months").bounds
+    assert_equal %w[2019-07 2020-07], lower.to_a.map(&:to_s)
+    h = CArray.time(["2024-01-01 00:00"], unit: :m)
+    lower, = CA_FLOAT64([1]).windows(on: h, before: "1 hour").bounds
+    assert_equal "m", lower.unit.to_s
+  end
+
+  # A bound beyond the range of an int64 key holds every key on that side,
+  # rather than wrapping round and emptying the windows that follow.
+  def test_bounds_beyond_int64_hold_every_key
+    v = CA_FLOAT64([1, 10, 100])
+    w = v.windows(on: CA_INT64([-5, 0, 3]), before: 2**63 - 1, exclude: nil)
+    assert_equal [1, 2, 3], w.elements.to_a
+    assert_equal [1.0, 11.0, 111.0], w.sum.to_a
+    w = v.windows(on: CA_INT64([-2**63, 0, 1]), before: 1, exclude: nil)
+    assert_equal [1, 1, 2], w.elements.to_a
+    w = v.windows(on: CA_INT64([2**63 - 2, 2**63 - 1, 0]), after: 2**63 - 1, exclude: nil)
+    assert_equal [2, 1, 3], w.elements.to_a
+    t = CArray.time(%w[1900-01-01 1950-01-01 2000-01-01], unit: :ns)
+    assert_equal [1, 2, 3], v.windows(on: t, before: "100000 days", exclude: nil).elements.to_a
+  end
 end
 
 class TestCAFrameWindows < Test::Unit::TestCase

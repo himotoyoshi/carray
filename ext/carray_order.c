@@ -807,11 +807,10 @@ rb_ca_nsmallest (int argc, VALUE *argv, VALUE self)
  * ever compare equal), so a later sort_addr key never gets consulted;
  * dense ranks preserve ties, so it does.
  *
- * descending: still works under method: :dense via the same
- * (n-1)-ascending transform below: n is fixed per-fiber, so within a
- * tied group ascending values are equal and (n-1)-ascending stays
- * equal too -- ties survive the transform, and the group-to-group
- * order still reverses correctly. */
+ * descending: ranks the largest value 0.  A dense rank r becomes top-r,
+ * top the fiber's highest dense rank, so the ranks stay without gaps.  An
+ * ordinal rank is the ascending ordinal rank of those descending dense
+ * ranks, so tied cells keep their original order in both directions. */
 
 static VALUE
 rb_ca_order (int argc, VALUE *argv, VALUE self)
@@ -826,7 +825,20 @@ rb_ca_order (int argc, VALUE *argv, VALUE self)
   int do_stable = NIL_P(rkind) ? 0
   : ca_symbol_choice(rkind, "kind", "quick", "stable", NULL);
 
-  VALUE asc, n;
+  if ( RTEST(rdesc) && ! dense ) {
+    VALUE kw = rb_hash_new();
+    rb_hash_aset(kw, ID2SYM(rb_intern("axis")), raxis);
+    rb_hash_aset(kw, ID2SYM(rb_intern("descending")), Qtrue);
+    rb_hash_aset(kw, ID2SYM(rb_intern("method")), ID2SYM(rb_intern("dense")));
+    rb_hash_aset(kw, ID2SYM(rb_intern("kind")), do_stable ? ID2SYM(rb_intern("stable")) : ID2SYM(rb_intern("quick")));
+    VALUE ranked = rb_funcallv_kw(self, rb_intern("order"), 1, &kw, RB_PASS_KEYWORDS);
+    rb_hash_delete(kw, ID2SYM(rb_intern("descending")));
+    rb_hash_delete(kw, ID2SYM(rb_intern("method")));
+    return rb_funcallv_kw(ranked, rb_intern("order"), 1, &kw, RB_PASS_KEYWORDS);
+  }
+
+  VALUE asc;
+  long axis_norm = 0;
   if ( NIL_P(raxis) ) {
     VALUE flat = rb_ca_flatten(self);
     /* Direct C-level dispatch via c_callable: true extern (mkkernel). */
@@ -839,42 +851,29 @@ rb_ca_order (int argc, VALUE *argv, VALUE self)
       shape_argv[k] = LONG2NUM((long) ca->dim[k]);
     }
     asc = rb_ca_reshape((int) ca->ndim, shape_argv, ranked);
-    n = RTEST(rb_ca_has_mask(self))
-      ? SIZE2NUM(ca_count_not_masked(ca))   /* = elements - count_masked */
-      : rb_ca_elements(self);
   } else {
-    long axis_norm = rb_ca_normalize_axis_value(self, raxis, "order");
-    VALUE raxis_norm = LONG2NUM(axis_norm);
-    asc = rb_ca_rank_index_ki_kind_dense(self, raxis_norm, do_stable, dense);
-    if ( RTEST(rb_ca_has_mask(self)) ) {
-      n = rb_ca_count_not_masked_c(self, raxis_norm);
-    } else {
-      CArray *ca;
-      TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-      n = LONG2NUM((long) ca->dim[axis_norm]);
-    }
-    if ( RTEST(rb_obj_is_kind_of(n, rb_cCArray)) ) {
-      VALUE ia_argv[1] = { raxis_norm };
-      n = rb_ca_insert_axis(1, ia_argv, n);
-    }
+    axis_norm = rb_ca_normalize_axis_value(self, raxis, "order");
+    asc = rb_ca_rank_index_ki_kind_dense(self, LONG2NUM(axis_norm), do_stable, dense);
+  }
+  if ( ! RTEST(rdesc) ) {
+    return asc;
   }
 
-  VALUE diff;
-  if ( RTEST(rdesc) ) {
-    /* `-` via rb_funcall handles both Integer-Integer and
-       CArray/Integer mixed receivers uniformly via Ruby's operator
-       dispatch.  No single C entry covers both. */
-    VALUE n_minus_1 = rb_funcall(n, id_sub, 1, INT2FIX(1));
-    diff = rb_funcall(n_minus_1, id_sub, 1, asc);
+  /* Dense and descending: subtract from the fiber's highest dense rank
+     (`-` via rb_funcall takes an Integer or a CArray receiver alike). */
+  VALUE top;
+  if ( NIL_P(raxis) ) {
+    top = rb_funcall(asc, rb_intern("max"), 0);
+    if ( top == CA_UNDEF ) top = INT2FIX(0);   /* no present cell */
   } else {
-    diff = asc;
+    VALUE kw = rb_hash_new();
+    rb_hash_aset(kw, ID2SYM(rb_intern("axis")), LONG2NUM(axis_norm));
+    rb_hash_aset(kw, ID2SYM(rb_intern("keep_axis")), Qtrue);
+    top = rb_funcallv_kw(asc, rb_intern("max"), 1, &kw, RB_PASS_KEYWORDS);
   }
-  /* Output data_type: CA_SIZE (= ca_size_t, int64 on 64-bit builds),
-     matching the rest of the *_index family (sort_index / partition_index
-     / rank_index) that order is built on.  No explicit cast needed here:
-     asc (rank_index_ki's output) is already CA_SIZE, and Integer - CArray
-     promotion in the descending branch preserves it. */
-  return diff;
+  /* Output data_type: CA_SIZE (int64 on 64-bit builds), as the rest of the
+     *_index family; Integer - CArray keeps it. */
+  return rb_funcall(top, id_sub, 1, asc);
 }
 
 /* ---- linear_section / linear_fetch ----------------------------------- */

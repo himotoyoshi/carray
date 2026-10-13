@@ -76,15 +76,9 @@ class TestOrderAxis < Test::Unit::TestCase
     [[3,1,4,1], [5,9,2,6]].each_with_index do |row, i|
       row.each_with_index { |v, j| b[i, j] = v }
     end
-    asc = b.order(axis: 1)
-    desc = b.order(axis: 1, descending: true)
-    # desc[i, j] == (4 - 1) - asc[i, j]
-    b.dim[0].times do |i|
-      b.dim[1].times do |j|
-        assert_equal(3 - asc[i, j], desc[i, j],
-                     "i=#{i}, j=#{j}: asc=#{asc[i,j]}, desc=#{desc[i,j]}")
-      end
-    end
+    # 0 is the largest; the tied 1s keep their order, as they do ascending.
+    assert_equal([[1, 2, 0, 3], [2, 0, 3, 1]], b.order(axis: 1, descending: true).to_a)
+    assert_equal([[2, 0, 3, 1], [1, 3, 0, 2]], b.order(axis: 1).to_a)
   end
 
   # ---- shape and data_type --------------------------------------------------

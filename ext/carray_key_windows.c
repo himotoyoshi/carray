@@ -24,8 +24,10 @@
 #define KW_BELOW_UPPER(k, hi_b, ex_hi)  ((ex_hi) ? ((k) < (hi_b)) : ((k) <= (hi_b)))
 
 /* The walk, written once for an int64 key and once for a float64 key.  ON_GRID
-   tells whether key k lies on the interval grid that starts at anchor t. */
-#define KW_WALK(T, ON_GRID)                                                   \
+   tells whether key k lies on the interval grid that starts at anchor t.
+   BOUNDS sets lo_b and hi_b, and lo_open / hi_open when a bound lies beyond
+   the range of T, so that every key of the group is inside it. */
+#define KW_WALK(T, ON_GRID, BOUNDS)                                           \
   {                                                                           \
     const T *key = (const T *) ck->ptr;                                       \
     const T before = (T) vbefore, after = (T) vafter, iv = (T) viv;           \
@@ -41,12 +43,14 @@
       if ( lo < gstart ) lo = gstart;                                         \
       if ( hi < lo ) hi = lo;                                                 \
       const T t = key[i];                                                     \
-      const T lo_b = t - before, hi_b = t + after;                            \
-      while ( lo < n && grp[lo] == grp[i] &&                                  \
+      T lo_b, hi_b;                                                           \
+      int lo_open, hi_open;                                                   \
+      BOUNDS;                                                                 \
+      while ( lo < n && grp[lo] == grp[i] && !lo_open &&                      \
               !KW_ABOVE_LOWER(key[lo], lo_b, ex_lo) ) lo++;                   \
       if ( hi < lo ) hi = lo;                                                 \
       while ( hi < n && grp[hi] == grp[i] &&                                  \
-              KW_BELOW_UPPER(key[hi], hi_b, ex_hi) ) hi++;                    \
+              ( hi_open || KW_BELOW_UPPER(key[hi], hi_b, ex_hi) ) ) hi++;     \
       plo[i] = lo;                                                            \
       phi[i] = hi;                                                            \
       if ( pcomplete ) {                                                      \
@@ -117,13 +121,21 @@ rb_ca_s_key_window_ranges (VALUE self, VALUE vkeys, VALUE vgroups,
   if ( ck->data_type == CA_INT64 ) {
     int64_t vbefore = NUM2LL(rbefore), vafter = NUM2LL(rafter);
     int64_t viv = NIL_P(rinterval) ? 1 : NUM2LL(rinterval);
-    KW_WALK(int64_t, ((k - t) % iv == 0))
+    int64_t d;
+    /* before and after are not negative, so an overflow of t - before is
+       below every key and one of t + after above every key.  A difference
+       k - t that overflows is not taken as on the grid. */
+    KW_WALK(int64_t,
+            (!__builtin_sub_overflow(k, t, &d) && d % iv == 0),
+            (lo_open = __builtin_sub_overflow(t, before, &lo_b),
+             hi_open = __builtin_add_overflow(t, after, &hi_b)))
   }
   else {
     double vbefore = NUM2DBL(rbefore), vafter = NUM2DBL(rafter);
     double viv = NIL_P(rinterval) ? 1.0 : NUM2DBL(rinterval);
     KW_WALK(double, (fabs((k - t) / iv - nearbyint((k - t) / iv)) <=
-                     1e-9 * fmax(1.0, fabs((k - t) / iv))))
+                     1e-9 * fmax(1.0, fabs((k - t) / iv))),
+            (lo_b = t - before, hi_b = t + after, lo_open = 0, hi_open = 0))
   }
 
   return rb_ary_new3(3, vlo, vhi, vcomplete);

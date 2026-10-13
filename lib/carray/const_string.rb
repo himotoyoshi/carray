@@ -143,6 +143,12 @@ class CAConstString
   #   Returns the per-fiber indices that index a sort by string order.
   #   @return [CArray] `:int64` indices.
   def sort_index (*args, **kw)
+    if args.empty? && kw.empty? && ! has_mask?
+      # With no axis the indices are those of the flattened array, which are
+      # its addresses.
+      addr = __sort_addr_bytes__
+      return ndim == 1 ? addr : addr.flatten.copy
+    end
     to_string.sort_index(*args, **kw)
   end
 

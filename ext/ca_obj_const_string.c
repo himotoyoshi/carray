@@ -922,6 +922,14 @@ ca_const_string_byte_cmp (const void *a, const void *b)
   return (la > lb) - (la < lb);
 }
 
+static int
+ca_const_string_index_cmp (const void *a, const void *b)
+{
+  ca_size_t ia = *(const ca_size_t *) a;
+  ca_size_t ib = *(const ca_size_t *) b;
+  return (ia > ib) - (ia < ib);
+}
+
 /* compute the ascending sort permutation; raises on masked input (matches
    base CArray#sort).  caller xfree()s the returned index array. */
 static ca_size_t *
@@ -937,6 +945,18 @@ ca_const_string_sort_perm (ca_const_string_scan_t *s)
   for ( i = 0; i < s->n; i++ ) idx[i] = i;
   ca_const_string_sort_ctx = s;
   qsort(idx, (size_t) s->n, sizeof(ca_size_t), ca_const_string_byte_cmp);
+  /* qsort is not stable.  Equal strings keep their order, as CArray's own
+     sort does, so each run of them is put back in position order.  Breaking
+     the tie inside the comparator instead doubles the sort on columns with
+     many repeats. */
+  for ( i = 0; i < s->n; ) {
+    ca_size_t j = i + 1;
+    while ( j < s->n && ca_const_string_byte_cmp(&idx[i], &idx[j]) == 0 ) j++;
+    if ( j - i > 1 ) {
+      qsort(idx + i, (size_t) (j - i), sizeof(ca_size_t), ca_const_string_index_cmp);
+    }
+    i = j;
+  }
   ca_const_string_sort_ctx = NULL;
   return idx;
 }

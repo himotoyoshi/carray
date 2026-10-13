@@ -153,4 +153,19 @@ class TestCAFrameGroupByIndexType < Test::Unit::TestCase
     assert_equal %w[2024-01-01 2024-02-01 2024-03-01 2024-04-01], filled.index.to_a.map(&:to_s)
     assert_equal [1.0, 2.0, 0.0, 3.0], filled["v"].to_a
   end
+
+  # Filled calendar bins keep the phase of an origin and of label: :right.
+  def test_filled_calendar_bins_keep_the_phase
+    t = CArray.time(%w[2023-11-30 2024-04-30 2024-09-02], unit: :D)
+    df = CAFrame.new("time" => t, "v" => CA_FLOAT64([1, 2, 4]))
+    r = df.resample("time", "3 months", origin: "2024-02-01", fill: true).sum
+    assert_equal %w[2023-11-01 2024-02-01 2024-05-01 2024-08-01], r.index.to_a.map(&:to_s)
+    assert_equal [1.0, 2.0, 0.0, 4.0], r["v"].to_a
+    r = df.resample("time", "3 months", origin: "2024-02-01", label: :right, fill: true).sum
+    assert_equal %w[2024-02-01 2024-05-01 2024-08-01 2024-11-01], r.index.to_a.map(&:to_s)
+    assert_equal [1.0, 2.0, 0.0, 4.0], r["v"].to_a
+    r = df.resample("time", "2 years", origin: "1971-01-01", fill: true).sum
+    assert_equal %w[2023-01-01], r.index.to_a.map(&:to_s)
+    assert_equal [7.0], r["v"].to_a
+  end
 end

@@ -79,6 +79,54 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   Array's first value. A nested Array keeps its shape; an Array of the wrong
   length raises.
 
+- Fix: copying the view that `sort` or `partition` returns without `axis:`
+  (`a.sort.copy`, `a.partition(k).copy`) is as fast as with `axis:` again,
+  about a third less time than in 3.0.3. More generally, reading a flattened
+  or reshaped array through an index (`a.flatten[idx]`) no longer pays a
+  division per cell.
+
+- Change: `order(descending: true)` (the default `method: :ordinal`) keeps
+  tied cells in their original order, as the ascending ranks do:
+  `[5, 3, 5, 1, 5]` gives `[0, 3, 1, 4, 2]`, was `[2, 3, 1, 4, 0]`. The same
+  holds for `order` on groups (`CAFrame#group_by`, `group_by_category`).
+  Code that relied on `order(descending: true) == (n - 1) - order` with ties
+  needs the old formula written out.
+
+- Fix: arithmetic on a masked array (`a + 1.0`, `a.add!(1)` and the like)
+  is as fast as in 3.0.2 again. Since 3.0.3 combining the operands' masks
+  took about a quarter longer (0.4 ms more per million cells).
+
+- Fix: `windows(on:).bounds` with a time key reports the bounds the windows
+  were cut at when the width is not a whole number of the key's unit (a
+  "15 minutes" width on a 10-minute key, "6 months" on a year key): the
+  bounds are given on the finer unit the two share instead of being cut
+  down to the key's unit.
+
+- Fix: `windows(on:)` with an int64 or time key no longer empties windows
+  when `t - before` or `t + after` goes beyond the int64 range (a width of
+  a few hundred years on a nanosecond time key, or a key near the int64
+  ends): such a bound now holds every key on its side.
+
+- Fix: `CAFrame#resample(..., fill: true)` with a month or year unit and an
+  `origin:` or `label: :right` no longer drops every row: the empty bins it
+  adds now keep the phase of the occupied ones.
+
+- Fix: `order(descending: true, method: :dense)` gives dense ranks: `0` is
+  the largest value and the ranks have no gaps (`[1, 1, 2]` gives `[1, 1, 0]`,
+  was `[2, 2, 1]`). The same holds for `order` on groups (`CAFrame#group_by`,
+  `group_by_category`). Sorting by such a key is unaffected.
+
+- Fix: `order(method: :dense)` gives every NaN the same rank, after the
+  numbers, as sorting and `unique` already treat NaN as one value. With it,
+  `sort_by_key(..., order: :desc)` passes NaN ties on to the next key and
+  keeps their rows in order.
+
+- Fix: `CAConstString#sort_index` with no arguments is fast again: since
+  3.0.2 it decoded every cell into a Ruby String first and was about 8 times
+  slower than in 3.0.0. With no arguments, `sort_index` and `sort_addr` now
+  keep equal strings in their original order, as `CArray#sort_index` does and
+  as they already did with `axis:` or a masked column.
+
 - Fix: a face-mode `CAObject` (`CAObject.new(..., parent: p, face: true)`)
   over a masked parent no longer leaks its mask, about 100 to 200 bytes
   per object.

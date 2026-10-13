@@ -658,7 +658,8 @@ class CASegmentIterator < CAIterator
     # iterator refuses what CArray#order refuses.
     CArray.int64(0).order(descending: descending, method: method, kind: kind)
     # The core ranks every value once, so the order and the ties are its own.
-    ranks = grouped.order(method: :dense, kind: kind)
+    # Ranked in the asked direction, so tied cells keep their order either way.
+    ranks = grouped.order(method: :dense, kind: kind, descending: descending)
     m = grouped.elements
     return out if m.zero?
     seg     = CArray.segment_index(offsets: @bounds)
@@ -680,7 +681,6 @@ class CASegmentIterator < CAIterator
       local[sorted] = CArray.int64(m).seq! - first
     end
     local[present.not] = UNDEF
-    local = (count_not_masked[seg] - 1) - local if descending
     out.reshape(@value.elements)[perm] = local
     out
   end

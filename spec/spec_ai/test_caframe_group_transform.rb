@@ -48,6 +48,20 @@ class TestCAFrameGroupTransform < Test::Unit::TestCase
     assert_equal [1, 1, 0, 0, 2, UNDEF], grp.order("temp", descending: true).to_a
   end
 
+  def test_order_descending_keeps_ties_in_row_order
+    df = CAFrame.new("st" => CA_INT32([1, 1, 2, 1, 2]), "t" => CA_INT32([5, 3, 7, 5, 7]))
+    assert_equal [0, 2, 0, 1, 1], df.group_by("st").order("t", descending: true).to_a
+  end
+
+  def test_order_dense_descending_starts_at_zero_in_each_group
+    df = CAFrame.new("st" => CA_INT32([1, 1, 1, 2, 2]), "t" => CA_INT32([10, 12, 12, 5, 7]))
+    assert_equal [1, 0, 0, 1, 0],
+                 df.group_by("st").order("t", descending: true, method: :dense).to_a
+    nan = Float::NAN
+    df = CAFrame.new("st" => CA_INT32([1, 1, 1]), "t" => CA_FLOAT64([nan, 1.0, nan]))
+    assert_equal [1, 0, 1], df.group_by("st").order("t", method: :dense).to_a
+  end
+
   def test_several_names
     grp = frame.group_by("station")
     temp, wind = grp.lag("temp", "wind")

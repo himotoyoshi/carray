@@ -21,7 +21,8 @@ require "carray/segment_iterator"
 # (whether the window holds exactly the keys of that grid).
 #
 # The keys need not be sorted.  A row whose key (or `by:` key) is masked, or
-# a NaN, is in no window and has no window: its answers are UNDEF.  A masked
+# a float key that is NaN or infinite, is in no window and has no window: its
+# answers are UNDEF (a distance to an infinite key has no value).  A masked
 # value is in the windows (it counts in {#elements}) but, as in any
 # reduction, takes no part in the reductions.
 #
@@ -171,11 +172,12 @@ class CAKeyWindowIterator < CAIterator
   # @overload bounds
   #   Returns the range each window was asked to cover, as two arrays of the
   #   key's kind: the key minus `before` and the key plus `after`.  Which
-  #   end is left out is the `exclude:` given.
+  #   end is left out is the `exclude:` given.  A time key whose unit does
+  #   not divide the width gives bounds on the finer unit the two share,
+  #   so a bound is the one the windows were cut at.
   #   @return [Array(CArray, CArray)]
   def bounds
-    [@before_value.nil? ? @key : @key - @before_value,
-     @after_value.nil?  ? @key : @key + @after_value]
+    [window_bound(@before_value, :-), window_bound(@after_value, :+)]
   end
 
   # @overload is_complete
@@ -363,6 +365,16 @@ class CAKeyWindowIterator < CAIterator
       check_widths(bw, aw, iv)
       [key.float64, bw, aw, iv]
     end
+  end
+
+  def window_bound (width, op)
+    return @key if width.nil?
+    key = @key
+    if key.is_a?(CATime) || key.is_a?(CATimedelta)
+      res = width.is_a?(CATimedelta::Element) ? width.unit : CATime::Resolution.parse(width)
+      key = key.to_unit(CATimeUnitAlgebra.finer(key.unit, res))
+    end
+    key.public_send(op, width)
   end
 
   # A duration in ticks of the key's unit, as a Rational.

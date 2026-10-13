@@ -1170,7 +1170,9 @@ class CArray
   #   key lies between t - before and t + after; `exclude:` leaves out the
   #   lower end (default), the upper end, both or neither.  `by:` keeps
   #   each window within the values with the same by keys, and `interval:`
-  #   gives the key's grid step for {CAKeyWindowIterator#is_complete}.
+  #   gives the key's grid step for {CAKeyWindowIterator#is_complete}.  A
+  #   value whose key is masked, NaN or infinite is in no window and has no
+  #   window.
   #
   #     temp.windows(on: time, before: "1 hour").mean
   #   @return [CAKeyWindowIterator]

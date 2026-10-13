@@ -47,8 +47,9 @@ a number for a numeric key. A month or a year has no fixed length, so it
 measures only a key stored in months or years.
 
 **Rows and masks.** The keys need not be sorted; the answers come in the
-order of the values. A value whose key (or `by:` key) is masked, or a NaN, is
-in no window and has no window: its answers are `UNDEF`. A masked value is in
+order of the values. A value whose key (or `by:` key) is masked, or a float
+key that is NaN or infinite, is in no window and has no window: its answers
+are `UNDEF` (a distance to an infinite key has no value). A masked value is in
 the windows but, as in any reduction, takes no part in the reductions.
 
 ## What each window covered
