@@ -57,10 +57,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   as does a day duration on a month grid. As with `Date#>>`, a month is not
   a fixed step: `+ 1 month - 1 month` need not undo it.
 
-- Change: `clip` refuses `UNDEF` as a bound with `ArgumentError`. To mask
-  the cells out of range, pass `UNDEF` as the fill (`clip(0, 10, UNDEF)`,
-  `lfill:` / `ufill:`). `clip(UNDEF, nil)` returned an `:object` array
-  with every cell masked.
+- Change: `clip` refuses a bound that is `UNDEF` or has a masked cell,
+  with `ArgumentError`; fill the bound first. A masked bound cell gave a
+  masked result, and `clip(UNDEF, nil)` an `:object` array with every cell
+  masked. A NaN in a bound array still leaves its cell unbounded, as `nil`
+  does a whole side. To mask the cells out of range, pass `UNDEF` as the
+  fill (`clip(0, 10, UNDEF)`, `lfill:` / `ufill:`).
 
 - Change: `search`, `bsearch` and `search_nearest` (and their `_addr`
   forms) find nothing for an `UNDEF` query or a masked cell of a query
