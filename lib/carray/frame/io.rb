@@ -657,9 +657,9 @@ class CAFrame
     dup = names.tally.select { |_, count| count > 1 }.keys
     unless dup.empty?
       raise ArgumentError,
-            "the header names #{dup.map(&:inspect).join(', ')} more than once; " \
-            "name the columns yourself: from_csv(path, header: 0, " \
-            "column_names: [...])"
+            "not a valid header row (#{dup.map(&:inspect).join(', ')} " \
+            "repeated); pass header: false for the default column names " \
+            "(c0, c1, ...), or name the columns with column_names:"
     end
 
     cols = {}

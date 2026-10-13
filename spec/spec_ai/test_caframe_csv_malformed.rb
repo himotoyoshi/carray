@@ -57,7 +57,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
   # A repeated header name used to keep only the last of its columns.
   def test_a_repeated_header_name_raises
     err = assert_raise(ArgumentError) { read("a,b,a\n1,2,3\n") }
-    assert_match(/"a" more than once/, err.message)
+    assert_match(/not a valid header row \("a" repeated\)/, err.message)
   end
 
   def test_two_empty_header_names_raise
