@@ -521,9 +521,10 @@ ca_mask_overlay_or_body (VALUE arg)
    Memory peak: one mask scratch at a time (= elements bytes, 1 B/cell),
    released between operands.
 
-   CAREFUL: `ca_out` must be a freshly templated entity (driver allocates
-   via ca_template_safe), so ca_out->mask->ptr is directly writable
-   without attach.
+   CAREFUL: ca_out's mask is written through ca_out->mask->ptr, so ca_out
+   is an entity (a fresh one from ca_template_safe) or an attached view.
+   Each operand other than a scalar has ca_out's number of elements
+   (ArgumentError otherwise); at most 8 operands.
 
    This gathers the full mask once; a per-chunk mask gather inside the
    chunked branch is a possible future optimisation. */
@@ -540,9 +541,21 @@ ca_mask_overlay_safe (CArray *ca_out, int n, ...)
   va_start(ap, n);
   for ( i = 0; i < n; i++ ) {
     slist[i] = va_arg(ap, CArray *);
-    if ( slist[i] && ca_has_mask(slist[i]) ) any_mask = 1;
   }
   va_end(ap);
+
+  /* An array operand's mask is gathered over ca_out's cells. */
+  for ( i = 0; i < n; i++ ) {
+    CArray *cs = slist[i];
+    if ( cs && ! ca_is_scalar(cs) && cs->elements != ca_out->elements ) {
+      rb_raise(rb_eArgError,
+               "mask operand has %lld elements, the output %lld",
+               (long long) cs->elements, (long long) ca_out->elements);
+    }
+  }
+  for ( i = 0; i < n; i++ ) {
+    if ( slist[i] && ca_has_mask(slist[i]) ) any_mask = 1;
+  }
 
   if ( ! any_mask ) return;
 

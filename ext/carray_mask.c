@@ -553,6 +553,10 @@ ca_create_mask (void *ap)
   }
 
   ca_func[ca->obj_type].create_mask(ca);
+  if ( ! ca->mask ) {
+    /* a lazy expression with no masked operand has no mask to make */
+    return;
+  }
   ca_set_flag(ca->mask, CA_FLAG_MASK_ARRAY); /* set array as mask array */
   if ( ca_is_view(ca) ) {
     if ( CAVIEW(ca)->attach ) {
@@ -606,6 +610,13 @@ void
 ca_setup_mask (void *ap, CArray *mask)
 {
   CArray *ca = (CArray *) ap;
+
+  if ( mask ) {
+    if ( ! ca_is_boolean_type(mask) ) {
+      rb_raise(rb_eCADataTypeError, "a mask is a boolean array");
+    }
+    ca_check_same_elements(ca, mask);
+  }
 
   ca_update_mask(ca);
 
