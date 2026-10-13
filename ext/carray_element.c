@@ -26,9 +26,14 @@
 static inline void
 elem_parse_idx_array (CArray *ca, VALUE rary, ca_size_t *idx)
 {
-  const VALUE *iarr = RARRAY_CONST_PTR(rary);
+  const VALUE *iarr;
   int8_t ndim = ca->ndim;
   int8_t i;
+  if ( RARRAY_LEN(rary) != ndim ) {
+    rb_raise(rb_eIndexError, "%ld indices given for a carray of ndim %i",
+             (long) RARRAY_LEN(rary), (int) ndim);
+  }
+  iarr = RARRAY_CONST_PTR(rary);
   for (i=0; i<ndim; i++) {
     VALUE v = iarr[i];
     ca_size_t k = FIXNUM_P(v) ? (ca_size_t)FIX2LONG(v) : NUM2SIZE(v);

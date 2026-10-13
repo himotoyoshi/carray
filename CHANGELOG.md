@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: three methods read or wrote outside their memory. `project` (and
+  `take_along_axis` with a masked index) on an object array computed
+  lazily could crash in the garbage collector. `bincount_nd` with a uint64
+  label of 2**63 or more counted it in another cell, or wrote before the
+  counts; it now counts in the overflow cell, as any label past the last
+  bin does. The `elem_*` methods given an index array whose length is not
+  the array's ndim read past the Ruby Array or ignored the extra entries;
+  they now raise IndexError, as `[]` does.
+
 - Change: NaN comes after the numbers in descending order too, as it
   already did ascending: `order(descending: true)`, `sort_by_key(..., order:
   :desc)`, and `order(descending: true)` on groups put NaN last instead of

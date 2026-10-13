@@ -116,19 +116,23 @@ ca_project_loop (CArray *co, CArray *ca, CArray *ci, char *lfill, char *ufill)
   xfree(ma);
 }
 
-CArray *
+/* The result is wrapped before anything is copied into it: for an object
+   array the gathered cells are VALUEs that only the result's mark keeps
+   alive once the source is detached. */
+static VALUE
 ca_project (CArray *ca, CArray *ci, char *lfill, char *ufill)
 {
+  volatile VALUE obj;
   CArray *co;
 
+  obj = rb_carray_new(ca->data_type, ci->ndim, ci->dim, ca->bytes, NULL);
+  GetCArray(obj, co);
+
   ca_attach_n(2, ca, ci); /* window: nothing raises inside */
-
-  co = carray_new(ca->data_type, ci->ndim, ci->dim, ca->bytes, NULL);
   ca_project_loop(co, ca, ci, lfill, ufill);
-
   ca_detach_n(2, ca, ci); /* DETACH */
 
-  return co;
+  return obj;
 }
 
 /* rk.__count_below__(q, inclusive) -- for each cell of q, how many values
@@ -274,14 +278,13 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
     TypedData_Get_Struct(vstorage, CArray, &carray_data_type, ca);
   }
 
-  co = ca_project(ca, ci,
-                 ( ! NIL_P(vlfval) ) ? lfval : NULL,
-                 ( ( ! NIL_P(vufval) ) || ( ! NIL_P(vlfval) ) ) ? ufval : NULL);
+  obj = ca_project(ca, ci,
+                  ( ! NIL_P(vlfval) ) ? lfval : NULL,
+                  ( ( ! NIL_P(vufval) ) || ( ! NIL_P(vlfval) ) ) ? ufval : NULL);
+  GetCArray(obj, co);
 
   ALLOCV_END(hlfval);
   ALLOCV_END(hufval);
-
-  obj = ca_wrap_struct(co);
 
   if ( ! ca_is_any_masked(co) ) {
     obj = rb_ca_unmask_copy(obj);
