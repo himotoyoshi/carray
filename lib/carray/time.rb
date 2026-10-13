@@ -1406,6 +1406,54 @@ class CATime
   # @return [CArray] integer.
   def second; clock_field(:s); end
 
+  # Quarter of the year, 1..4 (January to March is 1).  For a fiscal year,
+  # count quarters with `timesteps(unit: "3 months", origin:)`.
+  # @return [CArray] integer.
+  def quarter
+    (month - 1) / 3 + 1
+  end
+
+  # ISO 8601 week number, 1..53.  A week runs Monday to Sunday and belongs
+  # to the year its Thursday is in, so the first days of January can be in
+  # the last week of the year before, and the last days of December in
+  # week 1 of the next; {#iso_year} is that year.
+  # @return [CArray] integer.
+  def iso_week
+    thursday, year = iso_thursday
+    ones = CArray.int64(*shape) { 1 }
+    (thursday - CATimeCivil.days_from_civil(year, ones, ones)) / 7 + 1
+  end
+
+  # The ISO 8601 year of each time's week (see {#iso_week}): the calendar
+  # year except in the few days around New Year whose week is counted in the
+  # neighbouring year.
+  # @return [CArray] integer.
+  def iso_year
+    iso_thursday[1]
+  end
+
+  # The Thursday of each time's ISO week, in days since the epoch, and the
+  # year it falls in.
+  private def iso_thursday
+    days = days_since_epoch
+    iso_weekday = (days + 3) % 7 + 1          # Monday 1 .. Sunday 7; 1970-01-01 is a Thursday
+    thursday = days - iso_weekday + 4
+    [thursday, CATimeCivil.civil_from_days(thursday)[0]]
+  end
+
+  # Number of days in the month, 28..31 (January's for `:Y` storage, which
+  # does not resolve months).  `t.day.eq(t.days_in_month)` is the last day of
+  # the month.
+  # @return [CArray] integer.
+  def days_in_month
+    y, m, = CATimeCivil.civil_from_days(days_since_epoch)
+    ones = CArray.int64(*shape) { 1 }
+    ord  = y * 12 + m                     # the next month's ordinal (m is 1..12)
+    ny   = ord / 12
+    CATimeCivil.days_from_civil(ny, ord - ny * 12 + 1, ones) -
+      CATimeCivil.days_from_civil(y, m, ones)
+  end
+
   # Day of the week, Sunday = 0 .. Saturday = 6.
   # @return [CArray] integer.
   def weekday
@@ -3112,6 +3160,34 @@ class CATime
   #   @return [CATime]
   def floor(grid = nil, unit: nil, origin: nil)
     snap(grid, unit: unit, origin: origin, direction: :floor)
+  end
+
+  # @overload end_of(grid = nil, unit:, origin: nil)
+  #   Each element at the last tick of its bucket, on the array's own grid:
+  #   the bucket {#floor} gives the head of, one tick before the next head.
+  #   A day array's month ends on the month's last day, a second array's at
+  #   23:59:59 of it:
+  #
+  #     CArray.time(%w[2024-02-10 2024-03-31], unit: :D).end_of(unit: :M)
+  #     # => 2024-02-29, 2024-03-31
+  #
+  #   The bucket has to be a whole number of the array's ticks, since its
+  #   end is counted on that grid.
+  #   @return [CATime]
+  #   @raise [ArgumentError] when the bucket is finer than the grid or not a
+  #     whole number of its ticks.
+  def end_of(grid = nil, unit: nil, origin: nil)
+    step, origin = Grid.resolve(grid, unit, origin)
+    step = CATime::Resolution.parse(step)
+    per  = CATimeUnitAlgebra.ratio(step, self.unit)    # ticks of the grid per bucket
+    if per && !(per.denominator == 1 && per >= 1)
+      raise ArgumentError,
+            "end_of: a bucket of #{step} is not a whole number of the #{self.unit} " \
+            "grid's ticks, so its last tick is not on the grid"
+    end
+    head = floor(unit: step, origin: origin)
+    head + CATimedelta::Element.new(step.count, step.base) -
+      CATimedelta::Element.new(self.unit.count, self.unit.base)
   end
 
   # @overload ceil(grid = nil, unit:, origin: nil)

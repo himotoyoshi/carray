@@ -530,6 +530,10 @@ dt.yday      # => CArray [167, 168, ...]         (1..366)
 dt.jd        # Julian Day Number
 dt.ajd       # Astronomical Julian Day (Float)
 dt.is_leap   # boolean CArray
+dt.days_in_month   # => CArray [30, 30, ...]     (28..31; dt.day.eq(dt.days_in_month) is a month end)
+dt.quarter   # => CArray [2, 2, ...]             (1..4, January to March is 1)
+dt.iso_week  # => CArray [24, 24, 25, ...]       (ISO 8601 week, Monday to Sunday, 1..53)
+dt.iso_year  # => CArray [2024, ...]             (the year an ISO week is counted in)
 ```
 
 Each accessor returns a plain `Integer`, `Float`, or `bool` CArray —
@@ -1063,6 +1067,24 @@ dt.snap(g)                        # :round is the default, as in CArray#snap
 dt.snap(g, direction: :nearest)   # => ArgumentError
 ```
 
+`end_of` takes the same arguments and gives the other end of the bucket: its
+**last tick on the array's own grid**, one tick before the next head. A day
+array's month ends on its last day, a second array's at 23:59:59 of it:
+
+```ruby
+d = CArray.time(%w[2024-02-10 2024-03-31], unit: :D)
+d.end_of(unit: :M)                                  # => 2024-02-29, 2024-03-31
+d.end_of(unit: "1 year", origin: "2000-04-01")      # => 2024-03-31 (a fiscal year from April)
+CArray.time(%w[2024-02-10T05:06:07], unit: :s).end_of(unit: :M)   # => 2024-02-29T23:59:59Z
+
+# month ends as a series
+CArray.time_range("2024-01-01", "2024-06-01", unit: :M).to_unit(:D).end_of(unit: :M)
+# => 2024-01-31, 2024-02-29, 2024-03-31, 2024-04-30, 2024-05-31, 2024-06-30
+```
+
+The bucket has to be a whole number of the array's ticks: `end_of(unit: "6 hours")`
+on a day array raises, since a 6-hour bucket has no last day.
+
 ### 11.4 `is_righttime` — the on-grid guard
 
 A `timesteps` match means "same bucket", **not** "same instant". `is_righttime`
@@ -1488,6 +1510,8 @@ operation to the (often quite different) CArray way of doing it.
 | `arr.dt.dayofweek`                            | `dt.weekday`  (Sun=0..Sat=6)                                 |
 | `arr.dt.strftime('%Y-%m-%d')`                 | `dt.strftime("%Y-%m-%d")`                                    |
 | `arr.dt.is_leap_year`                         | `dt.is_leap`                                                 |
+| `arr.dt.quarter`                              | `dt.quarter`                                                 |
+| `arr.dt.isocalendar()` (year, week)           | `dt.iso_year`, `dt.iso_week`                                 |
 | `arr.min()`                                   | `dt.min`  (returns `CATime::Element`)                   |
 | `arr.mean()`                                  | `dt.mean`                                                    |
 | `arr1 - arr2`  (time − time)          | `dt1 - dt2`  (returns `CATimedelta`)                         |
@@ -1502,6 +1526,9 @@ operation to the (often quite different) CArray way of doing it.
 | `s.dt.floor('3h')`                            | `dt.floor(unit: "3 hours")`  (§11.3)                               |
 | `s.dt.ceil('D')` / `s.dt.round('h')`          | `dt.ceil(unit: :D)` / `dt.round(unit: :h)`                               |
 | `s.dt.to_period('M')` (period bucket)         | `dt.floor(unit: "1 month")` → `CATime` (§11.6)               |
+| `s + pd.offsets.MonthEnd(0)`, `to_period('M').end_time` | `dt.end_of(unit: "1 month")` (§11.3)                |
+| `s + pd.DateOffset(months=1)`                 | `dt + "1 month"` (as `Date#>>`; §5)                          |
+| `s.dt.days_in_month`                          | `dt.days_in_month`                                           |
 | `s.groupby(s.dt.to_period('M'))`              | `vals.group_by_category(dt.floor(unit: "1 month").categorize(sort_labels: true))` (§11.9) |
 | `df.resample('D')` (regular bucketing)        | `dt.timesteps(unit: "1 day", origin:)` + `group_by` (§11.10); true reindexing = `time_series` + `align` |
 

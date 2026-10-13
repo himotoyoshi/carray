@@ -36,6 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: `CATime#end_of(unit:, origin:)` gives each time the last tick of its
+  bucket on the array's own grid, as `floor` gives its head: a day array's
+  `end_of(unit: :M)` is the last day of the month, a second array's
+  23:59:59 of it, and `origin:` makes fiscal years and quarters. A bucket
+  that is not a whole number of the grid's ticks raises.
+  `CATime#days_in_month` gives the length of each time's month.
+
+- New: `CATime#quarter` (1..4) and the ISO 8601 week, `iso_week` (1..53)
+  with `iso_year`, the year a week is counted in, which differs from the
+  calendar year in the few days around New Year whose week belongs to the
+  neighbouring year.
+
 - Change: a month or year duration can be added to or subtracted from a
   time on a day, hour, minute or finer grid, and moves each date as Ruby's
   `Date#>>` does: the day stays unless the new month is shorter (then it is
