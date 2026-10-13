@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `is_in` with a single value (`float_array.is_in(2)`) compared in the
+  object lane, so a float array never found an Integer; the set operations
+  (`intersection` and the others) did the same. A single value is now a set
+  of one, as `[2]` is. A String looked for in a numeric array, as a single
+  value or in an Array, raised `unknown data_type representation`; it is now
+  a value that matches nothing.
+
 - New: `CAFrame#is_duplicate(*names)` gives a boolean column, true for the
   rows that repeat an earlier row in the named columns (every column when
   none are named); `df[df.is_duplicate.not]` keeps one row of each. A row

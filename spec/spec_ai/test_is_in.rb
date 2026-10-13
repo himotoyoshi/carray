@@ -263,4 +263,16 @@ class TestIsIn < Test::Unit::TestCase
     assert_equal [false, true], neg.is_in(big).to_a
     assert_equal [false], CA_UINT64([2**64 - 1]).is_in([-1]).to_a
   end
+
+  # A single value is a set of one, as [value] is: a float array finds an
+  # Integer by value, and a String meets a numeric array as a value.
+  def test_a_single_value_is_a_set_of_one
+    a = CA_FLOAT64([1.5, 2.0, 3.0])
+    assert_equal [false, true, false], a.is_in(2).to_a
+    assert_equal a.is_in([2]).to_a, a.is_in(2).to_a
+    assert_equal [false, false, false], CA_INT32([1, 2, 3]).is_in(2.5).to_a
+    assert_equal [false, false], CA_FLOAT64([1, 2]).is_in("x").to_a
+    assert_equal [false, true], CA_FLOAT64([1, 2]).is_in(["x", 2.0]).to_a
+    assert_equal [2.0], a.intersection(2).to_a
+  end
 end

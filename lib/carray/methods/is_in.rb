@@ -8,7 +8,8 @@ class CArray
   #   may be any shape (or an Array / Range) and is flattened to a
   #   single seen-set, so its shape need not match `self`. Only one
   #   argument is accepted; to test a few immediate values pass an
-  #   Array (`a.is_in([0, -1])`).
+  #   Array (`a.is_in([0, -1])`). A single value is a set of one, as
+  #   `[value]` is (`a.is_in(2)` is `a.is_in([2])`).
   #
   #   When `self` and `values` have different numeric data types they are
   #   promoted to a common type first (the same promotion binops use,
@@ -181,6 +182,13 @@ class CArray
     when Array then return promote_elements(values)
     when Range then return promote_elements(values.to_a)
     end
+    # A single value is a set of one, as [value] is.  wrap_readonly would make
+    # it an object array, which takes self into the object lane, where 2.0 is
+    # not eql? 2.
+    if !values.is_a?(CArray) && !values.respond_to?(:to_ca) &&
+       !CArray.memory_view_available?(values)
+      return promote_elements([values])
+    end
     set = values.is_a?(CArray) ? values : CArray.wrap_readonly(values)
     return [self, set] if set.data_type == data_type   # common fast path
     t = value_match_type(CArray.result_type(self, set), set.data_type)
@@ -203,6 +211,10 @@ class CArray
       [self, elems.to_ca.to_type(data_type, bytes: bytes)]
     elsif data_type == CA_OBJECT
       [self, elems.to_ca.to_type(data_type)]
+    elsif elems.any? { |v| v.is_a?(String) || v.is_a?(Symbol) }
+      # A String is a value, which result_type would read as the name of a
+      # data type; a numeric self meets it in the object lane.
+      [to_type(CA_OBJECT), elems.to_ca.to_type(CA_OBJECT)]
     else
       t = CArray.result_type(self, *elems)
       t = value_match_type(t, CA_INT64) if elems.any? { |v| v.is_a?(Integer) && v < 0 }
