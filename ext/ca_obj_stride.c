@@ -2829,7 +2829,9 @@ rb_ca_diagonal (int argc, VALUE *argv, VALUE self)
     base_offset = offset * parent_byte_stride[aj];
   }
   else {
-    ca_size_t neg = -offset;
+    /* compare before negating: -offset overflows for the most negative
+       offset */
+    ca_size_t neg = ( offset <= -parent->dim[ai] ) ? parent->dim[ai] : -offset;
     if (neg >= parent->dim[ai]) {
       diag_len = 0;
     }
@@ -2839,6 +2841,9 @@ rb_ca_diagonal (int argc, VALUE *argv, VALUE self)
       diag_len = (a < b) ? a : b;
     }
     base_offset = neg * parent_byte_stride[ai];
+  }
+  if (diag_len == 0) {
+    base_offset = 0;   /* an offset past the edge can overflow the product */
   }
 
   /* build output: kept axes (in original order), then diagonal axis */

@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `diagonal(offset)` returns an empty view for the most negative
+  offset (`-2**63`), as for any offset past the edge. It raised
+  `IndexError`.
+
 - Change: `seq` and `seq!` on an integer array raise `RangeError` when the
   first value does not fit the type (`int8.seq(300)`), or an Integer step
   is larger than the type can hold (`int32.seq(0, 2**40)` came out all

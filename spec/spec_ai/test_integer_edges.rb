@@ -265,4 +265,15 @@ class TestIntegerEdges < Test::Unit::TestCase
     assert_equal [120, 125, -126, -121], CArray.int8(4).seq(120, 5).to_a
     assert_equal [1, 1, 2], CArray.int8(3).seq(1.5, 0.5).to_a
   end
+
+  # -- diagonal --------------------------------------------------------
+
+  # An offset past either edge is an empty diagonal, at the most negative
+  # offset too (negating it overflowed).
+  def test_diagonal_at_the_extreme_offsets_is_empty
+    m = CArray.int32(3, 3).seq
+    assert_equal [], m.diagonal(-2**63).to_a
+    assert_equal [], m.diagonal(2**63 - 1).to_a
+    assert_equal [6], m.diagonal(-2).to_a
+  end
 end
