@@ -36,6 +36,31 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: adding a duration to a time, or subtracting it, raises when the
+  duration is coarser than the time's unit and not a whole number of its
+  ticks (`"1 day"` on a `"7 hours"` time, `"15 minutes"` on `"10 minutes"`).
+  It used to be cut to the grid. Convert the time to a unit both share
+  first. A duration finer than the unit is still truncated.
+
+- Change: `CArray#time(unit:, origin:)` raises when `origin` falls between
+  two ticks of `unit` (`origin: "…T10:00"` on `"3 hours"`, a midday origin on
+  `:D`, a mid-month origin on `:M`). It used to move to the tick before it.
+
+- Fix: time and duration arithmetic (`+`, `-`, `td * n`) raises `RangeError`
+  when a result leaves the range of int64 ticks, as the documentation says.
+  It wrapped around, e.g. a 500-year difference in `:ns` came out negative.
+
+- Fix: `CArray.time` without `unit:` reads an Integer as seconds when other
+  values make the chosen unit finer (`[1700000000, "2024-01-01T00:00:00.5"]`);
+  it read the Integer as milliseconds. A uint64 count that int64 cannot hold
+  raises `RangeError` in `CArray.time`, `#time` and `#timedelta` instead of
+  turning negative.
+
+- Fix: `CATime::Element` and `CATimedelta::Element` keep their value and
+  unit through `dup`, `clone` and `Marshal`; the copy used to be unusable,
+  and Marshal raised. A time element is `==` to the `Date` of its midnight,
+  as an array's `eq(Date)` already was.
+
 - Fix: `CArray.time` reads a date written by its day of the year
   (`"2024-015"`, `%j`), its ISO week (`"2024-W03-1"`, `%G-W%V-%u`) or its
   week of the year (`%U` / `%W` with a weekday) as that date; it used to
