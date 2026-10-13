@@ -260,15 +260,38 @@ ca_wrap_setup_null (CArray *ca,
   return ret;
 }
 
+static VALUE
+carray_new_copy_mask (VALUE arg)
+{
+  void **a = (void **) arg;
+  ca_setup_mask((CArray *) a[0], (CArray *) a[1]);
+  return Qnil;
+}
+
+/* Reading the mask to copy can call Ruby (a CAObject's mask hooks) and
+   raise, while the new array belongs to no Ruby object yet.  The array is
+   built without it, and the mask is copied in under ca_fill_or_free. */
+static CArray *
+carray_new_with_mask (CArray *ca, CArray *mask)
+{
+  if ( mask ) {
+    void *a[2];
+    a[0] = ca;
+    a[1] = mask;
+    ca_fill_or_free(ca, carray_new_copy_mask, (VALUE) a);
+  }
+  return ca;
+}
+
 CArray *
 carray_new (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask)
 {
   CArray *ca;
-  carray_setup(NULL, data_type, ndim, dim, bytes, mask);
+  carray_setup(NULL, data_type, ndim, dim, bytes, NULL);
   ca = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
-  carray_setup(ca, data_type, ndim, dim, bytes, mask);
-  return ca;
+  carray_setup(ca, data_type, ndim, dim, bytes, NULL);
+  return carray_new_with_mask(ca, mask);
 }
 
 CArray *
@@ -276,10 +299,10 @@ carray_new_safe (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask)
 {
   CArray *ca;
-  carray_safe_setup(NULL, data_type, ndim, dim, bytes, mask);
+  carray_safe_setup(NULL, data_type, ndim, dim, bytes, NULL);
   ca = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
-  carray_safe_setup(ca, data_type, ndim, dim, bytes, mask);
-  return ca;
+  carray_safe_setup(ca, data_type, ndim, dim, bytes, NULL);
+  return carray_new_with_mask(ca, mask);
 }
 
 /* Create an entity that adopts a caller-provided data buffer instead of
@@ -305,8 +328,8 @@ ca_wrap_new (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask, char *ptr)
 {
   CAWrap *ca  = (CAWrap *) ca_array_alloc(CA_OBJ_ARRAY_WRAP, ndim);
-  ca_wrap_setup(ca, data_type, ndim, dim, bytes, mask, ptr);
-  return ca;
+  ca_wrap_setup(ca, data_type, ndim, dim, bytes, NULL, ptr);
+  return (CAWrap *) carray_new_with_mask((CArray *) ca, mask);
 }
 
 CAWrap *
@@ -314,8 +337,8 @@ ca_wrap_new_null (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes
                   CArray *mask)
 {
   CAWrap *ca  = (CAWrap *) ca_array_alloc(CA_OBJ_ARRAY_WRAP, ndim);
-  ca_wrap_setup_null(ca, data_type, ndim, dim, bytes, mask);
-  return ca;
+  ca_wrap_setup_null(ca, data_type, ndim, dim, bytes, NULL);
+  return (CAWrap *) carray_new_with_mask((CArray *) ca, mask);
 }
 
 void
@@ -397,8 +420,8 @@ CScalar *
 cscalar_new (int8_t data_type, ca_size_t bytes, CArray *mask)
 {
   CScalar *ca = ALLOC(CScalar);
-  cscalar_setup(ca, data_type, bytes, mask);
-  return ca;
+  cscalar_setup(ca, data_type, bytes, NULL);
+  return (CScalar *) carray_new_with_mask((CArray *) ca, mask);
 }
 
 /*
