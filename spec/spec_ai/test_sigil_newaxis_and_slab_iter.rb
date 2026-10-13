@@ -371,12 +371,12 @@ class TestSigilRetirementAndReservation < Test::Unit::TestCase
     assert_nil defined?(CADimensionIterator)
   end
 
-  # :i / :j etc. still reserved for future contraction notation.
-  def test_single_alpha_reserved_for_contraction
+  # :i / :j etc. are reserved single-letter Symbols.
+  def test_single_alpha_reserved
     a = CArray.int32(3, 4).seq
     %i[i j k a z].each do |sym|
       e = assert_raise(IndexError) { a[sym, nil] }
-      assert_match(/reserved for future contraction notation/, e.message)
+      assert_match(/\Asymbol :\w is reserved\z/, e.message)
     end
   end
 

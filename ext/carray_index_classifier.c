@@ -14,9 +14,9 @@
     - a single negative-index normaliser used by all handlers
     - fast paths (POINT / ADDRESS, ndim == argc, all-FIXNUM) at
       the top of the entry point
-    - single-character alphabetic Symbols (:a-:z / :A-:Z) reserved
-      for future contraction notation; the classifier raises
-      NotImplementedError when they appear.
+    - single-character alphabetic Symbols (:a-:z / :A-:Z) are
+      reserved and kept free of meaning; the classifier raises
+      IndexError when they appear.
 
 --------------------------------------------------------------------------- */
 
@@ -188,12 +188,13 @@ ca_classifier_try_address_fast_path (ca_classifier_ctx_t *ctx)
 
 /* -------------------------------------------------------------------- */
 /* Single-character alphabetic Symbols (`:a`-`:z` / `:A`-`:Z`) are
-   reserved for future contraction notation.  Raises
-   NotImplementedError rather than the generic IndexError.  The
-   caller passes any Symbol that is not `:_` / `:%`; a
-   non-reserved Symbol returns without action. */
+   reserved: no index form gives them a meaning, and none should
+   until one is decided.  Raises IndexError saying so, rather than
+   the generic "invalid as the index" message.  The caller passes
+   any Symbol that is not `:_` / `:%`; a non-reserved Symbol
+   returns without action. */
 static inline void
-ca_classifier_check_reserved_contraction_symbol (VALUE sym)
+ca_classifier_check_reserved_symbol (VALUE sym)
 {
   const char *name;
   if ( ! SYMBOL_P(sym) ) return;
@@ -204,7 +205,7 @@ ca_classifier_check_reserved_contraction_symbol (VALUE sym)
             || ( name[0] >= 'A' && name[0] <= 'Z' ) )
        && name[0] != '_' /* :_ is iterator marker, handled separately */ ) {
     rb_raise(rb_eIndexError,
-             "symbol :%s is reserved for future contraction notation",
+             "symbol :%s is reserved",
              name);
   }
 }
@@ -565,7 +566,7 @@ ca_classifier_dispatch_axis_arg (ca_classifier_ctx_t *ctx, int axis, VALUE arg,
                "symbol :_ (newaxis) is handled at the [] / []= level, "
                "not valid in scan_index");
     }
-    ca_classifier_check_reserved_contraction_symbol(arg);  /* raises if reserved */
+    ca_classifier_check_reserved_symbol(arg);  /* raises if reserved */
     rb_raise(rb_eIndexError,
              "symbol :%"PRIsVALUE" is invalid as the index for slab iterator "
              "(use :> instead)",
@@ -828,7 +829,7 @@ rb_ca_scan_index_v2 (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
   /* argv[0] = multi-char Symbol → METHOD_CALL.  Single-char
      specials (:_ / :%) fall through the strlen check and are
      handled downstream (argc == 1 special / fast paths / main
-     loop).  Single-char alphabetic reserved-contraction Symbols
+     loop).  Single-char alphabetic reserved Symbols
      also fall through here and are raised later by the per-axis
      dispatcher's SYMBOL_P branch. */
   if ( SYMBOL_P(argv[0]) ) {

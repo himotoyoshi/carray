@@ -196,10 +196,10 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     cmp [10, 10], [-(2**40), 0]
   end
 
-  # ============== ITERATOR contraction reservation (PROPOSAL §1.6) ==============
-  def test_contraction_reserved_alphabet
+  # ============== single-letter Symbol reservation ==============
+  def test_reserved_single_letter_symbols
     # v1 raises IndexError "use :_ instead".
-    # v2 raises IndexError "reserved for future contraction notation".
+    # v2 raises IndexError "symbol :x is reserved".
     # The messages differ deliberately; here we assert v2's behavior directly
     # rather than via differential cmp.
     [:i, :j, :k, :a, :z, :A, :Z].each do |sym|
@@ -209,7 +209,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
       e = assert_raise(IndexError) do
         CArray._scan_index_v2([3, 3], [sym, sym])
       end
-      assert_match(/reserved for future contraction notation/, e.message)
+      assert_match(/\Asymbol :\w is reserved\z/, e.message)
     end
   end
 
@@ -514,7 +514,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
                  e2.message)
   end
 
-  # ============== I.5: ITERATOR post-pass + contraction matrix + rubber/neg-idx edges ==============
+  # ============== I.5: ITERATOR post-pass + reserved-symbol matrix + rubber/neg-idx edges ==============
 
   # decision-tree §3.4.5 — when REG=ITERATOR, every CA_IDX_SCALAR axis is
   # rewritten to BLOCK {start, count=1, step=1}.  Easy to miss in source
@@ -533,27 +533,27 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     cmp [3, 3], [:>, :>],       label: "ITERATOR all-iterator [:>, :>]"
   end
 
-  # ============== I.5: contraction notation reservation full alphabet ==============
+  # ============== single-letter Symbol reservation, full alphabet ==============
 
-  RESERVED_CONTRACTION_SYMBOLS = ("a".."z").to_a.map(&:to_sym) +
+  RESERVED_SINGLE_LETTER_SYMBOLS = ("a".."z").to_a.map(&:to_sym) +
                                  ("A".."Z").to_a.map(&:to_sym)
 
-  def test_contraction_all_lowercase_alphabet
-    RESERVED_CONTRACTION_SYMBOLS.each do |sym|
+  def test_reserved_full_alphabet
+    RESERVED_SINGLE_LETTER_SYMBOLS.each do |sym|
       next if sym == :_       # not in this set anyway
       e = assert_raise(IndexError, "axis-position :#{sym}") do
         CArray._scan_index_v2([3, 3], [sym, sym])
       end
-      assert_match(/reserved for future contraction notation/, e.message,
+      assert_match(/\Asymbol :\w is reserved\z/, e.message,
                    "axis-position :#{sym} message format")
     end
   end
 
-  def test_contraction_at_argv0_method_call_takes_precedence
+  def test_reserved_at_argv0_method_call_takes_precedence
     # `:foo` (multi-char Symbol) at argv[0] → METHOD_CALL via top-level
     # dispatch (= unchanged from v1).  Single-char alphabet at argv[0]
     # falls through the strlen>1 gate and hits the axis loop, where it
-    # then triggers the contraction-reserved raise.
+    # then triggers the reserved-symbol raise.
     assert_raise(IndexError) do
       CArray._scan_index_v2([3, 3], [:i, :>])   # :i at axis 0
     end
@@ -561,7 +561,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
     cmp [3, 3], [:ij_method], label: ":ij_method (METHOD_CALL)"
   end
 
-  def test_contraction_single_char_non_alpha_still_indexerror
+  def test_reserved_single_char_non_alpha_still_indexerror
     # `:0`, `:+` etc. single char, non-alphabet — NOT in reservation set,
     # must raise IndexError with the v1 message.
     [:"0", :"+", :"!", :"?"].each do |sym|
@@ -574,7 +574,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
   end
 
   def test_slab_sigil_gt_is_iterator
-    # SI.2: `:>` is the slab-axis (iterator) marker, NOT contraction-reserved.
+    # SI.2: `:>` is the slab-axis (iterator) marker, NOT a reserved single-letter Symbol.
     info = CArray._scan_index_v2([3, 3], [:>, :>])
     assert_equal CA_REG_ITERATOR, info[0]
   end
