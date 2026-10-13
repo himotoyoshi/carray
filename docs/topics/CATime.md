@@ -665,6 +665,15 @@ dt.window(0..3)
 dt.shift(1)
 ```
 
+`shift` fills the cells it moves out of with the storage value `0`, which a
+time array reads as the epoch, 1970-01-01. To leave them missing instead, as a
+difference from the previous time wants, pass `fill_value: UNDEF`:
+
+```ruby
+dt - dt.shift(1)                     # the first cell is the time since 1970
+dt - dt.shift(1, fill_value: UNDEF)  # the first cell is UNDEF
+```
+
 The time type survives arbitrary chains:
 
 ```ruby

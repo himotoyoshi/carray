@@ -22,7 +22,9 @@ class CArray
   # parent to position `i + shift`).  Out-of-range cells take `fill_value`
   # (default `0`); passing `fill_value: UNDEF` masks them instead of
   # filling.  In-range cells alias the parent, so writes through the view
-  # reach the parent.
+  # reach the parent.  The default `0` is the storage value, so for a time
+  # array it is 1970-01-01; `ts - ts.shift(1, fill_value: UNDEF)` leaves the
+  # first difference missing.
   #
   # The in-place idiom is `ca[] = ca.shift(...)`; there is no `shift!`.
   # For a cyclic (wrap-around) shift use {#roll}, which returns a `CARoll`

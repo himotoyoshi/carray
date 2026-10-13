@@ -454,6 +454,12 @@ dt.flatten         #                     => CATime
 dt.reshape(3, 4).transpose.flip[0..1].unit.base   # => :D
 ```
 
+`shift` also keeps the type, but it fills the cells it moves out of with the storage value `0`, which a time array reads as 1970-01-01. Pass `fill_value: UNDEF` to leave them missing — the form a difference from the previous time wants:
+
+```ruby
+dt - dt.shift(1, fill_value: UNDEF)   # the first cell is UNDEF, not the time since 1970
+```
+
 ## Ordering, search, and coordinate lookup
 
 A time axis is a natural coordinate, so ordering, binary search, and interpolation-based lookup all work on it directly.
