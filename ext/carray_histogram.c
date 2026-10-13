@@ -26,6 +26,32 @@
 #include "carray_internal.h"   /* ca_attach_window */
 #include <math.h>
 
+/* Edges are the bin boundaries and must read as such: no masked edge (its
+   stored value is no boundary), no NaN, and no edge below the one before
+   it.  Equal edges (a bin of zero width) and infinite ones are kept. */
+static void
+histbin_check_edge_mask (CArray *ce, const char *name)
+{
+  if ( ca_has_mask(ce) && ca_is_any_masked(ce) ) {
+    rb_raise(rb_eArgError, "%s: edges has a masked value", name);
+  }
+}
+
+static void
+histbin_check_edge_order (const double *ep, ca_size_t n, const char *name)
+{
+  ca_size_t i;
+  for (i = 0; i < n; i++) {
+    if ( isnan(ep[i]) ) {
+      rb_raise(rb_eArgError, "%s: edges has NaN at %lld", name, (long long) i);
+    }
+    if ( i > 0 && ep[i] < ep[i-1] ) {
+      rb_raise(rb_eArgError, "%s: edges must not decrease "
+               "(%g at %lld after %g)", name, ep[i], (long long) i, ep[i-1]);
+    }
+  }
+}
+
 /* Resolve `redges` to a 1-D float64 CArray of at least two edges.  The
    caller copies the edges out (ca_xfer_all into its own buffer) rather
    than attaching them: the walk that follows reads the caller's array,
@@ -50,6 +76,7 @@ histbin_resolve_edges (VALUE self, VALUE redges)
   if ( ce->elements < 2 ) {
     rb_raise(rb_eArgError, "histbin_ki: edges needs at least 2 values");
   }
+  histbin_check_edge_mask(ce, "bin_to");
 
   return ce;
 }
@@ -147,6 +174,7 @@ rb_ca_histbin_ki (VALUE self, VALUE redges, VALUE rinclude_max)
   ce = histbin_resolve_edges(self, redges);
   ep = ALLOCV_N(double, hedges, ce->elements);
   ca_xfer_all(ce, ep, CA_XFER_GET);
+  histbin_check_edge_order(ep, ce->elements, "bin_to");
   histbin_axis_setup(&ax, ep, ce->elements, RTEST(rinclude_max));
 
   /* output: fresh contiguous int64, same shape as self. */
@@ -315,6 +343,10 @@ histogram_scatter_edges (VALUE arg)
   histogram_scatter_t *c = (histogram_scatter_t *) arg;
   long k;
   for ( k = 0; k < c->M; k++ ) {
+    histbin_check_edge_order((const double *) c->edge_ca[k]->ptr,
+                             c->edge_ca[k]->elements, "histogram");
+  }
+  for ( k = 0; k < c->M; k++ ) {
     histbin_axis_setup(&c->axes[k], (const double *) c->edge_ca[k]->ptr,
                        c->edge_ca[k]->elements,
                        RTEST(RARRAY_AREF(c->rincmax, k)));
@@ -382,6 +414,7 @@ rb_ca_histogram_scatter_ki (VALUE self, VALUE rcounts, VALUE redges,
   for ( k = 0; k < M; k++ ) {
     VALUE e = RARRAY_AREF(redges, k);
     GetCArray(e, edge_ca[k]);
+    histbin_check_edge_mask(edge_ca[k], "histogram");
   }
 
   /* ext strides (row-major within the trailing M bin axes of counts). */

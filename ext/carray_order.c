@@ -720,6 +720,206 @@ rb_ca_range_method (VALUE self)
 
 /* ---- nlargest / nsmallest family ------------------------------------- */
 
+/* The partition picks the right values but, among cells that tie with the
+   last one picked, any of them.  The answer is the cells first in the
+   order (value, then NaN, then masked; the values descending for the
+   largest) with ties broken by position, as `order` breaks them.  So the
+   tied candidates are replaced by the earliest cells that tie, and the
+   candidates are sorted by (order, position): O(n) per fiber besides the
+   sort of the candidates. */
+
+typedef struct {
+  const char       *v;      /* the fiber's values, contiguous */
+  const boolean8_t *m;      /* its mask, or NULL */
+  int8_t            type;
+  ca_size_t         bytes;
+  int               desc;
+} ca_topk_fiber_t;
+
+/* 0 a value, 1 NaN, 2 masked: the classes come in that order. */
+static int
+ca_topk_class (const ca_topk_fiber_t *f, ca_size_t i)
+{
+  if ( f->m && f->m[i] ) return 2;
+  if ( f->type == CA_FLOAT64 && isnan(((const double *) f->v)[i]) ) return 1;
+  if ( f->type == CA_FLOAT32 && isnan(((const float *) f->v)[i]) ) return 1;
+  return 0;
+}
+
+#define CA_TOPK_CMP(T)                                                  \
+  { T a_ = ((const T *) f->v)[i], b_ = ((const T *) f->v)[j];         \
+    r = (a_ < b_) ? -1 : (a_ > b_) ? 1 : 0; }                          \
+  break
+
+/* The order of cells i and j, ties not broken. */
+static int
+ca_topk_cmp (const ca_topk_fiber_t *f, ca_size_t i, ca_size_t j)
+{
+  int ci = ca_topk_class(f, i), cj = ca_topk_class(f, j), r = 0;
+  if ( ci != cj ) return ( ci < cj ) ? -1 : 1;
+  if ( ci != 0 ) return 0;
+  switch ( f->type ) {
+  case CA_BOOLEAN:
+  case CA_UINT8:   CA_TOPK_CMP(uint8_t);
+  case CA_INT8:    CA_TOPK_CMP(int8_t);
+  case CA_INT16:   CA_TOPK_CMP(int16_t);
+  case CA_UINT16:  CA_TOPK_CMP(uint16_t);
+  case CA_INT32:   CA_TOPK_CMP(int32_t);
+  case CA_UINT32:  CA_TOPK_CMP(uint32_t);
+  case CA_INT64:   CA_TOPK_CMP(int64_t);
+  case CA_UINT64:  CA_TOPK_CMP(uint64_t);
+  case CA_FLOAT32: CA_TOPK_CMP(float);
+  case CA_FLOAT64: CA_TOPK_CMP(double);
+  case CA_FIXLEN:
+    r = memcmp(f->v + i * f->bytes, f->v + j * f->bytes, (size_t) f->bytes);
+    r = ( r > 0 ) - ( r < 0 );
+    break;
+  default:
+    r = 0;
+  }
+  return f->desc ? -r : r;
+}
+
+#undef CA_TOPK_CMP
+
+/* Merge sort of positions by (order, position). */
+static void
+ca_topk_sort (const ca_topk_fiber_t *f, ca_size_t *p, ca_size_t *tmp, ca_size_t n)
+{
+  ca_size_t h, i, j, k;
+  if ( n < 2 ) return;
+  h = n / 2;
+  ca_topk_sort(f, p, tmp, h);
+  ca_topk_sort(f, p + h, tmp, n - h);
+  i = 0; j = h; k = 0;
+  while ( i < h && j < n ) {
+    int r = ca_topk_cmp(f, p[i], p[j]);
+    if ( r < 0 || ( r == 0 && p[i] < p[j] ) ) tmp[k++] = p[i++];
+    else                                      tmp[k++] = p[j++];
+  }
+  while ( i < h ) tmp[k++] = p[i++];
+  while ( j < n ) tmp[k++] = p[j++];
+  memcpy(p, tmp, (size_t) n * sizeof(ca_size_t));
+}
+
+#define CA_TOPK_SCAN_VALUE(T)                                               \
+  { const T *v_ = (const T *) f->v; T w_ = v_[worst];                       \
+    for (j = 0; j <= end && ties > 0; j++) {                                \
+      if ( v_[j] == w_ && ! ( f->m && f->m[j] ) ) { c[n++] = j; ties--; }   \
+    } }                                                                      \
+  break
+
+/* The earliest cells, up to `end`, that tie with cell `worst`, appended to
+   c[n..] until `ties` are found.  A value compares by ==, which leaves out
+   NaN and the masked cells; those classes tie within themselves. */
+static ca_size_t
+ca_topk_scan_ties (const ca_topk_fiber_t *f, ca_size_t worst, ca_size_t end,
+                   ca_size_t *c, ca_size_t n, ca_size_t ties)
+{
+  ca_size_t j;
+  int cls = ca_topk_class(f, worst);
+  if ( cls != 0 || f->type == CA_FIXLEN ) {
+    for (j = 0; j <= end && ties > 0; j++) {
+      if ( ca_topk_cmp(f, j, worst) == 0 ) { c[n++] = j; ties--; }
+    }
+    return n;
+  }
+  switch ( f->type ) {
+  case CA_BOOLEAN:
+  case CA_UINT8:   CA_TOPK_SCAN_VALUE(uint8_t);
+  case CA_INT8:    CA_TOPK_SCAN_VALUE(int8_t);
+  case CA_INT16:   CA_TOPK_SCAN_VALUE(int16_t);
+  case CA_UINT16:  CA_TOPK_SCAN_VALUE(uint16_t);
+  case CA_INT32:   CA_TOPK_SCAN_VALUE(int32_t);
+  case CA_UINT32:  CA_TOPK_SCAN_VALUE(uint32_t);
+  case CA_INT64:   CA_TOPK_SCAN_VALUE(int64_t);
+  case CA_UINT64:  CA_TOPK_SCAN_VALUE(uint64_t);
+  case CA_FLOAT32: CA_TOPK_SCAN_VALUE(float);
+  case CA_FLOAT64: CA_TOPK_SCAN_VALUE(double);
+  }
+  return n;
+}
+
+#undef CA_TOPK_SCAN_VALUE
+
+static void
+ca_topk_fix_fiber (const ca_topk_fiber_t *f, ca_size_t len,
+                   ca_size_t *c, ca_size_t cap, ca_size_t *tmp)
+{
+  ca_size_t worst = c[0], ties = 0, n = 0, end = 0, k;
+  for (k = 1; k < cap; k++) {
+    if ( ca_topk_cmp(f, c[k], worst) > 0 ) worst = c[k];
+  }
+  /* Keep the candidates before the worst; the ones tied with it are
+     replaced by the earliest cells that tie, which lie no later than the
+     last tied candidate. */
+  for (k = 0; k < cap; k++) {
+    if ( ca_topk_cmp(f, c[k], worst) < 0 ) {
+      c[n++] = c[k];
+    }
+    else {
+      ties++;
+      if ( c[k] > end ) end = c[k];
+    }
+  }
+  (void) len;
+  n = ca_topk_scan_ties(f, worst, end, c, n, ties);
+  ca_topk_sort(f, c, tmp, cap);
+}
+
+/* `picked` holds cap candidate positions per fiber along axis; returns the
+   stable answer of the same shape.  The fibers are read with the axis
+   moved last, from a contiguous copy. */
+static VALUE
+ca_topk_stable (VALUE self, VALUE picked, long axis, int desc)
+{
+  volatile VALUE key = ca_order_key(self, desc ? "nlargest" : "nsmallest");
+  volatile VALUE vals, pk, holder = 0;
+  VALUE perm[CA_RANK_MAX], inv[CA_RANK_MAX];
+  CArray *cv, *cp;
+  ca_topk_fiber_t f;
+  ca_size_t len, cap, outer, o, *tmp;
+  int ndim, k, last;
+
+  GetCArray(key, cv);
+  ndim = cv->ndim;
+  last = ( axis == ndim - 1 );
+  if ( ! last ) {
+    int n = 0;
+    for (k = 0; k < ndim; k++) if ( k != axis ) perm[n++] = INT2FIX(k);
+    perm[n] = LONG2NUM(axis);
+    for (k = 0; k < ndim; k++) inv[NUM2INT(perm[k])] = INT2FIX(k);
+  }
+  /* An entity whose fibers already lie along its last axis is read in
+     place; anything else is copied into that layout. */
+  if ( last && ca_is_entity(cv) ) {
+    vals = key;
+    ca_update_mask(cv);
+  }
+  else {
+    vals = rb_ca_copy(last ? key : rb_funcallv(key, rb_intern("transpose"), ndim, perm));
+  }
+  pk   = rb_ca_copy(last ? picked : rb_funcallv(picked, rb_intern("transpose"), ndim, perm));
+  GetCArray(vals, cv);
+  GetCArray(pk, cp);
+
+  len   = cv->dim[ndim - 1];
+  cap   = cp->dim[ndim - 1];
+  if ( len == 0 || cap == 0 ) return picked;
+  outer = cv->elements / len;
+  f.type  = cv->data_type;
+  f.bytes = cv->bytes;
+  f.desc  = desc;
+  tmp = ALLOCV_N(ca_size_t, holder, cap);
+  for (o = 0; o < outer; o++) {
+    f.v = cv->ptr + o * len * cv->bytes;
+    f.m = cv->mask ? (boolean8_t *) cv->mask->ptr + o * len : NULL;
+    ca_topk_fix_fiber(&f, len, (ca_size_t *) cp->ptr + o * cap, cap, tmp);
+  }
+  ALLOCV_END(holder);
+  return last ? pk : rb_ca_copy(rb_funcallv(pk, rb_intern("transpose"), ndim, inv));
+}
+
 /* Per-axis top-k positions (cap clamped, axis normalized).
  * Called by rb_ca_topk_index below. */
 static VALUE
@@ -732,12 +932,13 @@ rb_ca_topk_positions (VALUE self, long cap, long axis_norm, int desc)
 
   /* The largest: reversing the ascending order would put the NaN and the
      masked cells first, so rank them descending (NaN, then the masked
-     cells, last) when there can be any. */
-  if ( desc && ( ca_has_mask(ca) || ca_is_float_type(ca) ||
-                 ca->data_type == CA_OBJECT ) ) {
+     cells, last) when there can be any.  An object array is ranked by
+     `order` both ways (its cells compare in Ruby). */
+  if ( ca->data_type == CA_OBJECT ||
+       ( desc && ( ca_has_mask(ca) || ca_is_float_type(ca) ) ) ) {
     VALUE kw = rb_hash_new();
     rb_hash_aset(kw, ID2SYM(rb_intern("axis")), raxis_norm);
-    rb_hash_aset(kw, ID2SYM(rb_intern("descending")), Qtrue);
+    rb_hash_aset(kw, ID2SYM(rb_intern("descending")), desc ? Qtrue : Qfalse);
     VALUE rank = rb_funcallv_kw(self, rb_intern("order"), 1, &kw, RB_PASS_KEYWORDS);
     VALUE full = rb_ca_sort_index_ki_quick(rank, raxis_norm);
     if ( cap >= dim_axis ) {
@@ -754,10 +955,7 @@ rb_ca_topk_positions (VALUE self, long cap, long axis_norm, int desc)
 
   if ( cap >= dim_axis ) {
     VALUE full = rb_ca_sort_index_ki_quick(self, raxis_norm);
-    if ( desc ) {
-      full = rb_ca_flip_axis(full, NUM2LONG(raxis_norm));
-    }
-    return rb_ca_copy(full);
+    return ca_topk_stable(self, full, axis_norm, desc);
   }
 
   long pivot = desc ? (dim_axis - cap) : (cap - 1);
@@ -784,7 +982,7 @@ rb_ca_topk_positions (VALUE self, long cap, long axis_norm, int desc)
     order = rb_ca_flip_axis(order, NUM2LONG(raxis_norm));
   }
   VALUE picked = rb_ca_take_along_axis_c(partidx_top, order, raxis_norm);
-  return rb_ca_copy(picked);
+  return ca_topk_stable(self, picked, axis_norm, desc);
 }
 
 /* Dispatcher: normalize axis, clamp cap, empty-cap corner.

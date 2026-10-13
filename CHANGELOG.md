@@ -36,6 +36,19 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: `nsmallest`, `nlargest` and their `_index` forms break ties by
+  position for every type, as `order` and `sort_index` do:
+  `nsmallest_index(k)` is the first k of `sort_index`. Integer arrays put
+  tied cells in reverse order for `nlargest_index`, and `nsmallest_index`
+  left ties in no fixed order.
+
+- Change: `bin(v, v, ...)` (a range of one point) puts a value equal to v
+  in bin 0 and treats the others as out of range, using `lfill:` /
+  `ufill:`; it put every value in bin 0. The step form now answers the same
+  instead of raising. `bin_to` and the histograms refuse edges that
+  decrease, a NaN edge or a masked one; equal and infinite edges are kept.
+  `random!` and `randomn!` clear the mask, as `seq!` and `fill` do.
+
 - Fix: in an object array, `unique`, `nunique`, `value_counts`,
   `mask_duplicates`, `is_mode`, `is_in` and the set operations take two
   Complex values with a NaN part as one value when their parts match with

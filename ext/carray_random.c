@@ -430,6 +430,8 @@ rb_ca_random_bang(int argc, VALUE *argv, VALUE self)
     c.limit      = limit;
     ca_random_run(&c, rng, ca_random_bang_fill);
   }
+  /* Every cell now holds a value, as after seq! or fill. */
+  ca_clear_mask(ca);
   return self;
 }
 
@@ -603,6 +605,8 @@ rb_ca_randomn_bang(int argc, VALUE *argv, VALUE self)
     c.n  = ca->elements;
     ca_random_run(&c, rng, ca_randomn_bang_fill);
   }
+  /* Every cell now holds a value, as after seq! or fill. */
+  ca_clear_mask(ca);
   return self;
 }
 

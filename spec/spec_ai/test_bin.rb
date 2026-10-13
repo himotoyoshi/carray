@@ -70,9 +70,14 @@ class TestBin < Test::Unit::TestCase
     assert_raise(ArgumentError) { a.bin(0.0, 9.0, bins: 0) }
   end
 
+  # A range of one point: the value at it is in bin 0 whatever the count
+  # of bins, the others are out of range.
   def test_min_equals_max_degenerate
-    a = CArray.float64(5).seq!(0, 1.0)
-    assert_equal [0] * 5, a.bin(5.0, 5.0, bins: 5).to_a
+    a = CArray.float64(5).seq!(3.0, 1.0)
+    assert_equal [UNDEF, UNDEF, 0, UNDEF, UNDEF], a.bin(5.0, 5.0, bins: 5).to_a
+    assert_equal [-1, -1, 0, 9, 9], a.bin(5.0, 5.0, bins: 5, lfill: -1, ufill: 9).to_a
+    assert_equal a.bin(5.0, 5.0, bins: 1).to_a, a.bin(5.0, 5.0, 0.5).to_a
+    assert_equal [0, 0, 0], CA_FLOAT64([2, 2, 2]).bin(2, 2, bins: 10).to_a
   end
 
   def test_min_gt_max_raises
