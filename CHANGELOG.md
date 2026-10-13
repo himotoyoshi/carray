@@ -47,9 +47,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 - Fix: `each_slab`, `map_slab` and `reduce_slab`, and `each` of a slab or
   block iterator, hand each piece of a Face such as `CATime` over as that
-  Face. Slabs came as the raw storage, and a block iterator's `each`
-  raised `TypeError`. The result of `map_slab` and `reduce_slab` is still
-  in the storage data type.
+  Face, and `map_slab` / `reduce_slab` answer in that Face when no
+  `data_type:` is given. Slabs came as the raw storage and the results in
+  the storage data type, and a block iterator's `each` raised `TypeError`.
+  A read-only Face (`CAConstString`, `CACategorical`) answers in `:object`.
+
+- Fix: `UNDEF` returned from a `reduce_slab` block masks that cell of the
+  result. It was written as 0.
 
 - New: `CAFrame#join` takes several key columns, `on: ["station", "date"]`.
   Rows match when every key column matches; a row with any key cell masked
