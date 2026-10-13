@@ -745,6 +745,10 @@ class CATime
         to_time <=> other.getutc
       when (defined?(DateTime) ? DateTime : nil)
         to_time <=> other.to_time.getutc
+      when (defined?(Date) ? Date : nil)
+        # a Date names the midnight (UTC) that begins it, as it does when an
+        # array is compared with it
+        to_time.to_r <=> CATimeLiteral.epoch_seconds(other)
       end
     rescue ArgumentError
       nil
@@ -760,6 +764,14 @@ class CATime
     # @return [Integer] a hash consistent with #eql? (unit-strict).
     def hash
       [value, unit].hash
+    end
+
+    # Marshal carries the tick and its resolution.
+    def marshal_dump = [value, unit.count, unit.base]
+
+    def marshal_load(data)
+      v, count, base = data
+      initialize(v, CATime::Resolution.new(count, base))
     end
 
     # @overload +(td)
@@ -948,6 +960,14 @@ class CATimedelta
     # @return [Integer] a hash consistent with #eql? (unit-strict).
     def hash
       [value, unit].hash
+    end
+
+    # Marshal carries the tick and its resolution.
+    def marshal_dump = [value, unit.count, unit.base]
+
+    def marshal_load(data)
+      v, count, base = data
+      initialize(v, CATime::Resolution.new(count, base))
     end
 
     # @overload +(other)
