@@ -36,6 +36,21 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: the reductions of the iterators answer as the core reduction does
+  over each piece in more cases. `quantile` of a categorical, segment or
+  axis-group iterator is NaN at a position next to a NaN, where it skipped
+  the NaN. `variancep` / `stddevp` of a group or segment holding one value
+  that is a NaN or an infinity is NaN, not 0.0. A window iterator's
+  `accumulate` over a boolean array answers by parity instead of raising.
+  An empty segment or category over a Face such as `CATime` answers
+  `UNDEF` where its reductions raised.
+
+- Fix: `each_slab`, `map_slab` and `reduce_slab`, and `each` of a slab or
+  block iterator, hand each piece of a Face such as `CATime` over as that
+  Face. Slabs came as the raw storage, and a block iterator's `each`
+  raised `TypeError`. The result of `map_slab` and `reduce_slab` is still
+  in the storage data type.
+
 - New: `CAFrame#join` takes several key columns, `on: ["station", "date"]`.
   Rows match when every key column matches; a row with any key cell masked
   matches nothing. `join_asof` still takes one key.
