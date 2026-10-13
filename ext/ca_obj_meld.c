@@ -575,6 +575,7 @@ ca_meld_xfer_stride_ma_internal (CAMeld *ca, ca_size_t *starts,
         else                      memcpy(buf, d + voff, chunk_bytes);
       }
       else if ( dir == CA_XFER_GET ) {
+        /* empty: the slot (ca_meld_func_xfer_stride) returns on an empty region; a parent the request does not reach returns above */
         while ( 1 ) {
           memcpy(d + voff, buf + paddr, chunk_bytes);
           paddr += chunk_bytes;
@@ -588,6 +589,7 @@ ca_meld_xfer_stride_ma_internal (CAMeld *ca, ca_size_t *starts,
           if ( i < 0 ) break;
         }
       } else {
+        /* empty: as above */
         while ( 1 ) {
           memcpy(buf + paddr, d + voff, chunk_bytes);
           paddr += chunk_bytes;
@@ -635,6 +637,7 @@ ca_meld_xfer_stride_per_cell (CAMeld *ca, ca_size_t *starts, ca_size_t *counts,
   for ( i = 0; i < ndim; i++ ) base += starts[i] * native[i];
   for ( i = 0; i < ndim; i++ ) idx[i] = 0;
 
+  /* empty: the slot (ca_meld_func_xfer_stride) returns on an empty region */
   while ( 1 ) {
     ca_size_t toff = base;
     for ( i = 0; i < ndim; i++ ) toff += idx[i] * strides[i];
@@ -803,6 +806,7 @@ ca_meld_xfer_all_ma_internal (CAMeld *ca, void *data, int dir,
       else                      memcpy(buf, d + voff, chunk_bytes);
     }
     else if ( dir == CA_XFER_GET ) {
+      /* empty: the slot returns on an empty view; the outer axes are the view's, and a parent empty along the meld axis copies chunks of 0 bytes */
       while ( 1 ) {
         memcpy(d + voff, buf + paddr, chunk_bytes);
         paddr += chunk_bytes;
@@ -817,6 +821,7 @@ ca_meld_xfer_all_ma_internal (CAMeld *ca, void *data, int dir,
       }
     }
     else {
+      /* empty: as above */
       while ( 1 ) {
         memcpy(buf + paddr, d + voff, chunk_bytes);
         paddr += chunk_bytes;
@@ -851,6 +856,7 @@ ca_meld_xfer_parents (CAMeld *ca, void *data, int dir, int into_buffers)
 static void
 ca_meld_func_xfer_all (void *ap, void *data, int dir)
 {
+  if ( ((CArray *) ap)->elements == 0 ) return;
   ca_meld_mask_refresh((CAMeld *) ap, dir == CA_XFER_PUT);
   ca_meld_xfer_parents((CAMeld *) ap, data, dir, 0);
 }

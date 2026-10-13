@@ -634,6 +634,7 @@ ca_fill_stride_buffer (char *dst, ca_size_t bytes, ca_size_t base, int8_t ndim,
   outer_ndim  = ndim - 1;
 
   for ( k = 0; k < outer_ndim; k++ ) idx[k] = 0;
+  /* empty: the function returns on an empty region at its entry */
   while ( 1 ) {
     ca_size_t addr = base;
     char     *p;

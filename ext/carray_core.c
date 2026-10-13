@@ -1376,6 +1376,7 @@ ca_xfer_strided_walk (char            *src_base,
     ca_size_t inner_dst_bytes  = counts[ndim-2] * counts[ndim-1] * bytes;
 
     for ( k = 0; k < outer_n; k++ ) idx[k] = 0;
+    /* empty: the walk returns on an empty region at its entry */
     while ( 1 ) {
       ca_size_t soff = 0;
       for ( k = 0; k < outer_n; k++ ) soff += idx[k] * src_strides[k];
@@ -1393,6 +1394,7 @@ ca_xfer_strided_walk (char            *src_base,
 
   /* prefix axes [0..slab_start-1] on odometer, slab-sized memcpy per iter. */
   for ( k = 0; k < slab_start; k++ ) idx[k] = 0;
+  /* empty: the walk returns on an empty region at its entry */
   while ( 1 ) {
     ca_size_t soff = 0;
     for ( k = 0; k < slab_start; k++ ) soff += idx[k] * src_strides[k];
@@ -1466,6 +1468,7 @@ ca_xfer_stride_dispatch (CArray *ca, ca_size_t *starts, ca_size_t *counts,
 
   /* fallback: per-cell via byte offset -> flat addr -> index -> xfer_index. */
   for ( k = 0; k < ndim; k++ ) idx[k] = 0;
+  /* empty: its one caller, ca_xfer_stride, returns on an empty region */
   while ( 1 ) {
     ca_size_t soff = base, vidx[CA_RANK_MAX];
     for ( k = 0; k < ndim; k++ ) soff += idx[k] * strides[k];
@@ -2312,7 +2315,10 @@ ca_fill_stride_default (void *ap, ca_size_t base, int8_t ndim,
   ca_size_t idx[CA_RANK_MAX];
   int8_t    k;
 
+  if ( ca_region_is_empty(ndim, counts) ) return;
+
   for ( k = 0; k < ndim; k++ ) idx[k] = 0;
+  /* empty: the function returns on an empty region at its entry */
   while ( 1 ) {
     ca_size_t addr = base, vidx[CA_RANK_MAX];
     for ( k = 0; k < ndim; k++ ) addr += idx[k] * steps[k];
@@ -2427,6 +2433,7 @@ ca_fill_stride_via_addrs (void *ap, ca_size_t base, int8_t ndim,
     idx[k] = 0;
   }
 
+  /* empty: an axis of count 0 returns above */
   while ( 1 ) {
     ca_size_t addr = base;
     for ( k = 0; k < ndim; k++ ) addr += idx[k] * steps[k];

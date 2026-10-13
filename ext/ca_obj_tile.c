@@ -242,6 +242,7 @@ ca_tile_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     ca_size_t idx[CA_RANK_MAX], doff = 0, base = 0;
     for (k = 0; k < ndim; k++) base += starts[k] * tnative[k];
     for (k = 0; k < ndim; k++) idx[k] = 0;
+    /* empty: the slot returns on an empty region at its entry */
     while (1) {
       ca_size_t toff = base, tidx[CA_RANK_MAX];
       for (k = 0; k < ndim; k++) toff += idx[k] * strides[k];
@@ -256,6 +257,7 @@ ca_tile_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   }
 
   for (k = 0; k < ndim; k++) o[k] = 0;
+  /* empty: the slot returns on an empty region at its entry */
   while (1) {
     ca_size_t pbase = 0, doff = 0, i;
     for (k = 0; k < inner; k++) {

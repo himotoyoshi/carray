@@ -847,6 +847,7 @@ ca_stride_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   if (!aligned || !root->ptr) {
     ca_size_t idx[CA_RANK_MAX], doff = 0;
     for (k = 0; k < ndim; k++) idx[k] = 0;
+    /* empty: the slot returns on an empty region at its entry */
     while (1) {
       ca_size_t off = base_addr, vmidx[CA_RANK_MAX];
       for (k = 0; k < ndim; k++) off += idx[k] * strides[k];
@@ -1362,6 +1363,8 @@ ca_stride_func_xfer_all (void *ap, void *data, int dir)
   char *ptr0 = ca->ptr;
   char *ptr = (char *) data;
 
+  if ( ca->elements == 0 ) return;
+
   ca_stride_compose_to_root(ca, &root, composed_strides, &composed_base);
 
   /* Partial materialise: when the fold stops at a cold boundary view that knows how to deliver a region (has an
@@ -1478,6 +1481,7 @@ ca_stride_func_xfer_all (void *ap, void *data, int dir)
     ca_size_t  idx[CA_RANK_MAX], n = 0;
     int8_t     k;
     for (k = 0; k < ca->ndim; k++) idx[k] = 0;
+    /* empty: the slot returns on an empty view at its entry */
     while (1) {
       ca_size_t off = composed_base;
       for (k = 0; k < ca->ndim; k++) off += idx[k] * composed_strides[k];
@@ -1497,7 +1501,7 @@ ca_stride_func_xfer_all (void *ap, void *data, int dir)
      elements and cut the cell's bytes out of them.  A write keeps the
      whole-root round trip below: two cells can share a root element, and
      writing back each one's copy of it would drop the other's bytes. */
-  if ( dir == CA_XFER_GET && ca->bytes != root->bytes
+  if ( dir == CA_XFER_GET && ca->elements > 0 && ca->bytes != root->bytes
        && ca_func[root->obj_type].xfer_stride ) {
     volatile VALUE ah = 0, sh = 0;
     ca_size_t  rb = root->bytes, cb = ca->bytes;

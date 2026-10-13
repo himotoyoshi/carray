@@ -536,6 +536,7 @@ ca_stack_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
           ca_size_t pidx[CA_RANK_MAX];
           ca_size_t paddr = 0;
           for ( a = 0; a < pndim; a++ ) pidx[a] = 0;
+          /* empty: the slot returns on an empty region at its entry */
           while ( 1 ) {
             ca_size_t voff = k_off;
             for ( a = 0; a < k_axis; a++ )     voff += pidx[a] * dstride[a];
@@ -614,6 +615,7 @@ ca_stack_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
            the CAStack-level addr2index dispatch hop in the per-cell fallback. */
         ca_size_t pidx[CA_RANK_MAX], doff = 0;
         for ( i = 0; i < ca->ndim; i++ ) odo[i] = 0;
+        /* empty: the slot returns on an empty region at its entry */
         while ( 1 ) {
           ca_size_t k2 = starts[k_axis] + odo[p];
           for ( a = 0; a < pndim; a++ ) {
@@ -632,6 +634,7 @@ ca_stack_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
       s = ca->bytes;
       for ( i = ca->ndim - 1; i >= 0; i-- ) { dstride[i] = s; s *= counts[i]; }
       for ( i = 0; i <= p; i++ ) odo[i] = 0;
+      /* empty: the slot returns on an empty region at its entry */
       while ( 1 ) {
         ca_size_t k2 = starts[k_axis] + odo[p];
         ca_size_t doff = 0;
@@ -661,6 +664,7 @@ ca_stack_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     ca_size_t idx[CA_RANK_MAX], doff = 0, base = 0;
     for ( i = 0; i < ca->ndim; i++ ) base += starts[i] * native[i];
     for ( i = 0; i < ca->ndim; i++ ) idx[i] = 0;
+    /* empty: the slot returns on an empty region at its entry */
     while ( 1 ) {
       ca_size_t toff = base, vidx[CA_RANK_MAX];
       for ( i = 0; i < ca->ndim; i++ ) toff += idx[i] * strides[i];
@@ -770,6 +774,7 @@ ca_stack_xfer_parents (CAStack *ca, char *d, int dir, int into_buffers)
         }
         else if ( dir == CA_XFER_GET ) {
           /* dir-hoisted GET inner loop, incremental voff. */
+          /* empty: the function returns on an empty view at its entry */
           while ( 1 ) {
             memcpy(d + voff, buf + paddr_bytes, bytes);
             paddr_bytes += bytes;
@@ -785,6 +790,7 @@ ca_stack_xfer_parents (CAStack *ca, char *d, int dir, int into_buffers)
         }
         else {
           /* dir-hoisted PUT inner loop, incremental voff. */
+          /* empty: the function returns on an empty view at its entry */
           while ( 1 ) {
             memcpy(buf + paddr_bytes, d + voff, bytes);
             paddr_bytes += bytes;

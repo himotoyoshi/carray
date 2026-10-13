@@ -591,6 +591,7 @@ ca_select_axis_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     ca_size_t idx[CA_RANK_MAX], doff = 0, base = 0;
     for (k = 0; k < ndim; k++) base += starts[k] * cnative[k];
     for (k = 0; k < ndim; k++) idx[k] = 0;
+    /* empty: the slot returns on an empty region at its entry */
     while (1) {
       ca_size_t coff = base, cidx[CA_RANK_MAX];
       for (k = 0; k < ndim; k++) coff += idx[k] * strides[k];
@@ -674,6 +675,7 @@ ca_select_axis_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
      ca_xfer_stride/ca_xfer_addrs. */
   for (k = 0; k < ndim; k++) o[k] = 0;
 
+  /* empty: the slot returns on an empty region at its entry */
   while (1) {
     ca_size_t pbase = 0, doff = 0;
     for (k = 0; k < inner; k++) {

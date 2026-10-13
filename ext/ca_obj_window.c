@@ -369,6 +369,7 @@ ca_window_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     ca_size_t idx[CA_RANK_MAX], doff = 0, base = 0;
     for (k = 0; k < ndim; k++) base += starts[k] * wnative[k];
     for (k = 0; k < ndim; k++) idx[k] = 0;
+    /* empty: the slot returns on an empty region at its entry */
     while (1) {
       ca_size_t woff = base, widx[CA_RANK_MAX];
       for (k = 0; k < ndim; k++) woff += idx[k] * strides[k];
