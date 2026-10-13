@@ -307,6 +307,67 @@ module CATimeUnitAlgebra
     r.denominator == 1 ? scaled : trunc_divide(scaled, r.denominator)
   end
 
+  # A duration brought onto a time's grid for dt +/- td.  A duration finer
+  # than the grid is truncated toward zero (a :D time + 5 h is + 0 days), but
+  # one whose tick is coarser and not a whole number of grid ticks ("1 day"
+  # on a "7 hours" grid, "15 minutes" on a "10 minutes" grid) must land on
+  # the grid exactly: cutting it would move the time by part of its own
+  # tick, which no rounding of the time asked for.
+  def duration_on_grid(storage, from, to)
+    r = ratio(res(from), res(to))
+    return convert_scale_trunc(storage, from, to) if r.nil? || r <= 1 || r.denominator == 1
+    scaled = widen(storage, r.numerator)
+    unless (scaled % r.denominator).eq(0).all
+      raise ArgumentError,
+            "a duration in #{res(from)} does not land on the #{res(to)} grid " \
+            "(it is not a whole number of #{res(to)} ticks); convert the time " \
+            "to a grid both share first"
+    end
+    scaled / r.denominator
+  end
+
+  # a + b and a - b on int64 storage (b a CArray or an Integer), raising
+  # instead of wrapping around when a result leaves int64.  An overflow is a
+  # result whose sign differs from both terms of the sum (a and b for +, a
+  # and -b for -).
+  def checked_add(a, b)
+    check_term(b, "+")
+    r = a + b
+    overflow_raise("+") if ((a ^ r) & (b ^ r)).lt(0).any
+    r
+  end
+
+  def checked_sub(a, b)
+    check_term(b, "-")
+    r = a - b
+    overflow_raise("-") if ((a ^ b) & (a ^ r)).lt(0).any
+    r
+  end
+
+  def checked_mul(a, k)
+    check_term(k, "*")
+    lo = a.min
+    unless lo == UNDEF
+      [lo, a.max].each do |x|
+        overflow_raise("*") unless (INT64_MIN..INT64_MAX).cover?(Integer(x) * k)
+      end
+    end
+    a * k
+  end
+
+  def check_term(b, op)
+    overflow_raise(op) if b.is_a?(Integer) && !(INT64_MIN..INT64_MAX).cover?(b)
+  end
+
+  def overflow_raise(op)
+    raise RangeError,
+          "time arithmetic overflows int64 (#{op}): the result is outside " \
+          "the range of the storage unit; use a coarser unit"
+  end
+
+  INT64_MIN = -2**63
+  INT64_MAX = 2**63 - 1
+
   # Truncating integer division of an int64 CArray (toward zero).  CArray
   # `/` floors toward the past, which is what an instant wants; a duration
   # is a magnitude and shrinks toward zero instead.
@@ -729,7 +790,9 @@ class CATime
       case other
       when Element
         u = CATimeUnitAlgebra.diff_unit(unit, other.unit)
-        CATimedelta::Element.new(instant_in(u) - other.instant_in(u), u)
+        v = instant_in(u) - other.instant_in(u)
+        CATimeUnitAlgebra.check_term(v, "-")
+        CATimedelta::Element.new(v, u)
       when CATimedelta::Element, CATimedelta
         shifted_by_duration(other, -1)
       when CATime
@@ -769,8 +832,10 @@ class CATime
         months = sign * td.value * CATimeUnitAlgebra.months_per_tick(td.unit)
         return Element.new(CATimeUnitAlgebra.shift_months(CA_INT64([value]), unit, months)[0], unit)
       end
-      tv = CATimeUnitAlgebra.convert_scale_trunc(CA_INT64([td.value]), td.unit, unit)[0]
-      Element.new(value + sign * tv, unit)
+      tv = CATimeUnitAlgebra.duration_on_grid(CA_INT64([td.value]), td.unit, unit)[0]
+      v = value + sign * tv
+      CATimeUnitAlgebra.check_term(v, sign > 0 ? "+" : "-")
+      Element.new(v, unit)
     end
 
     # Base epoch as a Date.  next_month / next_year clamp end-of-month
@@ -905,7 +970,9 @@ class CATimedelta
     #   @return [CATimedelta::Element]
     def *(n)
       raise TypeError, "CATimedelta::Element * #{n.class} is not allowed (Integer only)" unless n.is_a?(Integer)
-      Element.new(value * n, unit)
+      v = value * n
+      CATimeUnitAlgebra.check_term(v, "*")
+      Element.new(v, unit)
     end
 
     # @overload /(other)
@@ -952,7 +1019,9 @@ class CATimedelta
               "CATimedelta::Element #{sign > 0 ? '+' : '-'} #{other.class} is not allowed"
       end
       u = CATimeUnitAlgebra.finer(unit, other.unit)
-      Element.new(duration_in(u) + sign * other.duration_in(u), u)
+      v = duration_in(u) + sign * other.duration_in(u)
+      CATimeUnitAlgebra.check_term(v, sign > 0 ? "+" : "-")
+      Element.new(v, u)
     end
   end
 end
@@ -1018,7 +1087,8 @@ class CATime
   # @overload +(other)
   #   Returns `self + other` for a {CATimedelta}: the time is the
   #   anchor, so the result keeps `self`'s unit and the duration is converted
-  #   into it (a duration finer than `self`'s unit is truncated to it).  A
+  #   into it (a duration finer than `self`'s unit is truncated to it; a
+  #   coarser one that is not a whole number of `self`'s ticks raises).  A
   #   month or year duration on a fixed grid moves each date as Ruby's
   #   `Date#>>` does: the day stays unless the new month is shorter (then it
   #   is that month's last day), and the time of day stays, so
@@ -1032,15 +1102,17 @@ class CATime
   #     duration array)
   #   @return [CATime]
   #   @raise [TypeError] on a non-timedelta operand.
+  #   @raise [ArgumentError] when the duration does not land on `self`'s grid.
+  #   @raise [RangeError] when a result leaves the range of int64 ticks.
   def +(other)
     given, other = other, CATimeUnitAlgebra.operand(other)
     other = CATimeUnitAlgebra.scalar_operand(other, unit) || other
     case other
     when CATimedelta
       return shifted_by_months(other, 1) if moved_by_months?(other)
-      d = CATimeUnitAlgebra.convert_scale_trunc(other.parent, other.unit, unit)
+      d = CATimeUnitAlgebra.duration_on_grid(other.parent, other.unit, unit)
       d = d[0] if other.scalar?
-      (parent + d).time(unit: unit)
+      CATimeUnitAlgebra.checked_add(parent, d).time(unit: unit)
     when CATime
       raise TypeError, "CATime + CATime is ill-defined"
     else
@@ -1067,15 +1139,15 @@ class CATime
     case other
     when CATimedelta
       return shifted_by_months(other, -1) if moved_by_months?(other)
-      d = CATimeUnitAlgebra.convert_scale_trunc(other.parent, other.unit, unit)
+      d = CATimeUnitAlgebra.duration_on_grid(other.parent, other.unit, unit)
       d = d[0] if other.scalar?
-      (parent - d).time(unit: unit)
+      CATimeUnitAlgebra.checked_sub(parent, d).time(unit: unit)
     when CATime
       u = CATimeUnitAlgebra.diff_unit(unit, other.unit)
       a = CATimeUnitAlgebra.convert_instant!(parent, unit, u)
       b = CATimeUnitAlgebra.convert_instant!(other.parent, other.unit, u)
       b = b[0] if other.scalar?
-      (a - b).timedelta(unit: u)
+      CATimeUnitAlgebra.checked_sub(a, b).timedelta(unit: u)
     else
       raise TypeError, "CATime - #{given.class} is not allowed: subtract a duration " \
                        "(a CATimedelta, a CATimedelta::Element or a String such as \"3 days\") " \
@@ -1739,11 +1811,11 @@ class CATimedelta
       a = CATimeUnitAlgebra.convert_scale!(parent, unit, u)
       b = CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
       b = b[0] if other.scalar?
-      (a + b).timedelta(unit: u)
+      CATimeUnitAlgebra.checked_add(a, b).timedelta(unit: u)
     when CATime
       return other + self unless other.scalar?   # commutative -> time's unit
-      d = CATimeUnitAlgebra.convert_scale_trunc(parent, unit, other.unit)
-      (d + other.parent[0]).time(unit: other.unit)
+      d = CATimeUnitAlgebra.duration_on_grid(parent, unit, other.unit)
+      CATimeUnitAlgebra.checked_add(d, other.parent[0]).time(unit: other.unit)
     else
       raise TypeError, "CATimedelta + #{given.class} is not allowed"
     end
@@ -1766,7 +1838,7 @@ class CATimedelta
       a = CATimeUnitAlgebra.convert_scale!(parent, unit, u)
       b = CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
       b = b[0] if other.scalar?
-      (a - b).timedelta(unit: u)
+      CATimeUnitAlgebra.checked_sub(a, b).timedelta(unit: u)
     else
       raise TypeError, "CATimedelta - #{given.class} is not allowed"
     end
@@ -1794,7 +1866,7 @@ class CATimedelta
   #   @raise [TypeError] when `other` is not an Integer.
   def *(other)
     case other
-    when Integer then (parent * other).timedelta(unit: unit)
+    when Integer then CATimeUnitAlgebra.checked_mul(parent, other).timedelta(unit: unit)
     else raise TypeError, "CATimedelta * #{other.class} is not allowed (Integer only)"
     end
   end
@@ -2735,8 +2807,10 @@ class CArray
   #   int64 array is built; the origin is not stored).
   #   @param unit [Resolution, Symbol, String] grid resolution.
   #   @param origin [Time, String, Integer, DateTime, CATime::Element, nil] base instant that
-  #     `self`'s indices are counted from (default: the Unix epoch).
+  #     `self`'s indices are counted from (default: the Unix epoch); an
+  #     Integer is Unix seconds.  It has to be a point of the `unit` grid.
   #   @return [CATime]
+  #   @raise [ArgumentError] when `origin` falls between two ticks of `unit`.
   #   @note An `int64` receiver is wrapped zero-copy.  A narrower integer type
   #     is widened to `int64` first (a copy); a `Float` / non-integer type
   #     raises (cast it explicitly if the truncation is intended).
@@ -2746,8 +2820,11 @@ class CArray
     if origin.nil?
       CATime.wrap(src, unit: res)
     else
-      o = CATimeLiteral.tick_index(origin, res)
-      (src + o).time(unit: res)
+      # The origin is a point of the grid: one between two ticks has no
+      # index, so it raises rather than moving to the tick before it.
+      origin = Time.at(origin, in: "UTC") if origin.is_a?(Integer)
+      o = CATimeGrid.resolve_origin_ticks(origin, res, res)
+      CATimeUnitAlgebra.checked_add(src, o).time(unit: res)
     end
   end
 
