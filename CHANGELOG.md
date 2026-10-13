@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `windows(on:)` with an int64 or time key no longer empties windows
+  when `t - before` or `t + after` goes beyond the int64 range (a width of
+  a few hundred years on a nanosecond time key, or a key near the int64
+  ends): such a bound now holds every key on its side.
+
 - Fix: `CAFrame#resample(..., fill: true)` with a month or year unit and an
   `origin:` or `label: :right` no longer drops every row: the empty bins it
   adds now keep the phase of the occupied ones.

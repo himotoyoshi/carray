@@ -153,6 +153,21 @@ class TestKeyWindows < Test::Unit::TestCase
       end
     end
   end
+
+  # A bound beyond the range of an int64 key holds every key on that side,
+  # rather than wrapping round and emptying the windows that follow.
+  def test_bounds_beyond_int64_hold_every_key
+    v = CA_FLOAT64([1, 10, 100])
+    w = v.windows(on: CA_INT64([-5, 0, 3]), before: 2**63 - 1, exclude: nil)
+    assert_equal [1, 2, 3], w.elements.to_a
+    assert_equal [1.0, 11.0, 111.0], w.sum.to_a
+    w = v.windows(on: CA_INT64([-2**63, 0, 1]), before: 1, exclude: nil)
+    assert_equal [1, 1, 2], w.elements.to_a
+    w = v.windows(on: CA_INT64([2**63 - 2, 2**63 - 1, 0]), after: 2**63 - 1, exclude: nil)
+    assert_equal [2, 1, 3], w.elements.to_a
+    t = CArray.time(%w[1900-01-01 1950-01-01 2000-01-01], unit: :ns)
+    assert_equal [1, 2, 3], v.windows(on: t, before: "100000 days", exclude: nil).elements.to_a
+  end
 end
 
 class TestCAFrameWindows < Test::Unit::TestCase
