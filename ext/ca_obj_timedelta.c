@@ -133,6 +133,21 @@ rb_ca_timedelta_element_initialize (VALUE self, VALUE value, VALUE unit)
   return self;
 }
 
+/* dup / clone copy the value and the unit (the allocator leaves both 0). */
+static VALUE
+rb_ca_timedelta_element_initialize_copy (VALUE self, VALUE orig)
+{
+  CATimedeltaElement *s, *o;
+  if ( self == orig ) {
+    return self;
+  }
+  rb_check_frozen(self);
+  TypedData_Get_Struct(self, CATimedeltaElement, &catimedelta_element_data_type, s);
+  TypedData_Get_Struct(orig, CATimedeltaElement, &catimedelta_element_data_type, o);
+  *s = *o;
+  return self;
+}
+
 static VALUE
 rb_ca_timedelta_element_value (VALUE self)
 {
@@ -427,6 +442,8 @@ Init_ca_obj_timedelta (void)
                        rb_ca_timedelta_element_s_allocate);
   rb_define_method(rb_cCATimedeltaElement, "initialize",
                    rb_ca_timedelta_element_initialize, 2);
+  rb_define_method(rb_cCATimedeltaElement, "initialize_copy",
+                   rb_ca_timedelta_element_initialize_copy, 1);
   rb_define_method(rb_cCATimedeltaElement, "value",
                    rb_ca_timedelta_element_value, 0);
   rb_define_method(rb_cCATimedeltaElement, "unit",

@@ -43,6 +43,49 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   numbers, so `nlargest(1)` agrees with `max`. To place NaN with the masked
   cells instead, mask it first (`a[:is_nan] = UNDEF`).
 
+- Change: adding a duration to a time, or subtracting it, raises when the
+  duration is coarser than the time's unit and not a whole number of its
+  ticks (`"1 day"` on a `"7 hours"` time, `"15 minutes"` on `"10 minutes"`).
+  It used to be cut to the grid. Convert the time to a unit both share
+  first. A duration finer than the unit is still truncated.
+
+- Change: `CArray#time(unit:, origin:)` raises when `origin` falls between
+  two ticks of `unit` (`origin: "…T10:00"` on `"3 hours"`, a midday origin on
+  `:D`, a mid-month origin on `:M`). It used to move to the tick before it.
+
+- Fix: time and duration arithmetic (`+`, `-`, `td * n`) raises `RangeError`
+  when a result leaves the range of int64 ticks, as the documentation says.
+  It wrapped around, e.g. a 500-year difference in `:ns` came out negative.
+
+- Fix: `CArray.time` without `unit:` reads an Integer as seconds when other
+  values make the chosen unit finer (`[1700000000, "2024-01-01T00:00:00.5"]`);
+  it read the Integer as milliseconds. A uint64 count that int64 cannot hold
+  raises `RangeError` in `CArray.time`, `#time` and `#timedelta` instead of
+  turning negative.
+
+- Fix: `CATime::Element` and `CATimedelta::Element` keep their value and
+  unit through `dup`, `clone` and `Marshal`; the copy used to be unusable,
+  and Marshal raised. A time element is `==` to the `Date` of its midnight,
+  as an array's `eq(Date)` already was.
+
+- Fix: `CArray.time` reads a date written by its day of the year
+  (`"2024-015"`, `%j`), its ISO week (`"2024-W03-1"`, `%G-W%V-%u`) or its
+  week of the year (`%U` / `%W` with a weekday) as that date; it used to
+  give January 1. A clock field out of range (`"10:75"`, `"25:00"`,
+  `"10:20:61"`) raises instead of carrying into the next field. `24:00` and
+  the leap second `:60` are still accepted.
+
+- Fix: a time on a tick that does not divide a day (`"7 hours"`,
+  `"36 hours"`, `"7 seconds"`) converts to months and years by its date.
+  `to_unit(:M)` / `to_unit(:Y)` gave 1970, and storing such a value into a
+  month or year array stored 1970.
+
+- Fix: a Ruby Array given to a comparison of a `CATime` or `CATimedelta`
+  (`eq`, `<`, `<=>`, `mask_eq`, ...) is compared cell by cell, and given to
+  `count` counts each of its values. Every cell used to be compared with the
+  Array's first value. A nested Array keeps its shape; an Array of the wrong
+  length raises.
+
 - Fix: copying the view that `sort` or `partition` returns without `axis:`
   (`a.sort.copy`, `a.partition(k).copy`) is as fast as with `axis:` again,
   about a third less time than in 3.0.3. More generally, reading a flattened

@@ -307,6 +307,67 @@ module CATimeUnitAlgebra
     r.denominator == 1 ? scaled : trunc_divide(scaled, r.denominator)
   end
 
+  # A duration brought onto a time's grid for dt +/- td.  A duration finer
+  # than the grid is truncated toward zero (a :D time + 5 h is + 0 days), but
+  # one whose tick is coarser and not a whole number of grid ticks ("1 day"
+  # on a "7 hours" grid, "15 minutes" on a "10 minutes" grid) must land on
+  # the grid exactly: cutting it would move the time by part of its own
+  # tick, which no rounding of the time asked for.
+  def duration_on_grid(storage, from, to)
+    r = ratio(res(from), res(to))
+    return convert_scale_trunc(storage, from, to) if r.nil? || r <= 1 || r.denominator == 1
+    scaled = widen(storage, r.numerator)
+    unless (scaled % r.denominator).eq(0).all
+      raise ArgumentError,
+            "a duration in #{res(from)} does not land on the #{res(to)} grid " \
+            "(it is not a whole number of #{res(to)} ticks); convert the time " \
+            "to a grid both share first"
+    end
+    scaled / r.denominator
+  end
+
+  # a + b and a - b on int64 storage (b a CArray or an Integer), raising
+  # instead of wrapping around when a result leaves int64.  An overflow is a
+  # result whose sign differs from both terms of the sum (a and b for +, a
+  # and -b for -).
+  def checked_add(a, b)
+    check_term(b, "+")
+    r = a + b
+    overflow_raise("+") if ((a ^ r) & (b ^ r)).lt(0).any
+    r
+  end
+
+  def checked_sub(a, b)
+    check_term(b, "-")
+    r = a - b
+    overflow_raise("-") if ((a ^ b) & (a ^ r)).lt(0).any
+    r
+  end
+
+  def checked_mul(a, k)
+    check_term(k, "*")
+    lo = a.min
+    unless lo == UNDEF
+      [lo, a.max].each do |x|
+        overflow_raise("*") unless (INT64_MIN..INT64_MAX).cover?(Integer(x) * k)
+      end
+    end
+    a * k
+  end
+
+  def check_term(b, op)
+    overflow_raise(op) if b.is_a?(Integer) && !(INT64_MIN..INT64_MAX).cover?(b)
+  end
+
+  def overflow_raise(op)
+    raise RangeError,
+          "time arithmetic overflows int64 (#{op}): the result is outside " \
+          "the range of the storage unit; use a coarser unit"
+  end
+
+  INT64_MIN = -2**63
+  INT64_MAX = 2**63 - 1
+
   # Truncating integer division of an int64 CArray (toward zero).  CArray
   # `/` floors toward the past, which is what an instant wants; a duration
   # is a magnitude and shrinks toward zero instead.
@@ -397,25 +458,29 @@ module CATimeUnitAlgebra
     widen(calendar_days_since_epoch(storage, from), r.numerator)
   end
 
+  # Whole days since the epoch (floored) of fixed-length ticks, and the
+  # remainder that says whether each instant sits on a day boundary.  A tick
+  # need not divide a day, nor be a whole number of days ("7 hours",
+  # "36 hours", "7 seconds"): the count is scaled to a grid both share.
+  def fixed_storage_days(storage, from)
+    rd     = ratio(CATime::Resolution.new(1, :D), from)  # `from` ticks per day
+    scaled = widen(storage, rd.denominator)
+    n      = rd.numerator
+    { days: scaled / n, rest: scaled % n }
+  end
+
   # fixed-length grid -> calendar time: the coarsening half of
   # convert_instant!, exact-or-raise.  Every instant must land on a day
   # boundary and then on the calendar boundary itself (the 1st, and
   # January too for :Y), since a mid-month instant has no :M value.
   def convert_instant_fixed_to_calendar(storage, from, to)
-    rd = ratio(CATime::Resolution.new(1, :D), from)  # `from` ticks per day
-    days =
-      if rd.denominator == 1
-        n = rd.numerator
-        unless (storage % n).eq(0).all
-          raise ArgumentError,
-                "cannot convert time #{from} to #{to} without loss " \
-                "(instant is not on a day boundary)"
-        end
-        storage / n
-      else                                             # coarser than a day (:W)
-        storage * (from.tick_ratio / 86400r).to_i
-      end
-    y, m, d = CATimeCivil.civil_from_days(days)
+    days = fixed_storage_days(storage, from)
+    unless (days[:rest]).eq(0).all
+      raise ArgumentError,
+            "cannot convert time #{from} to #{to} without loss " \
+            "(instant is not on a day boundary)"
+    end
+    y, m, d = CATimeCivil.civil_from_days(days[:days])
     on_boundary = d.eq(1)
     on_boundary &= m.eq(1) if to.base == :Y
     unless on_boundary.all
@@ -462,14 +527,7 @@ module CATimeUnitAlgebra
   # month, whatever day and time it carries.  The flooring counterpart of
   # convert_instant_fixed_to_calendar.
   def convert_instant_fixed_to_calendar_floor(storage, from, to)
-    rd   = ratio(CATime::Resolution.new(1, :D), from)   # `from` ticks per day
-    days =
-      if rd.denominator == 1
-        storage / rd.numerator
-      else                                             # coarser than a day (:W)
-        storage * (from.tick_ratio / 86400r).to_i
-      end
-    y, m, = CATimeCivil.civil_from_days(days)
+    y, m, = CATimeCivil.civil_from_days(fixed_storage_days(storage, from)[:days])
     ord = to.base == :M ? (y * 12 + (m - 1) - 1970 * 12) : (y - 1970)
     to.count > 1 ? ord / to.count : ord
   end
@@ -549,6 +607,9 @@ module CATimeOperandValues
     return operand if operand.is_a?(self.class)
     case operand
     when Array
+      # A nested Array keeps its shape; reading it row by row would land
+      # each row as one value.
+      return lift_operand(CA_OBJECT(operand)) if operand.any?(Array)
       lifted = operand.map { |v| UNDEF.equal?(v) ? nil : lift_operand(v) }
       units  = lifted.compact.map(&:unit)
       u = units.empty? ? unit : units.reduce { |a, b| common_unit(a, b) }
@@ -684,6 +745,10 @@ class CATime
         to_time <=> other.getutc
       when (defined?(DateTime) ? DateTime : nil)
         to_time <=> other.to_time.getutc
+      when (defined?(Date) ? Date : nil)
+        # a Date names the midnight (UTC) that begins it, as it does when an
+        # array is compared with it
+        to_time.to_r <=> CATimeLiteral.epoch_seconds(other)
       end
     rescue ArgumentError
       nil
@@ -699,6 +764,14 @@ class CATime
     # @return [Integer] a hash consistent with #eql? (unit-strict).
     def hash
       [value, unit].hash
+    end
+
+    # Marshal carries the tick and its resolution.
+    def marshal_dump = [value, unit.count, unit.base]
+
+    def marshal_load(data)
+      v, count, base = data
+      initialize(v, CATime::Resolution.new(count, base))
     end
 
     # @overload +(td)
@@ -729,7 +802,9 @@ class CATime
       case other
       when Element
         u = CATimeUnitAlgebra.diff_unit(unit, other.unit)
-        CATimedelta::Element.new(instant_in(u) - other.instant_in(u), u)
+        v = instant_in(u) - other.instant_in(u)
+        CATimeUnitAlgebra.check_term(v, "-")
+        CATimedelta::Element.new(v, u)
       when CATimedelta::Element, CATimedelta
         shifted_by_duration(other, -1)
       when CATime
@@ -769,8 +844,10 @@ class CATime
         months = sign * td.value * CATimeUnitAlgebra.months_per_tick(td.unit)
         return Element.new(CATimeUnitAlgebra.shift_months(CA_INT64([value]), unit, months)[0], unit)
       end
-      tv = CATimeUnitAlgebra.convert_scale_trunc(CA_INT64([td.value]), td.unit, unit)[0]
-      Element.new(value + sign * tv, unit)
+      tv = CATimeUnitAlgebra.duration_on_grid(CA_INT64([td.value]), td.unit, unit)[0]
+      v = value + sign * tv
+      CATimeUnitAlgebra.check_term(v, sign > 0 ? "+" : "-")
+      Element.new(v, unit)
     end
 
     # Base epoch as a Date.  next_month / next_year clamp end-of-month
@@ -885,6 +962,14 @@ class CATimedelta
       [value, unit].hash
     end
 
+    # Marshal carries the tick and its resolution.
+    def marshal_dump = [value, unit.count, unit.base]
+
+    def marshal_load(data)
+      v, count, base = data
+      initialize(v, CATime::Resolution.new(count, base))
+    end
+
     # @overload +(other)
     #   Returns the sum of two durations, promoting to the finer unit.  A
     #   cross-group operand (a :M + a :s duration) has no fixed relation and
@@ -905,7 +990,9 @@ class CATimedelta
     #   @return [CATimedelta::Element]
     def *(n)
       raise TypeError, "CATimedelta::Element * #{n.class} is not allowed (Integer only)" unless n.is_a?(Integer)
-      Element.new(value * n, unit)
+      v = value * n
+      CATimeUnitAlgebra.check_term(v, "*")
+      Element.new(v, unit)
     end
 
     # @overload /(other)
@@ -952,7 +1039,9 @@ class CATimedelta
               "CATimedelta::Element #{sign > 0 ? '+' : '-'} #{other.class} is not allowed"
       end
       u = CATimeUnitAlgebra.finer(unit, other.unit)
-      Element.new(duration_in(u) + sign * other.duration_in(u), u)
+      v = duration_in(u) + sign * other.duration_in(u)
+      CATimeUnitAlgebra.check_term(v, sign > 0 ? "+" : "-")
+      Element.new(v, u)
     end
   end
 end
@@ -1018,7 +1107,8 @@ class CATime
   # @overload +(other)
   #   Returns `self + other` for a {CATimedelta}: the time is the
   #   anchor, so the result keeps `self`'s unit and the duration is converted
-  #   into it (a duration finer than `self`'s unit is truncated to it).  A
+  #   into it (a duration finer than `self`'s unit is truncated to it; a
+  #   coarser one that is not a whole number of `self`'s ticks raises).  A
   #   month or year duration on a fixed grid moves each date as Ruby's
   #   `Date#>>` does: the day stays unless the new month is shorter (then it
   #   is that month's last day), and the time of day stays, so
@@ -1032,15 +1122,17 @@ class CATime
   #     duration array)
   #   @return [CATime]
   #   @raise [TypeError] on a non-timedelta operand.
+  #   @raise [ArgumentError] when the duration does not land on `self`'s grid.
+  #   @raise [RangeError] when a result leaves the range of int64 ticks.
   def +(other)
     given, other = other, CATimeUnitAlgebra.operand(other)
     other = CATimeUnitAlgebra.scalar_operand(other, unit) || other
     case other
     when CATimedelta
       return shifted_by_months(other, 1) if moved_by_months?(other)
-      d = CATimeUnitAlgebra.convert_scale_trunc(other.parent, other.unit, unit)
+      d = CATimeUnitAlgebra.duration_on_grid(other.parent, other.unit, unit)
       d = d[0] if other.scalar?
-      (parent + d).time(unit: unit)
+      CATimeUnitAlgebra.checked_add(parent, d).time(unit: unit)
     when CATime
       raise TypeError, "CATime + CATime is ill-defined"
     else
@@ -1067,15 +1159,15 @@ class CATime
     case other
     when CATimedelta
       return shifted_by_months(other, -1) if moved_by_months?(other)
-      d = CATimeUnitAlgebra.convert_scale_trunc(other.parent, other.unit, unit)
+      d = CATimeUnitAlgebra.duration_on_grid(other.parent, other.unit, unit)
       d = d[0] if other.scalar?
-      (parent - d).time(unit: unit)
+      CATimeUnitAlgebra.checked_sub(parent, d).time(unit: unit)
     when CATime
       u = CATimeUnitAlgebra.diff_unit(unit, other.unit)
       a = CATimeUnitAlgebra.convert_instant!(parent, unit, u)
       b = CATimeUnitAlgebra.convert_instant!(other.parent, other.unit, u)
       b = b[0] if other.scalar?
-      (a - b).timedelta(unit: u)
+      CATimeUnitAlgebra.checked_sub(a, b).timedelta(unit: u)
     else
       raise TypeError, "CATime - #{given.class} is not allowed: subtract a duration " \
                        "(a CATimedelta, a CATimedelta::Element or a String such as \"3 days\") " \
@@ -1739,11 +1831,11 @@ class CATimedelta
       a = CATimeUnitAlgebra.convert_scale!(parent, unit, u)
       b = CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
       b = b[0] if other.scalar?
-      (a + b).timedelta(unit: u)
+      CATimeUnitAlgebra.checked_add(a, b).timedelta(unit: u)
     when CATime
       return other + self unless other.scalar?   # commutative -> time's unit
-      d = CATimeUnitAlgebra.convert_scale_trunc(parent, unit, other.unit)
-      (d + other.parent[0]).time(unit: other.unit)
+      d = CATimeUnitAlgebra.duration_on_grid(parent, unit, other.unit)
+      CATimeUnitAlgebra.checked_add(d, other.parent[0]).time(unit: other.unit)
     else
       raise TypeError, "CATimedelta + #{given.class} is not allowed"
     end
@@ -1766,7 +1858,7 @@ class CATimedelta
       a = CATimeUnitAlgebra.convert_scale!(parent, unit, u)
       b = CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
       b = b[0] if other.scalar?
-      (a - b).timedelta(unit: u)
+      CATimeUnitAlgebra.checked_sub(a, b).timedelta(unit: u)
     else
       raise TypeError, "CATimedelta - #{given.class} is not allowed"
     end
@@ -1794,7 +1886,7 @@ class CATimedelta
   #   @raise [TypeError] when `other` is not an Integer.
   def *(other)
     case other
-    when Integer then (parent * other).timedelta(unit: unit)
+    when Integer then CATimeUnitAlgebra.checked_mul(parent, other).timedelta(unit: unit)
     else raise TypeError, "CATimedelta * #{other.class} is not allowed (Integer only)"
     end
   end
@@ -2128,6 +2220,7 @@ module CATimeLiteral
       elsif (hour = hour_only_fields(spec)) then hour
       else                                       Date._parse(spec)
       end
+    h = resolve_day_of_year(h, spec) if h
     unless h && h[:year]
       raise ArgumentError, "cannot parse time #{spec.inspect}"
     end
@@ -2152,9 +2245,62 @@ module CATimeLiteral
       raise ArgumentError,
             "cannot parse time #{spec.inspect}: hour 24 is only 24:00:00"
     end
+    # A clock field out of range is refused rather than carried into the
+    # next one ("10:75" is not 11:15).  Second 60 is the leap second.
+    { hour: 24, min: 59, sec: 60 }.each do |key, top|
+      v = h[key]
+      next if v.nil? || (0..top).cover?(v)
+      raise ArgumentError,
+            "cannot parse time #{spec.inspect}: #{key} #{v} is out of range"
+    end
     h
   end
   private_class_method :parse_date_fields
+
+  # The month and day of a date written by its day of the year ("2024-015",
+  # %j), its ISO week ("2024-W03-1", %G-W%V-%u) or its week of the year
+  # (%U / %W with a weekday).  Date._parse and Date._strptime return those
+  # fields as they are written; left alone, the date would fall back to
+  # January 1.
+  def resolve_day_of_year(h, spec)
+    return h if h[:mon] || h[:mday]
+    date =
+      if h[:yday] && h[:year]
+        unless Date.valid_ordinal?(h[:year], h[:yday], Date::GREGORIAN)
+          raise ArgumentError,
+                "cannot parse time #{spec.inspect}: year #{h[:year]} has no day #{h[:yday]}"
+        end
+        Date.ordinal(h[:year], h[:yday], Date::GREGORIAN)
+      elsif h[:cwyear] && h[:cweek]
+        wd = h[:cwday] || 1
+        unless Date.valid_commercial?(h[:cwyear], h[:cweek], wd, Date::GREGORIAN)
+          raise ArgumentError,
+                "cannot parse time #{spec.inspect}: ISO year #{h[:cwyear]} " \
+                "has no week #{h[:cweek]}, day #{wd}"
+        end
+        Date.commercial(h[:cwyear], h[:cweek], wd, Date::GREGORIAN)
+      elsif h[:year] && (h[:wnum0] || h[:wnum1])
+        jan1 = Date.new(h[:year], 1, 1, Date::GREGORIAN)
+        wday = h[:wday] || (h[:cwday] && h[:cwday] % 7)
+        # Week 1 begins on the first Sunday (%U) or Monday (%W) of the year;
+        # the days before it are week 0.
+        if h[:wnum0]
+          first = jan1 + (7 - jan1.wday) % 7
+          d = first + (h[:wnum0] - 1) * 7 + (wday || 0)
+        else
+          first = jan1 + (8 - jan1.wday) % 7
+          d = first + (h[:wnum1] - 1) * 7 + ((wday || 1) + 6) % 7
+        end
+        unless d.year == h[:year]
+          raise ArgumentError,
+                "cannot parse time #{spec.inspect}: the week and weekday fall outside #{h[:year]}"
+        end
+        d
+      end
+    return h unless date
+    h.merge(year: date.year, mon: date.month, mday: date.day)
+  end
+  private_class_method :resolve_day_of_year
 
   # "YYYY-MM-DDThh" with an optional zone ("Z", "+hh", "+hhmm", "+hh:mm").
   def hour_only_fields(spec)
@@ -2373,7 +2519,7 @@ module CATimeLiteral
   # otherwise each String is parsed into fields here. Either way the fields
   # become ticks for the whole array at once, and a cell that is not a
   # String goes through tick_index.
-  def ticks_from_cells(x, res, format, on_error)
+  def ticks_from_cells(x, res, format, on_error, seconds: false)
     require 'date'
     kind, per = tick_kind(res)
     return nil unless kind
@@ -2405,7 +2551,9 @@ module CATimeLiteral
           off[i] = h[:offset] if h[:offset]
           present[i] = 1
         elsif s.is_a?(Integer) && format.nil?
-          direct[i] = s          # an Integer counts ticks of the unit
+          # an Integer counts ticks of the unit given, or seconds when the
+          # unit is chosen from the values
+          direct[i] = seconds ? tick_index(s, res) : s
         else
           direct[i] = tick_index(s, res, format)
         end
@@ -2609,7 +2757,8 @@ class CArray
   #   DateTime) — giving a 1-element result — or a CArray of such
   #   literals — giving a same-shape result parsed per cell.  Parsing is UTC
   #   and DateTime-independent.  An Integer counts ticks of `unit` from
-  #   the epoch, so it is Unix seconds when `unit` is not given:
+  #   the epoch, so it is Unix seconds when `unit` is not given (also among
+  #   values that make the chosen unit finer):
   #   `CArray.time(CA_INT64([0, 10]), unit: :m)` is 00:00 and 00:10.
   #
   #   A value that cannot be parsed raises by default (`on_error: :raise`);
@@ -2649,12 +2798,12 @@ class CArray
     # seconds by default, minutes with unit: :m.
     if format.nil?
       return CA_INT64([x]).time(unit: res) if x.is_a?(Integer)
-      return x.int64.copy.time(unit: res) if x.is_a?(CArray) && !x.face? && x.integer?
+      return (x.data_type == CA_INT64 ? x.copy : x).time(unit: res) if x.is_a?(CArray) && !x.face? && x.integer?
     end
     unless x.is_a?(CArray)
       return CATimeLiteral.to_time_array(x, res, format, on_error)
     end
-    raw = CATimeLiteral.ticks_from_cells(x, res, format, on_error)
+    raw = CATimeLiteral.ticks_from_cells(x, res, format, on_error, seconds: unit.nil?)
     return raw.time(unit: res) if raw
     raw = CArray.int64(*x.shape)
     x.each_index do |*idx|
@@ -2664,7 +2813,7 @@ class CArray
         next
       end
       begin
-        raw[*idx] = s.is_a?(Integer) && format.nil? ? s : CATimeLiteral.tick_index(s, res, format)
+        raw[*idx] = s.is_a?(Integer) && format.nil? && unit ? s : CATimeLiteral.tick_index(s, res, format)
       rescue ArgumentError, TypeError
         raise if on_error == :raise
         raw[*idx] = UNDEF        # opt-in parse-mask
@@ -2681,8 +2830,10 @@ class CArray
   #   int64 array is built; the origin is not stored).
   #   @param unit [Resolution, Symbol, String] grid resolution.
   #   @param origin [Time, String, Integer, DateTime, CATime::Element, nil] base instant that
-  #     `self`'s indices are counted from (default: the Unix epoch).
+  #     `self`'s indices are counted from (default: the Unix epoch); an
+  #     Integer is Unix seconds.  It has to be a point of the `unit` grid.
   #   @return [CATime]
+  #   @raise [ArgumentError] when `origin` falls between two ticks of `unit`.
   #   @note An `int64` receiver is wrapped zero-copy.  A narrower integer type
   #     is widened to `int64` first (a copy); a `Float` / non-integer type
   #     raises (cast it explicitly if the truncation is intended).
@@ -2692,8 +2843,11 @@ class CArray
     if origin.nil?
       CATime.wrap(src, unit: res)
     else
-      o = CATimeLiteral.tick_index(origin, res)
-      (src + o).time(unit: res)
+      # The origin is a point of the grid: one between two ticks has no
+      # index, so it raises rather than moving to the tick before it.
+      origin = Time.at(origin, in: "UTC") if origin.is_a?(Integer)
+      o = CATimeGrid.resolve_origin_ticks(origin, res, res)
+      CATimeUnitAlgebra.checked_add(src, o).time(unit: res)
     end
   end
 
@@ -2718,6 +2872,13 @@ class CArray
             "CATime / CATimedelta storage must be int64; a #{data_type} " \
             "array cannot be wrapped (cast it explicitly, e.g. " \
             "arr.int64.time(...), if a lossy conversion is intended)"
+    end
+    if data_type == CA_UINT64
+      hi = max
+      if hi != UNDEF && hi > 2**63 - 1
+        raise RangeError,
+              "CATime / CATimedelta storage is int64; #{hi} does not fit"
+      end
     end
     int64
   end

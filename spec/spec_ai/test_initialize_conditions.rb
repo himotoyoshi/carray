@@ -31,6 +31,8 @@ class TestInitializeConditions < Test::Unit::TestCase
   NOT_ARRAYS = {
     "rb_ca_time_element_initialize"      => "CATime::Element, a scalar value object",
     "rb_ca_timedelta_element_initialize" => "CATimedelta::Element, a scalar value object",
+    "rb_ca_time_element_initialize_copy"      => "CATime::Element, a scalar value object",
+    "rb_ca_timedelta_element_initialize_copy" => "CATimedelta::Element, a scalar value object",
     "rb_ca_struct_initialize"            => "a CAStruct record, backed by a CScalar it builds",
     "rb_ca_rng_initialize"               => "CARng, a generator state",
   }

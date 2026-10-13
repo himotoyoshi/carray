@@ -181,8 +181,10 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
       }
       /* The reconcile lifts a scalar query to a length-1 array; unwrap it so
          a scalar query still answers with a count rather than a length-1
-         array from the broadcast branch below. */
-      if ( query_was_scalar && rb_obj_is_carray(rval) ) {
+         array from the broadcast branch below.  A Ruby Array is a list of
+         queries and stays one, like a CArray query. */
+      if ( query_was_scalar && ! RB_TYPE_P(argv[0], T_ARRAY)
+           && rb_obj_is_carray(rval) ) {
         rval = rb_ca_fetch_addr(rval, 0);
       }
     }
