@@ -253,4 +253,14 @@ class TestDatetimeScalar < Test::Unit::TestCase
     dt[0] = dt[2]
     assert_equal dt[2].value, dt[0].value
   end
+
+  # The ratio of two duration arrays is a number, not a count of whole
+  # ticks, in a unit both are brought to: 90 s / 1 m is 1.5.
+  def test_duration_array_ratio_is_float
+    a = CA_INT64([90, 60]).timedelta(unit: :s)
+    r = a / CA_INT64([60, 60]).timedelta(unit: :s)
+    assert_equal CA_FLOAT64, r.data_type
+    assert_equal [1.5, 1.0], r.to_a
+    assert_equal [1.5, 1.0], (a / CA_INT64([1, 1]).timedelta(unit: :m)).to_a
+  end
 end

@@ -1517,8 +1517,9 @@ class CATimedelta
 
   # @overload /(other)
   #   Returns element-wise division: by Integer yields a
-  #   {CATimedelta}, by another {CATimedelta} with matching `unit`
-  #   yields a dimensionless CArray.
+  #   {CATimedelta} (truncated toward zero to the unit), by another
+  #   {CATimedelta} their ratio as a float64 CArray (90 s / 60 s is 1.5),
+  #   the two brought to a common unit first.
   #   @param other [Integer, CATimedelta]
   #     (or a MemoryView producer whose +to_ca+ gives one, such as an Arrow
   #     duration array)
@@ -1530,10 +1531,12 @@ class CATimedelta
     when Integer
       CATimeUnitAlgebra.trunc_divide(parent, other).timedelta(unit: unit)
     when CATimedelta
+      # A ratio of durations is a number, not a count of whole ticks: 90 s /
+      # 60 s is 1.5.  Both are brought to one unit first, so the ratio does
+      # not depend on the units they are held in.
       u = common_duration_unit(other.unit)
-      CATimeUnitAlgebra.trunc_divide(
-        CATimeUnitAlgebra.convert_scale!(parent, unit, u),
-        CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u))
+      CATimeUnitAlgebra.convert_scale!(parent, unit, u).to_type(:float64) /
+        CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
     else raise TypeError, "CATimedelta / #{given.class} is not allowed"
     end
   end

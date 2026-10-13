@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: dividing a `CATimedelta` array by another truncated the ratio to
+  an integer (90 s / 60 s gave 1). It is now a float64 array (1.5), the
+  two durations brought to a common unit first.
+
 - Fix: `locate_addr` with a reference given as an Array or Range compared
   in the object lane, so `float_array.locate_addr(1..3)` and
   `float_array.locate_addr([1, 3])` found nothing. The values now meet the

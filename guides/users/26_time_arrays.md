@@ -268,7 +268,7 @@ The full table:
 | `td - td2`     | `CATimedelta`      |                                             |
 | `td * Integer` | `CATimedelta`      | scaling                                     |
 | `td / Integer` | `CATimedelta`      | scaling                                     |
-| `td / td2`     | `CArray`           | ratio of the raw counts; a plain array      |
+| `td / td2`     | `CArray`           | their ratio as float64 (90 s / 1 m is 1.5)  |
 
 ### Cross-unit arithmetic
 
