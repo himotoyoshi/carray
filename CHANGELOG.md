@@ -36,6 +36,19 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: a masked cell of an integer index array keeps its place when
+  indexing: `x[i]`, `x[i, nil]` and the other grid forms, and `CAFrame`
+  row selection `df[i]`, now give a result shaped like `i` with the masked
+  positions reading as `UNDEF`, as `project`, `take_along_axis` and
+  `gather_nd` already did. They dropped those positions, so the result was
+  shorter than `i`. A write through `x[i] = values` takes one value per
+  position of `i` and leaves the masked positions alone. A
+  multi-dimensional index array with a masked cell (`x[a]` with a 2-D `a`)
+  is accepted the same way instead of raising `ArgumentError`. A masked
+  cell of a boolean selector still selects nothing and adds no position.
+  To drop the masked positions as before, index by the unmasked cells:
+  `x[i[i.is_not_masked]]`.
+
 - Fix: a view taken from a masked Face (`CATime`, `CATimedelta`, ...) or
   from a masked array through `.lazy`, and kept after the intermediate
   array was dropped, such as `t.reshape(4, 5)[nil, 1..3]` or
