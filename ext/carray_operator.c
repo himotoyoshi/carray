@@ -456,6 +456,7 @@ ca_op_guard_release (VALUE varg)
     }
     if ( g->mode[k] == 'w' ) {
       int tag = 0;
+      /* protect: a sync that raises is dropped so that every held array is detached */
       rb_protect(ca_op_guard_sync, (VALUE) ca, &tag);
       rb_set_errinfo(Qnil);
     }
@@ -609,17 +610,12 @@ ca_mask_overlay_attached (CArray *out, int n,
                           CArray *s0, CArray *s1, CArray *s2)
 {
   ca_overlay_args_t a;
-  int tag = 0;
   a.out = out;
   a.n   = n;
   a.src[0] = s0;
   a.src[1] = s1;
   a.src[2] = s2;
-  rb_protect(ca_overlay_attached_body, (VALUE) &a, &tag);
-  if ( tag ) {
-    ca_detach(out);
-    rb_jump_tag(tag);
-  }
+  ca_fill_or_detach(1, &out, ca_overlay_attached_body, (VALUE) &a);
 }
 
 /* Monop driver.  ca1 is input-only (the driver does not attach it); ca2

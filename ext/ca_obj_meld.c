@@ -864,16 +864,8 @@ ca_meld_func_attach (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
   ca_meld_mask_refresh(ca, 0);
-  int32_t k;
-  int     tag = 0;
   ca_attach_all(ca->parents, ca->n_parents);
-  rb_protect(ca_meld_attach_owned, (VALUE) ca, &tag);
-  if ( tag ) {
-    for ( k = 0; k < ca->n_parents; k++ ) {
-      ca_detach(ca->parents[k]);
-    }
-    rb_jump_tag(tag);
-  }
+  ca_fill_or_detach(ca->n_parents, ca->parents, ca_meld_attach_owned, (VALUE) ca);
 }
 
 static void
