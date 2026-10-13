@@ -129,7 +129,7 @@ class CArray
     return unless values.is_a?(Range)
     raise ArgumentError,
           "#{verb}: a Range is not taken as a set; pass its values as an Array " \
-          "((#{values.inspect}).to_a), or compare an interval as (a >= lo) & (a <= hi)"
+          "((#{values.inspect}).to_a), or test an interval with is_between(#{values.inspect})"
   end
 
   # Reconcile a set-valued argument with self to a common data_type via

@@ -48,7 +48,7 @@ class TestIsIn < Test::Unit::TestCase
     a = CA_INT32([1, 2, 3, 4, 5])
     err = assert_raise(ArgumentError) { a.is_in(1..3) }
     assert_equal "is_in: a Range is not taken as a set; pass its values as an Array " \
-                 "((1..3).to_a), or compare an interval as (a >= lo) & (a <= hi)", err.message
+                 "((1..3).to_a), or test an interval with is_between(1..3)", err.message
     assert_equal [true, true, true, false, false], a.is_in((1..3).to_a).to_a
     assert_raise(ArgumentError) { CA_FLOAT64([2.5]).is_in(2..4) }
     assert_raise(ArgumentError) { a.intersection(1..2) }

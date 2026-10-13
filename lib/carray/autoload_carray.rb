@@ -231,6 +231,7 @@ class CArray
   autoload_method "intersection",    "carray/methods/is_in"
   autoload_method "difference",      "carray/methods/is_in"
   autoload_method "union",           "carray/methods/is_in"
+  autoload_method "is_between",      "carray/methods/is_between"
   autoload_method "self.align_addr",         "carray/methods/align_addr"
   autoload_method "self.align_nearest_addr", "carray/methods/align_addr"
   autoload_method "value_counts",    "carray/methods/value_counts"

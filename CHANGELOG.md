@@ -43,6 +43,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   two comparisons joined by `&`, so a time array is bounded by Strings or
   `Time`. `is_in` given a Range now points at it.
 
+- New: `CArray#is_between(lo, hi, exclude:)` is true where a value lies
+  between two bounds, both included unless `exclude: :lower`, `:upper` or
+  `:both` leaves them out; a Range says the same (`a.is_between(2...4)`),
+  and a `nil` bound or an open end leaves that side unbounded. It is the
+  two comparisons joined by `&`, so a time array is bounded by Strings or
+  `Time`. `is_in` given a Range now points at it.
+
 - Fix: an operator over an array with an axis of length 0 could crash or
   write past its result when the other operand was a row broadcast to it
   or a view that is not contiguous: `CArray.int64(0, 4096) +
