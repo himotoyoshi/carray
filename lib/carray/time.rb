@@ -2499,7 +2499,7 @@ module CATimeLiteral
   # otherwise each String is parsed into fields here. Either way the fields
   # become ticks for the whole array at once, and a cell that is not a
   # String goes through tick_index.
-  def ticks_from_cells(x, res, format, on_error)
+  def ticks_from_cells(x, res, format, on_error, seconds: false)
     require 'date'
     kind, per = tick_kind(res)
     return nil unless kind
@@ -2531,7 +2531,9 @@ module CATimeLiteral
           off[i] = h[:offset] if h[:offset]
           present[i] = 1
         elsif s.is_a?(Integer) && format.nil?
-          direct[i] = s          # an Integer counts ticks of the unit
+          # an Integer counts ticks of the unit given, or seconds when the
+          # unit is chosen from the values
+          direct[i] = seconds ? tick_index(s, res) : s
         else
           direct[i] = tick_index(s, res, format)
         end
@@ -2735,7 +2737,8 @@ class CArray
   #   DateTime) — giving a 1-element result — or a CArray of such
   #   literals — giving a same-shape result parsed per cell.  Parsing is UTC
   #   and DateTime-independent.  An Integer counts ticks of `unit` from
-  #   the epoch, so it is Unix seconds when `unit` is not given:
+  #   the epoch, so it is Unix seconds when `unit` is not given (also among
+  #   values that make the chosen unit finer):
   #   `CArray.time(CA_INT64([0, 10]), unit: :m)` is 00:00 and 00:10.
   #
   #   A value that cannot be parsed raises by default (`on_error: :raise`);
@@ -2775,12 +2778,12 @@ class CArray
     # seconds by default, minutes with unit: :m.
     if format.nil?
       return CA_INT64([x]).time(unit: res) if x.is_a?(Integer)
-      return x.int64.copy.time(unit: res) if x.is_a?(CArray) && !x.face? && x.integer?
+      return (x.data_type == CA_INT64 ? x.copy : x).time(unit: res) if x.is_a?(CArray) && !x.face? && x.integer?
     end
     unless x.is_a?(CArray)
       return CATimeLiteral.to_time_array(x, res, format, on_error)
     end
-    raw = CATimeLiteral.ticks_from_cells(x, res, format, on_error)
+    raw = CATimeLiteral.ticks_from_cells(x, res, format, on_error, seconds: unit.nil?)
     return raw.time(unit: res) if raw
     raw = CArray.int64(*x.shape)
     x.each_index do |*idx|
@@ -2790,7 +2793,7 @@ class CArray
         next
       end
       begin
-        raw[*idx] = s.is_a?(Integer) && format.nil? ? s : CATimeLiteral.tick_index(s, res, format)
+        raw[*idx] = s.is_a?(Integer) && format.nil? && unit ? s : CATimeLiteral.tick_index(s, res, format)
       rescue ArgumentError, TypeError
         raise if on_error == :raise
         raw[*idx] = UNDEF        # opt-in parse-mask
@@ -2849,6 +2852,13 @@ class CArray
             "CATime / CATimedelta storage must be int64; a #{data_type} " \
             "array cannot be wrapped (cast it explicitly, e.g. " \
             "arr.int64.time(...), if a lossy conversion is intended)"
+    end
+    if data_type == CA_UINT64
+      hi = max
+      if hi != UNDEF && hi > 2**63 - 1
+        raise RangeError,
+              "CATime / CATimedelta storage is int64; #{hi} does not fit"
+      end
     end
     int64
   end
