@@ -91,6 +91,13 @@ CArray.time(CA_OBJECT(%w[2024-01-15 2024-02-15]), unit: :D)    # CArray
 CArray.time(%w[15/01/2024 20/06/2024], format: "%d/%m/%Y", unit: :D)
 ```
 
+Without `unit:`, the values are read in the finest unit they show, so nothing they hold is cut off: text written to the day comes back in `:D`, to the second in `:s`, and with a fraction in `:ms`, `:us` or `:ns` by its digits — the same reading `parse_to_time` gives a frame's text column. With `format:`, it is the finest field the format writes; a Unix-seconds Integer is `:s`, a `Time` the finest its value needs, a `Date` `:D`.
+
+```ruby
+CArray.time(%w[2024-01-15 2024-02-15]).unit   # => D
+CArray.time("2024-01-15T10:00:00.5").unit     # => ms   (the half second is kept)
+```
+
 Parsing uses Ruby's own date parser under the hood — the flexible `Date._parse` heuristic by default, or strict `strftime`-style pattern matching when you pass `format:`. Use `format:` when the day/month order is ambiguous or the layout is not ISO.
 
 There are two departures from `Date._parse`. A year-month (`"2019-09"`) and a bare year (`"2019"`) are read as such, so the form a `:M` or `:Y` element prints comes back in; a missing finer field names the head of that period. And a field out of range raises instead of rolling over into another date — `"2019-02-31"` is refused rather than becoming 2019-03-03. Watch out for `"201909"`: to Ruby that is a valid YYMMDD (2020-19-09), so it is refused as well. Write `"2019-09"`, or name the layout with `format: "%Y%m"`.

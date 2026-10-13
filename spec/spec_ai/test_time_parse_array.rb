@@ -118,4 +118,22 @@ class TestTimeParseArray < Test::Unit::TestCase
     assert_equal ["2023-11-14T22:13:20.123Z"],
                  CArray.time("1700000000123", format: "%Q", unit: :ms).to_a.map(&:to_s)
   end
+
+  # Without unit:, the values are read in the finest unit they show, so a
+  # fraction of a second is kept rather than cut to :s.
+  def test_the_unit_defaults_to_the_finest_the_values_show
+    unit = ->(*a, **k) { CArray.time(*a, **k).unit.to_s }
+    assert_equal "D", unit.(%w[2013-08-01 2013-08-02])
+    assert_equal "s", unit.(["2013-08-01 10:30", "2013-08-02"])
+    assert_equal "ms", unit.(%w[2013-08-01T10:00:00.5])
+    assert_equal ["2013-08-01T10:00:00.500Z"], CArray.time(%w[2013-08-01T10:00:00.5]).to_a.map(&:to_s)
+    assert_equal "ms", unit.(["Aug 1 2013 10:00:00.25"])
+    assert_equal "D", unit.(CA_INT64([20240101]), format: "%Y%m%d")
+    assert_equal "ms", unit.(["2024-01-01 10:00:00.123"], format: "%Y-%m-%d %H:%M:%S.%L")
+    assert_equal "s", unit.(1700000000)
+    assert_equal "ms", unit.(Time.utc(2024, 1, 1, 0, 0, 0.5r))
+    assert_equal "D", unit.(Date.new(2024, 1, 1))
+    assert_equal "s", unit.([Date.new(2024, 1, 1), "2024-01-01T10:00"])
+    assert_equal "h", unit.(%w[2013-08-01], unit: :h)
+  end
 end

@@ -121,6 +121,18 @@ CArray.time_range(q1[0], "2021-02-01", unit: :M, step: "3 months")
 # => 2020-07, 2020-10, 2021-01
 ```
 
+Without `unit:`, `CArray.time` reads the values in the finest unit they
+show, so nothing they hold is cut off: text written to the day is `:D`, to
+the second `:s`, with a fraction `:ms` / `:us` / `:ns` by its digits (as
+`CAFrame#parse_to_time` reads text); with `format:`, the finest field the
+format writes; a Unix-seconds Integer `:s`; a `Time` the finest its value
+needs; a `Date` `:D`. Mixed values take the finest of them.
+
+```ruby
+CArray.time(%w[2024-01-15 2024-02-15]).unit        # => D
+CArray.time("2024-01-15T10:00:00.5").unit          # => ms
+```
+
 `CArray.time` is **strict by default**: an unparseable value raises.
 Pass `on_error: :mask` to turn parse failures into UNDEF cells instead
 (a masked / `nil` *input* cell is a missing value, not a parse failure, and

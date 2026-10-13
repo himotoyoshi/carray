@@ -2217,6 +2217,63 @@ module CATimeLiteral
     raise RangeError, "time #{cells[i].inspect} does not fit int64 ticks of #{res}"
   end
 
+  # The unit CArray.time reads +x+ in when none is given: the finest any of
+  # its values shows (see the unit: of CArray.time), :s when none shows one.
+  def unit_shown(x, format)
+    require 'date'
+    cells = x.is_a?(CArray) ? x.flatten.to_a : [x]
+    text = cells.select { |v| v.is_a?(String) }
+    units = []
+    unless text.empty?
+      if format
+        units << format_unit(format)
+      else
+        unreadable = []
+        _, read = CA_OBJECT(text).__parse_time_text__(nil, unreadable, true)
+        units << read if read
+        unreadable.each do |i|
+          u = text_unit(text[i])
+          units << u if u
+        end
+      end
+    end
+    cells.each do |v|
+      case v
+      when Integer then units << :s
+      when CATime::Element then units << v.unit
+      when Time then units << CATimeLiteral.exact_instant(v).unit
+      when Date
+        units << (defined?(DateTime) && v.is_a?(DateTime) ? CATimeLiteral.exact_instant(v.to_time).unit : :D)
+      end
+    end
+    units.map { |u| CATime::Resolution.parse(u) }
+         .reduce { |a, b| CATimeUnitAlgebra.finer(a, b) } || CATime::Resolution.parse(:s)
+  end
+
+  # The unit a String read with Date._parse shows, or nil when it does not
+  # read (the reading raises or masks it later).
+  def text_unit(str)
+    h = Date._parse(str)
+    return nil unless h && h[:year]
+    return fraction_unit(h[:sec_fraction].denominator) if h[:sec_fraction]
+    (h[:hour] || h[:min] || h[:sec]) ? :s : :D
+  end
+
+  # The finest field a strptime format writes.
+  def format_unit(format)
+    if (m = format.match(/%(\d*)([LNQ])/))
+      return :ms if m[2] == "L" || m[2] == "Q"
+      digits = m[1].empty? ? 9 : m[1].to_i
+      return fraction_unit(10 ** digits)
+    end
+    format.match?(/%[-_0^#]*[sSTHIklMRrXcp]/) ? :s : :D
+  end
+
+  def fraction_unit(denominator)
+    digits = Math.log10(denominator).ceil
+    digits <= 3 ? :ms : digits <= 6 ? :us : :ns
+  end
+
   # +x+ with each Integer replaced by its decimal digits as a String, for a
   # format to read; a masked cell stays masked.
   def integers_as_text(x)
@@ -2323,7 +2380,13 @@ class CArray
   #   becomes UNDEF, regardless of `on_error`.
   #   @param x [Time, String, Integer, DateTime, CATime::Element, Array, CArray] a literal, a
   #     Ruby Array of literals, or a CArray of literals.
-  #   @param unit [Resolution, Symbol, String] target grid resolution.
+  #   @param unit [Resolution, Symbol, String, nil] target grid resolution;
+  #     by default the finest the values show, so nothing they hold is cut
+  #     off: text written to the day is `:D`, to the second `:s`, with a
+  #     fraction `:ms` / `:us` / `:ns` by its digits (as
+  #     `CAFrame#parse_to_time` reads text); with a format, the finest field
+  #     the format writes; an Integer (Unix seconds) `:s`; a Time the finest
+  #     its value needs; a Date `:D`; an element its own unit.
   #   @param format [String, nil] optional strptime format for String input.
   #     With a format, an Integer is read as its decimal digits
   #     (`CArray.time(20240101, format: "%Y%m%d")`), not as Unix seconds.
@@ -2335,8 +2398,7 @@ class CArray
   #   CArray.time("2024-06-15", unit: :D)                    # 1-element
   #   CArray.time(%w[2024-01-01 2024-02-01], unit: :D)       # Ruby Array
   #   CArray.time(CA_OBJECT(["2024-01-01", "oops"]), unit: :D, on_error: :mask)
-  def self.time(x, unit: :s, format: nil, on_error: :raise)
-    res = CATime::Resolution.parse(unit)
+  def self.time(x, unit: nil, format: nil, on_error: :raise)
     unless %i[raise mask].include?(on_error)
       raise ArgumentError, "on_error: must be :raise or :mask (got #{on_error.inspect})"
     end
@@ -2344,6 +2406,7 @@ class CArray
     # With a format, an Integer is the digits it is written with (20240101
     # read as "%Y%m%d"), not Unix seconds: a format describes text.
     x = CATimeLiteral.integers_as_text(x) if format
+    res = unit ? CATime::Resolution.parse(unit) : CATimeLiteral.unit_shown(x, format)
     unless x.is_a?(CArray)
       return CATimeLiteral.to_time_array(x, res, format, on_error)
     end
