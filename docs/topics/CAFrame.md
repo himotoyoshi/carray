@@ -718,7 +718,7 @@ end
 
 **`:mixed`** is for text that is not written in one format, which is broken as data for a machine to read. It guesses at each cell on its own, as `Time.parse` does, so it can read a cell wrongly without saying so: `"01/02/24"` is read as 24 February 2001. It is also much slower.
 
-**The unit.** Without a format, or with `:infer`, the unit is the finest the text shows: `:D` for dates alone, `:s` with a time of day, `:ms` / `:us` / `:ns` for fractions of a second. With a format it is `:s`. `unit:` sets it explicitly, in the spellings `CArray.time` takes (`:s`, `"10 minutes"`, a `CATime::Resolution`).
+**The unit.** The unit is the finest the text shows: `:D` for dates alone, `:s` with a time of day, `:ms` / `:us` / `:ns` for fractions of a second. With a format it is the finest field the format writes (`"%d/%m/%Y"` `:D`, `"%d/%m/%Y %H:%M"` `:s`, `%L` `:ms`), so a fraction of a second is not cut off. `unit:` sets it explicitly, in the spellings `CArray.time` takes (`:s`, `"10 minutes"`, a `CATime::Resolution`).
 
 The inferred unit is the finest **any** cell shows, so one cell with nanoseconds puts the whole column in `:ns`, which spans only the years 1677 to 2262. A date outside that span raises `RangeError` naming the column and the cell, under every `on_error:`, rather than becoming `UNDEF`. Pass a coarser `unit:` (`unit: :us`) to avoid it.
 

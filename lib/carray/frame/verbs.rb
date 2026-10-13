@@ -471,9 +471,10 @@ class CAFrame
   # For those, +format+ is a strptime format, :infer to find the one format
   # the column is written in (see infer_time_format; a cell not in it
   # raises CAFrame::UnreadableColumn, whatever +on_error+ says), or :mixed
-  # to guess at each cell (much slower). +unit+ is the storage resolution:
-  # without a format or with :infer it defaults to the finest the text
-  # shows, with a format to :s. Masked / nil and unparseable cells become
+  # to guess at each cell (much slower). +unit+ is the storage resolution,
+  # by default the finest the text shows -- with a format, the finest field
+  # the format writes ("%d/%m/%Y" :D, "%H:%M" :s, "%L" :ms), so a fraction
+  # of a second is not cut off. Masked / nil and unparseable cells become
   # UNDEF; +on_error:+ :warn / :raise reports the unparseable ones as +cast+
   # does. Make it the index with +set_index+ afterward.
   # +cast(name => :time)+ is the call without a format.
@@ -733,9 +734,12 @@ class CAFrame
   private def parse_time_column(key, col, format, unit, on_error)
     case format
     when nil    then read_time_text(key, col, unit, on_error)
-    when String then parse_time_by_format(key, col, format, unit || :s, on_error)
+    when String
+      parse_time_by_format(key, col, format, unit || CATimeLiteral.format_unit(format), on_error)
     when :infer then parse_time_inferred(key, col, unit)
-    when :mixed then parse_time_by_format(key, col, nil, unit || :s, on_error)
+    when :mixed
+      unit ||= CATimeLiteral.unit_shown(time_text_of(col), nil)
+      parse_time_by_format(key, col, nil, unit, on_error)
     else
       raise ArgumentError,
             "time format must be a strptime String, :infer or :mixed " \

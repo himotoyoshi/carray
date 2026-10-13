@@ -40,7 +40,8 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   unit they show, where it always used `:s`: dates alone give `:D`, a
   fraction of a second `:ms` / `:us` / `:ns` (it was cut off before), a
   format the finest field it writes; a Unix-seconds Integer is still `:s`.
-  Pass `unit: :s` to keep the old unit.
+  `CAFrame#parse_to_time` with a format or `:mixed` reads in the same unit,
+  where it too used `:s`. Pass `unit: :s` to keep the old unit.
 
 - Change: `elem_fetch` on an empty array raises `IndexError`, as it does
   for any index that names no cell; it returned `nil`. `elem_store` and
