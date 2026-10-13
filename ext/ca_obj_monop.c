@@ -222,6 +222,7 @@ ca_monop_setup (CAMonOp *ca, CArray *parent, uint16_t op_id)
 CAMonOp *
 ca_monop_new (CArray *parent, uint16_t op_id)
 {
+  /* check: the setup checks nothing */
   CAMonOp *ca = (CAMonOp *) ca_array_alloc(CA_OBJ_MONOP, parent->ndim);
   ca_monop_setup(ca, parent, op_id);
   return ca;

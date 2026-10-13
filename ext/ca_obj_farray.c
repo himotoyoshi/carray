@@ -60,6 +60,7 @@ ca_farray_setup (CAStride *ca, CArray *parent)
 CAStride *
 ca_farray_new (CArray *parent)
 {
+  /* check: the parent's shape, reversed, is already valid */
   CAStride *ca = (CAStride *) ca_array_alloc(CA_OBJ_FARRAY, parent->ndim);
   ca_farray_setup(ca, parent);
   ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);

@@ -163,6 +163,7 @@ ca_triop_setup (CATriOp *ca, CArray *op1, CArray *op2, CArray *op3,
 CATriOp *
 ca_triop_new (CArray *op1, CArray *op2, CArray *op3, uint16_t op_id)
 {
+  /* check: the setup checks nothing */
   CATriOp *ca = (CATriOp *) ca_array_alloc(CA_OBJ_TRIOP, op1->ndim);
   ca_triop_setup(ca, op1, op2, op3, op_id);
   return ca;

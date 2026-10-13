@@ -247,6 +247,7 @@ ca_grid_new (CArray *parent, int8_t ndim, cag_axis_t *protos)
 {
   CAGrid *ca;
   ca_grid_check_protos(parent, ndim, protos);
+  /* check: ca_grid_check_protos above */
   ca = (CAGrid *) ca_array_alloc(CA_OBJ_GRID, ndim);
   ca_grid_setup(ca, parent, ndim, protos, 0);
   ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
@@ -256,6 +257,7 @@ ca_grid_new (CArray *parent, int8_t ndim, cag_axis_t *protos)
 CAGrid *
 ca_grid_new_share (CArray *parent, int8_t ndim, cag_axis_t *protos)
 {
+  /* check: the mask grid copies its own grid's checked axes */
   CAGrid *ca = (CAGrid *) ca_array_alloc(CA_OBJ_GRID, ndim);
   ca_grid_setup(ca, parent, ndim, protos, 1);
   ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);

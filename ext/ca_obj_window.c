@@ -1363,6 +1363,7 @@ ca_window_func_create_mask (void *ap)
   /* The mask has the view's own type, so CAShift (which shares this table)
      gets a CAShiftMask. */
   {
+    /* check: the mask window copies its own window's checked ranges */
     CAWindow *m = (CAWindow *) ca_array_alloc(ca->obj_type, ca->ndim);
     ca_window_setup(m, ca->parent->mask,
                     ca->start, ca->count, mbounds, (char*)&fill);

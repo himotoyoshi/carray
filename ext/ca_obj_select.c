@@ -211,6 +211,7 @@ CArray *
 ca_select_new (CArray *parent, CArray *select)
 {
   CArray *snapshot = ca_select_snapshot(select);
+  /* check: the setup checks nothing */
   CASelect *ca = ALLOC(CASelect);
   ca_select_setup(ca, parent, snapshot);
   return (CArray*) ca;

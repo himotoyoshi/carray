@@ -132,6 +132,7 @@ ca_moncmp_setup (CAMonCmp *ca, CArray *parent, uint16_t op_id)
 CAMonCmp *
 ca_moncmp_new (CArray *parent, uint16_t op_id)
 {
+  /* check: the setup checks nothing */
   CAMonCmp *ca = (CAMonCmp *) ca_array_alloc(CA_OBJ_MONCMP, parent->ndim);
   ca_moncmp_setup(ca, parent, op_id);
   return ca;

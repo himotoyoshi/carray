@@ -311,6 +311,7 @@ ca_select_axis_new (CArray *parent, int8_t indirect_axis,
                     CArray *selector,
                     ca_size_t *ap_start, ca_size_t *ap_count, ca_size_t *ap_step)
 {
+  /* check: the callers (clone, create_mask) pass an existing view's checked selector */
   CASelectAxis *ca = (CASelectAxis *) ca_array_alloc(CA_OBJ_SELECT_AXIS, parent->ndim);
   ca_select_axis_setup(ca, parent, indirect_axis, selector,
                        ap_start, ap_count, ap_step);

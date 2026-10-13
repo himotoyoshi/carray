@@ -177,6 +177,7 @@ ca_binop_setup (CABinOp *ca, CArray *left, CArray *right, uint16_t op_id)
 CABinOp *
 ca_binop_new (CArray *left, CArray *right, uint16_t op_id)
 {
+  /* check: the setup checks nothing */
   CABinOp *ca = (CABinOp *) ca_array_alloc(CA_OBJ_BINOP, left->ndim);
   ca_binop_setup(ca, left, right, op_id);
   return ca;

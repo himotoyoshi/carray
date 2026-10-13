@@ -179,6 +179,7 @@ ca_bincmp_setup (CABinCmp *ca, CArray *left, CArray *right, uint16_t op_id,
 CABinCmp *
 ca_bincmp_new (CArray *left, CArray *right, uint16_t op_id, double eps)
 {
+  /* check: the setup checks nothing */
   CABinCmp *ca = (CABinCmp *) ca_array_alloc(CA_OBJ_BINCMP, left->ndim);
   ca_bincmp_setup(ca, left, right, op_id, eps);
   return ca;

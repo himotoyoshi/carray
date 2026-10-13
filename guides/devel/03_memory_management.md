@@ -231,6 +231,12 @@ by `call_cfunc` ([ch. 14](14_call_cfunc.md)).
 
 ## A raise between allocating and handing over
 
+A constructor checks its arguments before it allocates: `*_setup(NULL,
+...)` runs the setup's checks and returns, and the constructor calls it
+first. `rake setup_before_alloc_check` (`utils/check_setup_before_alloc.rb`)
+reports a constructor that allocates without it, unless a
+`/* check: ... */` note says why nothing the setup checks can fail.
+
 A struct returned by `carray_new`, `ca_template` or a view's `*_new`
 belongs to no Ruby object until `ca_wrap_struct`. If anything between
 the allocation and the hand-over can raise, what was allocated is lost.
