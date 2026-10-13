@@ -220,9 +220,19 @@ class TestRankIndex < Test::Unit::TestCase
     addr = CArray.sort_addr(a.order(descending: true, method: :dense), b)
     assert_equal [1, 2], b[addr].to_a
 
-    # Contrast: :ordinal (default) never ties, so the b key is ignored.
+    # Contrast: :ordinal (default) never ties, so the b key is ignored and
+    # the tied cells stay in their original order.
+    b = CA_INT32([2, 1])
     addr_ordinal = CArray.sort_addr(a.order(descending: true), b)
     assert_equal [2, 1], b[addr_ordinal].to_a
+  end
+
+  def test_order_ordinal_descending_keeps_ties_in_order
+    a = CA_INT32([5, 3, 5, 1, 5])
+    assert_equal [0, 3, 1, 4, 2], a.order(descending: true).to_a
+    assert_equal [0, 3, 1, 4, 2], a.order(descending: true, kind: :stable).to_a
+    a[0] = UNDEF
+    assert_equal [UNDEF, 2, 0, 3, 1], a.order(descending: true).to_a
   end
 
   def test_order_dense_descending_group_order_and_ties

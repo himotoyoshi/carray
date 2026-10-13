@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: `order(descending: true)` (the default `method: :ordinal`) keeps
+  tied cells in their original order, as the ascending ranks do:
+  `[5, 3, 5, 1, 5]` gives `[0, 3, 1, 4, 2]`, was `[2, 3, 1, 4, 0]`. The same
+  holds for `order` on groups (`CAFrame#group_by`, `group_by_category`).
+  Code that relied on `order(descending: true) == (n - 1) - order` with ties
+  needs the old formula written out.
+
 - Fix: arithmetic on a masked array (`a + 1.0`, `a.add!(1)` and the like)
   is as fast as in 3.0.2 again. Since 3.0.3 combining the operands' masks
   took about a quarter longer (0.4 ms more per million cells).
