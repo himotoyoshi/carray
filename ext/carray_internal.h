@@ -182,6 +182,15 @@ VALUE   ca_attach_window (int32_t n, CArray **list, const char *modes,
 
 void    ca_fill_or_free (CArray *co, VALUE (*fill)(VALUE), VALUE arg);
 
+/* The same for what else a step that can raise leaves behind: a buffer
+   that belongs to nothing yet (freed with xfree), or arrays the caller
+   attached for the step (each detached once).  A hand-written rb_protect
+   outside the files that implement these parts says why it is not one
+   of them; utils/check_protect_parts.rb finds one that does not. */
+
+void    ca_fill_or_xfree  (void *buf, VALUE (*fill)(VALUE), VALUE arg);
+void    ca_fill_or_detach (int n, CArray **list, VALUE (*fill)(VALUE), VALUE arg);
+
 /* A view takes its parent's mask by asking the parent whether it has one,
    and a parent that is a CAObject answers in Ruby and can raise.  A view's
    setup therefore does not ask: its constructor calls this under

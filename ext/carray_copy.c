@@ -36,6 +36,31 @@ ca_fill_or_free (CArray *co, VALUE (*fill)(VALUE), VALUE arg)
   }
 }
 
+void
+ca_fill_or_xfree (void *buf, VALUE (*fill)(VALUE), VALUE arg)
+{
+  int tag = 0;
+  rb_protect(fill, arg, &tag);
+  if ( tag ) {
+    xfree(buf);
+    rb_jump_tag(tag);
+  }
+}
+
+void
+ca_fill_or_detach (int n, CArray **list, VALUE (*fill)(VALUE), VALUE arg)
+{
+  int tag = 0;
+  int k;
+  rb_protect(fill, arg, &tag);
+  if ( tag ) {
+    for ( k = 0; k < n; k++ ) {
+      ca_detach(list[k]);
+    }
+    rb_jump_tag(tag);
+  }
+}
+
 VALUE
 ca_view_inherit_mask (VALUE view)
 {

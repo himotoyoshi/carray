@@ -1355,8 +1355,8 @@ ca_mask_of_operands_func_xfer_all (void *ap, void *data, int dir)
 static VALUE
 ca_mask_of_operands_fill_buffer (VALUE arg)
 {
-  CAMaskOfOperands *ca = (CAMaskOfOperands *) arg;
-  ca_mask_of_operands_func_xfer_all(ca, ca->ptr, CA_XFER_GET);
+  void **a = (void **) arg;
+  ca_mask_of_operands_func_xfer_all(a[0], a[1], CA_XFER_GET);
   return Qnil;
 }
 
@@ -1366,14 +1366,12 @@ static void
 ca_mask_of_operands_func_attach (void *ap)
 {
   CAMaskOfOperands *ca = (CAMaskOfOperands *) ap;
-  int tag = 0;
-  ca->ptr = ca_alloc_cells((CArray *) ca);
-  rb_protect(ca_mask_of_operands_fill_buffer, (VALUE) ca, &tag);
-  if ( tag ) {
-    xfree(ca->ptr);
-    ca->ptr = NULL;
-    rb_jump_tag(tag);
-  }
+  char *buf = ca_alloc_cells((CArray *) ca);
+  void *a[2];
+  a[0] = ca;
+  a[1] = buf;
+  ca_fill_or_xfree(buf, ca_mask_of_operands_fill_buffer, (VALUE) a);
+  ca->ptr = buf;
 }
 
 static void

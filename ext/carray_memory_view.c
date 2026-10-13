@@ -1125,6 +1125,7 @@ ca_mv_acquire_mask_view (VALUE mask_src, int8_t data_ndim,
     ca_mv_mask_get_t g;
     int tag = 0;
     g.src = mask_src;  g.view = &holder->view;  g.got = false;
+    /* protect: MV_MASK_CLEANUP also releases the data side's view */
     rb_protect(ca_mv_mask_get_body, (VALUE) &g, &tag);
     if (tag) {
       MV_MASK_CLEANUP();
@@ -1272,15 +1273,10 @@ rb_ca_s_wrap_memory_view (int argc, VALUE *argv, VALUE klass)
      freed here. */
   {
     ca_mv_acquire_args_t a;
-    int tag = 0;
     a.src = obj;  a.view = &holder->view;
     a.explicit_data_type = explicit_data_type;
     a.data_type = &data_type;  a.ndim = &ndim;  a.dim = dim;
-    rb_protect(ca_mv_acquire_body, (VALUE) &a, &tag);
-    if ( tag ) {
-      xfree(holder);
-      rb_jump_tag(tag);
-    }
+    ca_fill_or_xfree(holder, ca_mv_acquire_body, (VALUE) &a);
   }
   holder->valid = true;
   v = &holder->view;

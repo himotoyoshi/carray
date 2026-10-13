@@ -1214,14 +1214,9 @@ ca_stride_func_attach (void *ap)
        transfer slots. */
     char *buf = xmalloc(ca_length(ca));
     void *args[2];
-    int tag = 0;
     args[0] = ca;
     args[1] = buf;
-    rb_protect(ca_stride_cold_fill, (VALUE) args, &tag);   /* root stays cold */
-    if (tag) {
-      xfree(buf);
-      rb_jump_tag(tag);
-    }
+    ca_fill_or_xfree(buf, ca_stride_cold_fill, (VALUE) args);   /* root stays cold */
     ca->ptr = buf;
     return;
   }
