@@ -132,10 +132,18 @@ rb_ca_face_template (VALUE original_face, CArray *new_parent,
   TypedData_Get_Struct(original_face, CArray, &carray_data_type, src);
   tdata = ca_typeddata[src->obj_type];
 
-  /* Actual subclass size (incl. tail) — via TypedData's dsize callback */
-  size = (tdata && tdata->function.dsize)
-            ? tdata->function.dsize(src)
-            : sizeof(CAView);
+  /* The struct with its subclass tail.  struct_size is the struct alone;
+     a dsize callback also counts the buffers the struct points to (dim),
+     so it is only the fallback for a type registered without struct_size,
+     and copying that many bytes reads past the struct. */
+  if ( ca_func[src->obj_type].struct_size ) {
+    size = ca_func[src->obj_type].struct_size;
+  }
+  else {
+    size = (tdata && tdata->function.dsize)
+              ? tdata->function.dsize(src)
+              : sizeof(CAView);
+  }
 
   dst = (CArray *) xmalloc(size);
   /* CAREFUL: the whole-struct memcpy is how a C-tail Face
