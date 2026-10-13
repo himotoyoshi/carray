@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `CAConstString#sort_index` with no arguments is fast again: since
+  3.0.2 it decoded every cell into a Ruby String first and was about 8 times
+  slower than in 3.0.0. With no arguments, `sort_index` and `sort_addr` now
+  keep equal strings in their original order, as `CArray#sort_index` does and
+  as they already did with `axis:` or a masked column.
+
 - Fix: a face-mode `CAObject` (`CAObject.new(..., parent: p, face: true)`)
   over a masked parent no longer leaks its mask, about 100 to 200 bytes
   per object.
