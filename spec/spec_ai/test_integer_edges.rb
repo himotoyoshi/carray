@@ -263,7 +263,9 @@ class TestIntegerEdges < Test::Unit::TestCase
     assert_equal [10, 9, 8, 7], CArray.uint8(4).seq(10, -1).to_a
     assert_equal [0, 2**64 - 1], CArray.uint64(2).seq(0, -1).to_a
     assert_equal [120, 125, -126, -121], CArray.int8(4).seq(120, 5).to_a
-    assert_equal [1, 1, 2], CArray.int8(3).seq(1.5, 0.5).to_a
+    # A Float offset or step makes each cell the real value cut toward zero
+    # (1.5, 2.0, 2.5), as a store takes a float.
+    assert_equal [1, 2, 2], CArray.int8(3).seq(1.5, 0.5).to_a
   end
 
   # -- diagonal --------------------------------------------------------

@@ -32,6 +32,11 @@ class CArray
   #   Fills `self` in row-major order with `init_val`, `init_val +
   #   step`, `init_val + 2*step`, ...
   #
+  #   On an integer array an `init_val` or `step` that is not an Integer
+  #   (a Float, a Rational) makes each cell `init_val + step*i` cut
+  #   toward zero, as a store takes a float: `int32.seq(0.5, 0.5)` is
+  #   `[0, 1, 1, 2]`.  The first and last values must fit the type.
+  #
   #   For `:object` arrays only, `step` may be a Symbol naming the
   #   stepping method to invoke on the previous element (e.g. `:succ`).
   #   @param init_val [Numeric, Object]
@@ -51,8 +56,13 @@ class CArray
   #     integer.
   #   @raise [RangeError] for an integer array, if `init_val` does not fit
   #     its type, or an Integer `step` is larger than the type can hold. An
-  #     unsigned array takes a negative step (a descending run). A run that
-  #     passes the end of the type wraps, as integer arithmetic does.
+  #     unsigned array takes a negative step (a descending run). A run of
+  #     Integers that passes the end of the type wraps, as integer
+  #     arithmetic does; a real run (a Float or Rational argument) whose
+  #     first or last value does not fit raises.
+  #   @raise [FloatDomainError] for an integer array given a NaN argument.
+  #   @raise [TypeError] if `init_val` or `step` is not a number (a Symbol
+  #     `step` on an `:object` array excepted).
   def seq!(*); end
 
   # @overload seq(init_val = 0, step = 1, axis: nil)
