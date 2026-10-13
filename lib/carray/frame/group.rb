@@ -345,11 +345,67 @@ class GroupedFrame
   #   Returns a frame of the per-group maximum of every column whose type has
   #   a maximum, as {#sum} does.
   #   @return [CAFrame] one row per group.
-  [:sum, :mean, :min, :max].each do |red|
+  # @!method prod(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   Returns the per-group product, as {#sum} does.
+  #   @return [CAFrame] one row per group.
+  # @!method accumulate(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   Returns the per-group sum kept in each column's own data type, as
+  #   +CArray#accumulate+, as {#sum} does.
+  #   @return [CAFrame] one row per group.
+  # @!method median(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   Returns the per-group median, as {#sum} does.
+  #   @return [CAFrame] one row per group.
+  # @!method variance(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   Returns the per-group sample variance (divisor n - 1), as {#sum} does.
+  #   @return [CAFrame] one row per group.
+  # @!method stddev(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   Returns the per-group sample standard deviation, as {#sum} does.
+  #   @return [CAFrame] one row per group.
+  # @!method variancep(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   Returns the per-group population variance (divisor n), as {#sum} does.
+  #   @return [CAFrame] one row per group.
+  # @!method stddevp(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   Returns the per-group population standard deviation, as {#sum} does.
+  #   @return [CAFrame] one row per group.
+  [:sum, :mean, :min, :max, :prod, :accumulate, :median,
+   :variance, :stddev, :variancep, :stddevp].each do |red|
     define_method(red) do |*names, min_count: nil, fill_value: nil, keep_rows: false|
       keywords = { min_count: min_count, fill_value: fill_value }
       return reduce_columns(red, keep_rows, **keywords) if names.empty?
       reduce_named_columns(red, names, keep_rows, **keywords)
+    end
+  end
+
+  # The same convenience for the reductions that take no min_count: or
+  # fill_value:, as the core ones take none: a value of the group (first,
+  # last), a count (nunique, count) or a boolean fold (all, any).
+  #
+  # @!method first(*names, keep_rows: false)
+  #   Returns each group's first present value in row order, UNDEF for a
+  #   group with none, as {#sum} returns its sums.
+  #   @return [CAFrame] one row per group.
+  # @!method last(*names, keep_rows: false)
+  #   Returns each group's last present value in row order.
+  #   @return [CAFrame] one row per group.
+  # @!method nunique(*names, keep_rows: false)
+  #   Returns each group's number of distinct present values (int64).
+  #   @return [CAFrame] one row per group.
+  # @!method count(*names, keep_rows: false)
+  #   Returns each group's number of present values (int64), a masked cell
+  #   left out.
+  #   @return [CAFrame] one row per group.
+  # @!method all(*names, keep_rows: false)
+  #   Returns whether every present value of the group is true, for the
+  #   boolean columns.
+  #   @return [CAFrame] one row per group.
+  # @!method any(*names, keep_rows: false)
+  #   Returns whether any present value of the group is true, for the
+  #   boolean columns.
+  #   @return [CAFrame] one row per group.
+  [:first, :last, :nunique, :count, :all, :any].each do |red|
+    define_method(red) do |*names, keep_rows: false|
+      return reduce_columns(red, keep_rows) if names.empty?
+      reduce_named_columns(red, names, keep_rows)
     end
   end
 

@@ -55,6 +55,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   Rows match when every key column matches; a row with any key cell masked
   matches nothing. `join_asof` still takes one key.
 
+- New: a `CAFrame` group has the short form of `sum` / `mean` / `min` /
+  `max` for more reductions: `prod`, `accumulate`, `median`, `variance`,
+  `stddev`, `variancep`, `stddevp` (taking `min_count:` and `fill_value:`),
+  and `first`, `last`, `nunique`, `count`, `all`, `any` (taking neither, as
+  the core ones do not). Each reduces every column whose type has it, or the
+  named ones, and takes `keep_rows:`: `df.group_by("station").median`.
+
 - Fix: `CAFrame#group_by` and `is_duplicate` take the index as a key, named
   by the row axis name, as `resample` and `pivot` already did: after
   `set_index("station")`, `group_by("station")` groups by it. It raised

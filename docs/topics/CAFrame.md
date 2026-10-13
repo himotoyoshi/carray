@@ -905,7 +905,7 @@ A `GroupedFrame` offers four ways to reduce. Choose by what you need:
 
 | you need… | use |
 |---|---|
-| the same reduction for every column | [`sum` / `mean` / `min` / `max`](#the-same-reduction-for-every-column) |
+| the same reduction for every column | [`sum` / `mean` / `median` / `first` / `count` / …](#the-same-reduction-for-every-column) |
 | a reduction, or an output name, of your own for each column | [`aggregate`](#a-reduction-per-column--aggregate) |
 | a computation that combines several columns | [`table`](#computing-across-columns--table) |
 | one column, with any reduction the categorical iterator offers | [`grp["col"]`](#one-column--the-group-iterator) |
@@ -915,6 +915,15 @@ Each of the first three also takes [`keep_rows: true`](#keeping-the-rows--keep_r
 ### The same reduction for every column
 
 `sum` / `mean` / `min` / `max` reduce **every column whose type has that reduction** into a new frame indexed by the group labels. A time column has a mean, a minimum and a maximum but no sum; a string column a minimum and a maximum only; a boolean column all four. A column whose type lacks the reduction is left out. The **key columns are skipped** — they are the result's index.
+
+The other reductions are called the same way:
+
+| reductions | take `min_count:` / `fill_value:` |
+|---|---|
+| `sum` `mean` `min` `max` `prod` `accumulate` `median` `variance` `stddev` `variancep` `stddevp` | yes |
+| `first` `last` (the first / last present value in row order) · `nunique` · `count` (present values) · `all` `any` (boolean columns) | no, as the core ones take none |
+
+Each answers as the core reduction of the same name does over the group's rows; a time column has a `median` and a `stddev` (a duration) but no `variance` or `prod`.
 
 ```ruby
 df.group_by("station").mean       # => frame of per-station means
@@ -927,7 +936,7 @@ df.group_by("station").mean("temp")          # => CArray, one value per group
 hi, lo = df.group_by("station").max("temp", "rh")
 ```
 
-Each takes `min_count:` and `fill_value:`, as a CArray reduction does: a group with fewer than `min_count` present values is `UNDEF`, and `fill_value` fills the `UNDEF` cells:
+The reductions of the first row of the table take `min_count:` and `fill_value:`, as a CArray reduction does: a group with fewer than `min_count` present values is `UNDEF`, and `fill_value` fills the `UNDEF` cells:
 
 ```ruby
 df.group_by("station").mean(min_count: 20)                  # too few readings -> UNDEF
