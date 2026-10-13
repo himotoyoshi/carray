@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: `elem_fetch` on an empty array raises `IndexError`, as it does
+  for any index that names no cell; it returned `nil`. `elem_store` and
+  `[]` already raised.
+
 - Fix: an index that picks no cells may start at the end of an axis, as an
   empty slice at the end of a Ruby Array does: `a[2...2]`, `a[2..]`,
   `a[[2, 0]]` and `(2...2).step(1)` of a length-2 array are empty, and
