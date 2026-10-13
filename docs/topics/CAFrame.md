@@ -1077,6 +1077,28 @@ A row whose time is masked belongs to no bin. `resample` builds the bins and not
 
 ---
 
+### Windows bounded by a key — `windows`
+
+`windows` holds, for each row, the rows whose key lies within a width of its own: the last hour, the next 100 m. Unlike a window of a fixed number of rows, a gap in the data shortens it instead of reaching across.
+
+```ruby
+w = df.windows(on: "time", before: "1 hour", by: "station")
+w.mean("temp")     # => CArray, the mean of the last hour at the row's station
+w.mean             # => frame of the windowed mean of every column that has one
+w.elements         # => how many rows each window held
+```
+
+The window of a row whose key is t runs from `t - before` to `t + after`; `exclude:` leaves out the lower end (the default, so `before: "1 hour"` is the hour ending at t), the upper end, both or neither. `by:` keeps each window within the rows of the same station. The rows need not be sorted, and the answers come in row order.
+
+To check that each window is what you meant, `first_key` / `last_key` give the keys it really started and ended at, and with `interval:` (the grid step of the key) `is_complete` says whether it holds every point of the grid:
+
+```ruby
+w = df.windows(on: "time", before: "1 hour", interval: "10 minutes")
+w.mean("rain").mask_where(w.is_complete.not)    # UNDEF where an observation is missing
+```
+
+The reductions and checks are those of `CArray#windows(on:)`; see [CAKeyWindowIterator](CAKeyWindowIterator.md).
+
 ## Combining frames
 
 How the rows of the frames are put together decides the verb:

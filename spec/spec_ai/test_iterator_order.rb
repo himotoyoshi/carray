@@ -29,6 +29,7 @@ class TestIteratorOrder < Test::Unit::TestCase
       CASlabIterator        => ->(d) { d[nil, :>] },
       CABlockIterator       => ->(d) { d.flatten.copy.blocks(L) },
       CAWindowIterator      => nil,
+      CAKeyWindowIterator   => nil,
       CASegmentIterator     => ->(d) { d.flatten.copy.segments(lengths: [L] * P) },
       CACategoricalIterator => ->(d) { d.flatten.copy.group_by_category(labels) },
       CAGroupIterator       => ->(d) { d.flatten.copy[labels] },

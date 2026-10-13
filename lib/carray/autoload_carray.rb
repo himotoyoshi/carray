@@ -101,6 +101,7 @@ end
 
 autoload :CASlabIterator,   "carray/slab_iterator"
 autoload :CAWindowIterator, "carray/window_iterator"
+autoload :CAKeyWindowIterator, "carray/key_windows"
 autoload :CABlockIterator,  "carray/block_iterator"
 
 class CArray

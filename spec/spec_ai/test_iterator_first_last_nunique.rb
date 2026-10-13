@@ -37,6 +37,8 @@ class TestIteratorFirstLastNunique < Test::Unit::TestCase
       CAWindowIterator      => [->(d) { d.flatten.copy.windows(0..L - 1, bounds: :truncate) },
                                 ->(r) { (0...P).map { |i| r[i * L] } }],
       CASegmentIterator     => [->(d) { d.flatten.copy.segments(lengths: [L] * P) }, per_row],
+      CAKeyWindowIterator   => [->(d) { d.flatten.copy.windows(on: CArray.int64(P * L) { |i| i / L }, before: 0, exclude: nil) },
+                                ->(r) { (0...P).map { |i| r[i * L] } }],
       CACategoricalIterator => [->(d) { d.flatten.copy.group_by_category(labels) }, per_row],
       CAGroupIterator       => [->(d) { d.flatten.copy[labels] }, per_row],
     }

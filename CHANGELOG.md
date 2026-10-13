@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: `windows(on:, before:, after:)` bounds each window by a width of a
+  key -- a time, a duration or a number -- instead of a count of cells:
+  `temp.windows(on: time, before: "1 hour").mean`. The keys need not be
+  sorted, `by:` keeps each window within a group, and `exclude:` picks the
+  end left out (the lower one by default). The iterator also says what each
+  window held (`first_key`, `last_key`, `elements`), and with `interval:`
+  whether it holds every point of the key's grid (`is_complete`).
+  `CAFrame#windows(on: "time", ...)` does the same for a frame's columns.
+
 - Fix: the reductions of the iterators answer as the core reduction does
   over each piece in more cases. `quantile` of a categorical, segment or
   axis-group iterator is NaN at a position next to a NaN, where it skipped

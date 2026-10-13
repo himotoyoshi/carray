@@ -27,6 +27,7 @@ class TestIteratorAnswersCore < Test::Unit::TestCase
     CACategoricalIterator => ->(a) { a.group_by_category(CA_INT32(CODES).categorize) },
     CAGroupIterator       => ->(a) { a.reshape(4, 5)[CA_INT32([0, 1, 0, 1]).categorize, nil] },
     CASegmentIterator     => ->(a) { a.segments(offsets: CA_INT64(OFFSETS)) },
+    CAKeyWindowIterator   => ->(a) { a.windows(on: CArray.int64(N) { |i| i / 2 * 3 }, before: 4, after: 1) },
   }
 
   BASE = [3, -1, 0, 5, 2, 7, 1, 4, 6, -2]

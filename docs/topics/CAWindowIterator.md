@@ -6,6 +6,10 @@ fold each cell's window to one value, so the result is shaped like `a` — a
 *rolling* (moving-window) result. `correlate` / `convolve` do the weighted
 version, i.e. bounded convolution (image filters, FIR filters, smoothing).
 
+To bound each window by a width of a key — a time or a number — rather than
+by a count of cells, give `on:`: `a.windows(on: time, before: "1 hour")`
+returns a [`CAKeyWindowIterator`](CAKeyWindowIterator.md).
+
 It is the **window member of the 3.0 iterator family**, a sibling of
 [`CASlabIterator`](SlabIterator.md) and
 [`CACategoricalIterator`](CACategoricalIterator.md). Where a slab iterator folds

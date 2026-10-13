@@ -39,6 +39,8 @@ class TestReducePresentCountMatrix < Test::Unit::TestCase
       CAWindowIterator      => [->(d) { d.flatten.copy.windows(0..L - 1, bounds: :truncate) },
                                 ->(d) { ones(d, L) }, ->(r) { (0...P).map { |i| r[i * L] } }],
       CASegmentIterator     => [->(d) { d.flatten.copy.segments(lengths: [L] * P) }, ->(d) { ones(d, P * L) }, per_row],
+      CAKeyWindowIterator   => [->(d) { d.flatten.copy.windows(on: CArray.int64(P * L) { |i| i / L }, before: 0, exclude: nil) },
+                                ->(d) { ones(d, P * L) }, ->(r) { (0...P).map { |i| r[i * L] } }],
       CACategoricalIterator => [->(d) { d.flatten.copy.group_by_category(labels) }, ->(d) { ones(d, P * L) }, per_row],
       CAGroupIterator       => [->(d) { d.flatten.copy[labels] },              ->(d) { ones(d, P * L) }, per_row],
     }

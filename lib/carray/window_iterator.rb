@@ -1163,7 +1163,30 @@ class CArray
   #   @param bounds [Symbol] `:skip` / `:nearest` / `:truncate`.
   #   @param fill_value [Object, nil] constant margin value.
   #   @return [CAWindowIterator]
-  def windows (*ranges, bounds: :skip, fill_value: nil)
+  # @overload windows(on:, before: nil, after: nil, exclude: :lower, by: nil, interval: nil)
+  #   Returns a {CAKeyWindowIterator}: a window per value bounded by a width
+  #   of the key `on` (a time, a duration or a number) instead of a count of
+  #   cells.  The window of a value whose key is t holds the values whose
+  #   key lies between t - before and t + after; `exclude:` leaves out the
+  #   lower end (default), the upper end, both or neither.  `by:` keeps
+  #   each window within the values with the same by keys, and `interval:`
+  #   gives the key's grid step for {CAKeyWindowIterator#is_complete}.
+  #
+  #     temp.windows(on: time, before: "1 hour").mean
+  #   @return [CAKeyWindowIterator]
+  def windows (*ranges, bounds: :skip, fill_value: nil, on: nil, **key_window)
+    unless on.nil?
+      unless ranges.empty?
+        raise ArgumentError, "windows: give offset ranges or on:, not both"
+      end
+      require "carray/key_windows"
+      return CAKeyWindowIterator.new(self, on: on, **key_window)
+    end
+    unless key_window.empty?
+      raise ArgumentError,
+            "windows: #{key_window.keys.map { |k| "#{k}:" }.join(', ')} " \
+            "need on:, the key the widths are measured on"
+    end
     if ranges.size == 1 && ranges[0].is_a?(CArray) && ranges[0].obj_type == CA_OBJ_WINDOW
       return CAWindowIterator.new(ranges[0])
     end

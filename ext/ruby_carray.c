@@ -38,6 +38,7 @@ void Init_carray_attribute ();
 void Init_carray_loop ();
 void Init_carray_mask ();
 void Init_carray_hold ();
+void Init_carray_key_windows ();
 void Init_carray_mask_fast_paths ();  /* patches generated bit-op tables;
                                          must run AFTER Init_ca_op_ipower */
 void Init_carray_access ();
@@ -284,6 +285,7 @@ Init_carray_ext (void)
   Init_carray_undef();
   Init_carray_mask();
   Init_carray_hold();
+  Init_carray_key_windows();
   Init_carray_loop();
   Init_carray_access();
   Init_carray_index_classifier();
