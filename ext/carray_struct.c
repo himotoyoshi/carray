@@ -22,6 +22,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_obj2integer_fitting */
 #include <string.h>
 
 /* ---------------------------------------------------------------------
@@ -130,42 +131,42 @@ ca_struct_write_primitive_fast (char *p, int type_code, VALUE val)
     return;
   }
   case CA_INT8: {
-    int8_t v = (int8_t) NUM2INT(val);
+    int8_t v = (int8_t) NUM2LL(ca_obj2integer_fitting(val, CA_INT8));
     memcpy(p, &v, 1);
     return;
   }
   case CA_UINT8: {
-    uint8_t v = (uint8_t) NUM2UINT(val);
+    uint8_t v = (uint8_t) rb_num2ull(ca_obj2integer_fitting(val, CA_UINT8));
     memcpy(p, &v, 1);
     return;
   }
   case CA_INT16: {
-    int16_t v = (int16_t) NUM2INT(val);
+    int16_t v = (int16_t) NUM2LL(ca_obj2integer_fitting(val, CA_INT16));
     memcpy(p, &v, 2);
     return;
   }
   case CA_UINT16: {
-    uint16_t v = (uint16_t) NUM2UINT(val);
+    uint16_t v = (uint16_t) rb_num2ull(ca_obj2integer_fitting(val, CA_UINT16));
     memcpy(p, &v, 2);
     return;
   }
   case CA_INT32: {
-    int32_t v = (int32_t) NUM2LONG(val);
+    int32_t v = (int32_t) NUM2LL(ca_obj2integer_fitting(val, CA_INT32));
     memcpy(p, &v, 4);
     return;
   }
   case CA_UINT32: {
-    uint32_t v = (uint32_t) NUM2ULONG(val);
+    uint32_t v = (uint32_t) rb_num2ull(ca_obj2integer_fitting(val, CA_UINT32));
     memcpy(p, &v, 4);
     return;
   }
   case CA_INT64: {
-    int64_t v = (int64_t) NUM2LL(val);
+    int64_t v = (int64_t) NUM2LL(ca_obj2integer_fitting(val, CA_INT64));
     memcpy(p, &v, 8);
     return;
   }
   case CA_UINT64: {
-    uint64_t v = (uint64_t) NUM2ULL(val);
+    uint64_t v = (uint64_t) rb_num2ull(ca_obj2integer_fitting(val, CA_UINT64));
     memcpy(p, &v, 8);
     return;
   }
@@ -333,32 +334,32 @@ ca_struct_write_endian_swapped_fast (char *p, int type_code, VALUE val)
 {
   switch (type_code) {
   case CA_INT16: {
-    uint16_t v = (uint16_t) NUM2INT(val);
+    uint16_t v = (uint16_t) NUM2LL(ca_obj2integer_fitting(val, CA_INT16));
     v = CA_BSWAP16(v); memcpy(p, &v, 2);
     return;
   }
   case CA_UINT16: {
-    uint16_t v = (uint16_t) NUM2UINT(val);
+    uint16_t v = (uint16_t) rb_num2ull(ca_obj2integer_fitting(val, CA_UINT16));
     v = CA_BSWAP16(v); memcpy(p, &v, 2);
     return;
   }
   case CA_INT32: {
-    uint32_t v = (uint32_t) NUM2LONG(val);
+    uint32_t v = (uint32_t) NUM2LL(ca_obj2integer_fitting(val, CA_INT32));
     v = CA_BSWAP32(v); memcpy(p, &v, 4);
     return;
   }
   case CA_UINT32: {
-    uint32_t v = (uint32_t) NUM2ULONG(val);
+    uint32_t v = (uint32_t) rb_num2ull(ca_obj2integer_fitting(val, CA_UINT32));
     v = CA_BSWAP32(v); memcpy(p, &v, 4);
     return;
   }
   case CA_INT64: {
-    uint64_t v = (uint64_t) NUM2LL(val);
+    uint64_t v = (uint64_t) NUM2LL(ca_obj2integer_fitting(val, CA_INT64));
     v = CA_BSWAP64(v); memcpy(p, &v, 8);
     return;
   }
   case CA_UINT64: {
-    uint64_t v = NUM2ULL(val);
+    uint64_t v = (uint64_t) rb_num2ull(ca_obj2integer_fitting(val, CA_UINT64));
     v = CA_BSWAP64(v); memcpy(p, &v, 8);
     return;
   }

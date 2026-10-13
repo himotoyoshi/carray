@@ -278,25 +278,45 @@ rb_ca_elem_store (VALUE self, VALUE ridx, VALUE obj)
         if ( FIXNUM_P(obj) )             { *(int64_t *)p = (int64_t)FIX2LONG(obj); return obj; }
         break;
       case CA_INT32:
-        if ( FIXNUM_P(obj) )             { *(int32_t *)p = (int32_t)FIX2LONG(obj); return obj; }
+        if ( FIXNUM_P(obj) && FIX2LONG(obj) >= INT32_MIN && FIX2LONG(obj) <= INT32_MAX ) {
+          /* fits: checked against the type's range above */
+          *(int32_t *)p = (int32_t)FIX2LONG(obj); return obj;
+        }
         break;
       case CA_INT16:
-        if ( FIXNUM_P(obj) )             { *(int16_t *)p = (int16_t)FIX2LONG(obj); return obj; }
+        if ( FIXNUM_P(obj) && FIX2LONG(obj) >= INT16_MIN && FIX2LONG(obj) <= INT16_MAX ) {
+          /* fits: checked against the type's range above */
+          *(int16_t *)p = (int16_t)FIX2LONG(obj); return obj;
+        }
         break;
       case CA_INT8:
-        if ( FIXNUM_P(obj) )             { *(int8_t *)p = (int8_t)FIX2LONG(obj); return obj; }
+        if ( FIXNUM_P(obj) && FIX2LONG(obj) >= INT8_MIN && FIX2LONG(obj) <= INT8_MAX ) {
+          /* fits: checked against the type's range above */
+          *(int8_t *)p = (int8_t)FIX2LONG(obj); return obj;
+        }
         break;
       case CA_UINT64:
-        if ( FIXNUM_P(obj) )             { *(uint64_t *)p = (uint64_t)FIX2LONG(obj); return obj; }
+        if ( FIXNUM_P(obj) && FIX2LONG(obj) >= 0 ) {
+          *(uint64_t *)p = (uint64_t)FIX2LONG(obj); return obj;
+        }
         break;
       case CA_UINT32:
-        if ( FIXNUM_P(obj) )             { *(uint32_t *)p = (uint32_t)FIX2LONG(obj); return obj; }
+        if ( FIXNUM_P(obj) && FIX2LONG(obj) >= 0 && FIX2LONG(obj) <= (long) UINT32_MAX ) {
+          /* fits: checked against the type's range above */
+          *(uint32_t *)p = (uint32_t)FIX2LONG(obj); return obj;
+        }
         break;
       case CA_UINT16:
-        if ( FIXNUM_P(obj) )             { *(uint16_t *)p = (uint16_t)FIX2LONG(obj); return obj; }
+        if ( FIXNUM_P(obj) && FIX2LONG(obj) >= 0 && FIX2LONG(obj) <= (long) UINT16_MAX ) {
+          /* fits: checked against the type's range above */
+          *(uint16_t *)p = (uint16_t)FIX2LONG(obj); return obj;
+        }
         break;
       case CA_UINT8:
-        if ( FIXNUM_P(obj) )             { *(uint8_t *)p = (uint8_t)FIX2LONG(obj); return obj; }
+        if ( FIXNUM_P(obj) && FIX2LONG(obj) >= 0 && FIX2LONG(obj) <= (long) UINT8_MAX ) {
+          /* fits: checked against the type's range above */
+          *(uint8_t *)p = (uint8_t)FIX2LONG(obj); return obj;
+        }
         break;
       case CA_BOOLEAN:
         if ( obj == Qtrue )              { *(uint8_t *)p = 1; return obj; }
@@ -304,7 +324,8 @@ rb_ca_elem_store (VALUE self, VALUE ridx, VALUE obj)
         if ( FIXNUM_P(obj) )             { *(uint8_t *)p = (FIX2LONG(obj) != 0); return obj; }
         break;
       }
-      /* Fall through: data type matches but obj kind needs general coercion. */
+      /* Fall through: the value needs the general coercion, or does not fit
+         the cell, which the general path refuses. */
     }
   }
 
