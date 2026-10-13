@@ -1108,6 +1108,10 @@ rb_carray_num2cmplx (VALUE num)
   }
   if ( rb_respond_to(num, rb_intern("to_c")) ) {
     VALUE c = rb_funcall(num, rb_intern("to_c"), 0);
+    if ( ! RB_TYPE_P(c, T_COMPLEX) ) {
+      rb_raise(rb_eTypeError, "can't convert %"PRIsVALUE" to Complex (%"PRIsVALUE"#to_c gives %"PRIsVALUE")",
+               rb_obj_class(num), rb_obj_class(num), rb_obj_class(c));
+    }
     return CMPLX(NUM2DBL(rb_complex_real(c)), NUM2DBL(rb_complex_imag(c)));
   }
   if ( rb_respond_to(num, rb_intern("to_f")) ) {
@@ -1580,9 +1584,10 @@ void    ca_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data, int 
    opportunistic engine dispatch. */
 int     ca_xfer_addrs_is_sequential_run (ca_size_t n, ca_size_t *addrs,
                                          ca_size_t *base_out);
-/* Y.1.e: resolve cand through identity CAStride compose-fold to find an
+/* Resolve cand through identity CAStride compose-fold to find an
    attached root.  Returns cand if cand->ptr is set, cand is not CAStride
-   family, or no identity compose-fold path exists; otherwise returns the
+   family, or no identity compose-fold path exists (the cells differ from
+   the root's in data type, width or position); otherwise returns the
    resolved root (which has ptr).  Used by view xfer_addrs slots to lift
    parent->ptr gate through view CAStride layers (= chain pattern). */
 CArray *ca_resolve_attached_root_via_identity (CArray *cand);

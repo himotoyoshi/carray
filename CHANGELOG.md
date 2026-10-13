@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: storing an object whose `to_c` does not return a Complex into a
+  complex array raises `TypeError`, as `Complex()` does; it crashed the
+  process. `inherit_mask` and `inherit_mask_replace` refuse an array that
+  has fewer elements than the receiver (a scalar is still applied to every
+  cell); they read past its end. `bitfield` refuses a descending range such
+  as `3..1`, which read a different field. A `fake` over a `refer` that
+  reads the bytes as another type answers the same through an index array
+  or a boolean selection as through `copy`.
+
 - Change: `nsmallest`, `nlargest` and their `_index` forms break ties by
   position for every type, as `order` and `sort_index` do:
   `nsmallest_index(k)` is the first k of `sort_index`. Integer arrays put
