@@ -201,7 +201,13 @@ class TestClipDualFill < Test::Unit::TestCase
     assert_raise(ArgumentError) { a.clip(nil, UNDEF) }
     assert_raise(ArgumentError) { a.clip(0, UNDEF, -1) }
     assert_raise(ArgumentError) { CArray.time(%w[2024-01-01 2024-01-02], unit: :D).clip(UNDEF, nil) }
+    lo = CArray.float64(5) { 0.0 }
+    lo[1] = UNDEF
+    assert_raise(ArgumentError) { a.clip(lo, nil) }
+    assert_raise(ArgumentError) { a.clip(nil, lo) }
+    assert_raise(ArgumentError) { a.clip([0, UNDEF, 0, 0, 0], nil) }
   end
+
 
   def test_min_above_max_raises
     a = CArray.float64(5); a[] = [-1, 0, 1, 2, 3]
@@ -214,14 +220,8 @@ class TestClipDualFill < Test::Unit::TestCase
     assert_equal [1.0, 1.0, 1.0, 1.0, 1.0], a.clip(1, 1).to_a
   end
 
-  # A cell is checked only where both bounds are present.
-  def test_min_above_max_skips_masked_bound
-    lo = CA_FLOAT64([0, 0, 0, 0, 9]); lo[4] = UNDEF
-    a = CArray.float64(5); a[] = [-1, 0, 1, 2, 3]
-    assert_equal [0.0, 0.0, 1.0, 2.0, UNDEF], a.clip(lo, 2).to_a
-  end
-
-  # A NaN bound bounds nothing, in a scalar and in a cell.
+  # A NaN bound bounds nothing, in a scalar and in a cell: it is nil
+  # written cell by cell.
   def test_nan_bound_bounds_nothing
     a = CArray.float64(5); a[] = [-1, 0, 1, 2, 3]
     assert_equal [-1.0, 0.0, 1.0, 2.0, 2.0], a.clip(Float::NAN, 2).to_a
