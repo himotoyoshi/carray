@@ -899,6 +899,13 @@ Each of the first three also takes [`keep_rows: true`](#keeping-the-rows--keep_r
 df.group_by("station").mean       # => frame of per-station means
 ```
 
+Given column names, they reduce only those and return them as `df[...]` returns columns: one name gives the `CArray`, several an `Array` of them. A named column whose type lacks the reduction raises.
+
+```ruby
+df.group_by("station").mean("temp")          # => CArray, one value per group
+hi, lo = df.group_by("station").max("temp", "rh")
+```
+
 Each takes `min_count:` and `fill_value:`, as a CArray reduction does: a group with fewer than `min_count` present values is `UNDEF`, and `fill_value` fills the `UNDEF` cells:
 
 ```ruby
@@ -945,8 +952,8 @@ df.group_by("station")["temp"].mean    # => per-group means as a CArray
 
 ```ruby
 grp = df.group_by("station")
-df["temp_anom"]  = df["temp"] - grp.mean(keep_rows: true)["temp"]
-df["rain_share"] = df["rain"] / grp.sum(keep_rows: true)["rain"]
+df["temp_anom"]  = df["temp"] - grp.mean("temp", keep_rows: true)
+df["rain_share"] = df["rain"] / grp.sum("rain", keep_rows: true)
 ```
 
 - The columns and their types are those of the same call without `keep_rows:`; only the rows differ. An N-D column keeps its trailing shape.

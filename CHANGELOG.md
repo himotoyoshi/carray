@@ -36,10 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: the `sum` / `mean` / `min` / `max` of `CAFrame#group_by` and
+  `resample` take column names and return those columns as `df[...]` does:
+  `grp.mean("temp")` is a CArray, `grp.max("temp", "rh")` an Array of two.
+  Without names they return a frame of every column, as before.
+
 - New: `keep_rows: true` on the reductions of `CAFrame#group_by` and
   `resample` (`sum` / `mean` / `min` / `max`, `aggregate`, `table`) gives
   each row the result of its own group, in the frame's rows and index:
-  `df["temp"] - df.group_by("station").mean(keep_rows: true)["temp"]` is the
+  `df["temp"] - df.group_by("station").mean("temp", keep_rows: true)` is the
   anomaly from the station mean. A row whose key is masked is `UNDEF`.
 
 - Fix: a raise while an array's mask is read no longer leaks memory.

@@ -250,30 +250,39 @@ class GroupedFrame
   # takes +min_count:+ and +fill_value:+ as a core reduction does: a group
   # with fewer than min_count present values is UNDEF, and fill_value fills
   # the UNDEF cells. +keep_rows: true+ gives each row its group's value
-  # instead of one row per group, as for +aggregate+:
+  # instead of one row per group, as for +aggregate+.
   #
-  #   df["temp"] - df.group_by("station").mean(keep_rows: true)["temp"]   # anomaly
+  # Given column names, they reduce those columns only and return them as
+  # +df[...]+ does: one name gives the CArray, several an Array of them.
   #
-  # @!method sum(min_count: nil, fill_value: nil, keep_rows: false)
+  #   grp.mean                                   # a frame, one row per group
+  #   grp.mean("temp")                           # CArray, one value per group
+  #   df["temp"] - grp.mean("temp", keep_rows: true)   # anomaly from the group mean
+  #
+  # @!method sum(*names, min_count: nil, fill_value: nil, keep_rows: false)
   #   Returns a frame of the per-group sum of every column whose type has a
   #   sum, an N-D one per group along the rows. Other columns are left out.
-  #   @return [CAFrame] one row per group, indexed by the group labels, or
-  #     with keep_rows: true the frame's rows and index.
-  # @!method mean(min_count: nil, fill_value: nil, keep_rows: false)
+  #   @return [CAFrame, CArray, Array<CArray>] a frame with one row per
+  #     group, indexed by the group labels, or with keep_rows: true the
+  #     frame's rows and index; given names, the CArray (one) or the Array of
+  #     them (several).
+  # @!method mean(*names, min_count: nil, fill_value: nil, keep_rows: false)
   #   Returns a frame of the per-group mean of every column whose type has
   #   a mean, as {#sum} does.
   #   @return [CAFrame] one row per group.
-  # @!method min(min_count: nil, fill_value: nil, keep_rows: false)
+  # @!method min(*names, min_count: nil, fill_value: nil, keep_rows: false)
   #   Returns a frame of the per-group minimum of every column whose type has
   #   a minimum, as {#sum} does.
   #   @return [CAFrame] one row per group.
-  # @!method max(min_count: nil, fill_value: nil, keep_rows: false)
+  # @!method max(*names, min_count: nil, fill_value: nil, keep_rows: false)
   #   Returns a frame of the per-group maximum of every column whose type has
   #   a maximum, as {#sum} does.
   #   @return [CAFrame] one row per group.
   [:sum, :mean, :min, :max].each do |red|
-    define_method(red) do |min_count: nil, fill_value: nil, keep_rows: false|
-      reduce_columns(red, keep_rows, min_count: min_count, fill_value: fill_value)
+    define_method(red) do |*names, min_count: nil, fill_value: nil, keep_rows: false|
+      keywords = { min_count: min_count, fill_value: fill_value }
+      return reduce_columns(red, keep_rows, **keywords) if names.empty?
+      reduce_named_columns(red, names, keep_rows, **keywords)
     end
   end
 
@@ -298,6 +307,25 @@ class GroupedFrame
       cols[name] = group_reduce(col, reduction, **keywords)
     end
     result_frame(cols, keep_rows)
+  end
+
+  # The named columns only, returned as df[...] returns columns. A column
+  # whose type lacks the reduction raises, since it was asked for.
+  private def reduce_named_columns(reduction, names, keep_rows, **keywords)
+    results = names.map do |name|
+      unless name.is_a?(String)
+        raise ArgumentError, "#{reduction}: column names are Strings (got #{name.inspect})"
+      end
+      col = @frame[name]
+      unless answers?(col, reduction)
+        raise ArgumentError,
+              "#{reduction}: column #{name.inspect} " \
+              "(#{col.face? ? col.class : col.data_type}) has no #{reduction}"
+      end
+      col = group_reduce(col, reduction, **keywords)
+      keep_rows ? spread_to_rows(col) : col
+    end
+    results.size == 1 ? results.first : results
   end
 
   # One row per group, indexed by the labels; or, with +keep_rows+, the
