@@ -1491,6 +1491,52 @@ ca_stride_func_xfer_all (void *ap, void *data, int dir)
     return;
   }
 
+  /* A read through a byte reinterpret (CAField, a refer to another width)
+     over a cold root: the root's addresses are not this view's cells, but
+     each cell lies in a run of whole root elements.  Ask the root for those
+     elements and cut the cell's bytes out of them.  A write keeps the
+     whole-root round trip below: two cells can share a root element, and
+     writing back each one's copy of it would drop the other's bytes. */
+  if ( dir == CA_XFER_GET && ca->bytes != root->bytes
+       && ca_func[root->obj_type].xfer_stride ) {
+    volatile VALUE ah = 0, sh = 0;
+    ca_size_t  rb = root->bytes, cb = ca->bytes;
+    ca_size_t  per = (cb + rb - 1) / rb + 1;
+    ca_size_t *addrs = ALLOCV_N(ca_size_t, ah, ca->elements * per);
+    char      *scratch;
+    ca_size_t  idx[CA_RANK_MAX], n = 0, i;
+    ca_size_t *first = ALLOCV_N(ca_size_t, sh, ca->elements);
+    int8_t     k;
+    int        ok = 1;
+    for (k = 0; k < ca->ndim; k++) idx[k] = 0;
+    for (i = 0; ok; i++) {
+      ca_size_t off = composed_base, e, e_end;
+      for (k = 0; k < ca->ndim; k++) off += idx[k] * composed_strides[k];
+      if ( off < 0 || off + cb > root->elements * rb ) { ok = 0; break; }
+      first[i] = n * rb + off % rb;
+      for (e = off / rb, e_end = (off + cb - 1) / rb; e <= e_end; e++) {
+        addrs[n++] = e;
+      }
+      k = ca->ndim - 1;
+      while (k >= 0) { if (++idx[k] < ca->dim[k]) break; idx[k] = 0; k--; }
+      if (k < 0) break;
+    }
+    if ( ok && n < root->elements ) {
+      volatile VALUE dh = 0;
+      scratch = ALLOCV_N(char, dh, n * rb);
+      ca_xfer_addrs(root, n, addrs, scratch, CA_XFER_GET);
+      for (i = 0; i < ca->elements; i++) {
+        memcpy(ptr + i * cb, scratch + first[i], cb);
+      }
+      ALLOCV_END(dh);
+      ALLOCV_END(sh);
+      ALLOCV_END(ah);
+      return;
+    }
+    ALLOCV_END(sh);
+    ALLOCV_END(ah);
+  }
+
   /* Cold root without an xfer_stride slot, or an ndim mismatch the bridges
      above could not express: materialise the root into scratch via
      ca_xfer_all and run the direct strided gather/scatter against that.
