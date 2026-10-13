@@ -265,8 +265,8 @@ class TestLazyEagerParity < Test::Unit::TestCase
     assert_equal((t > t[0]).to_a, (t.lazy > t[0]).to_a)
     assert_equal(t.eq(t).to_a, t.lazy.eq(t.lazy).to_a)
     assert_equal((t - t).class, CArray.fuse { t - t }.class)
-    assert_raise(ArgumentError) { t < h }
-    assert_raise(ArgumentError) { t.lazy < h.lazy }
+    assert_equal([false, false, true], (t < h).to_a)
+    assert_equal((t < h).to_a, (t.lazy < h.lazy).to_a)
   end
 
   # ---- imag of a non-complex array ----

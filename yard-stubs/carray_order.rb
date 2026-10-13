@@ -168,6 +168,15 @@ class CArray
   #   `:object` array a cell matches when it is `==` to `val`, as {#eq}
   #   compares (so `1` matches `1.0`, which {#is_in} does not).
   #
+  #   An `UNDEF` `val`, or a masked cell of a CArray `val`, finds
+  #   nothing: `nil`, or `UNDEF` in that cell of the result.  The same
+  #   holds for {#bsearch} and {#search_nearest}.
+  #
+  #   A time array (`CATime`, `CATimedelta`) takes a value of another
+  #   unit, a `Time` or a String: when it is off the array's grid the
+  #   two are compared in the finer unit, so it matches nothing (and
+  #   {#search_nearest} finds the nearest cell).
+  #
   #   `self` need not be sorted; this is a linear scan. For sorted
   #   data prefer {#bsearch}.
   #   @param val [Object]

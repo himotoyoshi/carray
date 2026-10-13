@@ -515,8 +515,61 @@ module CATimeSurfaceFill
 
 end
 
+# The part of to_comparable the two time Faces share: values written one by
+# one (a Ruby Array) and an array that is not of this kind (an object column,
+# a string column) are each read as a value of this Face by to_comparable, an
+# UNDEF or a masked cell kept masked.  Nil for any other operand, which the Face's own
+# to_comparable decides.
+module CATimeOperandValues
+
+  # The reference and the operand of a comparison (eq, <, count, search,
+  # linear_section, pmax ...) brought to one unit: the operand read in its
+  # own unit, then the reference's unit when the operand sits on its grid
+  # (the reference is not converted), else the finer unit the two share, as
+  # is_in and the set operations meet.  A value that is not of this kind is
+  # refused as to_comparable refuses it.  An assignment, which has to land on
+  # the reference's grid, reconciles with to_comparable instead.
+  # @api private
+  def comparable_pair (operand)
+    lifted = lift_operand(operand)
+    return [self, lifted] if lifted.unit == unit
+    narrowed = lifted.to_unit(unit)
+    if narrowed.to_unit(lifted.unit).parent.eq(lifted.parent).all
+      return [self, narrowed]
+    end
+    in_common_unit_with(lifted)
+  end
+
+  private
+
+  # The operand as an array of this kind in its own unit: one value read as
+  # it is written, an Array or an array of another kind read value by value
+  # in the unit they share, an UNDEF or a masked cell kept masked.
+  def lift_operand (operand)
+    return operand if operand.is_a?(self.class)
+    case operand
+    when Array
+      lifted = operand.map { |v| UNDEF.equal?(v) ? nil : lift_operand(v) }
+      units  = lifted.compact.map(&:unit)
+      u = units.empty? ? unit : units.reduce { |a, b| common_unit(a, b) }
+      self.class.wrap(CA_INT64(lifted.map { |x| x ? x.to_unit(u).parent[0] : UNDEF }),
+                      unit: u)
+    when CArray
+      lift_operand(operand.to_a.flatten).reshape(*operand.shape)
+    else
+      lift_value(operand) || to_comparable(operand)
+    end
+  end
+
+  def reconcile_values (operand)
+    to_comparable(lift_operand(operand))
+  end
+
+end
+
 class CATime
   include CATimeSurfaceFill
+  include CATimeOperandValues
   # @overload new(*shape, unit: :ns)
   #   Allocates a new int64 storage CArray of the given `shape` and
   #   wraps it as a CATime Face with the given `unit`. The
@@ -747,6 +800,7 @@ end
 
 class CATimedelta
   include CATimeSurfaceFill
+  include CATimeOperandValues
   # @overload new(*shape, unit: :ns)
   #   Allocates a new int64 storage CArray of the given `shape` and
   #   wraps it as a CATimedelta Face with the given `unit`.
@@ -1046,6 +1100,44 @@ class CATime
     CATimeUnitAlgebra.shift_months(parent, unit, months).time(unit: unit)
   end
 
+  # @overload pmax(other)
+  #   The later of each cell and `other`, cell by cell: `other` is a time
+  #   array of the same shape, or one time (a {CATime::Element}, a `Time`, a
+  #   `Date`, `"2024-01-02"`) for every cell.  The two meet as a comparison
+  #   does, so the result is in `self`'s unit when `other` sits on its grid
+  #   and in the finer unit the two share otherwise.  A masked cell on either
+  #   side gives a masked cell.
+  #   @param other [CATime, CATime::Element, Time, Date, String]
+  #   @return [CATime]
+  #   @raise [TypeError] when `other` is not a time.
+  def pmax (other)
+    pick_by_order(other) { |a, b| a < b }
+  end
+
+  # @overload pmin(other)
+  #   The earlier of each cell and `other`; see {#pmax}.
+  #   @param other [CATime, CATime::Element, Time, Date, String]
+  #   @return [CATime]
+  #   @raise [TypeError] when `other` is not a time.
+  def pmin (other)
+    pick_by_order(other) { |a, b| a > b }
+  end
+
+  # A time has no NaN, so maximum / minimum (which let a NaN win) are pmax /
+  # pmin, and fmax / fmin are their other names.
+  alias_method :maximum, :pmax
+  alias_method :minimum, :pmin
+  alias_method :fmax, :pmax
+  alias_method :fmin, :pmin
+
+  # `other` where the block says self's cell loses to it, else self's cell.
+  private def pick_by_order (other)
+    return copy.tap { |out| out[] = UNDEF } if UNDEF.equal?(other)
+    a, b = comparable_pair(other)
+    b = b[0] unless other.is_a?(CArray) || other.is_a?(Array)
+    yield(a, b).then_else(b, a)
+  end
+
   # Element-wise comparison (< <= > >= <=>) rides the core comparison Face
   # gate (ca_face_reconcile_comparison in ext/ca_obj_face.c): the inherited
   # CArray operators descend to storage and reconcile a CATime RHS in a
@@ -1217,6 +1309,21 @@ class CATime
     [to_unit(u), other.to_unit(u)]
   end
 
+  private def common_unit (a, b)
+    CATimeUnitAlgebra.diff_unit(a, b)
+  end
+
+  # One instant as a length-1 time array in its own unit, or nil.
+  private def lift_value (operand)
+    require 'date'
+    case operand
+    when CATime::Element
+      CATime.wrap(CA_INT64([operand.value]), unit: operand.unit)
+    when Time, String, Date
+      CATimeLiteral.exact_instant(operand)
+    end
+  end
+
   def to_comparable (operand)
     require 'date'   # Date is one of the operand kinds below
     case operand
@@ -1229,17 +1336,11 @@ class CATime
       to_comparable(lifted)
     when Time, String, Date
       to_comparable(CATimeLiteral.exact_instant(operand))
-    when Array
-      # A set of instants written one by one (is_in(["2024-01-02", ...])).
-      CATime.wrap(CA_INT64(operand.map { |v| to_comparable(v).parent[0] }),
-                  unit: unit)
-    when CArray
-      # An array that is not a time array: each value read as an instant (an
-      # object column of Time values, a string column), a masked cell kept
-      # masked.
-      require "carray/methods/is_in"
-      send(:values_in_face, self, operand) ||
-        CArray.int64(*operand.shape).fill(UNDEF).time(unit: unit)
+    when Array, CArray
+      # A set of instants written one by one (is_in(["2024-01-02", ...])),
+      # or an array that is not a time array (an object column of Time
+      # values, a string column), read value by value.
+      reconcile_values(operand)
     else
       raise TypeError,
             "CATime cannot reconcile #{operand.class} " \
@@ -1885,6 +1986,17 @@ class CATimedelta
     [to_unit(u), other.to_unit(u)]
   end
 
+  private def common_unit (a, b)
+    CATimeUnitAlgebra.finer(a, b)
+  end
+
+  # One duration as a length-1 duration array in its own unit, or nil.
+  private def lift_value (operand)
+    if operand.is_a?(CATimedelta::Element)
+      CATimedelta.wrap(CA_INT64([operand.value]), unit: operand.unit)
+    end
+  end
+
   def to_comparable (operand)
     case operand
     when CATimedelta
@@ -1894,6 +2006,10 @@ class CATimedelta
     when CATimedelta::Element
       lifted = CATimedelta.wrap(CA_INT64([operand.value]), unit: operand.unit)
       to_comparable(lifted)
+    when Array, CArray
+      # Durations written one by one, or an array that is not a duration
+      # array (an object column of elements), read value by value.
+      reconcile_values(operand)
     else
       raise TypeError,
             "CATimedelta cannot reconcile #{operand.class} " \

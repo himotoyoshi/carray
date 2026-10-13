@@ -42,7 +42,7 @@ class CAFrame
   #
   #   obs.join(fcst, on: ["station", "date"])
   def join(other, on:, how: :left, suffixes: DEFAULT_JOIN_SUFFIXES)
-    names = join_key_names(on)
+    names = join_key_names(on, "join", "on:")
     lkeys = names.map { |name| join_key(self[name], name, "join") }
     rkeys = names.map { |name| join_key(other[name], name, "join") }
     plan  = join_name_plan(other, names, suffixes)
@@ -62,13 +62,29 @@ class CAFrame
   # is a number for a numeric key and a duration for a time key
   # ("10 minutes", or a CATimedelta value). Same wiring as the left join,
   # only the address primitive differs.
-  def join_asof(other, on:, direction: :floor, tolerance: nil, suffixes: DEFAULT_JOIN_SUFFIXES)
-    on   = column_key(on, "join_asof")
-    plan = join_name_plan(other, [on], suffixes)
+  #
+  # +by:+ names columns that must match exactly, one name or an Array: each
+  # left row is matched to the nearest row among the rows of +other+ with
+  # the same +by+ values.  A row with a masked +by+ cell matches nothing.
+  #
+  #   obs.join_asof(radar, on: "time", by: "station", tolerance: "10 minutes")
+  def join_asof(other, on:, by: nil, direction: :floor, tolerance: nil, suffixes: DEFAULT_JOIN_SUFFIXES)
+    on    = column_key(on, "join_asof")
+    exact = by.nil? ? [] : join_key_names(by, "join_asof", "by:")
+    if exact.include?(on)
+      raise ArgumentError, "join_asof: #{on.inspect} is the on: key; by: names the others"
+    end
+    plan = join_name_plan(other, [on, *exact], suffixes)
     lkey = join_key(self[on], on, "join_asof")
     rkey = join_key(other[on], on, "join_asof")
-    addr = lkey.locate_nearest_addr(rkey, direction: direction, tolerance: tolerance)
-    join_by_addr(other, [on], addr, plan)
+    addr = if exact.empty?
+             lkey.locate_nearest_addr(rkey, direction: direction, tolerance: tolerance)
+           else
+             _, lcode, rcode, k = join_codes(exact.map { |name| join_key(self[name], name, "join_asof") },
+                                             exact.map { |name| join_key(other[name], name, "join_asof") })
+             join_asof_by(lkey, rkey, lcode, rcode, k, direction, tolerance)
+           end
+    join_by_addr(other, [on, *exact], addr, plan)
   end
 
   # Conform every column to an externally supplied reference key set (the
@@ -207,14 +223,65 @@ class CAFrame
   end
 
   # The key column names of a join: one name, or an Array of names.
-  private def join_key_names(on)
+  private def join_key_names(on, verb, option)
     names = on.is_a?(Array) ? on : [on]
-    raise ArgumentError, "join: on: names no key column" if names.empty?
-    names = names.map { |name| column_key(name, "join") }
+    raise ArgumentError, "#{verb}: #{option} names no key column" if names.empty?
+    names = names.map { |name| column_key(name, verb) }
     if names.uniq.size < names.size
-      raise ArgumentError, "join: on: names a key column twice (#{on.inspect})"
+      raise ArgumentError, "#{verb}: #{option} names a key column twice (#{on.inspect})"
     end
     names
+  end
+
+  # Codes for the rows of both sides of a join on +lkeys+ / +rkeys+ (one
+  # array per key column): equal codes for equal keys, in 0...k, and none
+  # for a row with a masked key cell.  Each key column gets a code in one
+  # set of distinct values of both sides, compared as the lookups compare
+  # them (type, unit and width reconciled).  With several key columns a
+  # row's key is the tuple of its codes, coded again one column at a time
+  # so the number stays below the row count.  Returns [parts, lcode, rcode,
+  # k], parts holding each column's [distinct values, left codes, right
+  # codes].
+  private def join_codes(lkeys, rkeys)
+    parts = lkeys.zip(rkeys).map do |lkey, rkey|
+      common = CArray.align_addr(lkey, rkey, join: :outer)[0]
+      [common, lkey.locate_addr(common), rkey.locate_addr(common)]
+    end
+    _, lcode, rcode = parts[0]
+    k = parts[0][0].elements
+    parts.drop(1).each do |common, lc, rc|
+      lt = lcode * common.elements + lc
+      rt = rcode * common.elements + rc
+      tuples = CArray.align_addr(lt, rt, join: :outer)[0]
+      lcode, rcode, k = lt.locate_addr(tuples), rt.locate_addr(tuples), tuples.elements
+    end
+    [parts, lcode, rcode, k]
+  end
+
+  # The other side's row for each left row of an as-of join with exact
+  # keys: the nearest by +lkey+ / +rkey+ among the right rows with the
+  # same code.
+  private def join_asof_by(lkey, rkey, lcode, rcode, k, direction, tolerance)
+    addr = CArray.int64(lkey.elements).fill(UNDEF)
+    lrows, lstart, lcount = join_code_runs(lcode, k)
+    rrows, rstart, rcount = join_code_runs(rcode, k)
+    k.times do |g|
+      next if lcount[g] == 0 || rcount[g] == 0
+      li = lrows[lstart[g]...(lstart[g] + lcount[g])]
+      ri = rrows[rstart[g]...(rstart[g] + rcount[g])]
+      found = lkey[li].locate_nearest_addr(rkey[ri], direction: direction, tolerance: tolerance)
+      addr[li] = ri.project(found)
+    end
+    addr
+  end
+
+  # The rows of each code, in row order: count[g] rows from rows[start[g]] on
+  # have code g.  Rows without a code come after them all.
+  private def join_code_runs(code, k)
+    rows  = CArray.sort_addr(code, CArray.int64(code.elements).seq)
+    count = code.bincount(length: k).int64
+    start = count.cumsum.int64 - count
+    [rows, start.to_a, count.to_a]
   end
 
   private def join_name_plan(other, names, suffixes)
@@ -259,23 +326,7 @@ class CAFrame
   # The rows of a key join: li / ri are the left / right row of each result
   # row, UNDEF on the side a row has no match on.
   private def join_pairs(other, names, lkeys, rkeys, how, plan)
-    # Each key column gets a code in one set of distinct values of both
-    # sides, compared as the lookups compare them (type, unit and width
-    # reconciled); a masked key cell gets none and matches nothing.
-    parts = lkeys.zip(rkeys).map do |lkey, rkey|
-      common = CArray.align_addr(lkey, rkey, join: :outer)[0]
-      [common, lkey.locate_addr(common), rkey.locate_addr(common)]
-    end
-    # Several key columns: a row's key is the tuple of its codes, coded
-    # again one column at a time so the number stays below the row count.
-    _, lcode, rcode = parts[0]
-    k = parts[0][0].elements
-    parts.drop(1).each do |common, lc, rc|
-      lt = lcode * common.elements + lc
-      rt = rcode * common.elements + rc
-      tuples = CArray.align_addr(lt, rt, join: :outer)[0]
-      lcode, rcode, k = lt.locate_addr(tuples), rt.locate_addr(tuples), tuples.elements
-    end
+    parts, lcode, rcode, k = join_codes(lkeys, rkeys)
     extra = nil
     if how == :right
       ri, li = join_expand(rcode, lcode, k, true)

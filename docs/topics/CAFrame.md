@@ -1155,6 +1155,12 @@ A row with no such row (before the first key under `:floor`, after the last unde
 obs.join_asof(radar, on: "time", direction: :floor, tolerance: "10 minutes")
 ```
 
+`by:` names columns that must match exactly, one name or an Array. Each left row is then matched to the nearest row **among the rows with the same `by:` values** — the nearest radar time at the same station; a row with a masked `by:` cell matches nothing:
+
+```ruby
+obs.join_asof(radar, on: "time", by: "station", tolerance: "10 minutes")
+```
+
 - **`tolerance:` is the same kind of quantity as the key.** For a numeric key it is a number (`tolerance: 0.5`). For a time key it is a duration: a String in the spellings `CArray.time(unit:)` takes (`"10 minutes"`), or a `CATimedelta` value (`CATimedelta::Element.new(600, :s)`). A bare number is refused for a time key, since its length would depend on the unit the column is stored in; a duration means the same length whatever that unit is.
 - Neither frame needs to be sorted by the key; the result keeps the left frame's row order.
 - Each left row gets **one** row of the other frame. When several rows there share a key, `:floor` takes the **last** of them (the latest entry for that time) and `:ceil` the **first**; `:round` takes the first on an exact match, and otherwise does what `:floor` or `:ceil` does on its nearer side. Remove the duplicates first when the choice matters.

@@ -194,6 +194,15 @@ class TestClipDualFill < Test::Unit::TestCase
     assert_equal [UNDEF, 0.0, 1.0, 2.0, 2.0], a.clip(0, 2, lfill: UNDEF).to_a
   end
 
+  # UNDEF is a fill (mask the cells out of range), never a bound.
+  def test_undef_bound_raises
+    a = CArray.float64(5); a[] = [-1, 0, 1, 2, 3]
+    assert_raise(ArgumentError) { a.clip(UNDEF, nil) }
+    assert_raise(ArgumentError) { a.clip(nil, UNDEF) }
+    assert_raise(ArgumentError) { a.clip(0, UNDEF, -1) }
+    assert_raise(ArgumentError) { CArray.time(%w[2024-01-01 2024-01-02], unit: :D).clip(UNDEF, nil) }
+  end
+
   def test_min_above_max_raises
     a = CArray.float64(5); a[] = [-1, 0, 1, 2, 3]
     assert_raise(ArgumentError) { a.clip(2, 0) }

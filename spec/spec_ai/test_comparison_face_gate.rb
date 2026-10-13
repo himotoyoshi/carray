@@ -59,10 +59,12 @@ class TestComparisonFaceGate < Test::Unit::TestCase
     assert_equal [true, false, false], (d_s < d_ms).to_a
   end
 
-  def test_diff_unit_lossy_raises
+  def test_diff_unit_off_grid_meets_in_the_finer_unit
     d_s  = dt([10], unit: :s)
     d_ms = dt([1500], unit: :ms)   # 1.5s -- not a whole second
-    assert_raise(ArgumentError) { d_s < d_ms }
+    assert_equal [false], (d_s < d_ms).to_a
+    assert_equal [true],  (d_s > d_ms).to_a
+    assert_equal [false], d_s.eq(d_ms).to_a
   end
 
   def test_timedelta_diff_unit_reconciles

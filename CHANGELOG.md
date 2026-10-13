@@ -57,6 +57,37 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   as does a day duration on a month grid. As with `Date#>>`, a month is not
   a fixed step: `+ 1 month - 1 month` need not undo it.
 
+- Change: `clip` refuses `UNDEF` as a bound with `ArgumentError`. To mask
+  the cells out of range, pass `UNDEF` as the fill (`clip(0, 10, UNDEF)`,
+  `lfill:` / `ufill:`). `clip(UNDEF, nil)` returned an `:object` array
+  with every cell masked.
+
+- Change: `search`, `bsearch` and `search_nearest` (and their `_addr`
+  forms) find nothing for an `UNDEF` query or a masked cell of a query
+  array: `nil`, or `UNDEF` in that cell of the result. They searched the
+  value under the mask, so `CA_INT64([0, 1, 2]).search(UNDEF)` gave 0.
+
+- Change: a time array (`CATime`, `CATimedelta`) compares with a value off
+  its grid in the finer unit the two share, where it raised
+  `ArgumentError`: `days.eq("2024-01-03T05:00")` is all false, `<` orders
+  by the instant, `bsearch` finds nothing, `search_nearest` and
+  `linear_section` give the nearest cell and the fractional position.
+  This holds for the operators, `count(v)`, `mask_eq`, the searches,
+  `linear_section`, `is_in`, the set operations and `locate_addr`. An
+  assignment still raises for a value off the grid.
+
+- New: `CATime#pmax` / `#pmin` (and `maximum` / `minimum` / `fmax` /
+  `fmin`) give the later / earlier time cell by cell, against a time
+  array, an element, a `Time`, a `Date` or a String. They were refused for
+  a time array and returned an `:object` array mixing `Time` and elements
+  for a `Time`.
+
+- Fix: a `CATimedelta` takes durations in a Ruby Array or an `:object`
+  array in `is_in`, the set operations, `locate_addr` and `to_comparable`,
+  as a `CATime` takes times; it raised `TypeError`. `UNDEF` given to the
+  search family or `is_in` of a time array answers as for a plain array
+  instead of raising `TypeError`.
+
 - Fix: the reductions of the iterators answer as the core reduction does
   over each piece in more cases. `quantile` of a categorical, segment or
   axis-group iterator is NaN at a position next to a NaN, where it skipped
@@ -76,9 +107,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 - Fix: `UNDEF` returned from a `reduce_slab` block masks that cell of the
   result. It was written as 0.
 
+- New: `CAFrame#join_asof` takes `by:`, columns that must match exactly:
+  `obs.join_asof(radar, on: "time", by: "station")` matches each row to the
+  nearest time among the rows of the same station. `by:` takes one name or
+  several; a row with a masked `by:` cell matches nothing.
+
 - New: `CAFrame#join` takes several key columns, `on: ["station", "date"]`.
   Rows match when every key column matches; a row with any key cell masked
-  matches nothing. `join_asof` still takes one key.
+  matches nothing.
 
 - New: a `CAFrame` group has the short form of `sum` / `mean` / `min` /
   `max` for more reductions: `prod`, `accumulate`, `median`, `variance`,

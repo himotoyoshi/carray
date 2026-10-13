@@ -1,4 +1,4 @@
-require "carray/methods/is_in"   # fixlen_widened_with, values_in_face, values_for_lookup
+require "carray/methods/is_in"   # fixlen_widened_with, values_for_lookup
 
 class CArray
 
@@ -57,13 +57,13 @@ class CArray
       a, b = in_common_unit_with(ref)
       return a.locate_addr(b)
     end
-    if respond_to?(:to_comparable) && !ref.respond_to?(:to_comparable)
-      ref = values_in_face(self, ref)
-      return CArray.int64(*shape).fill(UNDEF) unless ref
-    elsif ref.respond_to?(:to_comparable) && !respond_to?(:to_comparable)
-      q = values_in_face(ref, self)
-      return CArray.int64(*shape).fill(UNDEF) unless q
-      return q.locate_addr(ref)
+    # They meet as a comparison does (comparable_pair).
+    if respond_to?(:comparable_pair) && !ref.respond_to?(:comparable_pair)
+      key, r = comparable_pair(ref)
+      return key.locate_addr(r)
+    elsif ref.respond_to?(:comparable_pair) && !respond_to?(:comparable_pair)
+      r, key = ref.comparable_pair(self)
+      return key.locate_addr(r)
     end
     unless ref.is_a?(CArray) || ref.respond_to?(:to_ca)
       raise TypeError, "locate_addr: the reference is an array of values (got #{ref.class})"

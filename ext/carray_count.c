@@ -173,8 +173,13 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
            && ! ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
         ca_face_refuse_order("count(v)", self, "count");
       }
-      rval = ca_face_reconcile_operand(self, rval, "count(v)");
-      /* to_comparable lifts a scalar query to a length-1 array; unwrap it so
+      {
+        volatile VALUE ref = self, query = rval;
+        ca_face_reconcile_pair(&ref, &query, "count(v)");
+        self = ref;
+        rval = query;
+      }
+      /* The reconcile lifts a scalar query to a length-1 array; unwrap it so
          a scalar query still answers with a count rather than a length-1
          array from the broadcast branch below. */
       if ( query_was_scalar && rb_obj_is_carray(rval) ) {

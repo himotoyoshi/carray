@@ -1140,6 +1140,47 @@ class TestCAFrameJoinNDKey < Test::Unit::TestCase
 end
 
 # join_asof's tolerance: is a duration for a time key.
+class TestCAFrameJoinAsofBy < Test::Unit::TestCase
+  def setup
+    t = ->(a) { CArray.time(a, unit: :s) }
+    @obs   = CAFrame.new("st"   => CA_OBJECT(%w[a b a b]),
+                         "time" => t.(["2024-01-01 00:10", "2024-01-01 00:10",
+                                       "2024-01-01 00:30", "2024-01-01 00:01"]),
+                         "x"    => CA_INT64([1, 2, 3, 4]))
+    @radar = CAFrame.new("st"   => CA_OBJECT(%w[b a a]),
+                         "time" => t.(["2024-01-01 00:05", "2024-01-01 00:08", "2024-01-01 00:29"]),
+                         "y"    => CA_INT64([10, 20, 30]))
+  end
+
+  def test_the_nearest_row_with_the_same_by_values
+    j = @obs.join_asof(@radar, on: "time", by: "st")
+    assert_equal %w[st time x y], j.column_names
+    assert_equal [20, 10, 30, UNDEF], j["y"].to_a
+  end
+
+  def test_direction_and_tolerance_apply_within_the_group
+    assert_equal [30, UNDEF, UNDEF, 10],
+                 @obs.join_asof(@radar, on: "time", by: "st", direction: :ceil)["y"].to_a
+    assert_equal [20, UNDEF, 30, UNDEF],
+                 @obs.join_asof(@radar, on: "time", by: "st", tolerance: "3 minutes")["y"].to_a
+  end
+
+  def test_several_by_columns_and_a_masked_by_cell
+    @obs["k"]   = CA_INT32([0, 0, 1, 0])
+    @radar["k"] = CA_INT32([0, 1, 1])
+    assert_equal [UNDEF, 10, 30, UNDEF],
+                 @obs.join_asof(@radar, on: "time", by: %w[st k])["y"].to_a
+    @obs["st"][1] = UNDEF
+    assert_equal [UNDEF, UNDEF, 30, UNDEF],
+                 @obs.join_asof(@radar, on: "time", by: %w[st k])["y"].to_a
+  end
+
+  def test_refuses_the_on_key_as_a_by_key
+    assert_raise(ArgumentError) { @obs.join_asof(@radar, on: "time", by: "time") }
+    assert_raise(ArgumentError) { @obs.join_asof(@radar, on: "time", by: []) }
+  end
+end
+
 class TestCAFrameJoinAsofTimeTolerance < Test::Unit::TestCase
   def setup
     t = ->(a, unit = :s) { CArray.time(a, unit: unit) }
