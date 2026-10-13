@@ -335,6 +335,19 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     assert_raise(ArgumentError) { CAFrame.new("v" => CArray.float64(3, 2)).is_duplicate }
   end
 
+  # except: names the occurrence left unmarked; :none marks every row whose
+  # values appear more than once, so its negation is the rows seen once.
+  def test_is_duplicate_except
+    df = CAFrame.new("a" => CA_INT32([1, 2, 1, 1, 3, 2]))
+    assert_equal [false, false, true, true, false, true], df.is_duplicate(except: :first).to_a
+    assert_equal [true, true, true, false, false, false], df.is_duplicate(except: :last).to_a
+    assert_equal [true, true, true, true, false, true], df.is_duplicate(except: :none).to_a
+    df["a"][4] = UNDEF
+    assert_equal [true, true, true, true, false, true], df.is_duplicate(except: :none).to_a
+    err = assert_raise(ArgumentError) { df.is_duplicate(except: false) }
+    assert_equal "is_duplicate: except: must be :first, :last or :none (got false)", err.message
+  end
+
   def test_keep_rows_keeps_the_index
     df = CAFrame.new({ "k" => CA_OBJECT(%w[a b a]), "v" => CA_FLOAT64([1, 2, 5]) }, index: CA_INT32([7, 8, 9]), axis_name: "id")
     m = df.group_by("k").mean(keep_rows: true)

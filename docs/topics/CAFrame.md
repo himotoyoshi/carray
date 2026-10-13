@@ -512,6 +512,13 @@ df.is_duplicate("station", "time")         # repeats of the pair only
 df.is_duplicate.count(true)                # how many rows repeat an earlier one
 ```
 
+`except:` names the occurrence that is left unmarked: `:first` (the default), `:last`, or `:none` to mark every row whose values appear more than once. Its negation is then the rows that appear only once:
+
+```ruby
+df[df.is_duplicate(except: :last).not]     # one row of each, the last
+df[df.is_duplicate(except: :none).not]     # only the rows that appear once
+```
+
 - Values compare as [`group_by`](#keys-and-groups) compares keys: NaN is one value, and `-0.0` and `0.0` are one value.
 - A row with a masked cell in the compared columns is never a duplicate, as a row with a masked key belongs to no group.
 - The index is not compared, and an N-D column cannot be: compare one of its components.

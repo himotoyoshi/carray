@@ -58,8 +58,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 - New: `CAFrame#is_duplicate(*names)` gives a boolean column, true for the
   rows that repeat an earlier row in the named columns (every column when
-  none are named); `df[df.is_duplicate.not]` keeps one row of each. A row
-  with a masked cell in those columns is never a duplicate.
+  none are named); `df[df.is_duplicate.not]` keeps one row of each.
+  `except: :last` leaves the last occurrence unmarked instead of the first,
+  and `except: :none` marks every repeated row, so its negation is the rows
+  that appear once. A row with a masked cell in those columns is never a
+  duplicate.
 
 - Fix: `CAFrame.from_records` with records that spell one column both as a
   Symbol and as a String (`{ :temp => 1, "temp" => 2 }`, or `temp:` in one

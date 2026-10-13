@@ -17,22 +17,35 @@ class CAFrame
     GroupedFrame.new(self, cat, axis, keys.grep(String), key: key)
   end
 
-  # Whether each row repeats an earlier row: a boolean column, true for the
-  # second and later rows with the same values in the named columns (every
-  # column when none are named), false for the first. Values compare as
-  # group_by compares keys (NaN is one value, -0.0 is 0.0), and a row with a
-  # masked cell in those columns is never a duplicate, as a masked key is in
-  # no group. The index is not compared.
+  # Whether each row repeats another row: a boolean column, true for the rows
+  # whose values in the named columns (every column when none are named)
+  # appear on more than one row, except the one +except:+ leaves out --
+  #
+  #   except: :first   every occurrence but the first (the default)
+  #   except: :last    every occurrence but the last
+  #   except: :none    every occurrence
+  #
+  # so +df[df.is_duplicate.not]+ keeps one row of each, and
+  # +is_duplicate(except: :none).not+ is the rows that appear only once.
+  # Values compare as group_by compares keys (NaN is one value, -0.0 is 0.0),
+  # and a row with a masked cell in those columns is never a duplicate, as a
+  # masked key is in no group. The index is not compared.
   #
   #   df[df.is_duplicate.not]                # the rows without repeats
   #   df.is_duplicate("station", "time")     # repeats of the pair
+  #   df.is_duplicate(except: :none).not     # the rows that appear once
   #
   # @param names [Array<String>] the columns to compare; default every column.
+  # @param except [Symbol] the occurrence left unmarked: :first, :last or :none.
   # @return [CArray] boolean, one value per row.
   # @raise [KeyError] for a name that is no column.
-  # @raise [ArgumentError] when a compared column is N-D, or there is no
-  #   column to compare.
-  def is_duplicate(*names)
+  # @raise [ArgumentError] when a compared column is N-D, there is no column
+  #   to compare, or +except:+ is not one of the three.
+  def is_duplicate(*names, except: :first)
+    unless %i[first last none].include?(except)
+      raise ArgumentError,
+            "is_duplicate: except: must be :first, :last or :none (got #{except.inspect})"
+    end
     names = names.map { |n| column_key(n, "is_duplicate") }
     names = column_names if names.empty?
     raise ArgumentError, "is_duplicate: the frame has no column to compare" if names.empty?
@@ -45,11 +58,19 @@ class CAFrame
       end
       col
     end
-    codes = (cols.size == 1 ? cols.first.categorize : composite_categorical(cols)).codes
-    seen  = codes.mask_duplicates
-    out   = seen.is_masked
-    out   = out & codes.is_not_masked if codes.has_mask?
-    out
+    cat   = cols.size == 1 ? cols.first.categorize : composite_categorical(cols)
+    codes = cat.codes
+    out =
+      case except
+      when :first then codes.mask_duplicates.is_masked
+      when :last  then codes.flip(0).mask_duplicates.is_masked.flip(0).copy
+      when :none
+        index = codes.value.int64
+        index[codes.is_masked] = 0 if codes.has_mask?
+        sizes = cat.category_sizes
+        sizes.elements > 0 ? sizes[index].gt(1) : CArray.boolean(nrow) { false }
+      end
+    codes.has_mask? ? out & codes.is_not_masked : out
   end
 
   # Group rows into time bins of length +unit+ along the time column (or the
