@@ -574,10 +574,11 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
     CArray *anchor = NULL;
     volatile VALUE r_anchor = Qnil;
     int8_t anchor_ndim;
-    /* Pick the largest-ndim non-scalar operand as anchor. */
-    if ( op1->elements > 1 ) { anchor = op1; r_anchor = r1; }
-    else if ( op2->elements > 1 ) { anchor = op2; r_anchor = r2; }
-    else if ( op3->elements > 1 ) { anchor = op3; r_anchor = r3; }
+    /* The first operand that is not a scalar is the anchor.  An array of
+       no cells is one (its shape is the walk's), not a scalar. */
+    if ( ! ca_is_scalar(op1) ) { anchor = op1; r_anchor = r1; }
+    else if ( ! ca_is_scalar(op2) ) { anchor = op2; r_anchor = r2; }
+    else if ( ! ca_is_scalar(op3) ) { anchor = op3; r_anchor = r3; }
     if ( anchor && anchor != op1 ) {
       /* op1 is a CScalar but the walk shape is determined by another
          operand.  Lift op1 up to anchor's shape via
