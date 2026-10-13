@@ -40,7 +40,7 @@ class CAFrame
     validate_sort_order(order)
     named = specs.map do |spec|
       name, dir = parse_sort_key_spec(spec, order)
-      [name.to_s, sort_key_column(name), dir]
+      [column_key(name, "sort_by_key"), sort_key_column(name), dir]
     end
     keys = named.map do |name, col, dir|
       dir == :desc ? col.order(descending: true, method: :dense) : col
@@ -119,7 +119,7 @@ class CAFrame
   end
 
   private def sort_key_column(name)
-    key = name.to_s
+    key = column_key(name, "sort_by_key")
     col = if @columns.key?(key)
             @columns[key]
           elsif @index && @axis_name == key

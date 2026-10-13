@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: CAFrame takes column names as Strings only. `CAFrame.new({ a:
+  col })`, `df.drop(:a)`, `df.select(:a)`, `df.rename("a" => :b)`,
+  `df.join(other, on: :a)` and the other verbs that name a column turned a
+  Symbol into a String; they now raise `TypeError` naming the verb. Write
+  the name as a String (`"a"`). The keys of the records given to
+  `from_records` may still be Symbols.
+
 - New: `CAFrame.from_csv(path, columns: { 2 => "code", "c7" => "area" })`
   selects columns by the Hash's keys (names or indexes, as `columns:` takes
   them) and names them with its values; `types:` and `missing:` use the new

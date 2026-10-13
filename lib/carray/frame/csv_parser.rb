@@ -418,6 +418,9 @@ class CAFrame
       end
       selection.each do |c|
         next if c.is_a?(String)
+        if c.is_a?(Symbol)
+          raise TypeError, "from_csv: columns: a column name is a String (got #{c.inspect})"
+        end
         next if c.is_a?(Integer) && c >= 0
         next if c.is_a?(Range) && (c.begin.nil? || (c.begin.is_a?(Integer) && c.begin >= 0)) &&
                 (c.end.nil? || c.end.is_a?(Integer))
@@ -436,8 +439,8 @@ class CAFrame
                                "not a Range (got #{key.inspect})"
         end
         unless name.is_a?(String)
-          raise ArgumentError, "from_csv: columns: a Hash names each column with a " \
-                               "String (got #{name.inspect} for #{key.inspect})"
+          raise TypeError, "from_csv: columns: a column name is a String " \
+                           "(got #{name.inspect} for #{key.inspect})"
         end
       end
       dup = map.values.tally.select { |_, k| k > 1 }.keys

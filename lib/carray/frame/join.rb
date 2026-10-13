@@ -37,7 +37,7 @@ class CAFrame
   # meaningful names up front (+["_obs", "_fcst"]+), or +suffixes: false+ to
   # raise instead. Rename afterward with +rename+ if needed (§12-C).
   def join(other, on:, how: :left, suffixes: DEFAULT_JOIN_SUFFIXES)
-    on   = on.to_s
+    on   = column_key(on, "join")
     lkey = join_key(self[on], on, "join")
     rkey = join_key(other[on], on, "join")
     plan = join_name_plan(other, on, suffixes)
@@ -58,7 +58,7 @@ class CAFrame
   # ("10 minutes", or a CATimedelta value). Same wiring as the left join,
   # only the address primitive differs.
   def join_asof(other, on:, direction: :floor, tolerance: nil, suffixes: DEFAULT_JOIN_SUFFIXES)
-    on   = on.to_s
+    on   = column_key(on, "join_asof")
     plan = join_name_plan(other, on, suffixes)
     lkey = join_key(self[on], on, "join_asof")
     rkey = join_key(other[on], on, "join_asof")
@@ -85,7 +85,7 @@ class CAFrame
   # Array is read as values of the key's kind, as +is_in+ reads one: numbers
   # against a numeric key, Time / Date / String instants against a time key.
   def align(key, reference)
-    key = key.to_s
+    key = column_key(key, "align")
     on_index = !@columns.key?(key) && @axis_name == key && @index
     keys = on_index ? @index : join_key(self[key], key, "align")
     # An Array reference is read as values of the key's kind, as is_in reads

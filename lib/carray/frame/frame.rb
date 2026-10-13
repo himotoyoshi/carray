@@ -51,10 +51,9 @@ class CAFrame
   # y)+). +:axis_name+ / +:index+ are control options; any remaining
   # (string-keyed) options are treated as columns.
   #
-  # Column names are normalized to Strings, so a Symbol key in an explicit
-  # column hash is stringified. The Symbol rejection below applies only to the
-  # keyword channel, which doubles as the +:axis_name+ / +:index+ control-option
-  # channel: a stray Symbol there is a mistyped control option, not a column.
+  # Column names are Strings, in an explicit column hash as in inline pairs.
+  # A stray Symbol among the keywords is a mistyped control option
+  # (+:axis_name+ / +:index+), not a column, and is named as such.
   def initialize(columns = {}, **opts)
     axis_name = opts.delete(:axis_name)
     index     = opts.delete(:index)
@@ -77,7 +76,7 @@ class CAFrame
     n = nil
     n_from = nil
     columns.each do |name, col|
-      key = name.to_s
+      key = column_key(name, "CAFrame.new")
       ca  = coerce_column(col)
       len = ca.shape[0]
       if n.nil?
@@ -370,7 +369,7 @@ class CAFrame
     raise ArgumentError, "select requires at least one column name" if names.empty?
     cols = {}
     names.each do |name|
-      key = name.to_s
+      key = column_key(name, "select")
       raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
       cols[key] = @columns[key]
     end
@@ -413,7 +412,7 @@ class CAFrame
   # returns it (memo §3.8). Any existing index is replaced.
   def set_index(name)
     refuse_if_frozen
-    key = name.to_s
+    key = column_key(name, "set_index")
     raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
     idx = @columns[key]
     unless idx.ndim == 1
@@ -803,6 +802,13 @@ class CAFrame
     # do not.
     new_index = @index ? @index[keep].copy : nil
     CAFrame.new(cols, axis_name: @axis_name, index: new_index)
+  end
+
+  # A column name given as an argument: a String, as the frame's column
+  # keys are. Symbols are the frame's options and types, never names.
+  private def column_key(name, verb)
+    return name if name.is_a?(String)
+    raise TypeError, "#{verb}: a column name is a String (got #{name.inspect})"
   end
 
   private def positional_range?(range)

@@ -62,9 +62,9 @@ class CAFrame
   #   unknown reduction or a multi-dimensional value column with it, or when
   #   two output columns would share a name.
   def pivot(index:, columns:, values:, aggregate: nil)
-    plan = pivot_plan(index.to_s, columns.to_s, aggregate, "pivot")
+    plan = pivot_plan(column_key(index, "pivot"), column_key(columns, "pivot"), aggregate, "pivot")
     labels = Array.new(plan[:nc]) { |j| plan[:clab][j].to_s }
-    value_names = values.is_a?(Array) ? values.map(&:to_s) : nil
+    value_names = values.is_a?(Array) ? values.map { |v| column_key(v, "pivot") } : nil
     names =
       if value_names
         value_names.flat_map { |v| labels.map { |l| "#{v}_#{l}" } }
@@ -78,7 +78,7 @@ class CAFrame
 
     source = plan[:source].reshape(plan[:nr], plan[:nc])
     cols = {}
-    (value_names || [values.to_s]).each_with_index do |value, k|
+    (value_names || [column_key(values, "pivot")]).each_with_index do |value, k|
       val = pivot_value(plan, value)
       plan[:nc].times do |j|
         cols[names[k * plan[:nc] + j]] = project_rows(val, source[nil, j])
@@ -108,8 +108,8 @@ class CAFrame
   #   and the axis-1 key values; the grid is new, not a view of +self+.
   # @raise [ArgumentError] as {#pivot}.
   def pivot_grid(index:, columns:, values:, aggregate: nil)
-    plan = pivot_plan(index.to_s, columns.to_s, aggregate, "pivot_grid")
-    val  = pivot_value(plan, values.to_s)
+    plan = pivot_plan(column_key(index, "pivot_grid"), column_key(columns, "pivot_grid"), aggregate, "pivot_grid")
+    val  = pivot_value(plan, column_key(values, "pivot_grid"))
     grid = project_rows(val, plan[:source]).reshape(plan[:nr], plan[:nc], *val.shape[1..])
     [grid, plan[:rlab], plan[:clab]]
   end
@@ -212,9 +212,9 @@ class CAFrame
   # @raise [ArgumentError] when there is nothing to melt, or the value
   #   columns differ in data type.
   def melt(id: [], value_columns: nil, var_name: "variable", value_name: "value")
-    ids = Array(id).map(&:to_s)
+    ids = Array(id).map { |n| column_key(n, "melt") }
     ids.each { |name| self[name] }
-    vars = (value_columns || column_names - ids).map(&:to_s)
+    vars = (value_columns || column_names - ids).map { |n| column_key(n, "melt") }
     raise ArgumentError, "melt: no columns to melt" if vars.empty?
     overlap = vars & ids
     unless overlap.empty?
@@ -240,6 +240,7 @@ class CAFrame
     out[@axis_name] = CArray.meld(Array.new(k, @index)) if @index
     ids.each { |name| out[name] = CArray.meld(Array.new(k, self[name])) }
     [var_name, value_name].each do |name|
+      column_name_arg(name, "melt")
       if out.key?(name)
         raise ArgumentError, "melt: #{name.inspect} is already an id column"
       end
@@ -291,7 +292,7 @@ class CAFrame
   # @param on [String, nil] the column whose values line the rows up.
   # @return [CAFrame] one row per group, indexed by the group labels.
   def stack_rows(by:, on: nil)
-    keys = (by.is_a?(Array) ? by : [by]).map { |k| k.is_a?(Symbol) ? k.to_s : k }
+    keys = (by.is_a?(Array) ? by : [by]).map { |k| k.is_a?(Symbol) ? column_key(k, "stack_rows") : k }
     raise ArgumentError, "stack_rows: by: names no key" if keys.empty?
     frame = @index ? CAFrame.new({ @axis_name => @index }.merge(@columns)) : self
     keys.each { |k| frame.__send__(:key_column, k, "stack_rows") }

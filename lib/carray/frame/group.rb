@@ -47,7 +47,7 @@ class CAFrame
   # @raise [ArgumentError] when the column is not a CATime, or +label:+ is
   #   neither :left nor :right.
   def resample(name, unit, origin: nil, label: :left, fill: false)
-    name = name.to_s
+    name = column_key(name, "resample")
     time = column_or_index(name)
     unless time.is_a?(CATime)
       raise ArgumentError, "resample: #{name.inspect} is not a time column (got #{time.class})"
@@ -199,7 +199,8 @@ class GroupedFrame
     spec = (spec || {}).merge(named)
     cols = {}
     spec.each do |out_name, (in_name, reduction, *args)|
-      out = out_name.to_s
+      out = @frame.__send__(:column_name_arg, out_name, "aggregate")
+      @frame.__send__(:column_key, in_name, "aggregate")
       options = args.last.is_a?(Hash) ? args.pop : {}
       cols[out] =
         case reduction
@@ -230,8 +231,8 @@ class GroupedFrame
       unless out.is_a?(Hash)
         raise ArgumentError, "table block must return a Hash (got #{out.class})"
       end
-      order ||= out.keys.map(&:to_s)
-      out.each { |k, v| (collected[k.to_s] ||= []) << v }
+      order ||= out.keys.map { |k| @frame.__send__(:column_name_arg, k, "table") }
+      out.each { |k, v| (collected[k] ||= []) << v }
     end
     cols = {}
     (order || []).each do |name|
@@ -313,10 +314,7 @@ class GroupedFrame
   # whose type lacks the reduction raises, since it was asked for.
   private def reduce_named_columns(reduction, names, keep_rows, **keywords)
     results = names.map do |name|
-      unless name.is_a?(String)
-        raise ArgumentError, "#{reduction}: column names are Strings (got #{name.inspect})"
-      end
-      col = @frame[name]
+      col = @frame[@frame.__send__(:column_key, name, reduction)]
       unless answers?(col, reduction)
         raise ArgumentError,
               "#{reduction}: column #{name.inspect} " \

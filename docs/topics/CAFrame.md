@@ -126,7 +126,7 @@ There are three constructors, one per shape the data arrives in:
 
 ### `CAFrame.new`
 
-Pass a Hash of `name => column`. Columns may be `CArray`s or anything that answers `to_ca` (a Ruby `Array`, a lazy view). Column names are **Strings** — a Symbol key in a column hash is stringified. Pairs may be given inline:
+Pass a Hash of `name => column`. Columns may be `CArray`s or anything that answers `to_ca` (a Ruby `Array`, a lazy view). Column names are **Strings**, here and in every verb that names a column: a Symbol is refused with `TypeError` (`drop: a column name is a String (got :temp)`), since Symbols are the frame's options and types. Pairs may be given inline:
 
 ```ruby
 CAFrame.new("a" => CA_INT32([1, 2, 3]), "b" => CA_FLOAT64([1.0, 2.0, 3.0]))

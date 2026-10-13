@@ -160,7 +160,9 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
     assert_raise(KeyError) { read(wide, columns: %w[c0]) }
     err = assert_raise(ArgumentError) { read(wide, columns: { 0..1 => "x" }) }
     assert_match(/not a Range/, err.message)
-    assert_raise(ArgumentError) { read(wide, columns: { 0 => :x }) }
+    assert_raise(TypeError) { read(wide, columns: { 0 => :x }) }
+    err = assert_raise(TypeError) { read(wide, columns: { c: "x" }) }
+    assert_equal "from_csv: columns: a column name is a String (got :c)", err.message
     err = assert_raise(ArgumentError) { read(wide, columns: { 0 => "x", 1 => "x" }) }
     assert_equal 'from_csv: columns: names "x" more than once', err.message
     assert_raise(ArgumentError) { read(wide, columns: []) }

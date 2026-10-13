@@ -10,7 +10,7 @@ class CAFrame
   # so the result is a different table (memo §3.8). The column is shared by
   # reference; the envelope is cheap. Chain or reassign: +df = df.append(...)+.
   def append(name, col)
-    key = name.to_s
+    key = column_name_arg(name, "append")
     ca  = coerce_column(col)
     rebuild(@columns.merge(key => ca))
   end
@@ -20,7 +20,7 @@ class CAFrame
   def drop(*names)
     cols = @columns.dup
     names.each do |name|
-      key = name.to_s
+      key = column_key(name, "drop")
       raise KeyError, "no column #{key.inspect}" unless cols.key?(key)
       cols.delete(key)
     end
@@ -33,8 +33,8 @@ class CAFrame
   def rename(mapping)
     norm = {}
     mapping.each do |old, new|
-      o = old.to_s
-      n = new.to_s
+      o = column_key(old, "rename")
+      n = column_name_arg(new, "rename")
       raise KeyError, "no column #{o.inspect}" unless @columns.key?(o)
       if n != o && @columns.key?(n)
         raise ArgumentError, "rename target #{n.inspect} already exists"
@@ -65,7 +65,7 @@ class CAFrame
   # @raise [ArgumentError] when the column is not text or 1-D, +into:+ names
   #   fewer than two columns or one twice, or names a column already there.
   def split_column(name, sep, into:)
-    key = name.to_s
+    key = column_key(name, "split_column")
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
     unless string_column?(col) && col.ndim == 1
       raise ArgumentError, "split_column: #{key.inspect} is not a one-dimensional text column"
@@ -73,7 +73,7 @@ class CAFrame
     unless sep.is_a?(String) || sep.is_a?(Regexp)
       raise ArgumentError, "split_column: sep must be a String or a Regexp (got #{sep.inspect})"
     end
-    names = Array(into).map(&:to_s)
+    names = Array(into).map { |n| column_name_arg(n, "split_column") }
     if names.size < 2 || names.uniq.size != names.size
       raise ArgumentError,
             "split_column: into: names two or more columns, each once (got #{names.inspect})"
@@ -177,7 +177,7 @@ class CAFrame
   #
   # @return [CAFrame] a new frame; the other columns are shared.
   def unstack_column(name, into: nil)
-    key = name.to_s
+    key = column_key(name, "unstack_column")
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
     if col.ndim < 2
       raise ArgumentError, "unstack_column: #{key.inspect} is one-dimensional; there is nothing to unstack"
@@ -218,12 +218,10 @@ class CAFrame
     rebuild(rebuilt)
   end
 
-  # A column name given as an argument: a non-empty String, as the frame's
-  # column keys are.
+  # A column name given as an argument for a column to make: a non-empty
+  # String, as the frame's column keys are.
   private def column_name_arg(name, verb)
-    unless name.is_a?(String)
-      raise TypeError, "#{verb}: a column name is a String (got #{name.inspect})"
-    end
+    column_key(name, verb)
     raise ArgumentError, "#{verb}: a column name can not be empty" if name.empty?
     name
   end
@@ -246,7 +244,7 @@ class CAFrame
               end
               keys[i..(selection.exclude_end? ? j - 1 : j)]
             when Array
-              selection.map(&:to_s).each do |n|
+              selection.map { |n| column_key(n, verb) }.each do |n|
                 raise KeyError, "#{verb}: no column #{n.inspect}" unless @columns.key?(n)
               end
             when Regexp
@@ -270,7 +268,7 @@ class CAFrame
   # raises — recode by rebuilding and rebinding instead.
   def mask_eq(name, value)
     refuse_if_frozen
-    self[name][:eq, value] = UNDEF
+    self[column_key(name, "mask_eq")][:eq, value] = UNDEF
     self
   end
 
@@ -356,7 +354,7 @@ class CAFrame
         end
         resolve_cast_map(name_or_map, label)
       else
-        { name_or_map.to_s => type }
+        { column_key(name_or_map, label) => type }
       end
     # Read every column before rebinding any, so a raise leaves the frame as
     # it was.
@@ -378,7 +376,7 @@ class CAFrame
         raise ArgumentError, "#{label} takes column names (Strings) and :default " \
                              "as keys (got #{key.inspect})"
       else
-        Array(key).each { |name| named[name.to_s] = t }
+        Array(key).each { |name| named[column_key(name, label)] = t }
       end
     end
     named.each_key do |name|
@@ -489,7 +487,7 @@ class CAFrame
       raise ArgumentError,
             "on_error: must be :mask, :warn or :raise (got #{on_error.inspect})"
     end
-    key = name.to_s
+    key = column_key(name, "parse_to_time")
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
     unless string_column?(col)
       raise ArgumentError,
@@ -511,7 +509,7 @@ class CAFrame
   #
   #   df.infer_time_format("date")   # => "%d/%m/%Y"
   def infer_time_format(name)
-    key = name.to_s
+    key = column_key(name, "infer_time_format")
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
     unless string_column?(col)
       raise ArgumentError, "column #{key.inspect} is #{col.data_type}, not text"
@@ -542,7 +540,7 @@ class CAFrame
   #   df.to_time("time", CATime::Grid.parse("days since 1980-01-01 12:00"))
   def to_time(name, grid = nil, unit: :s, epoch: nil)
     refuse_if_frozen
-    key = name.to_s
+    key = column_key(name, "to_time")
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
     raw = integer_serial_column(col, key)
     grid = unit if unit.is_a?(CATime::Grid)
@@ -579,7 +577,7 @@ class CAFrame
   # `df.append(name, df[name].strip_mask(method: :forward))`.
   def fill(name, method_or_value)
     refuse_if_frozen
-    key = name.to_s
+    key = column_key(name, "fill")
     raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
     col = @columns[key]
     # An N-D column is filled down the rows: each position on its trailing

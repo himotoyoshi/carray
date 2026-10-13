@@ -316,7 +316,7 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     assert_equal [1.55, -2.35, -1.55, 2.35, 0.0],
                  (@df["temp"] - g.mean("temp", keep_rows: true)).to_a.map { |v| v.round(2) }
     assert_raise(KeyError) { g.mean("nope") }
-    assert_raise(ArgumentError) { g.mean(:temp) }
+    assert_raise(TypeError) { g.mean(:temp) }
     err = assert_raise(ArgumentError) { g.sum("station") }
     assert_equal 'sum: column "station" (object) has no sum', err.message
   end

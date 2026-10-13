@@ -30,12 +30,33 @@ class TestCAFrameConstruction < Test::Unit::TestCase
     assert_raise(ArgumentError) { CAFrame.new(a: CA_INT32([1, 2])) }
   end
 
-  def test_symbol_key_in_explicit_hash_coerced
-    # An explicit column hash has no option ambiguity; symbol keys become
-    # strings so the internal Hash is uniformly string-keyed.
-    df = CAFrame.new({ a: CA_INT32([1, 2]) })
-    assert_equal ["a"], df.column_names
-    assert_equal [1, 2], df["a"].to_a
+  # Column names are Strings in every verb; a Symbol is refused, in an
+  # explicit column hash as well as in inline pairs.
+  def test_symbol_column_names_are_refused
+    err = assert_raise(TypeError) { CAFrame.new({ a: CA_INT32([1, 2]) }) }
+    assert_equal "CAFrame.new: a column name is a String (got :a)", err.message
+    df = CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_INT32([3, 4]), "s" => CA_OBJECT(["x_y", "z_w"]))
+    {
+      "select"      => -> { df.select(:a) },
+      "drop"        => -> { df.drop(:a) },
+      "rename"      => -> { df.rename("a" => :x) },
+      "append"      => -> { df.append(:c, CA_INT32([1, 2])) },
+      "sort_by_key" => -> { df.sort_by_key([:a, :desc]) },
+      "set_index"   => -> { df.copy.set_index(:a) },
+      "fill"        => -> { df.fill(:a, 0) },
+      "cast"        => -> { df.cast(:a, :float64) },
+      "pivot"       => -> { df.pivot(index: :a, columns: "b", values: "a") },
+      "melt"        => -> { df.melt(id: :a, value_columns: ["b"]) },
+      "join"        => -> { df.join(df.select("a"), on: :a) },
+      "split_column" => -> { df.split_column("s", "_", into: [:x, :y]) },
+      "describe"    => -> { df.describe(:a) },
+      "mean"        => -> { df.group_by("s").mean(:a) },
+      "aggregate"   => -> { df.group_by("s").aggregate(x: ["a", :sum]) },
+    }.each do |verb, call|
+      err = assert_raise(TypeError, verb) { call.() }
+      assert_match(/\A#{verb}: a column name is a String \(got :\w+\)\z/, err.message)
+    end
+    assert_equal ["a"], df.select("a").column_names
   end
 
   def test_ruby_array_column_coerced
