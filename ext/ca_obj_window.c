@@ -672,7 +672,6 @@ ca_window_setup (CAWindow *ca, CArray *parent,
   ca_size_t *dim;
   ca_size_t bytes, elements;
   int i;
-  int any_mask;
 
   data_type = parent->data_type;
   ndim      = parent->ndim;
@@ -747,19 +746,25 @@ ca_window_setup (CAWindow *ca, CArray *parent,
     }
   }
 
-  /* Mask is needed if ANY axis uses MASK policy (per-axis). */
-  any_mask = 0;
-  for (i=0; i<ndim; i++) {
+  return 0;
+}
+
+/* A window with an axis of MASK bounds has a mask of its own.  Making it
+   asks the parent for its mask, which can raise (a CAObject answers in
+   Ruby), so the constructor makes it after the setup under
+   ca_fill_or_free; see ca_view_inherit_mask. */
+VALUE
+ca_window_create_bounds_mask (VALUE view)
+{
+  CAWindow *ca = (CAWindow *) view;
+  int8_t i;
+  for (i = 0; i < ca->ndim; i++) {
     if ( ca->bounds[i] == CA_BOUNDS_MASK ) {
-      any_mask = 1;
+      ca_create_mask((CArray *) ca);
       break;
     }
   }
-  if ( any_mask ) {
-    ca_create_mask(ca);
-  }
-
-  return 0;
+  return Qnil;
 }
 
 CAWindow *
@@ -770,6 +775,7 @@ ca_window_new (CArray *parent,
   ca_window_setup(NULL, parent, start, count, bounds, fill);
   ca = (CAWindow *) ca_array_alloc(CA_OBJ_WINDOW, parent->ndim);
   ca_window_setup(ca, parent, start, count, bounds, fill);
+  ca_fill_or_free((CArray *) ca, ca_window_create_bounds_mask, (VALUE) ca);
   return ca;
 }
 
@@ -1592,6 +1598,7 @@ rb_ca_window_initialize_copy (VALUE self, VALUE other)
     ca_array_pool_alloc(ca, CA_OBJ_WINDOW, cs->ndim);
   }
   ca_window_setup(ca, cs->parent, cs->start, cs->count, cs->bounds, cs->fill);
+  ca_window_create_bounds_mask((VALUE) ca);
 
   return self;
 }

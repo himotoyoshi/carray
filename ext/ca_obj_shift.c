@@ -16,6 +16,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_window_create_bounds_mask */
 #include "ca_obj_face.h"  /* CA_FACE_LIFT_IF_FACE */
 
 /* External: CAWindow's operation table + setup are the basis for CAShift. */
@@ -127,6 +128,7 @@ ca_shift_new (CArray *parent, ca_size_t *shift, char *fill, int8_t *roll,
   ca_shift_setup(NULL, parent, shift, fill, roll, fill_mask);
   ca = (CAShift *) ca_array_alloc(CA_OBJ_SHIFT, parent->ndim);
   ca_shift_setup(ca, parent, shift, fill, roll, fill_mask);
+  ca_fill_or_free((CArray *) ca, ca_window_create_bounds_mask, (VALUE) ca);
   return ca;
 }
 
@@ -306,6 +308,7 @@ rb_ca_shift_initialize_copy (VALUE self, VALUE other)
     ca_array_pool_alloc(ca, CA_OBJ_SHIFT, cs->ndim);
   }
   ca_shift_setup(ca, cs->parent, shift, cs->fill, roll, fill_mask);
+  ca_window_create_bounds_mask((VALUE) ca);
 
   return self;
 }
