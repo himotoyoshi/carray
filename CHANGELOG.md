@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: an index that picks no cells may start at the end of an axis, as an
+  empty slice at the end of a Ruby Array does: `a[2...2]`, `a[2..]`,
+  `a[[2, 0]]` and `(2...2).step(1)` of a length-2 array are empty, and
+  `df[0...0]` of a `CAFrame` with no rows is an empty frame. These raised
+  `IndexError`. `[nil, step]` of an axis of length 0 is empty too.
+  An index past the end still raises, and a range that ends before it
+  starts still reads backwards.
+
 - New: `CArray#is_between(lo, hi, exclude:)` is true where a value lies
   between two bounds, both included unless `exclude: :lower`, `:upper` or
   `:both` leaves them out; a Range says the same (`a.is_between(2...4)`),

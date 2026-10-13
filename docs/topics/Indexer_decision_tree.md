@@ -138,14 +138,14 @@ Each `argv[i]` is classified, populating `info.index_type[i]` and
 | `Integer`                                       | `SCALAR`            | `scalar = k` (negative normalised)          | `IndexError` on out-of-range                 |
 | `nil`                                           | `ALL`               | none                                        | —                                            |
 | `false` or `:~`                                 | rubber expansion: fill `rndim = ndim - argc + 1` axes with `ALL` (`:~` = rubber sigil, RB.1; `false` legacy) | — | —                  |
-| `Range`                                         | `BLOCK`             | `{start, count, step = ±1}` (see §3.3.1)    | range check; `start == last && excl` degenerates to `{start, 0, 1}` |
+| `Range`                                         | `BLOCK`             | `{start, count, step = ±1}` (see §3.3.1)    | range check; an empty range (`2...2`, or `2..` at the end) is `{start, 0, 1}` and may start at the end of the axis |
 | `Enumerator::ArithmeticSequence`                | `BLOCK`             | `{start, count, step}` (step from the seq)  | `step == 0` raises `ArgumentError`            |
 | `[nil]`                                         | `ALL`               | none                                        | —                                            |
 | `[Range]`                                       | (re-enters Range path) | —                                        | —                                            |
 | `[Integer]`                                     | `BLOCK`             | `{start = k, count = 1, step = 1}`          | range check                                  |
-| `[nil, step]`                                   | `BLOCK`             | `{start = 0, count = dim/step + 1, step}`   | `step == 0` raises                           |
+| `[nil, step]`                                   | `BLOCK`             | `{start = 0, count = dim/step + 1, step}` (`count = 0` when `dim == 0`) | `step == 0` raises                           |
 | `[Range, step]`                                 | `BLOCK`             | `{start, count, step}`                      | range check; `step == 0` raises              |
-| `[start, count]`                                | `BLOCK`             | `{start, count, step = 1}`                  | range check on `start` and `start+count-1`   |
+| `[start, count]`                                | `BLOCK`             | `{start, count, step = 1}`                  | range check on `start` and `start+count-1`; with `count == 0` `start` may be the end of the axis |
 | `[start, count, step]`                          | `BLOCK`             | `{start, count, step}`                      | range check; `step == 0` raises              |
 | `Array` of any other length                     | raises `IndexError` | —                                           | —                                            |
 | `:>`                                            | `SYMBOL`            | `{id = :>, spec = nil}`                     | slab-axis (iterator) marker (SI.2)           |
@@ -168,12 +168,13 @@ excl  = RTEST(iv_excl)
 step  = NUM2SIZE(arg.step) if ArithmeticSequence,
         else ±1 (+1 when last >= start, -1 otherwise)
 
-normalise start
 if last < 0: last += dim[i]      # plain addition, no bounds check
 
-if excl && start == last:
+if (excl && start == last) || (iv_end is nil && start == dim[i]):
+  # no cells: the start may be the end of the axis, 0 <= start <= dim[i]
   index[i].block = {start, count = 0, step = 1}
 else:
+  normalise and bounds-check start  (0 <= start < dim[i])
   if excl: last += (last >= start ? -1 : +1)
   bounds-check last
   count = |last - start| / |step| + 1

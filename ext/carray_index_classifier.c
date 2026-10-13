@@ -96,6 +96,32 @@ ca_classifier_normalize_axis_index (ca_size_t k, ca_size_t dim, int axis, int ra
   return k;
 }
 
+/* Whether a range picks no cells along an axis of length dim: an exclusive
+   range that ends where it starts, or an endless one that starts at the end
+   of the axis.  `last` has been counted from the end already; `start` has
+   not.  A range in CArray otherwise always picks a cell -- one ending
+   before its start reads backwards. */
+static inline int
+ca_classifier_range_is_empty (ca_size_t start, ca_size_t last, int excl,
+                              int endless, ca_size_t dim)
+{
+  ca_size_t s = ( start < 0 ) ? start + dim : start;
+  return endless ? ( s == dim ) : ( excl && s == last );
+}
+
+/* The first index of a run of cells along an axis.  A run of no cells may
+   start at the end of the axis (position n), as an empty slice at the end
+   of a Ruby Array does; a run with cells has to start on one. */
+static inline ca_size_t
+ca_classifier_run_start (ca_size_t idx, ca_size_t n, int axis, int empty)
+{
+  ca_size_t i = ( idx < 0 ) ? idx + n : idx;
+  if ( i < 0 || i > n || ( ! empty && i == n ) ) {
+    ca_index_out_of_range_at(idx, n, axis);
+  }
+  return i;
+}
+
 /* Flat-address normalisation for the `argc == 1, ndim > 1,
    Integer` path.  CA_CHECK_INDEX does not carry axis info in its
    message, which is the intended behaviour on the flat path. */
@@ -212,18 +238,22 @@ ca_classifier_axis_from_range (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
 
   info->index_type[axis] = CA_IDX_BLOCK;
 
-  if ( info->range_check ) {
-    start = ca_index_in_range_at(start, dim, axis);
-  }
-
   if ( last < 0 ) {
     last += dim;  /* don't use CA_CHECK_INDEX for excl */
   }
-  if ( excl && start == last ) {
+  /* No cells: an exclusive range that ends where it starts, or an endless
+     one that starts at the end of the axis. */
+  if ( ca_classifier_range_is_empty(start, last, excl, NIL_P(iv_end), dim) ) {
+    if ( info->range_check ) {
+      start = ca_classifier_run_start(start, dim, axis, 1);
+    }
     info->index[axis].block.start = start;
     info->index[axis].block.count = 0;
     info->index[axis].block.step  = 1;
     return;
+  }
+  if ( info->range_check ) {
+    start = ca_index_in_range_at(start, dim, axis);
   }
   if ( excl ) {
     last += ( last >= start ) ? -1 : 1;
@@ -269,21 +299,20 @@ ca_classifier_axis_from_arithseq (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
 
   info->index_type[axis] = CA_IDX_BLOCK;
 
+  if ( last < 0 ) {
+    last += dim;
+  }
   /* CAREFUL: always range-check start on the ArithSeq path,
      ignoring info->range_check.  An ArithSeq with a negative or
      out-of-range start silently produces an empty region if this
      check is deferred, which upstream callers do not expect. */
-  start = ca_index_in_range_at(start, dim, axis);
-
-  if ( last < 0 ) {
-    last += dim;
-  }
-  if ( excl && start == last ) {
-    info->index[axis].block.start = start;
+  if ( ca_classifier_range_is_empty(start, last, excl, NIL_P(iv_end), dim) ) {
+    info->index[axis].block.start = ca_classifier_run_start(start, dim, axis, 1);
     info->index[axis].block.count = 0;
     info->index[axis].block.step  = 1;
     return;
   }
+  start = ca_index_in_range_at(start, dim, axis);
   if ( excl ) {
     last += ( last >= start ) ? -1 : 1;
   }
@@ -357,9 +386,12 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
                  "step in index equals to 0 in block reference");
       }
       last = dim - 1;
-      count = ( step < 0 ) ? 1 : (last / step + 1);
-      bound = start + (count - 1) * step;
-      bound = ca_index_in_range_at(bound, dim, axis);
+      /* every cell of the axis at that step: none of an axis of length 0 */
+      count = ( dim == 0 ) ? 0 : ( step < 0 ) ? 1 : (last / step + 1);
+      if ( count > 0 ) {
+        bound = start + (count - 1) * step;
+        bound = ca_index_in_range_at(bound, dim, axis);
+      }
       info->index[axis].block.start = start;
       info->index[axis].block.count = count;
       info->index[axis].block.step  = step;
@@ -381,14 +413,14 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
         rb_raise(rb_eArgError,
                  "step in index equals to 0 in block reference");
       }
-      start = ca_index_in_range_at(start, dim, axis);
       if ( last < 0 ) last += dim;
-      if ( excl && start == last ) {
-        info->index[axis].block.start = start;
+      if ( ca_classifier_range_is_empty(start, last, excl, NIL_P(iv_end), dim) ) {
+        info->index[axis].block.start = ca_classifier_run_start(start, dim, axis, 1);
         info->index[axis].block.count = 0;
         info->index[axis].block.step  = 1;
         return;
       }
+      start = ca_index_in_range_at(start, dim, axis);
       if ( excl ) {
         last += ( last >= start ) ? -1 : 1;
       }
@@ -420,8 +452,9 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
       given = NUM2SIZE(a0);
       count = NUM2SIZE(a1);
       /* The start counts from the end when negative; the last cell is
-         counted from that start and has to be inside as it is. */
-      start = ca_index_in_range_at(given, dim, axis);
+         counted from that start and has to be inside as it is.  A count
+         of 0 may start at the end of the axis. */
+      start = ca_classifier_run_start(given, dim, axis, count == 0);
       if ( count > 0 &&
            ( __builtin_add_overflow(start, count - 1, &bound) || bound >= dim ) ) {
         rb_raise(rb_eIndexError,
@@ -448,8 +481,9 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
     }
     /* The start counts from the end when negative; the last cell is
        counted from that start and has to be inside as it is, not a bound
-       that wraps back in from either end. */
-    start = ca_index_in_range_at(given, dim, axis);
+       that wraps back in from either end.  A count of 0 may start at the
+       end of the axis. */
+    start = ca_classifier_run_start(given, dim, axis, count == 0);
     if ( count > 0 &&
          ( __builtin_mul_overflow(count - 1, step, &bound) ||
            __builtin_add_overflow(start, bound, &bound) ||
