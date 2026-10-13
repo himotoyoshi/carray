@@ -679,8 +679,18 @@ class CASegmentIterator < CAIterator
     else
       local[sorted] = CArray.int64(m).seq! - first
     end
+    if descending
+      # The highest rank of each segment: one less than its present cells
+      # for :ordinal, the rank of its last present cell for :dense. A
+      # segment's present cells come first in its sorted run.
+      top = count_not_masked - 1
+      if method == :dense
+        last = (@bounds[0...-1] + top).pmax(0).pmin(m - 1)
+        top  = local[sorted[last]]
+      end
+      local = top[seg] - local
+    end
     local[present.not] = UNDEF
-    local = (count_not_masked[seg] - 1) - local if descending
     out.reshape(@value.elements)[perm] = local
     out
   end

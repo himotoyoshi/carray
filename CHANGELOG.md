@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `order(descending: true, method: :dense)` gives dense ranks: `0` is
+  the largest value and the ranks have no gaps (`[1, 1, 2]` gives `[1, 1, 0]`,
+  was `[2, 2, 1]`). The same holds for `order` on groups (`CAFrame#group_by`,
+  `group_by_category`). Sorting by such a key is unaffected.
+
+- Fix: `order(method: :dense)` gives every NaN the same rank, after the
+  numbers, as sorting and `unique` already treat NaN as one value. With it,
+  `sort_by_key(..., order: :desc)` passes NaN ties on to the next key and
+  keeps their rows in order.
+
 - Fix: `CAConstString#sort_index` with no arguments is fast again: since
   3.0.2 it decoded every cell into a Ruby String first and was about 8 times
   slower than in 3.0.0. With no arguments, `sort_index` and `sort_addr` now

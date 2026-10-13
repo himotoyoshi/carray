@@ -99,15 +99,17 @@ class CArray
   #   - `:ordinal` (default) — every cell gets a distinct rank; ties
   #     are broken by original position (stable). This is a total
   #     order: no two cells ever compare equal.
-  #   - `:dense` — tied values share one rank (no gaps). Useful as a
-  #     `sort_addr` priority key: an `:ordinal` key never ties, so a
-  #     lower-priority key after it is never consulted; a `:dense` key
+  #   - `:dense` — tied values share one rank (no gaps). Every NaN is
+  #     one value and shares one rank, placed after the numbers. Useful
+  #     as a `sort_addr` priority key: an `:ordinal` key never ties, so
+  #     a lower-priority key after it is never consulted; a `:dense` key
   #     preserves the tie so it is.
   #
-  #   `descending:` negates the rank order (`(n-1) - rank`, `n` =
-  #   fiber element count minus masked cells). This composes correctly
-  #   with `method: :dense`: ties stay tied after the transform, and
-  #   group-to-group order still reverses.
+  #   `descending:` reverses the ranks within each fiber, so `0` is the
+  #   largest value: an `:ordinal` rank `r` becomes `(n-1) - r` (`n` =
+  #   the fiber's unmasked cells), a `:dense` rank `r` becomes
+  #   `top - r` (`top` = the fiber's highest dense rank), so dense ranks
+  #   stay without gaps and ties stay tied.
   #
   #   Masked cells are excluded from ranking (own cell becomes UNDEF,
   #   like `rank_index`); `descending:`/`method:` apply to the

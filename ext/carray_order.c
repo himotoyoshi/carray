@@ -807,11 +807,10 @@ rb_ca_nsmallest (int argc, VALUE *argv, VALUE self)
  * ever compare equal), so a later sort_addr key never gets consulted;
  * dense ranks preserve ties, so it does.
  *
- * descending: still works under method: :dense via the same
- * (n-1)-ascending transform below: n is fixed per-fiber, so within a
- * tied group ascending values are equal and (n-1)-ascending stays
- * equal too -- ties survive the transform, and the group-to-group
- * order still reverses correctly. */
+ * descending: reverses the ascending ranks within each fiber: an
+ * ordinal rank r becomes (n-1)-r, n the fiber's present cells; a dense
+ * rank r becomes top-r, top the fiber's highest dense rank, so the
+ * largest value is 0 and the ranks stay without gaps. */
 
 static VALUE
 rb_ca_order (int argc, VALUE *argv, VALUE self)
@@ -864,8 +863,21 @@ rb_ca_order (int argc, VALUE *argv, VALUE self)
     /* `-` via rb_funcall handles both Integer-Integer and
        CArray/Integer mixed receivers uniformly via Ruby's operator
        dispatch.  No single C entry covers both. */
-    VALUE n_minus_1 = rb_funcall(n, id_sub, 1, INT2FIX(1));
-    diff = rb_funcall(n_minus_1, id_sub, 1, asc);
+    VALUE top;
+    if ( dense ) {
+      if ( NIL_P(raxis) ) {
+        top = rb_funcall(asc, rb_intern("max"), 0);
+        if ( top == CA_UNDEF ) top = INT2FIX(0);   /* no present cell */
+      } else {
+        VALUE kw = rb_hash_new();
+        rb_hash_aset(kw, ID2SYM(rb_intern("axis")), LONG2NUM(rb_ca_normalize_axis_value(self, raxis, "order")));
+        rb_hash_aset(kw, ID2SYM(rb_intern("keep_axis")), Qtrue);
+        top = rb_funcallv_kw(asc, rb_intern("max"), 1, &kw, RB_PASS_KEYWORDS);
+      }
+    } else {
+      top = rb_funcall(n, id_sub, 1, INT2FIX(1));
+    }
+    diff = rb_funcall(top, id_sub, 1, asc);
   } else {
     diff = asc;
   }

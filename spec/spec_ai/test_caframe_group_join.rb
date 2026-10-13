@@ -1084,6 +1084,14 @@ class TestCAFrameSort < Test::Unit::TestCase
     assert_equal %w[a a z m], m["station"].to_a
   end
 
+  def test_sort_by_key_descending_nan_ties_fall_through_to_next_key
+    nan = Float::NAN
+    df = CAFrame.new("a" => CA_FLOAT64([nan, 1, nan, nan, 1]), "b" => CA_INT32([3, 9, 1, 2, 0]))
+    assert_equal [1, 2, 3, 0, 9], df.sort_by_key(["a", :desc], ["b", :asc])["b"].to_a
+    df = CAFrame.new("a" => CA_FLOAT64([nan, 1, nan]), "b" => CA_INT32([0, 1, 2]))
+    assert_equal [0, 2, 1], df.sort_by_key(["a", :desc])["b"].to_a
+  end
+
   def test_sort_by_block_derived_key
     s = @df.sort_by { |f| (f["temp"] - 24).abs }
     assert_equal [25.0, 22.0, 19.0, 30.0], s["temp"].to_a
