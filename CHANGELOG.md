@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `windows(on:).bounds` with a time key reports the bounds the windows
+  were cut at when the width is not a whole number of the key's unit (a
+  "15 minutes" width on a 10-minute key, "6 months" on a year key): the
+  bounds are given on the finer unit the two share instead of being cut
+  down to the key's unit.
+
 - Fix: `windows(on:)` with an int64 or time key no longer empties windows
   when `t - before` or `t + after` goes beyond the int64 range (a width of
   a few hundred years on a nanosecond time key, or a key near the int64

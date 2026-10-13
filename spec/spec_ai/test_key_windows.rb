@@ -154,6 +154,20 @@ class TestKeyWindows < Test::Unit::TestCase
     end
   end
 
+  # A width the key's unit does not divide gives bounds on the finer unit,
+  # the bounds the windows were cut at.
+  def test_bounds_on_a_unit_finer_than_the_key
+    t = CArray.time(["2024-01-01 00:00", "2024-01-01 00:10"], unit: "10 minutes")
+    lower, = CA_FLOAT64([1, 2]).windows(on: t, before: "15 minutes").bounds
+    assert_equal %w[2023-12-31T23:45:00Z 2023-12-31T23:55:00Z], lower.to_a.map(&:to_s)
+    y = CArray.time(%w[2020 2021], unit: :Y)
+    lower, = CA_FLOAT64([1, 2]).windows(on: y, before: "6 months").bounds
+    assert_equal %w[2019-07 2020-07], lower.to_a.map(&:to_s)
+    h = CArray.time(["2024-01-01 00:00"], unit: :m)
+    lower, = CA_FLOAT64([1]).windows(on: h, before: "1 hour").bounds
+    assert_equal "m", lower.unit.to_s
+  end
+
   # A bound beyond the range of an int64 key holds every key on that side,
   # rather than wrapping round and emptying the windows that follow.
   def test_bounds_beyond_int64_hold_every_key
