@@ -95,4 +95,25 @@ class TestLocateNearestExact < Test::Unit::TestCase
     assert_equal [30, 10], l.join_asof(r, on: "k", direction: :floor)["w"].to_a
     assert_equal [30, 10], l.join_asof(r, on: "k", direction: :ceil)["w"].to_a
   end
+
+  # A key held as fixed-length bytes has no nearest.  The refusal names the
+  # method the caller called (it named the private __count_below__), and
+  # join_asof names its on: column.  A time key, whose storage is a number,
+  # is searched.
+  def test_a_fixed_length_bytes_key_is_refused_by_name
+    k  = CA_FIXLEN(["ab", "cd"], bytes: 2)
+    fs = CArray.fixlen_string(["ab", "cd"], bytes: 2)
+    e = assert_raise(CArray::DataTypeError) { k.locate_nearest_addr(k) }
+    assert_match(/\Alocate_nearest_addr: a fixlen key is held as fixed-length bytes/, e.message)
+    e = assert_raise(CArray::DataTypeError) { fs.locate_nearest_addr(fs) }
+    assert_match(/\Alocate_nearest_addr: a CAFixlenString key/, e.message)
+    assert_raise(CArray::DataTypeError) { CA_INT32([1]).locate_nearest_addr(k) }
+    [k, fs].each do |key|
+      f = CAFrame.new("t" => key, "x" => CA_INT32([1, 2]))
+      e = assert_raise(CArray::DataTypeError) { f.join_asof(f, on: "t") }
+      assert_match(/\Ajoin_asof: the on: key "t" is held as fixed-length bytes/, e.message)
+    end
+    t = CArray.time(["2024-01-01", "2024-01-02"], unit: :D)
+    assert_equal [0, 1], t.locate_nearest_addr(t).to_a
+  end
 end
