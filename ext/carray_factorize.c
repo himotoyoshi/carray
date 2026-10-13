@@ -2253,10 +2253,10 @@ rb_ca_value_counts_flat (VALUE self)
 
 /* @overload __nunique__(axis, keep_axis)
 
-   INTERNAL (CArray#nunique). Count the distinct values along axis, one linear
-   pass per fiber with an independent seen-set. Returns a reduced
-   CA_INT64 CArray of self.shape with axis removed (or kept as length-1 when
-   keep_axis). Masked cells do not participate; an all-masked fiber counts 0
+   INTERNAL (CArray#nunique). Count the distinct values along axis (an Integer
+   or an Array of them), one linear pass per fiber with an independent
+   seen-set. Returns a reduced CA_INT64 CArray of self.shape with the axes
+   removed (or kept as length-1 when keep_axis). Masked cells do not participate; an all-masked fiber counts 0
    (an empty set has zero distinct values, not UNDEF -- nunique has identity 0).
    Numeric distinctness collapses all NaN to one value and treats -0.0 == +0.0;
    object keys on rb_hash + rb_eql and fixlen on a byte-hash + memcmp, reproducing
@@ -2288,14 +2288,11 @@ fz_nunique_body (VALUE arg)
     rb_raise(rb_eRuntimeError, "__nunique__: need ndim >= 1");
   }
 
-  int axis = NUM2INT(vaxis);
-  if ( axis < 0 || axis >= ca->ndim ) {
-    rb_raise(rb_eArgError, "__nunique__: axis %d out of range", axis);
-  }
+  int8_t axes[CA_RANK_MAX];
+  int8_t naxes = rb_ca_parse_reduce_axes_kw_ctx(vaxis, ca, axes, "nunique");
   int keep_axis = RTEST(vkeep);
 
-  int8_t ax = (int8_t) axis;
-  VALUE vout = rb_ca_new_reduced(self, &ax, 1, CA_INT64, keep_axis);
+  VALUE vout = rb_ca_new_reduced(self, axes, naxes, CA_INT64, keep_axis);
   CArray *cout;
   TypedData_Get_Struct(vout, CArray, &carray_data_type, cout);
   int64_t *op = (int64_t *) cout->ptr;
@@ -2306,7 +2303,7 @@ fz_nunique_body (VALUE arg)
   else                        { fz_hash_init(&h); }
 
   ca_iter_state *st = &fr->st[0];
-  int rc = ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, &ax, 1, 0);
+  int rc = ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, axes, naxes, 0);
   if ( rc != CA_ITER_OK ) {
     fz_hash_free(&h);
     rb_raise(rb_eRuntimeError, "__nunique__: kernel_iterator init failed rc=%d", rc);

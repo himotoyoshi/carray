@@ -12,7 +12,9 @@ class CArray
   #   whole array and returns an Integer. With `axis: k` it counts per
   #   fiber along axis `k`, returning a reduced `CA_INT64` CArray
   #   (shape = self.shape with axis `k` removed; `keep_axis: true` keeps
-  #   it as a length-1 axis). The shape rule matches other per-axis
+  #   it as a length-1 axis). An Array of axes counts over all of them
+  #   together, one count per remaining position; naming every axis
+  #   returns an Integer. The shape rule matches other per-axis
   #   reductions such as `sum(axis:)`.
   #
   #   The distinct count has identity 0: an empty array, an all-masked
@@ -25,12 +27,12 @@ class CArray
   #   distinctness follows Ruby `eql?` / `hash` (which, unlike numeric,
   #   does not collapse distinct NaN objects).
   #
-  #   @param axis [Integer, nil] axis to count along; `nil` counts over
-  #     the whole array.
+  #   @param axis [Integer, Array<Integer>, nil] axis or axes to count
+  #     over; `nil` counts over the whole array.
   #   @param keep_axis [Boolean] when `axis` is given, keep the reduced
   #     axis as a length-1 axis instead of dropping it.
-  #   @return [Integer, CArray] Integer for `axis: nil`, otherwise a
-  #     reduced `CA_INT64` CArray.
+  #   @return [Integer, CArray] Integer for `axis: nil` or every axis,
+  #     otherwise a reduced `CA_INT64` CArray.
   # @overload nunique(along: k)
   #   Returns how many distinct **sub-arrays** `self` holds, comparing
   #   whole sub-arrays rather than cells: `along: k` names the axis
@@ -60,7 +62,10 @@ class CArray
       # then read the single reduced cell as an Integer.
       flatten.send(:__nunique__, 0, false)[0]
     else
-      __nunique__(normalize_axis(axis, "nunique"), keep_axis)
+      axes = Array(axis).map { |a| normalize_axis(a, "nunique") }
+      counts = __nunique__(axes, keep_axis)
+      # naming every axis reduces to one count, an Integer as sum(axis:) gives
+      (axes.size == ndim && ! keep_axis) ? counts[0] : counts
     end
   end
 
