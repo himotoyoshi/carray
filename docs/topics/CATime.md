@@ -19,8 +19,9 @@ representation.
 The epoch is fixed at **1970-01-01 UTC** and the calendar is proleptic
 Gregorian; parsing is UTC by default and does not depend on the Ruby
 `DateTime` class (it uses `Date._parse` plus an internal civil-date
-kernel). Reference-time calendars (NetCDF CF conventions and the like)
-are left to external gems. CATime is its own type — an integer index
+kernel). Counts from another reference time (a NetCDF CF `units`
+attribute) convert in core; non-standard calendars (CF `360_day`,
+`noleap`, …) are left to external gems. CATime is its own type — an integer index
 on a tick grid, with its own vocabulary; the appendix gives a correspondence table
 for migrating existing time code.
 
@@ -1394,11 +1395,13 @@ UNDEF.
 
 ### 15.2 Fixed by design
 
-- The epoch is **1970-01-01 UTC**, fixed.
-  Arbitrary reference times — as used by NetCDF CF conventions — are
-  delegated to external gems. (Integer bucketing / matching against a grid
-  is provided in core by the step system, §11; only non-standard calendars
-  stay external.)
+- The epoch is **1970-01-01 UTC**, fixed. A count from another reference
+  time — a NetCDF CF `units` attribute such as `"hours since 1990-01-01"` —
+  converts in core: `CATime::Grid.parse` reads the attribute, and
+  `CArray#time(unit:, origin:)` / `CAFrame#to_time` rebase the counts onto
+  the epoch (§2.3, §11). Only **non-standard calendars** (CF `360_day`,
+  `noleap` and the like) stay with external gems: CATime's calendar is the
+  proleptic Gregorian one.
 - Storage is **`int64`**, fixed. The parent's `data_type` must match.
   The *surface* is `CA_FIXLEN` for both classes (the NonNumeric gate), so
   the numeric kernels do not dispatch on them: `sqrt(dur)` and a variance

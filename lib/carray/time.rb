@@ -11,7 +11,9 @@
 #   - Same pattern for CATimedelta
 #
 # Base epoch fixed to 1970-01-01 (Unix epoch).
-# NetCDF CF convention (= reference time epoch) is delegated to external gems (timesteps etc.).
+# Counts from another reference time (a NetCDF CF units attribute) convert in
+# core through CATime::Grid; only non-standard calendars are left to external
+# gems.
 
 # Internal: unit-conversion algebra shared by CATime / CATimedelta
 # (used by to_comparable to align a search query to the reference unit).
