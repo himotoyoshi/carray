@@ -12,16 +12,15 @@ class CArray
   #
   #   Out-of-range positions are filled with `lval` (below-range) and
   #   `uval` (above-range); when `lval` is given alone, it fills
-  #   both. Without either, out-of-range positions are masked.
+  #   both. Without either, out-of-range positions are masked, and so
+  #   they are with a fill of `UNDEF`.
   #
   #   When `self` is a Face (CATime / CATimedelta / CACategorical),
-  #   the result is the same Face type, carrying the unit / labels; the
-  #   gather runs on the underlying storage and misses become UNDEF. Fill
-  #   (`lval` / `uval`) is not supported for a Face and raises ArgumentError
-  #   — omit the fill args to get UNDEF at misses.
+  #   the result is the same Face type, carrying the unit / labels, and a
+  #   fill is one of its values (a time for a CATime).
   #   @param idx [CArray] flat addresses, of any shape.
-  #   @param lval [Object, nil] fill for indices `< 0` (non-Face only).
-  #   @param uval [Object, nil] fill for indices `>= self.elements` (non-Face only).
+  #   @param lval [Object, nil] fill for indices `< 0`.
+  #   @param uval [Object, nil] fill for indices `>= self.elements`.
   #   @return [CArray] a fresh array shaped like `idx`; a Face of the same
   #     type when `self` is a Face.
   #   @raise [ArgumentError] if `lval` / `uval` is given and `self` is a Face.

@@ -82,8 +82,16 @@ ca_count_each_body (VALUE arg)
     /* Extract vk as a scalar VALUE via flat addr.  rb_ca_fetch_addr
        takes a ca_size_t addr (not a Ruby VALUE). */
     VALUE vk = rb_ca_fetch_addr(c->rval, k);
-    inner_argv[0] = vk;
-    VALUE sub = rb_ca_count(inner_call_argc, inner_argv, c->self);
+    VALUE sub;
+    /* A masked query cell asks nothing: its count is masked.  Passing it
+       on would ask count(UNDEF), the count of self's masked cells. */
+    if ( vk == CA_UNDEF ) {
+      sub = CA_UNDEF;
+    }
+    else {
+      inner_argv[0] = vk;
+      sub = rb_ca_count(inner_call_argc, inner_argv, c->self);
+    }
 
     /* Place sub into output[..., k] slot.
        Output stride for v-axis = 1, base stride = v_elements. */

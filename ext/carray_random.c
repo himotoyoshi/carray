@@ -88,16 +88,18 @@ typedef struct {
   long           low_long;
   unsigned long  limit;
   int            axis;           /* shuffle!: -1 = all cells */
+  CArray        *mask;           /* shuffle!: self's mask, moved with the values */
 } ca_random_ctx_t;
 
 static void
 ca_random_run (ca_random_ctx_t *c, VALUE rng, VALUE (*fill)(VALUE))
 {
-  CArray *list[2];
+  CArray *list[3];
   ca_rng_resolve(rng, &c->source);
   list[0] = c->ca;
   list[1] = c->source.state;
-  ca_attach_window(2, list, "ww", fill, (VALUE) c);
+  list[2] = c->mask;
+  ca_attach_window(c->mask ? 3 : 2, list, "www", fill, (VALUE) c);
 }
 
 /* The state is attached once the window is open. */
@@ -382,7 +384,7 @@ rb_ca_random_bang(int argc, VALUE *argv, VALUE self)
   }
 
   {
-    ca_random_ctx_t c;
+    ca_random_ctx_t c = { 0 };
     c.ca         = ca;
     c.n          = ca->elements;
     c.is_default = is_default;
@@ -560,7 +562,7 @@ rb_ca_randomn_bang(int argc, VALUE *argv, VALUE self)
   }
 
   {
-    ca_random_ctx_t c;
+    ca_random_ctx_t c = { 0 };
     c.ca = ca;
     c.n  = ca->elements;
     ca_random_run(&c, rng, ca_randomn_bang_fill);
@@ -600,12 +602,16 @@ ca_shuffle_bang_fill (VALUE arg)
     ca_size_t elem_bytes = ca->bytes;
     char *tmp = ALLOCV_N(char, tmp_holder, elem_bytes);
     char *p = ca->ptr;
+    char *m = c->mask ? c->mask->ptr : NULL;
 
     n = ca->elements;
     for (ca_size_t i = n - 1; i > 0; i--) {
       unsigned long j = ca_random_ulong_limited(&c->source, (unsigned long)i);
       if ((ca_size_t)j != i) {
         swap_chunks(p + i * elem_bytes, p + j * elem_bytes, elem_bytes, tmp);
+        if ( m ) {
+          char b = m[i]; m[i] = m[j]; m[j] = b;
+        }
       }
     }
     ALLOCV_END(tmp_holder);
@@ -630,12 +636,16 @@ ca_shuffle_bang_fill (VALUE arg)
 
     for (ca_size_t o = 0; o < outer; o++) {
       char *base = ca->ptr + o * stride;
+      char *mbase = c->mask ? c->mask->ptr + o * n * inner : NULL;
       for (ca_size_t i = n - 1; i > 0; i--) {
         unsigned long j = ca_random_ulong_limited(&c->source, (unsigned long)i);
         if ((ca_size_t)j != i) {
           swap_chunks(base + i * chunk_bytes,
                       base + j * chunk_bytes,
                       chunk_bytes, tmp);
+          if ( mbase ) {
+            swap_chunks(mbase + i * inner, mbase + j * inner, inner, tmp);
+          }
         }
       }
     }
@@ -650,7 +660,7 @@ rb_ca_shuffle_bang(int argc, VALUE *argv, VALUE self)
   CArray *ca;
   VALUE opts = Qnil, v_axis = Qnil;
   int axis = -1;
-  ca_random_ctx_t c;
+  ca_random_ctx_t c = { 0 };
 
   rb_scan_args(argc, argv, "0:", &opts);
   VALUE rng = Qnil;
@@ -670,6 +680,10 @@ rb_ca_shuffle_bang(int argc, VALUE *argv, VALUE self)
 
   c.ca   = ca;
   c.axis = axis;
+  /* The mask moves with the values: a masked cell stays masked wherever
+     it lands. */
+  ca_update_mask(ca);
+  c.mask = ca->mask;
   ca_random_run(&c, rng, ca_shuffle_bang_fill);
   return self;
 }

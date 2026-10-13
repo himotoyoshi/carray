@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `shuffle!` and `shuffle` moved the values but not the mask, so a
+  masked cell's value came into view and another cell went masked; the mask
+  now moves with the values. `project(idx, UNDEF)` filled out-of-range cells
+  with 0 instead of masking them. `count` with a query array that has a
+  masked cell counted self's masked cells there; that count is now masked.
+
 - Fix: `nlargest`, `nsmallest`, their `_index` forms, `partition`,
   `sort_by_key`, `max_by_key`, `min_by_key` and `range` ordered a
   CAConstString by its storage offsets and a record array by its bytes. They

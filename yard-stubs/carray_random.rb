@@ -72,7 +72,9 @@ class CArray
   #   Fisher-Yates permutes `self` in-place and returns `self`.
   #   Without `axis:`, shuffles all cells as if flattened. With
   #   `axis:`, permutes slices along that axis (the trailing
-  #   sub-slab is treated as a byte chunk and swapped whole).
+  #   sub-slab is treated as a byte chunk and swapped whole). The mask
+  #   moves with the values: a masked cell stays masked wherever it
+  #   lands.
   #   @param axis [Integer, nil] axis to permute along; nil = flat.
   #   @param rng [Random, nil] RNG instance; nil uses the per-ractor
   #     default RNG.

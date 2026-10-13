@@ -258,12 +258,12 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
   lfval = ALLOCV_N(char, hlfval, ca->bytes);   /* converting a fill value */
   ufval = ALLOCV_N(char, hufval, ca->bytes);   /* can raise; the unwind frees */
 
-  if ( ! NIL_P(vlfval) ) {
+  if ( ! NIL_P(vlfval) && vlfval != CA_UNDEF ) {
     rb_ca_obj2ptr(self, vlfval, lfval);
     rb_ca_obj2ptr(self, vlfval, ufval);
   }
 
-  if ( ! NIL_P(vufval) ) {
+  if ( ! NIL_P(vufval) && vufval != CA_UNDEF ) {
     rb_ca_obj2ptr(self, vufval, ufval);
   }
 
@@ -278,9 +278,14 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
     TypedData_Get_Struct(vstorage, CArray, &carray_data_type, ca);
   }
 
-  obj = ca_project(ca, ci,
-                  ( ! NIL_P(vlfval) ) ? lfval : NULL,
-                  ( ( ! NIL_P(vufval) ) || ( ! NIL_P(vlfval) ) ) ? ufval : NULL);
+  /* A fill of UNDEF is no fill: the cell is masked, as it is with none. */
+  {
+    VALUE vlower = vlfval;
+    VALUE vupper = NIL_P(vufval) ? vlfval : vufval;
+    obj = ca_project(ca, ci,
+                     ( NIL_P(vlower) || vlower == CA_UNDEF ) ? NULL : lfval,
+                     ( NIL_P(vupper) || vupper == CA_UNDEF ) ? NULL : ufval);
+  }
   GetCArray(obj, co);
 
   ALLOCV_END(hlfval);
