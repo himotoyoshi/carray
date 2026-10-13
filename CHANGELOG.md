@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: for C extensions, `carray.h` declares `ca_unmask_copy` (it named
+  `ca_unmasked_copy`, which does not exist) and no longer declares
+  `camapping_mask_data_type`. `ca_setup_mask` and `ca_mask_overlay_safe`
+  refuse a mask or operand of another size, and `ca_setup_mask` one that is
+  not boolean; they read past it or wrote outside the output. A raise while
+  `ca_attach` makes a mask no longer leaves the array attached, a refused
+  `ca_install_obj_type` no longer uses up an obj_type, `ca_create_mask` on
+  an unmasked lazy expression no longer crashes, and the `CA_CHECK_*`
+  macros take an expression as their argument.
+
 - Fix: storing an object whose `to_c` does not return a Complex into a
   complex array raises `TypeError`, as `Complex()` does; it crashed the
   process. `inherit_mask` and `inherit_mask_replace` refuse an array that

@@ -323,9 +323,9 @@ ca_install_obj_type (VALUE klass,
                      const ca_operation_function_t *func,
                      size_t func_size)
 {
-  int obj_type  = ca_obj_num++;
+  int obj_type;
 
-  if ( ca_obj_num >= CA_OBJ_TYPE_MAX ) {
+  if ( ca_obj_num + 1 >= CA_OBJ_TYPE_MAX ) {
     rb_raise(rb_eRuntimeError,
              "internal: too many CArray object types installed <CA_OBJ_TYPE_MAX = %i>",
              CA_OBJ_TYPE_MAX);
@@ -347,6 +347,9 @@ ca_install_obj_type (VALUE klass,
              func_size,
              (size_t) offsetof(ca_operation_function_t, xfer_index));
   }
+
+  /* A refused table takes no number. */
+  obj_type = ca_obj_num++;
 
   /* Copy by the caller's length and zero the rest: slots this build knows
      about but the caller does not are NULL, which every dispatcher already
@@ -1754,6 +1757,18 @@ ca_attach_view_first (VALUE arg)
   return Qnil;
 }
 
+static VALUE
+ca_attach_mask_step (VALUE arg)
+{
+  CArray *ca    = (CArray *) arg;
+  CArray *mask0 = ca->mask;
+  ca_update_mask(ca);
+  if ( ca->mask == mask0 ) {   /* see ca_attach_view_first */
+    ca_attach(ca->mask);
+  }
+  return Qnil;
+}
+
 /* attach parent's data to ca->ptr */
 
 void
@@ -1798,10 +1813,18 @@ ca_attach (void *ap)
   }
 
   {
-    CArray *mask0 = ca->mask;
-    ca_update_mask(ca);
-    if ( ca->mask == mask0 ) {   /* see ca_attach_view_first */
-      ca_attach(ca->mask);
+    /* Making the mask can raise (a CAObject's mask hooks); the attach
+       taken above is given back then. */
+    int tag = 0;
+    rb_protect(ca_attach_mask_step, (VALUE) ca, &tag);
+    if ( tag ) {
+      if ( ca_is_view(ca) ) {
+        CA_VIEW_ATTACH_STEP(ca, -1);
+      }
+      else {
+        ca_func[ca->obj_type].detach(ap);
+      }
+      rb_jump_tag(tag);
     }
   }
 }

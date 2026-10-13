@@ -1,0 +1,7 @@
+# build artifacts
+Makefile
+*.o
+*.bundle
+*.so
+*.dSYM
+mkmf.log
