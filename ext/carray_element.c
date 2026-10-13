@@ -352,8 +352,6 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  if ( ca_is_empty(ca) ) return Qnil;
-
   if ( TYPE(ridx) == T_ARRAY ) {
     volatile VALUE out;
     elem_parse_idx_array(ca, ridx, idx);

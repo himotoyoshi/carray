@@ -40,9 +40,10 @@ class CArray
   # @overload elem_fetch(idx)
   #   Returns the value at position `idx` (cast back to the
   #   appropriate Ruby type). Returns `UNDEF` if the cell is masked.
-  #   Returns `nil` if `self.empty?`.
+  #   A negative index counts from the end.
   #   @param idx [Integer, Array<Integer>]
-  #   @return [Object, nil]
+  #   @return [Object]
+  #   @raise [IndexError] if `idx` names no cell, an empty array included.
   def elem_fetch(idx); end
 
   # @overload elem_incr(idx)

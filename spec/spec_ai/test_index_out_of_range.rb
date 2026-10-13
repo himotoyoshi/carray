@@ -76,6 +76,17 @@ class TestIndexOutOfRange < Test::Unit::TestCase
     end
   end
 
+  # An empty array has no cell to name: every door raises, elem_fetch too.
+  def test_an_empty_array_has_no_cell
+    e = CArray.int32(0)
+    [0, -1, 1].each do |i|
+      assert_raise(IndexError, "a[#{i}]") { e[i] }
+      assert_raise(IndexError, "elem_fetch #{i}") { e.elem_fetch(i) }
+      assert_raise(IndexError, "elem_store #{i}") { e.elem_store(i, 0) }
+      assert_equal false, e.valid_addr?(i), "valid_addr? #{i}"
+    end
+  end
+
   # valid_addr? and valid_index? say whether an index names a cell, so they
   # answer what the doors do.
   def test_valid_predicates_agree_with_the_doors
