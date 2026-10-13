@@ -36,6 +36,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: a complex array's `linear_fetch` and `strip_mask(method: :linear)` /
+  `unmask(method: :linear)` dropped the imaginary part; both parts are now
+  interpolated. `linear_section`, `elem_min` and `elem_max` refuse a complex
+  array, which has no order. `put_along_axis` and `put_nd` with a masked
+  index wrote the other values as `scatter_replace!` does rather than as
+  the store does (an object array was refused, a broadcast or Face value
+  read differently); they now go through the store either way. `put_nd` on
+  a frozen array raises FrozenError.
+
 - Change: arguments of the binning, counting and random methods are
   checked instead of cut or wrapped. `random!` on an integer array takes
   Integer bounds whose values all fit the type (`int8.random!(0, 1000)` and

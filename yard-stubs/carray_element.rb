@@ -68,7 +68,10 @@ class CArray
   #   @param idx [Integer, Array<Integer>]
   #   @param v [Numeric]
   #   @return [self]
-  #   @raise [CArray::DataTypeError] for non-numeric `data_type`.
+  #   @raise [CArray::DataTypeError] for a non-numeric or complex
+  #     `data_type` (complex values have no order).
+  #   @raise [RangeError] when `v` wins but does not fit the type, as
+  #     `self[idx] = v` raises.
   def elem_min(idx, v); end
 
   # @overload elem_max(idx, v)
@@ -78,7 +81,9 @@ class CArray
   #   @param idx [Integer, Array<Integer>]
   #   @param v [Numeric]
   #   @return [self]
-  #   @raise [CArray::DataTypeError] for non-numeric `data_type`.
+  #   @raise [CArray::DataTypeError] for a non-numeric or complex
+  #     `data_type`.
+  #   @raise [RangeError] when `v` wins but does not fit the type.
   def elem_max(idx, v); end
 
   # @!endgroup

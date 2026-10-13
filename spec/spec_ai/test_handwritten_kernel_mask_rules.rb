@@ -85,3 +85,50 @@ class TestShuffleMovesTheMask < Test::Unit::TestCase
   end
 
 end
+
+class TestPutWithMaskedIndices < Test::Unit::TestCase
+
+  # With a masked index the unmasked cells are written exactly as they are
+  # when no index is masked; the masked index writes nothing.
+  def check (values)
+    idx = CA_INT64([[2], [0]])
+    plain = CArray.int32(2, 3).seq
+    plain.put_along_axis(idx, values, axis: 1)
+    midx = idx.copy
+    midx[1, 0] = UNDEF
+    a = CArray.int32(2, 3).seq
+    a.put_along_axis(midx, values, axis: 1)
+    assert_equal plain[0, nil].to_a, a[0, nil].to_a, values.inspect
+    assert_equal [3, 4, 5], a[1, nil].to_a, values.inspect
+  end
+
+  def test_values_mean_what_they_mean_unmasked
+    check(99)
+    check(UNDEF)
+    check(CA_INT32([[7], [8]]))
+    check([7, 8])
+  end
+
+  def test_a_face
+    t = CArray.time(%w[2024-01-01 2024-01-02 2024-01-03], unit: :D).reshape(1, 3)
+    i = CA_INT64([[2, 0]])
+    i[0, 1] = UNDEF
+    t.put_along_axis(i, t[0, 0], axis: 1)
+    assert_equal %w[2024-01-01 2024-01-02 2024-01-01], t.to_a.flatten.map(&:to_s)
+  end
+
+  def test_put_nd_converts_as_the_store
+    x = CArray.int8(3).seq
+    q = CA_INT64([[0], [2]])
+    q[1, 0] = UNDEF
+    assert_raise(RangeError) { x.put_nd(q, 300) }
+    x.put_nd(q, CA_INT8([7, 8]))
+    assert_equal [7, 1, 2], x.to_a
+  end
+
+  def test_put_nd_on_a_frozen_array
+    x = CArray.int8(2).seq.freeze
+    assert_raise(FrozenError) { x.put_nd(CA_INT64([[0]]), 1) }
+  end
+
+end

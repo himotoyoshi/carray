@@ -843,6 +843,10 @@ rb_ca_elem_min (VALUE self, VALUE ridx, VALUE rval)
     rb_raise(rb_eCADataTypeError,
              "elem_min requires a numeric array");
   }
+  if ( ca_is_complex_type(ca) ) {
+    rb_raise(rb_eCADataTypeError,
+             "elem_min requires a real array (complex values have no order)");
+  }
 
   /* Super-hot path: entity + numeric data type + Fixnum/Float rval. */
   ELEM_MINMAX_BODY(<);
@@ -898,6 +902,10 @@ rb_ca_elem_max (VALUE self, VALUE ridx, VALUE rval)
   if ( ! ca_is_numeric_type(ca) ) {
     rb_raise(rb_eCADataTypeError,
              "elem_max requires a numeric array");
+  }
+  if ( ca_is_complex_type(ca) ) {
+    rb_raise(rb_eCADataTypeError,
+             "elem_max requires a real array (complex values have no order)");
   }
 
   ELEM_MINMAX_BODY(>);

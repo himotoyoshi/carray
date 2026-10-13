@@ -685,10 +685,16 @@ rb_ca_put_along_axis (int argc, VALUE *argv, VALUE self)
     raxis = INT2FIX(0);
   }
   VALUE addrs = rb_ca_axis2addr_c(self, argv[0], raxis);
-  /* A masked index writes nothing: scatter_replace! skips a masked
-     address (and writes the rest last-write-wins, as the store does). */
+  /* A masked index writes nothing.  The values are first laid out over the
+     indices by the store itself (an array of the indices' shape, so a
+     broadcast, UNDEF or a Face value means what it means unmasked), and
+     only the cells at unmasked indices are written. */
   if ( RTEST(rb_ca_has_mask(addrs)) ) {
-    rb_funcall(self, rb_intern("scatter_replace!"), 2, addrs, argv[1]);
+    VALUE sel  = rb_funcall(addrs, rb_intern("is_not_masked"), 0);
+    VALUE vals = rb_funcall(self, rb_intern("project"), 1, addrs);
+    rb_funcall(vals, rb_intern("[]="), 1, argv[1]);
+    rb_ca_store(self, rb_funcall(addrs, rb_intern("[]"), 1, sel),
+                rb_funcall(vals, rb_intern("[]"), 1, sel));
     return self;
   }
   rb_ca_store(self, addrs, argv[1]);
@@ -994,6 +1000,16 @@ rb_ca_linear_section_m (int argc, VALUE *argv, VALUE self)
     }
   }
 
+  {
+    CArray *ca;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+    if ( ca_is_complex_type(ca) ) {
+      rb_raise(rb_eCADataTypeError,
+               "linear_section: a %s array has no order (complex numbers are "
+               "not ordered)", ca_type_name[ca->data_type]);
+    }
+  }
+
   long axis_norm = 0;
   VALUE sc = ca_linear_prep(self, raxis, "linear_section", &axis_norm);
   VALUE raxis_norm = LONG2NUM(axis_norm);
@@ -1018,6 +1034,27 @@ rb_ca_linear_fetch_m (int argc, VALUE *argv, VALUE self)
   rb_scan_options(ropt, "axis", &raxis);
   rb_check_arity(argc, 1, 1);
   VALUE addr = argv[0];
+
+  /* A complex array interpolates its real and imaginary parts: the
+     weights are real, so each part is a real interpolation. */
+  {
+    CArray *ca;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+    if ( ca_is_complex_type(ca) ) {
+      VALUE args[2], re, im;
+      int n = 1;
+      args[0] = addr;
+      if ( ! NIL_P(ropt) ) args[n++] = ropt;
+      re = rb_funcallv_kw(rb_funcall(self, rb_intern("real"), 0),
+                          rb_intern("linear_fetch"), n, args,
+                          NIL_P(ropt) ? RB_NO_KEYWORDS : RB_PASS_KEYWORDS);
+      im = rb_funcallv_kw(rb_funcall(self, rb_intern("imag"), 0),
+                          rb_intern("linear_fetch"), n, args,
+                          NIL_P(ropt) ? RB_NO_KEYWORDS : RB_PASS_KEYWORDS);
+      return rb_funcall(re, '+', 1,
+                        rb_funcall(im, '*', 1, rb_Complex(INT2FIX(0), INT2FIX(1))));
+    }
+  }
 
   long axis_norm = 0;
   VALUE sc = ca_linear_prep(self, raxis, "linear_fetch", &axis_norm);

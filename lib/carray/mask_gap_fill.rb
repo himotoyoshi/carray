@@ -180,7 +180,9 @@ class CArray
       # lands on its own grid.
       return self[present].linear_fetch(addr)
     end
-    interp = value.float64[present].linear_fetch(addr)
+    v = value[present]
+    # A complex value interpolates its real and imaginary parts.
+    interp = v.complex? ? v.linear_fetch(addr) : v.float64.linear_fetch(addr)
     # Built from the values alone, so a fully filled result carries no mask.
     out      = value.copy
     masked   = is_masked
