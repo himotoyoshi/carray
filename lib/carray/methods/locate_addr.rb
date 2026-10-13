@@ -42,10 +42,9 @@ class CArray
   #   variables without repeating the lookup.
   #
   #   @param ref [CArray, Array, Range] reference values to match against;
-  #     any shape (used as flat). An Array or Range is coerced with `to_ca`
-  #     and so lands in `:object`, where numeric matching follows Ruby
-  #     `eql?` (`2.0` does not match `2`); pass a CArray to match in a
-  #     numeric lane.
+  #     any shape (used as flat). An Array or Range is the list of its
+  #     values, met at a common type with `self` as {#is_in} meets one, so
+  #     `2` finds `2.0`.
   #   @return [CArray] `:int64` flat addresses into `ref`, same shape as
   #     `self`; unmatched cells are masked.
   #   @raise [CArray::DataTypeError] when `self` and `ref` have no common data type.
@@ -68,6 +67,13 @@ class CArray
     end
     unless ref.is_a?(CArray) || ref.respond_to?(:to_ca)
       raise TypeError, "locate_addr: the reference is an array of values (got #{ref.class})"
+    end
+    # An Array or Range of values meets self as is_in's does: the common type
+    # comes from self and the elements, so 2 finds 2.0 in a float array.  The
+    # conversion keeps the order, so the addresses stay positions in ref.
+    if ref.is_a?(Array) || ref.is_a?(Range)
+      q, r = promote_elements(ref.is_a?(Range) ? ref.to_a : ref)
+      return q.send(:__locate_addr__, r)
     end
     ref = ref.to_ca unless ref.is_a?(CArray)
     ref = values_for_lookup(ref)

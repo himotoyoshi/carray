@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `locate_addr` with a reference given as an Array or Range compared
+  in the object lane, so `float_array.locate_addr(1..3)` and
+  `float_array.locate_addr([1, 3])` found nothing. The values now meet the
+  array at a common type, as `is_in` meets them, so `2` finds `2.0`.
+
 - Change: `is_in`, `intersection`, `difference` and `union` refuse a Range
   (`ArgumentError`). They read it as the set of its steps, so
   `float_array.is_in(2..4)` missed 2.5, a float or endless Range raised,
