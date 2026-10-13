@@ -4523,6 +4523,21 @@ module MkKernel
       io.puts "      }"
       io.puts "      *(#{oi[:c]} *) (po + buf[r].i * ostride) = (#{oi[:c]}) out_r;"
       io.puts "    }"
+      # dense == 2 (from CArray#order only): descending dense ranks, the
+      # largest value 0, the NaN cells (sorted to the end) after the numbers.
+      nan_test = if is_object then "CA_OBJ_ISNAN(buf[nan_start - 1].v)"
+                 elsif FLOAT_DTYPES.include?(src) then "isnan(buf[nan_start - 1].v)"
+                 end
+      io.puts "    if ( dense == 2 && #{rank_n} > 0 ) {"
+      io.puts "      ca_size_t nan_start = #{rank_n};"
+      io.puts "      while ( nan_start > 0 && #{nan_test} ) nan_start--;" if nan_test
+      io.puts "      #{oi[:c]} top = nan_start > 0"
+      io.puts "        ? *(#{oi[:c]} *) (po + buf[nan_start - 1].i * ostride) : (#{oi[:c]}) -1;"
+      io.puts "      for ( ca_size_t r = 0; r < #{rank_n}; r++ ) {"
+      io.puts "        #{oi[:c]} *o = (#{oi[:c]} *) (po + buf[r].i * ostride);"
+      io.puts "        *o = ( r < nan_start ) ? top - *o : top + 1;"
+      io.puts "      }"
+      io.puts "    }"
       if mask_skip
         io.puts "    /* Mirror input mask to output (= UNDEF rank for masked"
         io.puts "       cells).  Write via co->mask->ptr directly with the"

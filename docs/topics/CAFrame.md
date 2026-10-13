@@ -488,7 +488,7 @@ df.sort_by_key("time")                             # by the index (its axis name
 
 - Each key is a **column name** (or the index's axis name), or a **`[name, :asc | :desc]`** pair. `order:` is the direction for bare-name keys (default `:asc`).
 - **`masked_position:`** sends rows whose key is masked to the `:last` (default) or `:first` end, whichever the direction.
-- **NaN** counts as larger than every number: it comes last in ascending order and first in descending order. To keep it at the end either way, mask it first (`df["temp"][:is_nan] = UNDEF`) and let `masked_position:` place it.
+- **NaN** comes after the numbers in both ascending and descending order, and before the masked cells when `masked_position:` is `:last`. To place it with the masked cells, mask it first (`df["temp"][:is_nan] = UNDEF`).
 - A key can be any column whose values have an order — numbers, text, times — in either direction. Two kinds of column cannot be keys:
   - a **categorical** column, whose codes are not in the order of its labels. Sort by its labels with `df.sort_by { |f| f["k"].to_type(:object) }`;
   - a **complex** column, since complex numbers have no order. Sort by a part of it, e.g. `df.sort_by { |f| f["z"].abs }`.

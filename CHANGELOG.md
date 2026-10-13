@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: NaN comes after the numbers in descending order too, as it
+  already did ascending: `order(descending: true)`, `sort_by_key(..., order:
+  :desc)`, and `order(descending: true)` on groups put NaN last instead of
+  first. `nlargest` no longer returns NaN or masked cells ahead of the
+  numbers, so `nlargest(1)` agrees with `max`. To place NaN with the masked
+  cells instead, mask it first (`a[:is_nan] = UNDEF`).
+
 - Change: adding a duration to a time, or subtracting it, raises when the
   duration is coarser than the time's unit and not a whole number of its
   ticks (`"1 day"` on a `"7 hours"` time, `"15 minutes"` on `"10 minutes"`).

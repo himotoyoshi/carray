@@ -250,7 +250,10 @@ class TestRankIndex < Test::Unit::TestCase
     assert_equal [1, 1, 0], CA_FLOAT64([nan, nan, 1.0]).order(method: :dense).to_a
     assert_equal [1, 1, 0], CA_FLOAT32([nan, nan, 1.0]).order(method: :dense).to_a
     assert_equal [1, 1, 0], CA_OBJECT([nan, nan, 1.0]).order(method: :dense).to_a
-    assert_equal [0, 0, 1], CA_FLOAT64([nan, nan, 1.0]).order(method: :dense, descending: true).to_a
+    # NaN comes after the numbers in both directions.
+    assert_equal [1, 1, 0], CA_FLOAT64([nan, nan, 1.0]).order(method: :dense, descending: true).to_a
+    assert_equal [1, 2, 0], CA_FLOAT64([nan, nan, 1.0]).order(descending: true).to_a
+    assert_equal [1, 1, 0], CA_OBJECT([nan, nan, 1.0]).order(method: :dense, descending: true).to_a
   end
 
   def test_order_dense_descending_has_no_gaps
@@ -268,7 +271,18 @@ class TestRankIndex < Test::Unit::TestCase
     a = CA_FLOAT64([nan, 1, nan, nan, 1])
     b = CA_INT32([3, 9, 1, 2, 0])
     addr = CArray.sort_addr(a.order(descending: true, method: :dense), b)
-    assert_equal [1, 2, 3, 0, 9], b[addr].to_a
+    assert_equal [0, 9, 1, 2, 3], b[addr].to_a
+  end
+
+  def test_nlargest_puts_nan_and_masked_cells_last
+    nan = Float::NAN
+    a = CA_FLOAT64([nan, 1, nan, 3, 2])
+    assert_equal [3.0, 2.0], a.nlargest(2).to_a
+    a[1] = UNDEF
+    assert_equal [3.0, 2.0], a.nlargest(2).to_a
+    assert_equal [3, 4, 0], a.nlargest_index(3, axis: 0).to_a
+    b = CA_FLOAT64([[1, nan, 3], [5, 4, 6]])
+    assert_equal [[3.0, 1.0], [6.0, 5.0]], b.nlargest(2, axis: 1).to_a
   end
 
   def test_order_dense_unknown_method_raises
