@@ -416,17 +416,20 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
     /* [start, count] */
     {
       ca_size_t start, count, bound;
-      start = NUM2SIZE(a0);
+      ca_size_t given;
+      given = NUM2SIZE(a0);
       count = NUM2SIZE(a1);
-      if ( __builtin_add_overflow(start, count - 1, &bound) ) {
+      /* The start counts from the end when negative; the last cell is
+         counted from that start and has to be inside as it is. */
+      start = ca_index_in_range_at(given, dim, axis);
+      if ( count > 0 &&
+           ( __builtin_add_overflow(start, count - 1, &bound) || bound >= dim ) ) {
         rb_raise(rb_eIndexError,
                  "%s: index [%" PRId64 ", %" PRId64 "] is out of range for "
                  "length %" PRId64 " on axis %i",
-                 ca_calling_method_name(), (ca_size_t) start, (ca_size_t) count,
+                 ca_calling_method_name(), (ca_size_t) given, (ca_size_t) count,
                  (ca_size_t) dim, axis);
       }
-      start = ca_index_in_range_at(start, dim, axis);
-      bound = ca_index_in_range_at(bound, dim, axis);
       info->index[axis].block.start = start;
       info->index[axis].block.count = count;
       info->index[axis].block.step  = 1;
@@ -435,26 +438,28 @@ ca_classifier_axis_from_array (ca_classifier_ctx_t *ctx, int axis, VALUE arg)
   }
 
   if ( len == 3 ) {                      /* [start, count, step] */
-    ca_size_t start, count, step, bound;
-    start = NUM2SIZE(rb_ary_entry(arg, 0));
+    ca_size_t given, start, count, step, bound;
+    given = NUM2SIZE(rb_ary_entry(arg, 0));
     count = NUM2SIZE(rb_ary_entry(arg, 1));
     step  = NUM2SIZE(rb_ary_entry(arg, 2));
     if ( step == 0 ) {
       rb_raise(rb_eArgError,
                "step in index equals to 0 in block reference");
     }
-    /* A count and a step whose last cell lies past the range of an index
-       are out of range, not a wrapped bound that lands back inside. */
-    if ( __builtin_mul_overflow(count - 1, step, &bound) ||
-         __builtin_add_overflow(start, bound, &bound) ) {
+    /* The start counts from the end when negative; the last cell is
+       counted from that start and has to be inside as it is, not a bound
+       that wraps back in from either end. */
+    start = ca_index_in_range_at(given, dim, axis);
+    if ( count > 0 &&
+         ( __builtin_mul_overflow(count - 1, step, &bound) ||
+           __builtin_add_overflow(start, bound, &bound) ||
+           bound < 0 || bound >= dim ) ) {
       rb_raise(rb_eIndexError,
                "%s: index [%" PRId64 ", %" PRId64 ", %" PRId64 "] is out of "
                "range for length %" PRId64 " on axis %i",
-               ca_calling_method_name(), (ca_size_t) start, (ca_size_t) count,
+               ca_calling_method_name(), (ca_size_t) given, (ca_size_t) count,
                (ca_size_t) step, (ca_size_t) dim, axis);
     }
-    start = ca_index_in_range_at(start, dim, axis);
-    bound = ca_index_in_range_at(bound, dim, axis);
     info->index[axis].block.start = start;
     info->index[axis].block.count = count;
     info->index[axis].block.step  = step;

@@ -172,6 +172,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
     if ( step == 0 ) {
       rb_raise(rb_eArgError, "step should not be 0");
     }
+    CA_CHECK_INDEX(start, size);
     if ( last < 0 ) {
       last += size;
     }
@@ -181,7 +182,6 @@ ca_parse_range (VALUE arg, ca_size_t size,
     if ( last < 0 || last >= size ) {
       ca_index_out_of_range(last, size, "index");
     }
-    CA_CHECK_INDEX(start, size);
     if ( (last - start) * step < 0 ) {
       count = 1;
     }
@@ -189,7 +189,9 @@ ca_parse_range (VALUE arg, ca_size_t size,
       count = llabs(last - start)/llabs(step) + 1;
     }
     bound = start + (count - 1)*step;
-    CA_CHECK_INDEX(bound, size);
+    if ( count > 0 && ( bound < 0 || bound >= size ) ) {
+      ca_index_out_of_range(bound, size, "index");
+    }
     *poffset = start;
     *pcount  = count;
     *pstep   = step;
@@ -211,8 +213,9 @@ ca_parse_range (VALUE arg, ca_size_t size,
         start = 0;
         count = (size-1)/llabs(step) + 1;
         bound = start + (count - 1)*step;
-        CA_CHECK_INDEX(start, size);
-        CA_CHECK_INDEX(bound, size);
+        if ( count > 0 && ( bound < 0 || bound >= size ) ) {
+          ca_index_out_of_range(bound, size, "index");
+        }
         *poffset = start;
         *pcount  = count;
         *pstep   = step;
@@ -225,6 +228,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "step should not be 0");
         }
+        CA_CHECK_INDEX(start, size);
         if ( last < 0 ) {
           last += size;
         }
@@ -234,7 +238,6 @@ ca_parse_range (VALUE arg, ca_size_t size,
         if ( last < 0 || last >= size ) {
           ca_index_out_of_range(last, size, "index");
         }
-        CA_CHECK_INDEX(start, size);
         if ( (last - start) * step < 0 ) {
           count = 1;
         }
@@ -242,7 +245,9 @@ ca_parse_range (VALUE arg, ca_size_t size,
           count = llabs(last - start)/llabs(step) + 1;
         }
         bound = start + (count - 1)*step;
-        CA_CHECK_INDEX(bound, size);
+        if ( count > 0 && ( bound < 0 || bound >= size ) ) {
+          ca_index_out_of_range(bound, size, "index");
+        }
         *poffset = start;
         *pcount  = count;
         *pstep   = step;
@@ -259,6 +264,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "step should not be 0");
         }
+        CA_CHECK_INDEX(start, size);
         if ( last < 0 ) {
           last += size;
         }
@@ -268,7 +274,6 @@ ca_parse_range (VALUE arg, ca_size_t size,
         if ( last < 0 || last >= size ) {
           ca_index_out_of_range(last, size, "index");
         }
-        CA_CHECK_INDEX(start, size);
         if ( (last - start) * step < 0 ) {
           count = 1;
         }
@@ -276,7 +281,9 @@ ca_parse_range (VALUE arg, ca_size_t size,
           count = llabs(last - start)/llabs(step) + 1;
         }
         bound = start + (count - 1)*step;
-        CA_CHECK_INDEX(bound, size);
+        if ( count > 0 && ( bound < 0 || bound >= size ) ) {
+          ca_index_out_of_range(bound, size, "index");
+        }
         *poffset = start;
         *pcount  = count;
         *pstep   = step;
@@ -285,9 +292,11 @@ ca_parse_range (VALUE arg, ca_size_t size,
       else {                            /* [i,n] */
         start = NUM2SIZE(arg0);
         count = NUM2SIZE(arg1);
-        bound = start + (count - 1);
         CA_CHECK_INDEX(start, size);
-        CA_CHECK_INDEX(bound, size);
+        bound = start + (count - 1);
+        if ( count > 0 && ( bound < 0 || bound >= size ) ) {
+          ca_index_out_of_range(bound, size, "index");
+        }
         *poffset = start;
         *pcount  = count;
         *pstep    = 1;
@@ -300,9 +309,11 @@ ca_parse_range (VALUE arg, ca_size_t size,
       if ( step == 0 ) {
         rb_raise(rb_eArgError, "step should not be 0");
       }
-      bound = start + (count - 1)*step;
       CA_CHECK_INDEX(start, size);
-      CA_CHECK_INDEX(bound, size);
+      bound = start + (count - 1)*step;
+      if ( count > 0 && ( bound < 0 || bound >= size ) ) {
+        ca_index_out_of_range(bound, size, "index");
+      }
       *poffset = start;
       *pcount  = count;
       *pstep   = step;
