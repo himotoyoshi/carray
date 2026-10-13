@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: reading a few cells of a view over a CAObject or a lazy expression
+  no longer makes it produce all of its cells when the view goes through a
+  reshape or flatten of a transpose (`r.transpose.flatten[idx]`), or reads
+  the cells in another width (`r.field(0, CA_INT16)[...]`, a `refer` to
+  another data type). The values were right; for a CAObject over a file or
+  a remote source the whole of it was read for each such view.
+
 - New: `CArray#lag(n = 1, axis:)` is the value `n` steps earlier along one
   axis, UNDEF where there is none, so `x - x.lag` is UNDEF at the start
   instead of a difference against 0. An array of more than one dimension
