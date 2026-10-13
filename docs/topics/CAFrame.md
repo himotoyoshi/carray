@@ -889,6 +889,8 @@ A `GroupedFrame` offers four ways to reduce. Choose by what you need:
 | a computation that combines several columns | [`table`](#computing-across-columns--table) |
 | one column, with any reduction the categorical iterator offers | [`grp["col"]`](#one-column--the-group-iterator) |
 
+Each of the first three also takes [`keep_rows: true`](#keeping-the-rows--keep_rows) to give the result on every row instead of one row per group.
+
 ### The same reduction for every column
 
 `sum` / `mean` / `min` / `max` reduce **every column whose type has that reduction** into a new frame indexed by the group labels. A time column has a mean, a minimum and a maximum but no sum; a string column a minimum and a maximum only; a boolean column all four. A column whose type lacks the reduction is left out. The **key columns are skipped** — they are the result's index.
@@ -936,6 +938,20 @@ end
 ```ruby
 df.group_by("station")["temp"].mean    # => per-group means as a CArray
 ```
+
+### Keeping the rows — `keep_rows:`
+
+`sum` / `mean` / `min` / `max`, `aggregate` and `table` take `keep_rows: true`. The rows are then not collapsed: **each row gets the result of its own group**, so the result has the frame's rows and index and lines up with the frame's columns. That is what a value relative to its group needs — an anomaly from the station mean, a share of the group total:
+
+```ruby
+grp = df.group_by("station")
+df["temp_anom"]  = df["temp"] - grp.mean(keep_rows: true)["temp"]
+df["rain_share"] = df["rain"] / grp.sum(keep_rows: true)["rain"]
+```
+
+- The columns and their types are those of the same call without `keep_rows:`; only the rows differ. An N-D column keeps its trailing shape.
+- A row whose key is masked belongs to no group, so its cells are `UNDEF`.
+- It works for `resample` as well: each row gets the result of its time bin.
 
 ### Time bins — `resample`
 

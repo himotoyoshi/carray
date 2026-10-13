@@ -188,7 +188,15 @@ class GroupedFrame
   # with the group's column slice). A Symbol reduction takes its arguments
   # after it, as in a call: +["temp", :percentile, 90.0]+, and its keywords
   # last: +["temp", :mean, min_count: 6]+.
-  def aggregate(spec)
+  #
+  # With +keep_rows: true+ the rows are not collapsed: each row of the frame
+  # gets the result of its own group, so the result has the frame's rows and
+  # index, and a row whose key is masked (in no group) is UNDEF. The same
+  # keyword works for +table+ and the reductions below.
+  #
+  #   df.group_by("station").aggregate("temp_mean" => ["temp", :mean], keep_rows: true)
+  def aggregate(spec = nil, keep_rows: false, **named)
+    spec = (spec || {}).merge(named)
     cols = {}
     spec.each do |out_name, (in_name, reduction, *args)|
       out = out_name.to_s
@@ -207,13 +215,14 @@ class GroupedFrame
                 "reduction must be a Symbol or Proc (got #{reduction.class})"
         end
     end
-    CAFrame.new(cols, axis_name: @axis_name, index: label_index)
+    result_frame(cols, keep_rows)
   end
 
   # Cross-column Ruby escape (memo §11.6). The block receives a per-group
   # view-frame and returns a Hash of output-name => value; the values are
-  # collected column-wise across groups into a new frame.
-  def table
+  # collected column-wise across groups into a new frame. +keep_rows: true+
+  # gives each row its group's values, as for +aggregate+.
+  def table(keep_rows: false)
     collected = {}
     order = nil
     each_group_frame do |g|
@@ -229,7 +238,7 @@ class GroupedFrame
       vals = collected[name]
       cols[name] = CArray.object(vals.size) { |i| vals[i] }
     end
-    CAFrame.new(cols, axis_name: @axis_name, index: label_index)
+    result_frame(cols, keep_rows)
   end
 
   # Convenience reductions over every column that defines the reduction. A
@@ -240,27 +249,31 @@ class GroupedFrame
   # its trailing shape: a (N, L) column gives (groups, L). Each
   # takes +min_count:+ and +fill_value:+ as a core reduction does: a group
   # with fewer than min_count present values is UNDEF, and fill_value fills
-  # the UNDEF cells.
+  # the UNDEF cells. +keep_rows: true+ gives each row its group's value
+  # instead of one row per group, as for +aggregate+:
   #
-  # @!method sum(min_count: nil, fill_value: nil)
+  #   df["temp"] - df.group_by("station").mean(keep_rows: true)["temp"]   # anomaly
+  #
+  # @!method sum(min_count: nil, fill_value: nil, keep_rows: false)
   #   Returns a frame of the per-group sum of every column whose type has a
   #   sum, an N-D one per group along the rows. Other columns are left out.
-  #   @return [CAFrame] one row per group, indexed by the group labels.
-  # @!method mean(min_count: nil, fill_value: nil)
+  #   @return [CAFrame] one row per group, indexed by the group labels, or
+  #     with keep_rows: true the frame's rows and index.
+  # @!method mean(min_count: nil, fill_value: nil, keep_rows: false)
   #   Returns a frame of the per-group mean of every column whose type has
   #   a mean, as {#sum} does.
   #   @return [CAFrame] one row per group.
-  # @!method min(min_count: nil, fill_value: nil)
+  # @!method min(min_count: nil, fill_value: nil, keep_rows: false)
   #   Returns a frame of the per-group minimum of every column whose type has
   #   a minimum, as {#sum} does.
   #   @return [CAFrame] one row per group.
-  # @!method max(min_count: nil, fill_value: nil)
+  # @!method max(min_count: nil, fill_value: nil, keep_rows: false)
   #   Returns a frame of the per-group maximum of every column whose type has
   #   a maximum, as {#sum} does.
   #   @return [CAFrame] one row per group.
   [:sum, :mean, :min, :max].each do |red|
-    define_method(red) do |min_count: nil, fill_value: nil|
-      reduce_columns(red, min_count: min_count, fill_value: fill_value)
+    define_method(red) do |min_count: nil, fill_value: nil, keep_rows: false|
+      reduce_columns(red, keep_rows, min_count: min_count, fill_value: fill_value)
     end
   end
 
@@ -275,7 +288,7 @@ class GroupedFrame
     CArray.object(@labels.size) { |i| @labels[i] }
   end
 
-  private def reduce_columns(reduction, **keywords)
+  private def reduce_columns(reduction, keep_rows, **keywords)
     cols = {}
     @frame.column_names.each do |name|
       # A key column is the index here, not a result column.
@@ -284,7 +297,33 @@ class GroupedFrame
       next unless answers?(col, reduction)
       cols[name] = group_reduce(col, reduction, **keywords)
     end
-    CAFrame.new(cols, axis_name: @axis_name, index: label_index)
+    result_frame(cols, keep_rows)
+  end
+
+  # One row per group, indexed by the labels; or, with +keep_rows+, the
+  # frame's rows, each holding its group's result.
+  private def result_frame(cols, keep_rows)
+    return CAFrame.new(cols, axis_name: @axis_name, index: label_index) unless keep_rows
+    CAFrame.new(cols.transform_values { |col| spread_to_rows(col) },
+                axis_name: @frame.axis_name, index: @frame.index)
+  end
+
+  # A per-group result (one entry per group along axis 0) laid back over the
+  # frame's rows through the group codes. A row in no group is UNDEF.
+  private def spread_to_rows(result)
+    codes    = group_codes
+    excluded = codes.is_masked
+    rest     = [nil] * (result.ndim - 1)
+    if ngroup == 0
+      out = CArray.new(result.data_type, [codes.elements, *result.shape[1..]], bytes: result.bytes)
+      out[] = UNDEF
+      return out
+    end
+    index = codes.value.int64
+    index[excluded] = 0
+    out = result[index, *rest].copy
+    out[excluded, *rest] = UNDEF if excluded.any
+    out
   end
 
   # A column's group reduction. An N-D column is reduced along the rows, so

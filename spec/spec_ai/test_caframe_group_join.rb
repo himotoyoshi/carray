@@ -287,6 +287,31 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     assert_equal ["ab", "ef"], df.group_by("k").min["f"].to_a
     assert_equal ["ab", "ef"], fx.group_by_category(CA_INT32([1, 1, 2]).categorize).min.to_a
   end
+
+  # keep_rows: true gives each row its own group's result, in the frame's
+  # rows and index; a row whose key is masked is UNDEF.
+  def test_keep_rows_gives_each_row_its_group
+    @df["station"][4] = UNDEF
+    g = @df.group_by("station")
+    m = g.mean(keep_rows: true)
+    assert_equal 5, m.nrow
+    assert_equal [20.55, 27.65, 20.55, 27.65, UNDEF], m["temp"].to_a.map { |v| UNDEF.equal?(v) ? v : v.round(2) }
+    assert_equal [[3.0, 4.0], [5.0, 6.0], [3.0, 4.0], [5.0, 6.0]], m["wind"][0..3, nil].to_a
+    a = g.aggregate("hi" => ["temp", :max], "rng" => ["temp", ->(c) { c.max - c.min }], keep_rows: true)
+    assert_equal [22.1, 30.0, 22.1, 30.0, UNDEF], a["hi"].to_a
+    assert_in_delta 3.1, a["rng"][0], 1e-12
+    t = g.table(keep_rows: true) { |f| { "n" => f.nrow } }
+    assert_equal [2, 2, 2, 2, UNDEF], t["n"].to_a
+    assert_equal 2, g.mean.nrow
+  end
+
+  def test_keep_rows_keeps_the_index
+    df = CAFrame.new({ "k" => CA_OBJECT(%w[a b a]), "v" => CA_FLOAT64([1, 2, 5]) }, index: CA_INT32([7, 8, 9]), axis_name: "id")
+    m = df.group_by("k").mean(keep_rows: true)
+    assert_equal [7, 8, 9], m.index.to_a
+    assert_equal "id", m.axis_name
+    assert_equal [3.0, 2.0, 3.0], m["v"].to_a
+  end
 end
 
 class TestCAFrameJoin < Test::Unit::TestCase
