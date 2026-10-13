@@ -638,16 +638,7 @@ ca_monop_func_allocate (void *ap)
   if ( ca_monop_is_writable_view(ca->op_id) ) {
     ca_attach(ca->parent);
   }
-  ca->ptr = xmalloc(ca_length(ca));
-  /* CA_OBJECT initialisation for GC safety.  */
-  if ( ca->data_type == CA_OBJECT ) {
-    VALUE *p = (VALUE *) ca->ptr;
-    VALUE zero = SIZE2NUM(0);
-    ca_size_t i;
-    for ( i = 0; i < ca->elements; i++ ) {
-      *p++ = zero;
-    }
-  }
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -676,18 +667,7 @@ ca_monop_func_attach (void *ap)
      Mirrors CAFake.attach.  */
   if ( ca_monop_is_writable_view(ca->op_id) ) {
     ca_attach(ca->parent);
-    ca->ptr = xmalloc(ca_length(ca));
-    /* CA_OBJECT initialisation for GC safety (mirrors CAFake.allocate):
-       zero-init the VALUE cells before any potential GC can observe
-       them.  */
-    if ( ca->data_type == CA_OBJECT ) {
-      VALUE *p = (VALUE *) ca->ptr;
-      VALUE zero = SIZE2NUM(0);
-      ca_size_t i;
-      for ( i = 0; i < ca->elements; i++ ) {
-        *p++ = zero;
-      }
-    }
+    ca->ptr = ca_alloc_cells((CArray *) ca);
     if ( ca_monop_is_cast(ca->op_id) ) {
       /* Cast parent.ptr (parent data_type) → ca.ptr (cast target data_type).  */
       ca_cast_block(ca->elements, ca->parent, ca->parent->ptr,
@@ -702,19 +682,11 @@ ca_monop_func_attach (void *ap)
     return;
   }
 
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 
   s = ca->bytes;
   for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
   for ( k = 0; k < ca->ndim; k++ ) starts[k] = 0;
-  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
-     soon as the view is, so it must not be handed to the GC as raw
-     xmalloc garbage. */
-  if ( ca->data_type == CA_OBJECT ) {
-    VALUE *p = (VALUE *) ca->ptr;
-    ca_size_t i;
-    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
-  }
   ca_monop_func_xfer_stride(ca, starts, ca->dim, native, ca->ptr, CA_XFER_GET);
 }
 

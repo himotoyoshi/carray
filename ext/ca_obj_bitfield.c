@@ -452,7 +452,7 @@ ca_bitfield_func_allocate (void *ap)
 {
   CABitfield *ca = (CABitfield *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -460,7 +460,7 @@ ca_bitfield_func_attach (void *ap)
 {
   CABitfield *ca = (CABitfield *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
   ca_bitfield_attach(ca);
 }
 

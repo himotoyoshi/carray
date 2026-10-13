@@ -277,18 +277,7 @@ ca_fake_func_allocate (void *ap)
 {
   CAFake *ca = (CAFake *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
-
-  /* CAREFUL: CA_OBJECT storage must contain valid VALUEs before GC can
-     scan it, so seed with Fixnum 0 rather than leaving raw xmalloc bytes. */
-  if ( ca->data_type == CA_OBJECT ) {
-    VALUE *p = (VALUE *) ca->ptr;
-    VALUE zero = SIZE2NUM(0);
-    ca_size_t i;
-    for (i=0; i<ca->elements; i++) {
-      *p++ = zero;
-    }
-  }
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -296,17 +285,7 @@ ca_fake_func_attach (void *ap)
 {
   CAFake *ca = (CAFake *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
-
-  /* CAREFUL: same VALUE-seed rule as ca_fake_func_allocate. */
-  if ( ca->data_type == CA_OBJECT ) {
-    VALUE *p = (VALUE *) ca->ptr;
-    VALUE zero = SIZE2NUM(0);
-    ca_size_t i;
-    for (i=0; i<ca->elements; i++) {
-      *p++ = zero;
-    }
-  }
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 
   if ( ca->parent->mask ) {
     ca_cast_block_with_mask(ca->elements, ca->parent, ca->parent->ptr, 

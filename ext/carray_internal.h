@@ -102,6 +102,34 @@ void    ca_gc_hold_pop_to (int depth);
 void    ca_gc_hold_buffer    (void *ptr, ca_size_t n_elements);
 void    ca_gc_release_buffer (void *ptr);
 
+/* Object cells are marked strictly (rb_gc_mark, which trusts what it is
+   given) as soon as anything can see their buffer: a view's ca->ptr from
+   the moment it is set (ca_mark), a held buffer from the moment it is held.
+   A fresh buffer that will carry object cells is therefore filled with
+   valid VALUEs before it is published, whether or not the code that fills
+   it can call Ruby.  A buffer for an array's cells is allocated with
+   ca_alloc_cells; other fresh VALUE buffers are cleared with
+   ca_object_cells_clear before they are held.  utils/check_cell_buffers.rb
+   finds a ptr allocated any other way. */
+static inline void
+ca_object_cells_clear (void *ptr, ca_size_t n_elements)
+{
+  VALUE *p = (VALUE *) ptr;
+  while ( n_elements-- > 0 ) {
+    *p++ = Qnil;
+  }
+}
+
+static inline char *
+ca_alloc_cells (const CArray *ca)
+{
+  char *p = (char *) xmalloc(ca_length(ca));
+  if ( ca->data_type == CA_OBJECT ) {
+    ca_object_cells_clear(p, ca->elements);
+  }
+  return p;
+}
+
 /* Copy the attributes src shows onto dst (a new entity with src's values). */
 void    rb_ca_inherit_attr (VALUE dst, VALUE src);
 

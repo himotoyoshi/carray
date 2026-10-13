@@ -809,7 +809,7 @@ ca_stack_func_allocate (void *ap)
   CAStack *ca = (CAStack *) ap;
   ca_stack_mask_refresh(ca, 0);
   ca_attach_all(ca->parents, ca->n_parents);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static VALUE

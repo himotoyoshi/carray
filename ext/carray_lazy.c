@@ -655,7 +655,7 @@ ca_lazy_arena_acquire (ca_size_t bytes)
     s->ptr   = NULL;
     s->bytes = 0;
     xfree(old);
-    s->ptr    = xmalloc(bytes);
+    s->ptr    = xmalloc(bytes);  /* cells: ca_lazy_arena_acquire_object clears object slots */
     s->bytes  = bytes;
     s->in_use = 1;
     s->object_elements = 0;
@@ -672,7 +672,7 @@ ca_lazy_arena_acquire (ca_size_t bytes)
     }
   }
   if ( empty >= 0 ) {
-    ca_lazy_arena.slots[empty].ptr    = xmalloc(bytes);
+    ca_lazy_arena.slots[empty].ptr    = xmalloc(bytes);  /* cells: ca_lazy_arena_acquire_object clears object slots */
     ca_lazy_arena.slots[empty].bytes  = bytes;
     ca_lazy_arena.slots[empty].in_use = 1;
     ca_lazy_arena.slots[empty].object_elements = 0;
@@ -722,11 +722,7 @@ ca_lazy_arena_acquire_object (ca_size_t n_elements)
   if ( n_elements < 0 ) n_elements = 0;
   ptr = ca_lazy_arena_acquire(n_elements * (ca_size_t) sizeof(VALUE));
 
-  {
-    VALUE *p = (VALUE *) ptr;
-    ca_size_t n = n_elements;
-    while ( n-- ) *p++ = Qnil;
-  }
+  ca_object_cells_clear(ptr, n_elements);
 
   for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
     if ( ca_lazy_arena.slots[i].ptr == ptr ) {
@@ -1371,7 +1367,7 @@ ca_mask_of_operands_func_attach (void *ap)
 {
   CAMaskOfOperands *ca = (CAMaskOfOperands *) ap;
   int tag = 0;
-  ca->ptr = xmalloc(ca->elements);
+  ca->ptr = ca_alloc_cells((CArray *) ca);
   rb_protect(ca_mask_of_operands_fill_buffer, (VALUE) ca, &tag);
   if ( tag ) {
     xfree(ca->ptr);
@@ -1384,7 +1380,7 @@ static void
 ca_mask_of_operands_func_allocate (void *ap)
 {
   CAMaskOfOperands *ca = (CAMaskOfOperands *) ap;
-  ca->ptr = xmalloc(ca->elements);
+  ca->ptr = ca_alloc_cells((CArray *) ca);
   memset(ca->ptr, 0, ca->elements);
 }
 

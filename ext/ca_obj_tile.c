@@ -403,7 +403,7 @@ ca_tile_func_allocate (void *ap)
 {
   CATile *ca = (CATile *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -411,7 +411,7 @@ ca_tile_func_attach (void *ap)
 {
   CATile *ca = (CATile *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
   ca_tile_attach_into(ca, ca->ptr);
 }
 

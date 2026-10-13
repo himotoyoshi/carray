@@ -337,7 +337,7 @@ static void
 ca_moncmp_func_allocate (void *ap)
 {
   CAMonCmp *ca = (CAMonCmp *) ap;
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -353,7 +353,7 @@ ca_moncmp_func_attach (void *ap)
   int8_t    k;
   ca_size_t s;
 
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 
   s = ca->bytes;
   for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }

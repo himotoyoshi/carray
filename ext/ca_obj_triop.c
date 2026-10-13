@@ -358,15 +358,7 @@ static void
 ca_triop_func_allocate (void *ap)
 {
   CATriOp *ca = (CATriOp *) ap;
-  ca->ptr = xmalloc(ca_length(ca));
-  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
-     soon as the view is, so it must not be handed to the GC as raw
-     xmalloc garbage. */
-  if ( ca->data_type == CA_OBJECT ) {
-    VALUE *p = (VALUE *) ca->ptr;
-    ca_size_t i;
-    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
-  }
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -381,19 +373,11 @@ ca_triop_func_attach (void *ap)
   int8_t    k;
   ca_size_t s;
 
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 
   s = ca->bytes;
   for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
   for ( k = 0; k < ca->ndim; k++ ) starts[k] = 0;
-  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
-     soon as the view is, so it must not be handed to the GC as raw
-     xmalloc garbage. */
-  if ( ca->data_type == CA_OBJECT ) {
-    VALUE *p = (VALUE *) ca->ptr;
-    ca_size_t i;
-    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
-  }
   ca_triop_func_xfer_stride(ca, starts, ca->dim, native, ca->ptr, CA_XFER_GET);
 }
 

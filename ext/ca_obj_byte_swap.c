@@ -464,7 +464,7 @@ ca_byte_swap_func_allocate (void *ap)
 {
   CAByteSwap *ca = (CAByteSwap *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -472,7 +472,7 @@ ca_byte_swap_func_attach (void *ap)
 {
   CAByteSwap *ca = (CAByteSwap *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
   memcpy(ca->ptr, ca->parent->ptr, ca_length(ca));
   ca_byte_swap_apply(ca, ca->ptr);
 }

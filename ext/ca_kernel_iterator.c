@@ -102,10 +102,8 @@ ki_data_alloc (int8_t data_type, ca_size_t bytes)
     p = xmalloc(bytes > 0 ? bytes : 1);
   }
   if ( data_type == CA_OBJECT ) {
-    VALUE    *v = (VALUE *) p;
     ca_size_t n = bytes / (ca_size_t) sizeof(VALUE);
-    ca_size_t i;
-    for ( i = 0; i < n; i++ ) v[i] = Qnil;
+    ca_object_cells_clear(p, n);
     ca_gc_hold_buffer(p, n);
   }
   return p;

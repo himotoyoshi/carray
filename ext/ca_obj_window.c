@@ -1011,7 +1011,7 @@ ca_window_func_allocate (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
   if ( ca_window_owns_buffer(ca) ) {
-    ca->ptr = xmalloc(ca_length(ca));
+    ca->ptr = ca_alloc_cells((CArray *) ca);
     return;
   }
   ca_attach(ca->parent);
@@ -1019,7 +1019,7 @@ ca_window_func_allocate (void *ap)
     ca->ptr = ca_window_alias_ptr(ca);
     return;
   }
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 /* The engine paths below emit a per-axis descriptor (ca_window_describe_axes)
@@ -1049,8 +1049,7 @@ ca_window_func_attach (void *ap)
     ca->ptr = ca_window_alias_ptr(ca);
   } else if ( ca->embed_eligible ) {
     /* Embed path: allocate, then 1 fill + 1 strided memcpy. */
-    ca_size_t out_len = ca->elements * ca->bytes;
-    ca->ptr = xmalloc(out_len > 0 ? out_len : 1);
+    ca->ptr = ca_alloc_cells((CArray *) ca);
     ca_window_attach_embed(ca, ca->ptr);
   } else {
     /* Fallback: PERIODIC / REFLECT / NEAREST / RUBY / STRICT go through

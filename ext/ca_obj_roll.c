@@ -506,7 +506,7 @@ ca_roll_func_allocate (void *ap)
 {
   CARoll *ca = (CARoll *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -514,7 +514,7 @@ ca_roll_func_attach (void *ap)
 {
   CARoll *ca = (CARoll *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
   ca_roll_iterate_regions(ca, ca->ptr, 0);
 }
 

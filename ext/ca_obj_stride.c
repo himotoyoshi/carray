@@ -1164,14 +1164,14 @@ ca_stride_func_allocate (void *ap)
 
   ca_stride_compose_to_root(ca, &root, composed_strides, &composed_base);
   if (ca_root_lends_no_memory(root)) {
-    ca->ptr = xmalloc(ca_length(ca));
+    ca->ptr = ca_alloc_cells((CArray *) ca);
     return;
   }
   ca_attach(root);
   if (ca_layout_is_contiguous(ca->ndim, ca->dim, composed_strides, ca->bytes)) {
     ca->ptr = root->ptr + composed_base;
   } else {
-    ca->ptr = xmalloc(ca_length(ca));
+    ca->ptr = ca_alloc_cells((CArray *) ca);
   }
 }
 
@@ -1215,7 +1215,7 @@ ca_stride_func_attach (void *ap)
   if (ca_layout_is_contiguous(ca->ndim, ca->dim, composed_strides, ca->bytes)) {
     ca->ptr = root->ptr + composed_base;
   } else {
-    ca->ptr = xmalloc(ca_length(ca));
+    ca->ptr = ca_alloc_cells((CArray *) ca);
     ca_stride_xfer_with_layout(ca, 0, root->ptr + composed_base, composed_strides);
   }
 }

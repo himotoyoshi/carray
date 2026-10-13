@@ -77,6 +77,7 @@
 
 #include "carray.h"
 #include "ca_obj_face.h"
+#include "carray_internal.h"   /* ca_object_cells_clear */
 #include <string.h>
 #include <math.h>
 
@@ -402,8 +403,7 @@ fz_hash_alloc (fz_hash *h, ca_size_t cap)
   h->cap  = cap;
   MEMZERO(h->used, uint8_t, cap);
   if ( has_val ) {
-    ca_size_t i;
-    for ( i = 0; i < cap; i++ ) h->val[i] = Qnil;
+    ca_object_cells_clear(h->val, cap);
     fz_tmp_values(h->hbuf, h->val, cap);
   }
 }
@@ -669,9 +669,7 @@ typedef struct {
 static void
 fz_levels_values (fz_levels *l, ca_size_t from)
 {
-  VALUE    *v = (VALUE *) l->p;
-  ca_size_t i;
-  for ( i = from; i < l->cap; i++ ) v[i] = Qnil;
+  ca_object_cells_clear((VALUE *) l->p + from, l->cap - from);
   fz_tmp_values(l->hp, l->p, l->cap);
 }
 

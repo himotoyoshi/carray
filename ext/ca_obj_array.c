@@ -190,16 +190,14 @@ carray_setup_i (CArray *ca,
 
     /* allocate memory for entity */
     if ( use_calloc ) {
-      /* ca->ptr = ALLOC_N(char, elements * bytes); */
-      ca->ptr = xmalloc(elements * bytes);
+      ca->ptr = xmalloc(elements * bytes);  /* cells: set to 0 below */
       MEMZERO(ca->ptr, char, elements * bytes);
     }
     else {
-      /* ca->ptr = ALLOC_N(char, elements * bytes); */
-      ca->ptr = xmalloc(elements * bytes);
+      ca->ptr = xmalloc(elements * bytes);  /* cells: set to 0 below */
     }
 
-    /* initialize elements with Qnil for CA_OBJECT data_type */
+    /* an object array starts with every cell 0 */
     if ( allocate && data_type == CA_OBJECT ) {
       volatile VALUE zero = SIZE2NUM(0);
       VALUE *p = (VALUE *) ca->ptr;
@@ -370,7 +368,7 @@ cscalar_setup (CScalar *ca,
   ca->bytes     = bytes;
   ca->elements  = 1;
   ca->dim       = &(ca->_dim);
-  ca->ptr       = xmalloc(bytes);
+  ca->ptr       = xmalloc(bytes);  /* cells: the one cell is set to 0 below */
   ca->mask      = NULL;
 
   ca->dim[0] = 1;

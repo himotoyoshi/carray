@@ -211,7 +211,7 @@ static void
 ca_remap_func_allocate (void *ap)
 {
   CARemap *ca = (CARemap *) ap;
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void

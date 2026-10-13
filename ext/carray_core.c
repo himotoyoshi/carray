@@ -1607,9 +1607,7 @@ ca_xfer_all (void *ap, void *data, int dir)
      written by nested transfers land inside it. */
   if ( ca->data_type == CA_OBJECT && dir == CA_XFER_GET ) {
     if ( data != (void *) ca->ptr ) {
-      VALUE *p = (VALUE *) data;
-      ca_size_t i;
-      for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
+      ca_object_cells_clear(data, ca->elements);
     }
     guard = ca_gc_hold_push(data, ca->elements);
   }

@@ -666,7 +666,7 @@ ca_grid_func_allocate (void *ap)
   if ( ! ca_parent_lends_no_memory(ca->parent) ) {
     ca_attach(ca->parent);
   }
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void

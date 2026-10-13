@@ -924,8 +924,8 @@ static void
 ca_object_func_allocate (void *ap)
 {
   CAObject *ca = (CAObject *) ap;
-  /* ca->data->ptr = ALLOC_N(char, ca_length(ca)); */
-  ca->data->ptr = xmalloc(ca_length(ca));  
+  /* cells: seeded with 0, which a copy_data that skips cells leaves visible */
+  ca->data->ptr = xmalloc(ca_length(ca));
   if ( ca_is_object_type(ca->data) ) { /* GC safe */
     VALUE *p = (VALUE *) ca->data->ptr;
     VALUE zero = INT2NUM(0);
@@ -1017,7 +1017,7 @@ ca_object_func_attach (void *ap)
     ca_face_attach(ap);
     return;
   }
-  /* ca->data->ptr = ALLOC_N(char, ca_length(ca)); */
+  /* cells: seeded with 0, which a copy_data that skips cells leaves visible */
   ca->data->ptr = xmalloc(ca_length(ca));
   if ( ca_is_object_type(ca->data) ) { /* GC safe */
     VALUE *p = (VALUE *) ca->data->ptr;
