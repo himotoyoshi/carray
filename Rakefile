@@ -70,6 +70,11 @@ task :runtime_error_check do
   ruby "utils/check_runtime_errors.rb" or exit($?.exitstatus)
 end
 
+desc "Report memory a raise leaves behind across every public method (macOS, slow)"
+task :leak_matrix do
+  ruby "-Iext", "-Ilib", "utils/leak_matrix.rb" or exit($?.exitstatus)
+end
+
 desc "Check that a buffer for an array's cells is valid before it is published"
 task :cell_buffer_check do
   ruby "utils/check_cell_buffers.rb" or exit($?.exitstatus)

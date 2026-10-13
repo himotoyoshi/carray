@@ -229,6 +229,28 @@ VALUE   rb_ca_template_n          (int n, ...);
 VALUEs, get an output sized by their broadcast shape. Used internally
 by `call_cfunc` ([ch. 14](14_call_cfunc.md)).
 
+## A raise between allocating and handing over
+
+A struct returned by `carray_new`, `ca_template` or a view's `*_new`
+belongs to no Ruby object until `ca_wrap_struct`. If anything between
+the allocation and the hand-over can raise, what was allocated is lost.
+Calls that can raise are not always visible at the allocation:
+asking an array for its mask (`ca_has_mask`, `ca_create_mask`,
+`ca_setup_mask`) or for its cells runs Ruby when the array is a
+`CAObject`, and a MemoryView producer can build its export in Ruby.
+
+- Take every buffer first, then do the step that can raise under
+  `ca_fill_or_free(ca, step, arg)`, which frees `ca` before the raise
+  propagates. `carray_new` copies a source mask this way, and `ca_grid_new`
+  asks its parent for a mask this way.
+- A buffer that is not yet part of a struct is freed by an `rb_protect`
+  around the step, or taken with `ALLOCV`.
+
+`rake leak_matrix` (`utils/leak_matrix.rb`, macOS) runs every public
+method over a `CAObject` source whose hooks raise and reports the calls
+that leave memory behind; `utils/measure_leak.rb` measures one expression
+in a fresh process.
+
 ## What about `CARRAY_DEV`?
 
 `CARRAY_DEV=1` is the build flag every developer machine should export
