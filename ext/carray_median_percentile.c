@@ -197,8 +197,7 @@ pct_compute (VALUE method, long k, double r, long n, double lo, double hi)
     return use_k ? lo : hi;
   }
   if ( method == sym_linear ) {
-    if ( r == 0.0 || k + 1 >= n ) return lo;
-    return lo * (1.0 - r) + hi * r;
+    return ca_percentile_linear(lo, hi, r, k, n);
   }
   if ( method == sym_midpoint ) {
     if ( k + 1 >= n ) return lo;

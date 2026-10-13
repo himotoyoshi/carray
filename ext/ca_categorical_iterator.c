@@ -316,9 +316,7 @@ ca_nth_element_double (double *a, ca_size_t n, ca_size_t kth)
           for ( t = ki + 2; t < nnum; t++ ) if ( scratch[t] < mn ) mn = scratch[t]; \
           vhi = mn;                                                            \
         } else vhi = (double) NAN;                                             \
-        { double r = f - (double) ki;                                          \
-          outp[c] = ( r == 0.0 || ki + 1 >= m ) ? vlo                          \
-                                                : vlo * (1.0 - r) + vhi * r; } } \
+        outp[c] = ca_percentile_linear(vlo, vhi, f - (double) ki, ki, m); }    \
     }                                                                           \
   } while (0)
 
@@ -693,19 +691,16 @@ cmp_double (const void *a, const void *b)
         scratch[m++] = (double) gp[jj];                                         \
       }                                                                         \
       if ( m == 0 ) { for ( t = 0; t < 5; t++ ) { outp[t][c] = 0.0; outm[t][c] = 1; } continue; } \
+      /* NaN sorts last, as in the core's sort, so a position or an upper   \
+         neighbour in the tail is NaN, as the core answers. */                \
       qsort(scratch, (size_t) m, sizeof(double), cmp_double);                   \
-      { ca_size_t nnum = m;                                                     \
-        while ( nnum > 0 && scratch[nnum-1] != scratch[nnum-1] ) nnum--;        \
       for ( t = 0; t < 5; t++ ) {                                               \
         double f = (double) (m - 1) * P[t] / 100.0;                            \
         ca_size_t ki = (ca_size_t) floor(f);                                   \
-        double vlo = scratch[ki];                                              \
-        /* Clamp the upper neighbour into the numeric prefix: with NaN sorted  \
-           last, a position whose neighbour is a NaN interpolates against      \
-           itself, which is what the core answers. */                          \
-        double vhi = (ki + 1 < nnum) ? scratch[ki+1] : vlo;                    \
-        outp[t][c] = vlo + (f - (double) ki) * (vhi - vlo);                     \
-      } }                                                                       \
+        double vhi = (ki + 1 < m) ? scratch[ki+1] : scratch[ki];               \
+        outp[t][c] = ca_percentile_linear(scratch[ki], vhi, f - (double) ki,   \
+                                          ki, m);                              \
+      }                                                                         \
     }                                                                           \
   } while (0)
 

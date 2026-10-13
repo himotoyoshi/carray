@@ -592,4 +592,16 @@ extern int ca_fast_paths_on;
 void ca_binop_read_boolean_as_truth (int logical, volatile VALUE *pa,
                                      volatile VALUE *pb);
 
+/* The :linear percentile between the k-th and (k+1)-th of n sorted values,
+   lo and hi, at fraction r past the k-th: lo itself when r is 0 or there is
+   no (k+1)-th, else lo * (1 - r) + hi * r.  A NaN sorts last, so a hi in the
+   NaN tail makes the answer NaN unless r is 0.  The core's percentile and the
+   iterators' per-segment kernels answer through this one expression. */
+static inline double
+ca_percentile_linear (double lo, double hi, double r, ca_size_t k, ca_size_t n)
+{
+  if ( r == 0.0 || k + 1 >= n ) return lo;
+  return lo * (1.0 - r) + hi * r;
+}
+
 #endif /* CARRAY_INTERNAL_H */
