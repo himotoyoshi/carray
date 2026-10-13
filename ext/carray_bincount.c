@@ -67,8 +67,8 @@
   case CA_UINT64:  COUNT_KERNEL(uint64_t, OUT_T); break; \
   default: \
     rb_raise(rb_eCADataTypeError, \
-             "bincount: integer label array required (got %d)", \
-             cl->data_type); \
+             "bincount: integer label array required (got %s)", \
+             ca_type_name[cl->data_type]); \
   } \
 } while (0)
 
@@ -83,8 +83,8 @@ bincount_check_types (CArray *cl, CArray *cw)
     break;
   default:
     rb_raise(rb_eCADataTypeError,
-             "bincount: integer label array required (got %d)",
-             cl->data_type);
+             "bincount: integer label array required (got %s)",
+             ca_type_name[cl->data_type]);
   }
   if ( ! cw ) {
     return;
@@ -96,7 +96,8 @@ bincount_check_types (CArray *cl, CArray *cw)
     break;
   default:
     rb_raise(rb_eCADataTypeError,
-             "bincount: weights must be numeric (got %d)", cw->data_type);
+             "bincount: weights must be numeric (got %s)",
+             ca_type_name[cw->data_type]);
   }
 }
 
@@ -199,8 +200,8 @@ rb_ca_bincount_count_kernel (VALUE self, VALUE rlength)
   case CA_UINT64:  WEIGHTED_KERNEL(uint64_t, W_T); break; \
   default: \
     rb_raise(rb_eCADataTypeError, \
-             "bincount: integer label array required (got %d)", \
-             cl->data_type); \
+             "bincount: integer label array required (got %s)", \
+             ca_type_name[cl->data_type]); \
   } \
 } while (0)
 
@@ -262,7 +263,8 @@ rb_ca_bincount_weighted_kernel (VALUE self, VALUE rweights, VALUE rlength)
   default:
     ca_detach_n(2, cl, cw);
     rb_raise(rb_eCADataTypeError,
-             "bincount: weights must be numeric (got %d)", w_type);
+             "bincount: weights must be numeric (got %s)",
+             ca_type_name[w_type]);
   }
 
   ca_detach_n(2, cl, cw);

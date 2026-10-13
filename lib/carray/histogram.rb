@@ -448,7 +448,7 @@ class CArray
   #   @param weights [CArray, nil] optional per-sample weights.
   #   @return [Histogram] 1-D accumulator (`m == 1`).
   def histogram1d (edges:, axis: -1, include_max: false, weights: nil)
-    ax = normalize_axis(axis, "histogram1d")
+    ax = normalize_axis(axis.nil? ? -1 : axis, "histogram1d")
 
     new_shape = shape + [1]
     arr_with_channel = reshape(*new_shape)
@@ -492,6 +492,10 @@ class CArray
   def histogram (edges:, axis: [-2, -1], include_max: false, weights: nil)
     raise ArgumentError, "edges must be an Array of edges arrays" unless edges.is_a?(Array)
     arr = self
+    axis = [-2, -1] if axis.nil?
+    unless axis.is_a?(Array) && axis.size == 2
+      raise ArgumentError, "histogram: axis: is a [sample, channel] pair (got #{axis.inspect})"
+    end
     sample_ax  = normalize_axis(axis[0], "histogram sample axis")
     channel_ax = normalize_axis(axis[1], "histogram channel axis")
     fiber_shape = arr.shape.dup

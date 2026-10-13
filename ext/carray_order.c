@@ -116,19 +116,23 @@ ca_project_loop (CArray *co, CArray *ca, CArray *ci, char *lfill, char *ufill)
   xfree(ma);
 }
 
-CArray *
+/* The result is wrapped before anything is copied into it: for an object
+   array the gathered cells are VALUEs that only the result's mark keeps
+   alive once the source is detached. */
+static VALUE
 ca_project (CArray *ca, CArray *ci, char *lfill, char *ufill)
 {
+  volatile VALUE obj;
   CArray *co;
 
+  obj = rb_carray_new(ca->data_type, ci->ndim, ci->dim, ca->bytes, NULL);
+  GetCArray(obj, co);
+
   ca_attach_n(2, ca, ci); /* window: nothing raises inside */
-
-  co = carray_new(ca->data_type, ci->ndim, ci->dim, ca->bytes, NULL);
   ca_project_loop(co, ca, ci, lfill, ufill);
-
   ca_detach_n(2, ca, ci); /* DETACH */
 
-  return co;
+  return obj;
 }
 
 /* rk.__count_below__(q, inclusive) -- for each cell of q, how many values
@@ -254,12 +258,12 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
   lfval = ALLOCV_N(char, hlfval, ca->bytes);   /* converting a fill value */
   ufval = ALLOCV_N(char, hufval, ca->bytes);   /* can raise; the unwind frees */
 
-  if ( ! NIL_P(vlfval) ) {
+  if ( ! NIL_P(vlfval) && vlfval != CA_UNDEF ) {
     rb_ca_obj2ptr(self, vlfval, lfval);
     rb_ca_obj2ptr(self, vlfval, ufval);
   }
 
-  if ( ! NIL_P(vufval) ) {
+  if ( ! NIL_P(vufval) && vufval != CA_UNDEF ) {
     rb_ca_obj2ptr(self, vufval, ufval);
   }
 
@@ -274,14 +278,18 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
     TypedData_Get_Struct(vstorage, CArray, &carray_data_type, ca);
   }
 
-  co = ca_project(ca, ci,
-                 ( ! NIL_P(vlfval) ) ? lfval : NULL,
-                 ( ( ! NIL_P(vufval) ) || ( ! NIL_P(vlfval) ) ) ? ufval : NULL);
+  /* A fill of UNDEF is no fill: the cell is masked, as it is with none. */
+  {
+    VALUE vlower = vlfval;
+    VALUE vupper = NIL_P(vufval) ? vlfval : vufval;
+    obj = ca_project(ca, ci,
+                     ( NIL_P(vlower) || vlower == CA_UNDEF ) ? NULL : lfval,
+                     ( NIL_P(vupper) || vupper == CA_UNDEF ) ? NULL : ufval);
+  }
+  GetCArray(obj, co);
 
   ALLOCV_END(hlfval);
   ALLOCV_END(hufval);
-
-  obj = ca_wrap_struct(co);
 
   if ( ! ca_is_any_masked(co) ) {
     obj = rb_ca_unmask_copy(obj);
@@ -532,6 +540,41 @@ rb_ca_search_nearest_addr_kw (int argc, VALUE *argv, VALUE self)
 
 /* ---- sort_by_key family ---------------------------------------------- */
 
+/* The key orders self's cells one for one, so it has self's shape. */
+static void
+ca_by_key_check_shape (VALUE self, VALUE rkey, const char *name)
+{
+  CArray *ca, *ck;
+  int8_t i;
+  rb_check_carray_object(rkey);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(rkey, CArray, &carray_data_type, ck);
+  if ( ca->ndim == ck->ndim ) {
+    for (i = 0; i < ca->ndim; i++) {
+      if ( ca->dim[i] != ck->dim[i] ) break;
+    }
+    if ( i == ca->ndim ) return;
+  }
+  rb_raise(rb_eArgError, "%s: the key's shape %"PRIsVALUE" differs from "
+           "the array's %"PRIsVALUE, name,
+           rb_funcall(rkey, rb_intern("shape"), 0),
+           rb_funcall(self, rb_intern("shape"), 0));
+}
+
+/* self at the addresses an extremum by key found.  A fiber with no cell to
+   compare has a masked (or UNDEF) address and answers UNDEF. */
+static VALUE
+ca_by_key_fetch (VALUE self, VALUE addrs)
+{
+  if ( addrs == CA_UNDEF ) {
+    return CA_UNDEF;
+  }
+  if ( rb_obj_is_carray(addrs) && RTEST(rb_ca_has_mask(addrs)) ) {
+    return rb_funcall(self, rb_intern("project"), 1, addrs);
+  }
+  return rb_ca_fetch(self, addrs);
+}
+
 /* sort_by_key(key, axis: 0) -- gather self at key.sort_addr(axis:). */
 static VALUE
 rb_ca_sort_by_key (int argc, VALUE *argv, VALUE self)
@@ -542,6 +585,7 @@ rb_ca_sort_by_key (int argc, VALUE *argv, VALUE self)
   if ( NIL_P(raxis) ) {
     raxis = INT2FIX(0);
   }
+  ca_by_key_check_shape(self, rkey, "sort_by_key");
   VALUE addrs = rb_ca_sort_addr_c(rkey, raxis, 0, 1);  /* masked_last=1 (:last), unchanged default */
   return rb_ca_fetch(self, addrs);
 }
@@ -553,9 +597,11 @@ rb_ca_max_by_key (int argc, VALUE *argv, VALUE self)
   VALUE rkey, rkw = Qnil, raxis = Qnil;
   rb_scan_args(argc, argv, "1:", &rkey, &rkw);
   rb_scan_options(rkw, "axis", &raxis);
-  if ( RTEST(rb_ca_is_empty(self)) ) {
-    return rb_const_get(rb_cObject, rb_intern("UNDEF"));
+  ca_by_key_check_shape(self, rkey, "max_by_key");
+  if ( NIL_P(raxis) && RTEST(rb_ca_is_empty(self)) ) {
+    return CA_UNDEF;
   }
+  rkey = ca_order_key(rkey, "max_by_key");
 
   VALUE addrs;
 
@@ -568,7 +614,7 @@ rb_ca_max_by_key (int argc, VALUE *argv, VALUE self)
     rb_hash_aset(kw, ID2SYM(id_axis), raxis);
     addrs = rb_funcallv_kw(rkey, rb_intern("max_addr"), 1, &kw, RB_PASS_KEYWORDS);
   }
-  return rb_ca_fetch(self, addrs);
+  return ca_by_key_fetch(self, addrs);
 }
 
 /* min_by_key(key, axis: nil) -- self[key.min_addr(axis:)] (or UNDEF if empty). */
@@ -578,9 +624,11 @@ rb_ca_min_by_key (int argc, VALUE *argv, VALUE self)
   VALUE rkey, rkw = Qnil, raxis = Qnil;
   rb_scan_args(argc, argv, "1:", &rkey, &rkw);
   rb_scan_options(rkw, "axis", &raxis);
-  if ( RTEST(rb_ca_is_empty(self)) ) {
-    return rb_const_get(rb_cObject, rb_intern("UNDEF"));
+  ca_by_key_check_shape(self, rkey, "min_by_key");
+  if ( NIL_P(raxis) && RTEST(rb_ca_is_empty(self)) ) {
+    return CA_UNDEF;
   }
+  rkey = ca_order_key(rkey, "min_by_key");
 
   VALUE addrs;
 
@@ -593,7 +641,7 @@ rb_ca_min_by_key (int argc, VALUE *argv, VALUE self)
     rb_hash_aset(kw, ID2SYM(id_axis), raxis);
     addrs = rb_funcallv_kw(rkey, rb_intern("min_addr"), 1, &kw, RB_PASS_KEYWORDS);
   }
-  return rb_ca_fetch(self, addrs);
+  return ca_by_key_fetch(self, addrs);
 }
 
 /* ---- take_along_axis / put_along_axis -------------------------------- */
@@ -637,10 +685,16 @@ rb_ca_put_along_axis (int argc, VALUE *argv, VALUE self)
     raxis = INT2FIX(0);
   }
   VALUE addrs = rb_ca_axis2addr_c(self, argv[0], raxis);
-  /* A masked index writes nothing: scatter_replace! skips a masked
-     address (and writes the rest last-write-wins, as the store does). */
+  /* A masked index writes nothing.  The values are first laid out over the
+     indices by the store itself (an array of the indices' shape, so a
+     broadcast, UNDEF or a Face value means what it means unmasked), and
+     only the cells at unmasked indices are written. */
   if ( RTEST(rb_ca_has_mask(addrs)) ) {
-    rb_funcall(self, rb_intern("scatter_replace!"), 2, addrs, argv[1]);
+    VALUE sel  = rb_funcall(addrs, rb_intern("is_not_masked"), 0);
+    VALUE vals = rb_funcall(self, rb_intern("project"), 1, addrs);
+    rb_funcall(vals, rb_intern("[]="), 1, argv[1]);
+    rb_ca_store(self, rb_funcall(addrs, rb_intern("[]"), 1, sel),
+                rb_funcall(vals, rb_intern("[]"), 1, sel));
     return self;
   }
   rb_ca_store(self, addrs, argv[1]);
@@ -653,7 +707,12 @@ static VALUE
 rb_ca_range_method (VALUE self)
 {
   VALUE mm_argv[1] = { Qnil };
-  VALUE pair = rb_ca_minmax_ki(0, mm_argv, self);
+  CArray *ca;
+  VALUE pair;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  /* A Face answers its own minmax (in its order, with its elements). */
+  pair = ca_is_face(ca) ? rb_funcall(self, rb_intern("minmax"), 0)
+                        : rb_ca_minmax_ki(0, mm_argv, self);
   VALUE lo = rb_ary_entry(pair, 0);
   VALUE hi = rb_ary_entry(pair, 1);
   return rb_range_new(lo, hi, 0);
@@ -941,6 +1000,16 @@ rb_ca_linear_section_m (int argc, VALUE *argv, VALUE self)
     }
   }
 
+  {
+    CArray *ca;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+    if ( ca_is_complex_type(ca) ) {
+      rb_raise(rb_eCADataTypeError,
+               "linear_section: a %s array has no order (complex numbers are "
+               "not ordered)", ca_type_name[ca->data_type]);
+    }
+  }
+
   long axis_norm = 0;
   VALUE sc = ca_linear_prep(self, raxis, "linear_section", &axis_norm);
   VALUE raxis_norm = LONG2NUM(axis_norm);
@@ -965,6 +1034,27 @@ rb_ca_linear_fetch_m (int argc, VALUE *argv, VALUE self)
   rb_scan_options(ropt, "axis", &raxis);
   rb_check_arity(argc, 1, 1);
   VALUE addr = argv[0];
+
+  /* A complex array interpolates its real and imaginary parts: the
+     weights are real, so each part is a real interpolation. */
+  {
+    CArray *ca;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+    if ( ca_is_complex_type(ca) ) {
+      VALUE args[2], re, im;
+      int n = 1;
+      args[0] = addr;
+      if ( ! NIL_P(ropt) ) args[n++] = ropt;
+      re = rb_funcallv_kw(rb_funcall(self, rb_intern("real"), 0),
+                          rb_intern("linear_fetch"), n, args,
+                          NIL_P(ropt) ? RB_NO_KEYWORDS : RB_PASS_KEYWORDS);
+      im = rb_funcallv_kw(rb_funcall(self, rb_intern("imag"), 0),
+                          rb_intern("linear_fetch"), n, args,
+                          NIL_P(ropt) ? RB_NO_KEYWORDS : RB_PASS_KEYWORDS);
+      return rb_funcall(re, '+', 1,
+                        rb_funcall(im, '*', 1, rb_Complex(INT2FIX(0), INT2FIX(1))));
+    }
+  }
 
   long axis_norm = 0;
   VALUE sc = ca_linear_prep(self, raxis, "linear_fetch", &axis_norm);

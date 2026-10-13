@@ -428,7 +428,16 @@ rb_ca_histogram_scatter_ki (VALUE self, VALUE rcounts, VALUE redges,
      weights = nil OR float64 [fiber..., A] (second iterator in lockstep).
    =========================================================================== */
 
-#define BINCOUNT_ND_BODY(LABEL_T)                                              \
+/* A label at or above the last bin lands in the overflow cell.  An unsigned
+   64-bit label above INT64_MAX must be clamped before it becomes an int64,
+   or it turns negative and indexes before the counts. */
+static inline int64_t
+bincount_nd_label_u64 (uint64_t x)
+{
+  return ( x > (uint64_t) INT64_MAX ) ? INT64_MAX : (int64_t) x;
+}
+
+#define BINCOUNT_ND_BODY(LABEL_T, TO_INT64)                                    \
   do {                                                                         \
     while ( ca_iter_state_next_slab_axes(&st, &p, &m) ) {                      \
       ca_size_t fiber_base = 0, A, a, kk, ss, cs, sms, cms, ws = 0, wms = 0;   \
@@ -441,7 +450,7 @@ rb_ca_histogram_scatter_ki (VALUE self, VALUE rcounts, VALUE redges,
       for ( a = 0; a < A; a++ ) {                                             \
         ca_size_t off = fiber_base; int masked = 0;                           \
         for ( kk = 0; kk < (ca_size_t) M; kk++ ) {                            \
-          int64_t v = (int64_t) *(const LABEL_T *)(p + a * ss + kk * cs);     \
+          int64_t v = TO_INT64(*(const LABEL_T *)(p + a * ss + kk * cs));     \
           if ( m && m[a * sms + kk * cms] ) { masked = 1; break; }            \
           if ( v >= ext_dim[kk] - 1 ) v = ext_dim[kk] - 1;                    \
           off += (ca_size_t) v * ext_stride[kk];                             \
@@ -515,14 +524,14 @@ rb_ca_bincount_nd_count_ki (VALUE self, VALUE rcounts, VALUE rweights)
     for ( mm = 0; mm < st.outer_ndim; mm++ ) cur_outer_idx[mm] = 0;
 
     switch ( ca->data_type ) {
-    case CA_INT8:   BINCOUNT_ND_BODY(int8_t);   break;
-    case CA_UINT8:  BINCOUNT_ND_BODY(uint8_t);  break;
-    case CA_INT16:  BINCOUNT_ND_BODY(int16_t);  break;
-    case CA_UINT16: BINCOUNT_ND_BODY(uint16_t); break;
-    case CA_INT32:  BINCOUNT_ND_BODY(int32_t);  break;
-    case CA_UINT32: BINCOUNT_ND_BODY(uint32_t); break;
-    case CA_INT64:  BINCOUNT_ND_BODY(int64_t);  break;
-    case CA_UINT64: BINCOUNT_ND_BODY(uint64_t); break;
+    case CA_INT8:   BINCOUNT_ND_BODY(int8_t, (int64_t));   break;
+    case CA_UINT8:  BINCOUNT_ND_BODY(uint8_t, (int64_t));  break;
+    case CA_INT16:  BINCOUNT_ND_BODY(int16_t, (int64_t));  break;
+    case CA_UINT16: BINCOUNT_ND_BODY(uint16_t, (int64_t)); break;
+    case CA_INT32:  BINCOUNT_ND_BODY(int32_t, (int64_t));  break;
+    case CA_UINT32: BINCOUNT_ND_BODY(uint32_t, (int64_t)); break;
+    case CA_INT64:  BINCOUNT_ND_BODY(int64_t, (int64_t));  break;
+    case CA_UINT64: BINCOUNT_ND_BODY(uint64_t, bincount_nd_label_u64); break;
     default:
       ca_iter_state_finish(&st);
       if ( weighted ) ca_iter_state_finish(&stw);

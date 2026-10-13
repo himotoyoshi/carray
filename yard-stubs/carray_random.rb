@@ -24,7 +24,9 @@ class CArray
   #   Fills `self` with uniform random numbers in-place and returns
   #   `self`.  Boolean arrays fill 0/1 at 50% probability, ignoring
   #   any range argument.  Complex arrays sample real and imaginary
-  #   parts independently from the same range.
+  #   parts independently from the same range.  An integer array takes
+  #   Integer bounds whose every value fits its type (the whole range
+  #   of the type included); a float array takes finite bounds.
   #
   #   @param low [Numeric] lower bound (inclusive).
   #   @param high [Numeric] upper bound (exclusive).
@@ -35,7 +37,11 @@ class CArray
   #   @raise [CArray::DataTypeError] for `:object` / `:fixlen` arrays.
   #   @raise [ArgumentError] when an integer array is called with no
   #     range, when `low >= high`, when a Range is combined with a
-  #     second positional argument, or when a Range endpoint is nil.
+  #     second positional argument, when a Range endpoint is nil, or
+  #     when a float bound is NaN or infinite.
+  #   @raise [TypeError] when an integer array is given a non-Integer
+  #     bound.
+  #   @raise [RangeError] when the integer range does not fit the type.
   def random!(*args, rng: nil); end
 
   # @overload random(rng: nil)
@@ -72,7 +78,9 @@ class CArray
   #   Fisher-Yates permutes `self` in-place and returns `self`.
   #   Without `axis:`, shuffles all cells as if flattened. With
   #   `axis:`, permutes slices along that axis (the trailing
-  #   sub-slab is treated as a byte chunk and swapped whole).
+  #   sub-slab is treated as a byte chunk and swapped whole). The mask
+  #   moves with the values: a masked cell stays masked wherever it
+  #   lands.
   #   @param axis [Integer, nil] axis to permute along; nil = flat.
   #   @param rng [Random, nil] RNG instance; nil uses the per-ractor
   #     default RNG.

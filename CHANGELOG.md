@@ -36,6 +36,69 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: a complex array's `linear_fetch` and `strip_mask(method: :linear)` /
+  `unmask(method: :linear)` dropped the imaginary part; both parts are now
+  interpolated. `linear_section`, `elem_min` and `elem_max` refuse a complex
+  array, which has no order. `put_along_axis` and `put_nd` with a masked
+  index wrote the other values as `scatter_replace!` does rather than as
+  the store does (an object array was refused, a broadcast or Face value
+  read differently); they now go through the store either way. `put_nd` on
+  a frozen array raises FrozenError.
+
+- Change: arguments of the binning, counting and random methods are
+  checked instead of cut or wrapped. `random!` on an integer array takes
+  Integer bounds whose values all fit the type (`int8.random!(0, 1000)` and
+  `random!(1.5)` raise; the whole int64 and uint64 ranges now work), and on
+  a float array finite bounds. `bin(bins:)`, `bincount(length:)` and
+  `bincount_nd(lengths:)` take Integers, `bincount(length:)` a non-negative
+  one. `bin_to(lfill: n)` (n the number of bins) wrote `ufill` under the
+  range. `histogram`, `histogram1d` and `bincount_nd` take `axis: nil` as
+  the default.
+
+- Fix: `windows(on:)` with a uint64 key above 2**63 - 1, or with a time
+  key whose widths need a finer grid late in the time range, wrapped the
+  key and gave wrong windows; such keys are now measured from the smallest
+  one, and a span that int64 cannot hold raises. A `before:` or `after:` of
+  NaN raises, as `interval:` of NaN does, and `bounds:` / `fill_value:` with
+  `on:` raise instead of being ignored.
+
+- Fix: `shuffle!` and `shuffle` moved the values but not the mask, so a
+  masked cell's value came into view and another cell went masked; the mask
+  now moves with the values. `project(idx, UNDEF)` filled out-of-range cells
+  with 0 instead of masking them. `count` with a query array that has a
+  masked cell counted self's masked cells there; that count is now masked.
+
+- Fix: `nlargest`, `nsmallest`, their `_index` forms, `partition`,
+  `sort_by_key`, `max_by_key`, `min_by_key` and `range` ordered a
+  CAConstString by its storage offsets and a record array by its bytes. They
+  now order them as `sort` does: by string, and by the struct's `order_by:`
+  members; a struct that declares no order raises, as it does for `sort`.
+  The `*_by_key` methods also refuse a key of another shape, and answer UNDEF
+  instead of raising when no key cell can be compared.
+
+- Change: `scatter_*!`, `put_nd`, `elem_store`, `elem_min` and
+  `elem_max` convert a scalar value the way `self[i] = v` does, so a value
+  that does not fit the type now raises (`RangeError`, `FloatDomainError`
+  for NaN into an integer type) instead of wrapping: `int8.scatter_add!([0],
+  300)` used to add 44. `scatter_*!` also take an Integer above the fixnum
+  range, a Rational, or a BigDecimal as one value for every address, and
+  `scatter_replace!(addrs, UNDEF)` masks the cells. Index arrays and element
+  indices are read as `self[idx]` reads them: a float index array (to
+  `scatter_*!`, `project`, `take_along_axis`) or a Float element index
+  raises IndexError instead of being cut to an integer, and a uint64 index
+  of 2**63 or more is out of range instead of counting from the end.
+  `count` with a Rational or BigDecimal query compares it as a number
+  instead of cutting it to the array's type.
+
+- Fix: three methods read or wrote outside their memory. `project` (and
+  `take_along_axis` with a masked index) on an object array computed
+  lazily could crash in the garbage collector. `bincount_nd` with a uint64
+  label of 2**63 or more counted it in another cell, or wrote before the
+  counts; it now counts in the overflow cell, as any label past the last
+  bin does. The `elem_*` methods given an index array whose length is not
+  the array's ndim read past the Ruby Array or ignored the extra entries;
+  they now raise IndexError, as `[]` does.
+
 - Fix: `diagonal(offset)` returns an empty view for the most negative
   offset (`-2**63`), as for any offset past the edge. It raised
   `IndexError`.

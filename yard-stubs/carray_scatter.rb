@@ -16,13 +16,17 @@ class CArray
   # Shared contract:
   #
   # - `addrs` is a CArray of any integer type (coerced to
-  #   `CA_SIZE`) or a Ruby Array.
+  #   `CA_SIZE`) or a Ruby Array. A float or complex CArray is
+  #   refused with `IndexError`, as `self[addrs]` refuses it.
   # - `vals` is a CArray of length matching `addrs` (coerced to
-  #   `self.data_type`), or a Numeric scalar broadcast to all
-  #   addresses. A complex `self` also takes a Complex scalar.
-  # - Out-of-range `addrs[i]` (`< 0` or `>= self.elements`) raises
-  #   `IndexError`.  The pairs before it stay applied, through a view
-  #   as well.
+  #   `self.data_type`), or a scalar broadcast to all addresses: any
+  #   Numeric, `true` / `false`, or `UNDEF`. The scalar is converted as
+  #   `self[i] = v` converts it, so a value that does not fit the type
+  #   raises (`RangeError`, `FloatDomainError` for NaN into an integer
+  #   type). A scalar `UNDEF` is a masked value.
+  # - A negative `addrs[i]` counts from the end. One out of range
+  #   raises `IndexError`; the pairs before it stay applied, through a
+  #   view as well.
   # - `self.data_type` must be numeric. Complex is accepted by
   #   every variant except {#scatter_min!} and {#scatter_max!},
   #   since complex values have no order.
@@ -101,11 +105,12 @@ class CArray
   #   result is written back many times.
   #
   #   Unlike the arithmetic `scatter_*!` family, `self` may be
-  #   **boolean** (assignment does not widen), and `true` / `false`
-  #   are accepted as scalar `vals` alongside numeric scalars.
+  #   **boolean** (assignment does not widen); `true` / `false` (or
+  #   `1` / `0`) are its scalar values. A scalar `UNDEF` masks every
+  #   addressed cell.
   #
   #   @param addrs [CArray, Array<Integer>]
-  #   @param vals [CArray, Numeric, true, false]
+  #   @param vals [CArray, Numeric, true, false, UNDEF]
   #   @return [self]
   def scatter_replace!(addrs, vals); end
 

@@ -35,6 +35,22 @@ class CArray
       raise CArray::DataTypeError,
             "bincount requires an integer label array (got #{data_type_name})"
     end
+    unless length.is_a?(Integer)
+      raise TypeError, "bincount: length: must be an Integer (got #{length.inspect})"
+    end
+    if length < 0
+      raise ArgumentError, "bincount: length: must not be negative (got #{length})"
+    end
+    unless weights.nil?
+      unless weights.is_a?(CArray)
+        raise ArgumentError, "bincount: weights must be a CArray"
+      end
+      unless weights.integer? || weights.float?
+        raise CArray::DataTypeError,
+              "bincount: weights must be numeric (got " \
+              "#{weights.face? ? weights.class : weights.data_type_name})"
+      end
+    end
 
     if elements.zero?
       if weights

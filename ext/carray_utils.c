@@ -635,15 +635,22 @@ ca_shape_elements (int8_t ndim, const ca_size_t *dim, ca_size_t bytes)
   return elements;
 }
 
-/* An index array is read as ca_size_t.  A uint64 one holding 2**63 or more
-   would turn negative on the way and count from the end of the axis, so it
-   is refused here as the out-of-range index it is. */
+/* An index array is read as ca_size_t.  A float or complex one would be
+   cut to an integer on the way, so it is refused, as the indexer refuses
+   it.  A uint64 one holding 2**63 or more would turn negative and count
+   from the end of the axis, so it is refused as the out-of-range index it
+   is. */
 void
 ca_check_index_array (VALUE v)
 {
   CArray *ca;
   if ( ! rb_obj_is_carray(v) ) return;
   GetCArray(v, ca);
+  if ( ca_is_float_type(ca) || ca_is_complex_type(ca) ) {
+    rb_raise(rb_eIndexError,
+             "data_type %s is invalid for an index (should be integer)",
+             ca_type_name[ca->data_type]);
+  }
   if ( ca->data_type != CA_UINT64 || ca->elements == 0 ) return;
   {
     VALUE max = rb_funcall(v, rb_intern("max"), 0);

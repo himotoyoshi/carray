@@ -376,6 +376,7 @@ VALUE       ca_answer_as_caller (VALUE (*body)(VALUE), VALUE arg);
 long        ca_integer_arg (VALUE v, const char *arg, const char *name);
 ca_size_t   ca_shape_elements (int8_t ndim, const ca_size_t *dim, ca_size_t bytes);
 void        ca_check_index_array (VALUE v);
+VALUE       ca_order_key (VALUE v, const char *name);
 void        ca_check_integer_fits (VALUE v, int8_t data_type);
 VALUE       ca_obj2integer_fitting (VALUE v, int8_t data_type);
 int         ca_integer_range_side (VALUE v, int8_t data_type);

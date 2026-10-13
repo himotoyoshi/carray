@@ -14,7 +14,9 @@
                (boolean / object / fixlen → CADataTypeError; the bang
                cannot widen self, same rationale as fma! / fms!)
                replace: numeric or boolean (assignment, no widening)
-    scalar     Integer / Float, and Complex when self is complex
+    scalar     any Numeric, true / false, or UNDEF; converted to self's
+               type as the indexer's store converts it (a value that does
+               not fit raises, as `self[i] = v` does)
 
 --------------------------------------------------------------------------- */
 
@@ -44,12 +46,19 @@
 #define OP_MIN_INT(qp, v) do { if ((v) < *(qp)) *(qp) = (v); } while (0)
 #define OP_MAX_INT(qp, v) do { if ((v) > *(qp)) *(qp) = (v); } while (0)
 
-/* The scalar operand as T.  An Integer goes to T directly, not through
-   double, so an int64 above 2**53 is exact.  A complex self also takes a
-   Ruby Complex scalar, whose parts sit in vd / vi; an Integer or Float
-   scalar leaves vi at 0. */
-#define SCALAR_REAL(T)  (v_is_float ? (T) vd : (T) vl)
-#define SCALAR_CMPLX(T) ((T) ((v_is_float ? (double)vd : (double)vl) + vi * I))
+/* The scalar operand, already converted to self's type by rb_ca_obj2ptr
+   (the indexer's store conversion) and held as one cell in vcell. */
+typedef union {
+  char       bytes[16];
+  double     d;
+  int64_t    l;
+#ifdef HAVE_COMPLEX_H
+  cmplx128_t z;
+#endif
+} ca_scatter_cell_t;
+
+#define SCALAR_REAL(T)  (*(const T *) vcell.bytes)
+#define SCALAR_CMPLX(T) (*(const T *) vcell.bytes)
 
 #define LOOP_SCALAR(T, APPLY) LOOP_SCALAR_V(T, APPLY, SCALAR_REAL(T))
 
@@ -105,8 +114,8 @@
        both value and mask (indexer contract, `self[addrs] = vals`).
      - masked vals[i] flips target to masked (writes UNDEF); valid
        vals[i] writes value and clears the target's mask bit.
-   Scalar vals is always valid (Fixnum / Float), so scalar path just
-   writes and clears target mask. */
+   A scalar UNDEF masks every target (self's mask exists by then); any
+   other scalar writes and clears the target's mask. */
 
 #define LOOP_SCALAR_REPLACE(T) LOOP_SCALAR_REPLACE_V(T, SCALAR_REAL(T))
 
@@ -117,6 +126,10 @@
     if ( maddrs && maddrs[i] ) continue; \
     addr = p[i]; \
     CA_CHECK_INDEX(addr, elements); \
+    if ( vals_undef ) { \
+      mself[addr] = 1; \
+      continue; \
+    } \
     q[addr] = vs; \
     if ( mself ) mself[addr] = 0; \
   } \
@@ -204,11 +217,21 @@
   } \
 } while (0)
 
+/* A value that is one cell for every address: a Numeric, true / false,
+   or UNDEF.  Anything else (a CArray, an Array, ...) is coerced to an
+   array of values. */
+static int
+ca_scatter_is_scalar (VALUE v)
+{
+  return v == CA_UNDEF || v == Qtrue || v == Qfalse
+      || rb_obj_is_kind_of(v, rb_cNumeric);
+}
+
 /* Setup boilerplate: parse args and wrap addrs/vals.
 
    Outputs into caller's locals:
      ca, ci, cv (CArray*), n (ca_size_t),
-     vals_scalar (int), v_is_float (int), vd, vi (double), vl (long).
+     vals_scalar, vals_undef (int), vcell (the scalar as one cell).
 
    The kernel then runs through AT_RUN, and an address out of range
    raising part way still leaves the cells already written.
@@ -218,9 +241,12 @@
 */
 /* Body shared by arithmetic and replace setups.  Caller precondition:
    the data_type gate has already run (arithmetic = numeric only, replace
-   = numeric or boolean).  For the replace variant, `true` / `false`
-   scalars are accepted as vals (bridged as vl = 1 / 0). */
-#define AT_SETUP_BODY(name, allow_bool_scalar) \
+   = numeric or boolean).  A scalar is converted the way `self[i] = v`
+   converts it, so true / false reach only a boolean self and a value that
+   does not fit raises.  A scalar UNDEF is a masked value: the arithmetic
+   family skips every pair, replace masks every target. */
+#define AT_SETUP_BODY(name) \
+  ca_check_index_array(raddrs); \
   raddrs = rb_ca_wrap_readonly(raddrs, INT2NUM(CA_SIZE)); \
   TypedData_Get_Struct(raddrs, CArray, &carray_data_type, ci); \
   if ( ca_shares_root(ci, ca) ) { \
@@ -229,18 +255,14 @@
   } \
   n = ci->elements; \
   if ( n == 0 ) return self; \
-  vals_scalar = (RB_FLOAT_TYPE_P(rvals) || FIXNUM_P(rvals) \
-                 || ((allow_bool_scalar) && (rvals == Qtrue || rvals == Qfalse)) \
-                 || (ca_is_complex_type(ca) && RB_TYPE_P(rvals, T_COMPLEX))); \
+  vals_scalar = ca_scatter_is_scalar(rvals); \
   if ( vals_scalar ) { \
-    if ( RB_TYPE_P(rvals, T_COMPLEX) ) { \
-      vd = NUM2DBL(rb_complex_real(rvals)); \
-      vi = NUM2DBL(rb_complex_imag(rvals)); \
-      v_is_float = 1; \
+    if ( rvals == CA_UNDEF ) { \
+      vals_undef = 1; \
     } \
-    else if ( RB_FLOAT_TYPE_P(rvals) ) { vd = RFLOAT_VALUE(rvals); v_is_float = 1; } \
-    else if ( FIXNUM_P(rvals) )   { vl = FIX2LONG(rvals);     v_is_float = 0; } \
-    else                          { vl = (rvals == Qtrue) ? 1 : 0; v_is_float = 0; } \
+    else { \
+      rb_ca_obj2ptr(self, rvals, vcell.bytes); \
+    } \
   } \
   else { \
     /* coerce: a store into the receiver */ \
@@ -260,8 +282,8 @@
 #define AT_SETUP_LOCALS \
   CArray  *ca, *ci, *cv = NULL; \
   ca_size_t n; \
-  int vals_scalar, v_is_float = 0; \
-  double vd = 0.0, vi = 0.0; long vl = 0;
+  int vals_scalar, vals_undef = 0; \
+  ca_scatter_cell_t vcell = {{0}};
 
 #define AT_SETUP_OR_RETURN(name, ordered) \
   AT_SETUP_LOCALS \
@@ -274,7 +296,8 @@
     rb_raise(rb_eCADataTypeError, \
       name " requires a real array (complex values have no order)"); \
   } \
-  AT_SETUP_BODY(name, 0)
+  AT_SETUP_BODY(name) \
+  if ( vals_undef ) return self;
 
 /* replace variant: accepts boolean self (assignment, no widening) and
    Ruby true / false as scalar vals. */
@@ -286,7 +309,8 @@
     rb_raise(rb_eCADataTypeError, \
       name " requires a numeric or boolean array"); \
   } \
-  AT_SETUP_BODY(name, 1)
+  AT_SETUP_BODY(name) \
+  if ( vals_undef ) ca_create_mask(ca);
 
 /* The kernel works either on self's own memory or on a compact region:
    the distinct cells the addresses touch, read out of self and written
@@ -306,9 +330,8 @@ typedef struct {
 typedef struct {
   CArray    *ca, *ci, *cv;
   ca_size_t  n;
-  int        vals_scalar, v_is_float;
-  double     vd, vi;
-  long       vl;
+  int        vals_scalar, vals_undef;
+  ca_scatter_cell_t vcell;
   ca_scatter_region_t *region;
 } ca_scatter_ctx_t;
 
@@ -331,10 +354,9 @@ fname (VALUE arg) \
   boolean8_t *mvals    = (cv && cv->mask) ? (boolean8_t *) cv->mask->ptr : NULL; \
   boolean8_t *mself    = rg_ ? rg_->mask \
                              : (ca->mask ? (boolean8_t *) ca->mask->ptr : NULL); \
-  int         vals_scalar = c_->vals_scalar, v_is_float = c_->v_is_float; \
-  double      vd = c_->vd, vi = c_->vi; \
-  long        vl = c_->vl; \
-  (void) cv; (void) mvals; (void) v_is_float; (void) vd; (void) vi; (void) vl; \
+  int         vals_scalar = c_->vals_scalar, vals_undef = c_->vals_undef; \
+  ca_scatter_cell_t vcell = c_->vcell; \
+  (void) cv; (void) mvals; (void) vals_undef; (void) vcell; \
   DISPATCH; \
   return Qnil; \
 }
@@ -461,8 +483,8 @@ ca_scatter_region_body (VALUE varg)
   ca_scatter_ctx_t c_; \
   CArray *list_[3]; \
   c_.ca = ca; c_.ci = ci; c_.cv = cv; c_.n = n; \
-  c_.vals_scalar = vals_scalar; c_.v_is_float = v_is_float; \
-  c_.vd = vd; c_.vi = vi; c_.vl = vl; \
+  c_.vals_scalar = vals_scalar; c_.vals_undef = vals_undef; \
+  c_.vcell = vcell; \
   c_.region = NULL; \
   if ( ca_attach_is_alias(ca) ) { \
     list_[0] = ca; list_[1] = ci; list_[2] = cv; \
@@ -570,8 +592,7 @@ rb_ca_scatter_replace_bang (VALUE self, VALUE raddrs, VALUE rvals)
   /* Pre-scan: if vals is a masked CArray and self isn't yet masked,
      promote self so the kernel can flip target cells to masked (indexer
      `self[addrs] = vals` establishes self.mask lazily the same way). */
-  if ( ! (RB_FLOAT_TYPE_P(rvals) || FIXNUM_P(rvals))
-       && rb_obj_is_carray(rvals) ) {
+  if ( rb_obj_is_carray(rvals) ) {
     CArray *cv_pre;
     TypedData_Get_Struct(rvals, CArray, &carray_data_type, cv_pre);
     if ( ca_has_mask(cv_pre) ) {

@@ -91,10 +91,19 @@ class CArray
   #   @raise [ArgumentError] on the same conditions as {#gather_nd}.
   #   @raise [IndexError] when a coordinate is out of range on any axis.
   def put_nd (indices, values)
+    # The write goes through a flattened view, which carries a frozen
+    # array's read-only flag but not its frozenness; say what the array is.
+    raise FrozenError.new("can't modify frozen #{self.class}", receiver: self) if frozen?
     flat_addr, _outer, _rest = gather_nd_flat_addr(indices, "put_nd")
     if flat_addr.has_mask?
-      # A masked coordinate writes nothing: scatter_replace! skips it.
-      flatten.scatter_replace!(flat_addr, values)
+      # A masked coordinate writes nothing.  The values are laid out over
+      # the coordinates by the store itself, so they mean what they mean
+      # unmasked, and only the cells at unmasked coordinates are written.
+      flat = flatten
+      vals = flat.project(flat_addr)
+      vals[] = values
+      sel  = flat_addr.is_not_masked
+      flat[flat_addr[sel]] = vals[sel]
     else
       self.flatten[flat_addr] = values
     end

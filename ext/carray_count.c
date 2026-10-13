@@ -82,8 +82,16 @@ ca_count_each_body (VALUE arg)
     /* Extract vk as a scalar VALUE via flat addr.  rb_ca_fetch_addr
        takes a ca_size_t addr (not a Ruby VALUE). */
     VALUE vk = rb_ca_fetch_addr(c->rval, k);
-    inner_argv[0] = vk;
-    VALUE sub = rb_ca_count(inner_call_argc, inner_argv, c->self);
+    VALUE sub;
+    /* A masked query cell asks nothing: its count is masked.  Passing it
+       on would ask count(UNDEF), the count of self's masked cells. */
+    if ( vk == CA_UNDEF ) {
+      sub = CA_UNDEF;
+    }
+    else {
+      inner_argv[0] = vk;
+      sub = rb_ca_count(inner_call_argc, inner_argv, c->self);
+    }
 
     /* Place sub into output[..., k] slot.
        Output stride for v-axis = 1, base stride = v_elements. */
@@ -351,6 +359,20 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     /* A Float query on an integer array is compared as a float, as `eq`
        compares and `search` searches: 1.5 must not match 1.  An Integer
        query keeps the array's type and is refused when it does not fit. */
+    if ( ca_is_integer_type(src) && ! RB_INTEGER_TYPE_P(rval)
+         && ! RB_FLOAT_TYPE_P(rval) && ! RB_TYPE_P(rval, T_COMPLEX)
+         && rb_obj_is_kind_of(rval, rb_cNumeric) ) {
+      /* A Rational or BigDecimal query: an integral one is the Integer it
+         equals; any other is compared as a float, like a Float query,
+         rather than cut to the array's type. */
+      VALUE ival = rb_funcall(rval, rb_intern("to_i"), 0);
+      VALUE *nargv = ALLOCA_N(VALUE, argc);
+      MEMCPY(nargv, argv, VALUE, argc);
+      nargv[0] = RTEST(rb_funcall(rval, rb_intern("=="), 1, ival))
+               ? ival : rb_funcall(rval, rb_intern("to_f"), 0);
+      argv = nargv;
+      rval = nargv[0];
+    }
     if ( ca_is_integer_type(src) && RB_FLOAT_TYPE_P(rval) ) {
       self = rb_ca_wrap_readonly(self, INT2NUM(CA_FLOAT64));
     }

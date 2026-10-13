@@ -4587,30 +4587,24 @@ module MkKernel
     io.puts "}"
   end
 
-  # Shared sort-family Face gate.  Descends a Face to its storage: a fixlen
-  # storage sorts by memcmp (the default order for fixlen, the same as a plain
-  # fixlen array -- a struct/record Face gets a deterministic byte order, and
-  # opts into a semantic order separately); a numeric storage requires
-  # ORDERABLE so the numeric order equals the surface order, else it raises.
-  # `src`/`self` are rebound to the stripped storage.
+  # Shared sort-family Face gate.  Every kernel of the family answers
+  # positions, so it runs on the array the Face's order is read from
+  # (ca_order_key): the storage of an ORDERABLE Face, the Face's own dense
+  # rank for a fixlen storage that is not ORDERABLE (CAConstString's offsets,
+  # a record's bytes), and a refusal otherwise.  `src`/`self` are rebound to
+  # that array.
   def self.emit_sort_face_gate(io, name)
     io.puts "  if ( ca_is_face(src) ) {"
-    io.puts "    VALUE _face = self;"
-    io.puts "    int _orderable = ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE);"
-    io.puts "    VALUE _st = rb_ca_strip_face_value(self);"
-    io.puts "    CArray *_sc;"
-    io.puts "    GetCArray(_st, _sc);"
-    io.puts "    if ( _sc->data_type != CA_FIXLEN && ! _orderable ) {"
-    io.puts %Q[      ca_face_refuse_order(ca_calling_method_name(), _face, "order");]
-    io.puts "    }"
-    io.puts "    self = _st;"
-    io.puts "    src = _sc;"
+    io.puts "    self = ca_order_key(self, ca_calling_method_name());"
+    io.puts "    GetCArray(self, src);"
     io.puts "  }"
   end
 
-  # Reduce-family Face gate.  Same ORDERABLE-descent policy as
-  # emit_sort_face_gate (fixlen storage -> memcmp default; numeric storage
-  # -> ORDERABLE required, else raise), rebinding self/src to storage.  When
+  # Reduce-family Face gate.  Descends a Face to its storage: a numeric
+  # storage requires ORDERABLE, else it raises; a fixlen storage is reduced
+  # by memcmp, which is the order of a CAFixlenString.  CAConstString and
+  # CARecord, whose bytes are no order, answer min / max / minmax in Ruby
+  # and do not reach this gate.  self/src are rebound to storage.  When
   # `relift` is set (value-returning kernels), the original Face is saved to
   # the function-scope `_reduce_face` so the dispatcher can re-lift the output.
   def self.emit_reduce_face_gate(io, name, relift)
@@ -4730,10 +4724,10 @@ module MkKernel
       io.puts "  CArray *src;"
       io.puts "  GetCArray(self, src);"
       emit_lazy_evaluated(io)
-      io.puts "  /* Face gate: descend to storage (fixlen -> memcmp default,"
-      io.puts "     numeric -> ORDERABLE required).  The strip also makes the"
-      io.puts "     switch below and every index/addr template output build on"
-      io.puts "     the plain storage, not a face-lifted (NULL-ptr) view. */"
+      io.puts "  /* Face gate: run on the array the Face's order is read from."
+      io.puts "     It is never a Face, so the switch below and every index/addr"
+      io.puts "     template output build on a plain array, not a face-lifted"
+      io.puts "     (NULL-ptr) view. */"
       emit_sort_face_gate(io, name)
       if k[:mask_self] == :raise
         io.puts "  /* sort family rejects masked sources globally (R3 / Q3): "
@@ -4842,8 +4836,7 @@ module MkKernel
       io.puts "  CArray *src;"
       io.puts "  GetCArray(self, src);"
       emit_lazy_evaluated(io)
-      io.puts "  /* Face gate (partition): same as the sort dispatcher --"
-      io.puts "     fixlen -> memcmp default, numeric -> ORDERABLE required. */"
+      io.puts "  /* Face gate (partition): same as the sort dispatcher. */"
       emit_sort_face_gate(io, name)
       if k[:mask_self] == :raise
         io.puts "  /* sort family rejects masked sources globally (R3 / Q3): "

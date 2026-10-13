@@ -1176,14 +1176,23 @@ class CArray
   #
   #     temp.windows(on: time, before: "1 hour").mean
   #   @return [CAKeyWindowIterator]
-  def windows (*ranges, bounds: :skip, fill_value: nil, on: nil, **key_window)
+  def windows (*ranges, on: nil, **key_window)
     unless on.nil?
       unless ranges.empty?
         raise ArgumentError, "windows: give offset ranges or on:, not both"
       end
+      given = [:bounds, :fill_value] & key_window.keys
+      unless given.empty?
+        raise ArgumentError,
+              "windows: #{given.map { |k| "#{k}:" }.join(', ')} " \
+              "belong to offset windows; a window on a key has no padding " \
+              "(a row with no window answers UNDEF)"
+      end
       require "carray/key_windows"
       return CAKeyWindowIterator.new(self, on: on, **key_window)
     end
+    bounds     = key_window.delete(:bounds) { :skip }
+    fill_value = key_window.delete(:fill_value)
     unless key_window.empty?
       raise ArgumentError,
             "windows: #{key_window.keys.map { |k| "#{k}:" }.join(', ')} " \
