@@ -43,11 +43,11 @@ class CArray
     # const string, a categorical) resizes too.  The new area starts as zero
     # storage; a given fill_value is written as a value of the array, which a
     # read-only Face refuses.
-    out = __blank_like__(newdim)
-    out_storage = out.__send__(:__face_storage__)
+    out = blank_like(newdim)
+    out_storage = out.__send__(:face_storage)
     out[] = fill_value unless fill_value.equal?(NO_FILL_VALUE)
     out_storage.mask.paste(offset, self.false) if out_storage.has_mask?
-    out_storage.paste(offset, __face_storage__)
+    out_storage.paste(offset, face_storage)
     out
   end
 

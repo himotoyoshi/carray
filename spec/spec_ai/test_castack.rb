@@ -108,7 +108,7 @@ class TestCAStack < Test::Unit::TestCase
     assert_false c.has_mask?
 
     s = CArray.stack([a, b, c])
-    s.send(:__create_mask__)
+    s.send(:add_mask)
 
     # The stack's mask stands in for the parents' without giving them one;
     # UNDEF written into a part gives that parent its mask.
@@ -124,7 +124,7 @@ class TestCAStack < Test::Unit::TestCase
 
   def test_mask_class_self_similar
     s = CArray.stack([@a, @b, @c])
-    s.send(:__create_mask__)
+    s.send(:add_mask)
     # mask CAStack uses same class (self-similar)
     assert_kind_of CAStack, s.mask
   end

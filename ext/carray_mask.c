@@ -2224,7 +2224,7 @@ rb_ca_inherit_mask_replace_ruby (int argc, VALUE *argv, VALUE self)
 void
 Init_carray_mask (void)
 {
-  rb_define_private_method(rb_cCArray, "__create_mask__", rb_ca_create_mask, 0);
+  rb_define_private_method(rb_cCArray, "add_mask", rb_ca_create_mask, 0);
   /*
   rb_define_private_method(rb_cCArray, "__update_mask__", rb_ca_update_mask, 0);
   */

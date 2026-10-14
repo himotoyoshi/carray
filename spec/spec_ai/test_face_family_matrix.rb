@@ -247,7 +247,7 @@ class TestFaceFamilyMatrix < Test::Unit::TestCase
     each_face do |face, a|
       assert a == a.copy, "#{face[:name]}: == its own copy"
       assert a.eql?(a.copy), "#{face[:name]}: eql? its own copy"
-      storage = a.__send__(:__face_storage__)
+      storage = a.__send__(:face_storage)
       assert !(a == storage), "#{face[:name]}: == its storage"
       assert !(a == a.to_type(:object)), "#{face[:name]}: == its values as objects"
     end

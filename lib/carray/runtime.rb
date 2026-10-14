@@ -30,7 +30,7 @@ class CArray
   # `_`->UNDEF parser is far more natural (and maintainable) in Ruby.
   # +type+ arrives as the data_type Symbol.  Required: without it
   # +CA_INT32("1 2 3")+ and friends raise.
-  def self.__cast_string__ (type, v) # :nodoc:
+  def self.cast_string (type, v)
     if type == CA_OBJECT
       return CScalar.new(CA_OBJECT) { v }
     elsif type == CA_BOOLEAN
@@ -49,7 +49,7 @@ class CArray
       return CArray.new(type, CArray.guess_array_shape(v)).tap { |a| a[] = v }
     end
   end
-  private_class_method :__cast_string__
+  private_class_method :cast_string
 
   # CA_OBJECT escape for the weighted-sum kernel (mkkernel object_escape:).
   # The C dispatcher (carray_kernels.c rb_ca_wsum_ki) intercepts CA_OBJECT
@@ -62,18 +62,18 @@ class CArray
   # scalar or a full-shape weight), matching CArray's explicit-broadcast rule.
   # +opts+ is the trailing options Hash (axis:/keep_axis:/min_count:/
   # fill_value:) forwarded verbatim by the C escape; it goes straight to +sum+.
-  def __wsum_object__ (weights, opts = {}) # :nodoc:
+  def wsum_object (weights, opts = {}) # :nodoc:
     (self * weights).sum(**opts)
   end
-  private :__wsum_object__
+  private :wsum_object
 
   # CA_OBJECT escape for the weighted-mean kernel.  Weighted mean is
   # +Σ(w*v) / Σw+ over the cells valid after mask overlay (a masked value OR a
   # masked weight drops the cell from BOTH sums).  The denominator is guarded:
   # an empty / all-masked slab or weights summing to zero yields UNDEF (the
   # object analogue of the numeric kernel's 0/0 -> NaN, since objects have no
-  # NaN).  Weight forms and +opts+ as in {#__wsum_object__}.
-  def __wmean_object__ (weights, opts = {}) # :nodoc:
+  # NaN).  Weight forms and +opts+ as in {#wsum_object}.
+  def wmean_object (weights, opts = {}) # :nodoc:
     axis      = opts[:axis]
     keep_axis = opts[:keep_axis]
     prod = self * weights
@@ -95,7 +95,7 @@ class CArray
       end
     CArray.__fill_undefined_result_cells__(result, opts[:fill_value])
   end
-  private :__wmean_object__
+  private :wmean_object
 
 end
 

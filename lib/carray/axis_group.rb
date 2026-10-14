@@ -220,21 +220,9 @@ class AxisGroup
   # all / any take axis: only, as the core ones do.
   LOGICAL_REDUCE_KEYWORDS = [:axis].freeze
 
-  def self.__check_reduce_keywords__ (op, kw)
-    allowed = [:all, :any].include?(op.to_sym) ? LOGICAL_REDUCE_KEYWORDS : REDUCE_KEYWORDS
-    unknown = kw.keys - allowed
-    unless unknown.empty?
-      raise ArgumentError,
-            "#{op}: unknown keyword#{unknown.size > 1 ? "s" : ""}: " +
-            unknown.map(&:inspect).join(", ")
-    end
-    CArray.__present_cells_needed_per_result_cell__(op, kw[:min_count], 0)
-    nil
-  end
-
   # A boolean array carrying value's mask: what a count reads, for a value
-  # whose payload the group kernel cannot read.
-  def self.__count_stand_in__ (value)
+  # whose payload the group kernel cannot read.  Called from C.
+  private_class_method def self.count_stand_in (value)
     return value if value.boolean? || value.integer? || value.float?
     stand_in = CArray.boolean(*value.shape)
     stand_in.mask = value.mask if value.has_mask?
@@ -243,26 +231,6 @@ class AxisGroup
 
   # A count of the mask reads every cell of the group, as the core's does.
   MASK_COUNTS = [:count, :count_not_masked, :count_masked].freeze
-
-  # min_count: masks a group with fewer contributing cells (present cells,
-  # or every cell for a count of the mask); fill_value: then fills the masked
-  # cells -- as a core reduction does with each.
-  def self.__finish_reduction__ (iter, op, kw, result)
-    need = CArray.__present_cells_needed_per_result_cell__(op, kw[:min_count], 0)
-    if need > 0
-      counts = if MASK_COUNTS.include?(op.to_sym)
-                 iter.elements(axis: kw[:axis])
-               else
-                 iter.count_not_masked(axis: kw[:axis])
-               end
-      if result.is_a?(CArray)
-        result[counts.lt(need)] = UNDEF
-      elsif counts < need
-        result = UNDEF
-      end
-    end
-    CArray.__fill_undefined_result_cells__(result, kw[:fill_value])
-  end
 
   # Parse an axis: spec into [has_group, fused_band_slot_positions].
   def self.parse_axis (axis)
@@ -383,7 +351,12 @@ class CAGroupIterator
   # -- arrived as "wrong number of arguments", which reads as a method that
   # does not take one rather than one whose engine has no such fold. Both are
   # composed here instead, out of folds the engine does have.
-  alias __count_present__ count
+  # The engine's own count, all and any, taken before the definitions
+  # below replace them.
+  COUNT_PRESENT = instance_method(:count)
+  ALL_FOLDED    = instance_method(:all)
+  ANY_FOLDED    = instance_method(:any)
+  private_constant :COUNT_PRESENT, :ALL_FOLDED, :ANY_FOLDED
 
   # @overload count
   #   Per-group count of present (non-masked) cells.
@@ -393,7 +366,7 @@ class CAGroupIterator
   #   Per-group count of cells equal to `v`.
   #   @return [CArray]
   def count (*args, **kw)
-    return __count_present__(**kw) if args.empty?
+    return COUNT_PRESENT.bind_call(self, **kw) if args.empty?
     if args.size > 1
       raise ArgumentError, "wrong number of arguments (given #{args.size}, expected 0..1)"
     end
@@ -401,18 +374,15 @@ class CAGroupIterator
     return count_masked(**kw) if v.equal?(UNDEF)
     # eq leaves a masked cell UNDEF, so the sum leaves it out and its
     # min_count: counts the present cells, as the core count(v) does
-    self.class.__build__(value.eq(v).int64, spec).sum(**kw).int64
+    regroup(value.eq(v).int64, spec).sum(**kw).int64
   end
-
-  alias __all_folded__ all
-  alias __any_folded__ any
 
   # @overload all
   #   Per-group `all` over a boolean payload.
   #   @return [CArray]
   def all (**kw)
     boolean_payload!(:all)
-    __all_folded__(**kw)
+    ALL_FOLDED.bind_call(self, **kw)
   end
 
   # @overload any
@@ -420,23 +390,23 @@ class CAGroupIterator
   #   @return [CArray]
   def any (**kw)
     boolean_payload!(:any)
-    __any_folded__(**kw)
+    ANY_FOLDED.bind_call(self, **kw)
   end
 
   # Per-group classified cell count (mask-independent) = count on the
   # mask-stripped value, so every classified cell is counted regardless of the
   # value mask (unlike count / count_not_masked, which count present cells).
   def elements (**kw)
-    self.class.__build__(value.value, spec).count(**kw)
+    regroup(value.value, spec).count(**kw)
   end
 
   # Per-group count of value-masked cells = elements - count_not_masked.
   def count_masked (**kw)
     has_group, = AxisGroup.parse_axis(kw[:axis])
     return value.count_masked(**kw) unless has_group
-    AxisGroup.__check_reduce_keywords__(:count_masked, kw)
+    check_reduce_keywords(:count_masked, kw)
     plain = { axis: kw[:axis] }
-    AxisGroup.__finish_reduction__(self, :count_masked, kw,
+    finish_reduction(:count_masked, kw,
                                    elements(**plain) - count_not_masked(**plain))
   end
 
@@ -447,11 +417,11 @@ class CAGroupIterator
   # is uint64, a time column's minimum a time, its sum refused.
   [:sum, :accumulate, :prod, :mean, :min, :max,
    :variance, :stddev, :variancep, :stddevp].each do |op|
-    alias_method :"__#{op}_by_kernel__", op
+    by_kernel = instance_method(op)
     define_method(op) do |**kw|
       has_group, = AxisGroup.parse_axis(kw[:axis])
       if ! has_group || kernel_reads_value?
-        __send__(:"__#{op}_by_kernel__", **kw)
+        by_kernel.bind_call(self, **kw)
       else
         reduce_by_core(op, kw)
       end
@@ -490,7 +460,7 @@ class CAGroupIterator
   # value|weight mask, so masked cells drop out. Empty group -> 0.0 (identity).
   # No weighted kernel needed -- it is a plain group-sum of a derived array.
   def wsum (weights, **kw)
-    self.class.__build__(value * weights, spec).sum(**kw)
+    regroup(value * weights, spec).sum(**kw)
   end
 
   # Weighted mean = Sum(v*w) / Sum(w), both over the combined present-set. The
@@ -501,19 +471,19 @@ class CAGroupIterator
   def wmean (weights, **kw)
     has_group, = AxisGroup.parse_axis(kw[:axis])
     return value.wmean(weights, **kw) unless has_group
-    AxisGroup.__check_reduce_keywords__(:wmean, kw)
+    check_reduce_keywords(:wmean, kw)
     plain = { axis: kw[:axis] }
     prod = value * weights
-    num  = self.class.__build__(prod, spec).sum(**plain)
-    den  = self.class.__build__(value * 0 + weights, spec).sum(**plain)
-    cnt  = self.class.__build__(prod, spec).count_not_masked(**plain)
+    num  = regroup(prod, spec).sum(**plain)
+    den  = regroup(value * 0 + weights, spec).sum(**plain)
+    cnt  = regroup(prod, spec).count_not_masked(**plain)
     # No present pair is UNDEF (an empty group), set on the denominator so
     # the division never meets an empty group's 0 / 0.
     den  = den.copy
     den[cnt.eq(0)] = UNDEF
     # min_count: counts the present pairs, as the core wmean does.
-    pairs = self.class.__build__(prod, spec)
-    AxisGroup.__finish_reduction__(pairs, :wmean, kw, num / den)
+    pairs = regroup(prod, spec)
+    pairs.finish_reduction(:wmean, kw, num / den)
   end
 
   # ---- segment scan: within-group running statistics ---------------------
@@ -768,7 +738,49 @@ class CAGroupIterator
     out
   end
 
+  protected
+
+  # min_count: masks a group with fewer contributing cells (present cells,
+  # or every cell for a count of the mask); fill_value: then fills the masked
+  # cells -- as a core reduction does with each.  Protected: wmean finishes
+  # through the iterator over its products.
+  def finish_reduction (op, kw, result)
+    need = CArray.__present_cells_needed_per_result_cell__(op, kw[:min_count], 0)
+    if need > 0
+      counts = if AxisGroup::MASK_COUNTS.include?(op.to_sym)
+                 elements(axis: kw[:axis])
+               else
+                 count_not_masked(axis: kw[:axis])
+               end
+      if result.is_a?(CArray)
+        result[counts.lt(need)] = UNDEF
+      elsif counts < need
+        result = UNDEF
+      end
+    end
+    CArray.__fill_undefined_result_cells__(result, kw[:fill_value])
+  end
+
   private
+
+  # An unknown keyword is refused before the work is done.
+  def check_reduce_keywords (op, kw)
+    allowed = [:all, :any].include?(op.to_sym) ? AxisGroup::LOGICAL_REDUCE_KEYWORDS : AxisGroup::REDUCE_KEYWORDS
+    unknown = kw.keys - allowed
+    unless unknown.empty?
+      raise ArgumentError,
+            "#{op}: unknown keyword#{unknown.size > 1 ? "s" : ""}: " +
+            unknown.map(&:inspect).join(", ")
+    end
+    CArray.__present_cells_needed_per_result_cell__(op, kw[:min_count], 0)
+    nil
+  end
+
+  # The same grouping over another value.
+  def regroup (value, spec)
+    self.class.send(:build_for, value, spec)
+  end
+
 
   # Build the composite categorical over the group block (the sub-array spanning
   # every group axis). Each group slot -- rank-1 or rank-N -- contributes its
@@ -914,8 +926,8 @@ class CAGroupIterator
             "(axis: [:group, k]) is not supported for a #{value.class} of " \
             "data type #{value.data_type_name}"
     end
-    AxisGroup.__check_reduce_keywords__(op, kw)
-    AxisGroup.__finish_reduction__(self, op, kw, composite_order(op, []))
+    check_reduce_keywords(op, kw)
+    finish_reduction(op, kw, composite_order(op, []))
   end
 
   # An array of +shape+ of the same kind as +model+ -- its data type, or its
@@ -925,7 +937,7 @@ class CAGroupIterator
     out = if model.face? && model.read_only?
             CArray.new(CA_OBJECT, shape)
           else
-            model.__send__(:__blank_like__, shape)
+            model.__send__(:blank_like, shape)
           end
     out[] = UNDEF
     out
@@ -944,12 +956,12 @@ class CAGroupIterator
             "axis_group: folding a band into an order statistic (axis: [:group, k]) " \
             "is not supported; order statistics gather every member of a group"
     end
-    AxisGroup.__check_reduce_keywords__(op, kw)
+    check_reduce_keywords(op, kw)
     res = composite_order(op, args)
     if op == :quantile
-      res.map { |r| AxisGroup.__finish_reduction__(self, op, kw, r) }
+      res.map { |r| finish_reduction(op, kw, r) }
     else
-      AxisGroup.__finish_reduction__(self, op, kw, res)
+      finish_reduction(op, kw, res)
     end
   end
 
@@ -1022,4 +1034,4 @@ class CAGroupIterator
 end
 
 require "carray/categorical"
-CArray.__register_axis_group_classes__(CACategorical, AxisGroup)
+CArray.send(:register_axis_group_classes, CACategorical, AxisGroup)

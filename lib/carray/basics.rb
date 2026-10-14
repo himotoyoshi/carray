@@ -146,7 +146,7 @@ class CArray
   # out of range (a time array reads its bounds as times, a record array
   # orders by its declared members, a Face that cannot be ordered refuses),
   # and its store writes the bound or the fill value into them.
-  private def __face_clip__ (min, max, fill_value, lfill, ufill)
+  private def face_clip (min, max, fill_value, lfill, ufill)
     lfill = fill_value if lfill.nil?
     ufill = fill_value if ufill.nil?
     out = copy
@@ -158,8 +158,8 @@ class CArray
   # An array of +shape+ of the same kind as self: its data type and cell
   # width, or its Face over a zero storage.  Nothing is written into it, so
   # it can be built for a read-only Face too.
-  private def __blank_like__ (shape)
-    storage = __face_storage__
+  private def blank_like (shape)
+    storage = face_storage
     out = CArray.new(storage.data_type, shape, bytes: storage.bytes)
     face? ? out.face_lift(self) : out
   end
@@ -346,7 +346,7 @@ class CArray
                            "(fill the bound first; a NaN bound leaves its cell " \
                            "unbounded, and UNDEF as the fill masks the cells out of range)"
     end
-    return __face_clip__(min, max, fill_value, lfill, ufill) if face?
+    return face_clip(min, max, fill_value, lfill, ufill) if face?
     if !min.nil? && !max.nil?
       reversed = if min.is_a?(CArray) then min.gt(max).any
                  elsif max.is_a?(CArray) then max.lt(min).any
@@ -574,7 +574,7 @@ class CArray
     def map_slab (**kw, &block)
       return super unless face? && kw[:data_type].nil? && block
       return super(**kw, data_type: :object, &block) if read_only?
-      out = super(**kw, data_type: __face_storage__.data_type) { |slab|
+      out = super(**kw, data_type: face_storage.data_type) { |slab|
         face_slab_storage(block.call(slab), slab.shape)
       }
       out.face_lift(self)
@@ -585,7 +585,7 @@ class CArray
       return super(**kw, data_type: :object, &block) if read_only?
       fiber = kw.key?(:init)
       init  = kw.delete(:init)
-      out = super(**kw, data_type: __face_storage__.data_type) { |slab|
+      out = super(**kw, data_type: face_storage.data_type) { |slab|
         value = if fiber
                   slab.to_a.flatten.inject(init) { |acc, e| block.call(acc, e) }
                 else
@@ -599,9 +599,9 @@ class CArray
     private
 
     def face_slab_storage (value, shape)
-      cell = __blank_like__(shape)
+      cell = blank_like(shape)
       cell[] = value
-      cell.__send__(:__face_storage__)
+      cell.__send__(:face_storage)
     end
   end
 

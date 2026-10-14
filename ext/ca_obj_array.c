@@ -868,7 +868,7 @@ rb_ca_s_allocate (VALUE klass)
 }
 
 /* Reads the (data_type, dim, bytes: nil) argument list that CArray.new
-   and CArray.__empty__ share.  The two differ only in whether the buffer
+   and CArray.empty_of_data_type share.  The two differ only in whether the buffer
    is filled, so the rule for reading their arguments -- the optional
    bytes for a fixlen, the refusal of a Class, the guess of the data type,
    the demand that dim be an Array -- is written once here. */
@@ -1647,7 +1647,7 @@ Init_ca_obj_array (void)
   rb_define_method(rb_cCArray, "initialize", rb_ca_initialize, -1);
   rb_define_singleton_method(rb_cCArray, "__alloc_uninit__",
                              rb_ca_s_alloc_uninit, 2);
-  rb_define_singleton_method(rb_cCArray, "__empty__", rb_ca_s_empty, -1);
+  rb_define_private_method(rb_singleton_class(rb_cCArray), "empty_of_data_type", rb_ca_s_empty, -1);
 
   rb_define_singleton_method(rb_cCArray, "fixlen", rb_ca_s_fixlen, -1);
   rb_define_singleton_method(rb_cCArray, "boolean", rb_ca_s_boolean, -1);

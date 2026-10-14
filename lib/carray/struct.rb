@@ -720,8 +720,8 @@ end
 # in Builder sets them up before any instance is created).  Subclasses
 # created by Builder later don't need re-installation -- they inherit the
 # C methods from CAStruct.
-if CArray.respond_to?(:__install_castruct_methods__)
-  CArray.__install_castruct_methods__(CAStruct)
+if CArray.respond_to?(:install_struct_methods, true)
+  CArray.send(:install_struct_methods, CAStruct)
 end
 
 require 'carray/record_order'

@@ -411,7 +411,7 @@ rb_ca_time_wrap (VALUE parent_val, int8_t unit, int64_t count)
   return obj;
 }
 
-/* __wrap__(raw, unit_spec) — primitive; unit_spec is Symbol / String /
+/* wrap_storage(raw, unit_spec) — primitive; unit_spec is Symbol / String /
    Resolution / nil (normalized here). */
 static VALUE
 rb_ca_time_wrap_method (VALUE klass, VALUE raw, VALUE unit_spec)
@@ -526,8 +526,8 @@ Init_ca_obj_time (void)
   rb_define_method(rb_cCATime, "initialize_copy",
                                      rb_ca_time_initialize_copy, 1);
 
-  rb_define_singleton_method(rb_cCATime, "__wrap__",
-                                     rb_ca_time_wrap_method, 2);
+  rb_define_private_method(rb_singleton_class(rb_cCATime), "wrap_storage",
+                           rb_ca_time_wrap_method, 2);
   rb_define_method(rb_cCATime, "unit", rb_ca_time_unit, 0);
   rb_define_method(rb_cCATime, "storage_to_element",
                                      rb_ca_time_storage_to_element, 1);

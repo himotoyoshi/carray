@@ -151,7 +151,7 @@ class CArray
     # its cell width, and the result is as wide as its widest piece.
     face_parent = list[0].face? ? list.max_by(&:bytes) : nil
     if face_parent
-      list = list.map { |x| x.__send__(:__face_storage__) }
+      list = list.map { |x| x.__send__(:face_storage) }
     end
     data_type = list[0].data_type
     # Fixlen pieces of different widths join at the widest, so no cell is

@@ -1026,7 +1026,7 @@ rb_ca_s_face_state_portable_p (VALUE klass)
   return Qtrue;
 }
 
-/* ca.__orderable_storage__ -- whether ca's storage holds its values, in
+/* ca.orderable_storage? -- whether ca's storage holds its values, in
    their order, so that a lookup may compare the storage: true for an array
    that is not a Face and for a Face that declares
    CA_FLAG_FACE_ORDERABLE_STORAGE, false for a Face whose cells encode the
@@ -1040,7 +1040,7 @@ rb_ca_orderable_storage_p (VALUE self)
   return ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ? Qtrue : Qfalse;
 }
 
-/* ca.__comparable_storage__ -- whether ca's storage holds its values as
+/* ca.comparable_storage? -- whether ca's storage holds its values as
    they are, so that a plain operand may be compared with the storage: true
    for an array that is not a Face and for a Face that declares
    CA_FLAG_FACE_COMPARABLE_STORAGE. */
@@ -1053,7 +1053,7 @@ rb_ca_comparable_storage_p (VALUE self)
   return ca_test_flag(ca, CA_FLAG_FACE_COMPARABLE_STORAGE) ? Qtrue : Qfalse;
 }
 
-/* ca.__face_storage__ -- the storage under a Face (ca itself when it is not
+/* ca.face_storage -- the storage under a Face (ca itself when it is not
    a Face). */
 static VALUE
 rb_ca_face_storage (VALUE self)
@@ -1061,7 +1061,7 @@ rb_ca_face_storage (VALUE self)
   return rb_ca_strip_face_value(self);
 }
 
-/* ca.__reconcile_operand__(operand, name) -- operand brought into ca's
+/* ca.reconcile_operand(operand, name) -- operand brought into ca's
    storage space by the rule every operand family follows
    (ca_face_reconcile_operand for a Face, ca_face_operand_descend for an
    array that is not one).  For the families written in Ruby. */
@@ -1179,12 +1179,12 @@ Init_ca_face (void)
   rb_define_singleton_method(rb_cCArray, "face_state_portable?",
                              rb_ca_s_face_state_portable_p, 0);
   rb_define_method(rb_cCArray, "face_lift", rb_ca_face_lift_method, 1);
-  rb_define_private_method(rb_cCArray, "__orderable_storage__",
+  rb_define_private_method(rb_cCArray, "orderable_storage?",
                            rb_ca_orderable_storage_p, 0);
-  rb_define_private_method(rb_cCArray, "__comparable_storage__",
+  rb_define_private_method(rb_cCArray, "comparable_storage?",
                            rb_ca_comparable_storage_p, 0);
-  rb_define_private_method(rb_cCArray, "__face_storage__",
+  rb_define_private_method(rb_cCArray, "face_storage",
                            rb_ca_face_storage, 0);
-  rb_define_private_method(rb_cCArray, "__reconcile_operand__",
+  rb_define_private_method(rb_cCArray, "reconcile_operand",
                            rb_ca_reconcile_operand, 2);
 }

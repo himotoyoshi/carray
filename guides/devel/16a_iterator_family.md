@@ -290,7 +290,7 @@ The split of responsibilities is deliberate:
   bundles so it is independent of how the classifier was constructed.
 
 A registration handshake keeps the hot path free: `lib/carray/axis_group.rb`
-calls `CArray.__register_axis_group_classes__(CACategorical, AxisGroup)` at
+calls `CArray.register_axis_group_classes(CACategorical, AxisGroup)` at
 load time, storing the class objects in C statics (GC-registered). Until the
 classes are loaded the statics are `Qnil` and the `[]` type-gate scan
 short-circuits — a normal index pays **nothing** (not even a `kind_of?`) for

@@ -10,12 +10,12 @@
 #   a Face takes (its own record class, a COMPARABLE Face, its to_comparable)
 #   and refuses the rest.  A direct to_comparable call or
 #   ca_face_operand_descend elsewhere is a second copy of that rule; Ruby
-#   reaches the part through __reconcile_operand__.
+#   reaches the part through reconcile_operand.
 # - The storage under a Face is found by ca_strip_face (C) or
-#   __face_storage__ (Ruby).  A loop of its own that walks the parents is a
+#   face_storage (Ruby).  A loop of its own that walks the parents is a
 #   second copy, and the first place one goes wrong when a Face gains a
 #   wrapper of a different kind.
-# - In Ruby, an empty array of a Face's kind is __blank_like__, and a value is
+# - In Ruby, an empty array of a Face's kind is blank_like, and a value is
 #   written into a Face by storing the Face, not by writing its storage.
 #
 # The generated carray_kernels_*.c are not read; their templates in
@@ -39,9 +39,9 @@ RULES = [
 
 RUBY_RULES = [
   [/\.parent\s+while\s+\w+\.face\?/,
-   "a hand loop down to the storage: use __face_storage__"],
+   "a hand loop down to the storage: use face_storage"],
   [/CArray\.new\([^)]*\)\s*\.face_lift\(/m,
-   "a blank Face built by hand: use __blank_like__"],
+   "a blank Face built by hand: use blank_like"],
   [/(?:\.|\b)parent(\.value)?\[[^\]]*\]\s*=(?!=)/,
    "a write into a Face's storage: store the Face (a Face of its own class is taken as it is)"],
 ]

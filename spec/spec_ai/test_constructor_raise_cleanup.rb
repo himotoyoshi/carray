@@ -30,7 +30,7 @@ class TestConstructorRaiseCleanup < Test::Unit::TestCase
     bitarray_of_complex:     ["a = CArray.cmplx128(4)", "a.bitarray"],
     string_of_int:           ["a = CArray.int32(8)", "CAString.wrap(a)"],
     fixlen_string_of_int:    ["a = CArray.int32(8)", "CAFixlenString.wrap(a)"],
-    time_of_int32:           ["a = CArray.int32(8)", "CATime.__wrap__(a, :s)"],
+    time_of_int32:           ["a = CArray.int32(8)", "CATime.wrap(a, unit: :s)"],
     endian_of_object:        ["a = CArray.object(3)", "a.endian(:big)"],
     empty_negative_dim:      ["a = nil", "CArray.empty(:int32, [-1])"],
     empty_too_large:         ["a = nil", "CArray.empty(:int32, [1<<40, 1<<40])"],

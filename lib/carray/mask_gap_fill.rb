@@ -15,7 +15,7 @@
 # `strip_mask(:na)`).  Passing both raises ArgumentError.
 #
 # Design / rationale: devel/PROPOSAL_UNMASK_FILL_METHOD.md.  The forward
-# hold is the C primitive #__hold__; backward = flip -> forward -> flip,
+# hold is the C primitive #hold_forward; backward = flip -> forward -> flip,
 # flatten = flatten -> hold -> reshape, and :linear composes
 # linear_section / linear_fetch.  User-facing YARD docs live in
 # yard-stubs/carray_mask.rb.
@@ -29,11 +29,11 @@
 
 class CArray
 
-  # Preserve the C constant-fill primitives under private names so the
-  # Ruby wrappers can delegate the non-method path unchanged.
-  alias __unmask_const__ unmask
-  alias __strip_mask_const__ strip_mask
-  private :__unmask_const__, :__strip_mask_const__
+  # The C constant-fill primitives, taken before the Ruby wrappers below
+  # replace them, so the wrappers delegate the non-method path unchanged.
+  UNMASK_WITH_VALUE      = instance_method(:unmask)
+  STRIP_MASK_WITH_VALUE  = instance_method(:strip_mask)
+  private_constant :UNMASK_WITH_VALUE, :STRIP_MASK_WITH_VALUE
 
   # Sentinel for "no positional fill value given" (distinct from any real
   # fill value, including nil / false / a Symbol).
@@ -46,18 +46,18 @@ class CArray
         raise ArgumentError,
               "unmask: pass either a constant fill value or method:, not both"
       end
-      held = __gap_fill__(method, axis, "unmask")
+      held = gap_fill(method, axis, "unmask")
       # Copy the filled values in place (a Face takes a Face of its own kind
       # as it is).
       value[] = held.value
       if held.has_mask?
         self.mask = held.mask              # residual leading/trailing mask
       else
-        __unmask_const__                   # fully filled: drop the mask
+        UNMASK_WITH_VALUE.bind_call(self)                   # fully filled: drop the mask
       end
       return self
     end
-    fill.equal?(MASK_FILL_UNSET) ? __unmask_const__ : __unmask_const__(fill)
+    fill.equal?(MASK_FILL_UNSET) ? UNMASK_WITH_VALUE.bind_call(self) : UNMASK_WITH_VALUE.bind_call(self, fill)
   end
 
   def strip_mask (fill = MASK_FILL_UNSET, method: nil, axis: nil)
@@ -66,12 +66,12 @@ class CArray
         raise ArgumentError,
               "strip_mask: pass either a constant fill value or method:, not both"
       end
-      return strip_mask_with_attrs(__gap_fill__(method, axis, "strip_mask"))
+      return strip_mask_with_attrs(gap_fill(method, axis, "strip_mask"))
     end
     if fill.equal?(MASK_FILL_UNSET)
       raise ArgumentError, "strip_mask: a fill value is required (or method:)"
     end
-    strip_mask_with_attrs(__strip_mask_const__(fill))
+    strip_mask_with_attrs(STRIP_MASK_WITH_VALUE.bind_call(self, fill))
   end
 
   private
@@ -88,15 +88,15 @@ class CArray
   # unfillable cells stay masked; a fully filled result carries no mask
   # (hold allocates the output mask only when a leading run goes UNDEF;
   # :linear masks only the exterior via mask_invalid).
-  def __gap_fill__ (method, axis, name)
+  def gap_fill (method, axis, name)
     axis = normalize_axis(axis, name) unless axis.nil?
     case method
     when :forward, :ffill
-      __hold_axis__(axis, false)
+      hold_along_axis(axis, false)
     when :backward, :bfill
-      __hold_axis__(axis, true)
+      hold_along_axis(axis, true)
     when :linear
-      __gap_fill_linear__(axis)
+      gap_fill_linear(axis)
     else
       raise ArgumentError,
             "unmask/strip_mask: unknown method: #{method.inspect} " \
@@ -105,20 +105,20 @@ class CArray
   end
 
   # Forward (backward = false) or backward (true) hold along `axis`, already
-  # normalised by __gap_fill__ (axis nil = flatten).  Backward reuses the forward primitive on the
+  # normalised by gap_fill (axis nil = flatten).  Backward reuses the forward primitive on the
   # reversed view; flatten flattens, holds axis 0, reshapes back.
-  def __hold_axis__ (axis, backward)
+  def hold_along_axis (axis, backward)
     if axis.nil?
       flat = flatten
       flat = flat.reverse if backward
-      held = flat.send(:__hold__, 0)
+      held = flat.send(:hold_forward, 0)
       held = held.reverse if backward
       held.reshape(*shape)
     else
       if backward
-        flip(axis).send(:__hold__, axis).flip(axis)
+        flip(axis).send(:hold_forward, axis).flip(axis)
       else
-        send(:__hold__, axis)
+        send(:hold_forward, axis)
       end
     end
   end
@@ -129,9 +129,9 @@ class CArray
   # linear_fetch, which keeps its unit and rounds to its grid.  Defining one
   # is how a Face says it interpolates: without it, the core linear_fetch
   # reads the Face's storage and fails from inside.
-  def __gap_fill_linear__ (axis)
+  def gap_fill_linear (axis)
     if face?
-      unless __interpolable__
+      unless interpolable?
         raise ArgumentError,
               "unmask/strip_mask(method: :linear): #{self.class} does not " \
               "interpolate (it defines no linear_fetch of its own); " \
@@ -143,15 +143,15 @@ class CArray
             "required (got #{data_type_name})"
     end
     if axis.nil?
-      return __linear_fiber__(flatten).reshape(*shape)
+      return linear_fill_fiber(flatten).reshape(*shape)
     end
     ax = axis
     # A fiber comes back in self's own type (a Face's linear_fetch has already
     # rounded to its grid), so the result assembles in that type and the
     # present cells are never carried through float64.
     out = face? ? template : value.copy
-    __each_fiber_key__(ax) do |key|
-      out[*key] = __linear_fiber__(self[*key])
+    each_fiber_key(ax) do |key|
+      out[*key] = linear_fill_fiber(self[*key])
     end
     out
   end
@@ -159,13 +159,13 @@ class CArray
   # Whether linear interpolation can fill this array: a numeric array, or a
   # Face that defines a linear_fetch of its own -- which is how a Face says it
   # interpolates (the core linear_fetch would read its storage).
-  private def __interpolable__
+  private def interpolable?
     face? ? self.class.instance_method(:linear_fetch).owner != CArray : numeric?
   end
 
   # 1-D linear-by-index fill of a single (possibly masked) fiber.
-  def __linear_fiber__ (vec)
-    vec.send(:__linear_fill_along__, CArray.float64(vec.elements) { |i| i.to_f })
+  def linear_fill_fiber (vec)
+    vec.send(:linear_fill_along, CArray.float64(vec.elements) { |i| i.to_f })
   end
 
   # Fill the masked cells of this 1-D array by linear interpolation against
@@ -177,7 +177,7 @@ class CArray
   # linear_section answers NaN -- a property of x, not of the values, so a
   # NaN or Inf stored in a present cell is left alone.  A Face goes through
   # its own linear_fetch, which keeps its unit and rounds to its grid.
-  def __linear_fill_along__ (x)
+  def linear_fill_along (x)
     present = is_not_masked
     # Fewer than two valid points -> nothing to interpolate between; leave
     # every masked cell masked.
@@ -204,7 +204,7 @@ class CArray
   # Yield an index key (Array with `nil` at `axis`, integers elsewhere)
   # for every fiber along `axis`.  `self[*key]` is that fiber as a masked
   # 1-D view.
-  def __each_fiber_key__ (axis)
+  def each_fiber_key (axis)
     outer = shape
     outer_dims = outer.each_index.reject { |k| k == axis }.map { |k| outer[k] }
     idx = Array.new(outer_dims.size, 0)
@@ -220,7 +220,7 @@ class CArray
       end
     end
   end
-  private :__hold_axis__, :__gap_fill_linear__, :__linear_fiber__,
-          :__each_fiber_key__
+  private :hold_along_axis, :gap_fill_linear, :linear_fill_fiber,
+          :each_fiber_key
 
 end

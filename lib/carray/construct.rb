@@ -287,7 +287,7 @@ class CArray
             "(its contents are left undefined); use CArray.new to fill."
     end
     if args.size == 2 and args[1].is_a?(Array)
-      return __empty__(*args, **options)
+      return empty_of_data_type(*args, **options)
     end
     unless options.empty?
       raise ArgumentError,

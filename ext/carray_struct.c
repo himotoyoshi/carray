@@ -2,7 +2,7 @@
 
   C-native member access for CAStruct subclasses.  The hooked
   methods (`[]`, `[]=`, `initialize`) are installed on a subclass by
-  `CArray.__install_castruct_methods__(klass)` — called from the
+  `CArray.install_struct_methods(klass)` — called from the
   bottom of lib/carray/struct.rb once CAStruct is defined, so this
   ext can load before that file.
 
@@ -768,7 +768,7 @@ void
 Init_carray_struct (void)
 {
   /* Singleton on rb_cCArray so lib/carray/struct.rb can call it as
-     `CArray.__install_castruct_methods__(klass)`. */
-  rb_define_singleton_method(rb_cCArray, "__install_castruct_methods__",
-                             rb_carray_install_castruct_methods, 1);
+     `CArray.install_struct_methods(klass)`. */
+  rb_define_private_method(rb_singleton_class(rb_cCArray), "install_struct_methods",
+                           rb_carray_install_castruct_methods, 1);
 }

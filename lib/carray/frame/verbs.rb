@@ -609,7 +609,7 @@ class CAFrame
   private def fill_linear_column(key, col)
     # A Face column interpolates through its own linear_fetch (a time
     # column's keeps the Face and its unit), as the core gap fill does.
-    unless col.__send__(:__interpolable__)
+    unless col.__send__(:interpolable?)
       raise ArgumentError,
             "fill(#{key.inspect}, :linear): numeric or time column required " \
             "(got #{col.data_type_name})"
@@ -635,7 +635,7 @@ class CAFrame
       return
     end
     # The same fill as the core, with the index as x.
-    col[] = col.send(:__linear_fill_along__, @index)   # write-through
+    col[] = col.send(:linear_fill_along, @index)   # write-through
   end
 
   # Text cells are data, not Ruby literals: an object column cast to a

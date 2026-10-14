@@ -34,7 +34,7 @@ static VALUE rb_cCAGroupIterator = Qnil;
 static ID id_value, id_spec, id_axis_group, id_reduce_plan, id_parse_axis;
 static ID id_axis_group_reduce, id_reshape, id_transpose, id_labels;
 
-/* CArray.__register_axis_group_classes__(CACategorical, AxisGroup) — called
+/* CArray.register_axis_group_classes(CACategorical, AxisGroup) — called
    from the top of lib/carray/axis_group.rb so the C type gate can recognise
    the classifier/spec types without triggering autoload on every [] call. */
 static VALUE
@@ -120,7 +120,7 @@ rb_ca_fetch_group (int argc, VALUE *argv, VALUE self)
        validates the slot layout = one slot per source axis). */
     spec = rb_funcallv(self, id_axis_group, argc, argv);
   }
-  return rb_funcall(rb_cCAGroupIterator, rb_intern("__build__"), 2, self, spec);
+  return rb_funcall(rb_cCAGroupIterator, rb_intern("build_for"), 2, self, spec);
 }
 
 /* --- CAGroupIterator -------------------------------------------------------
@@ -247,7 +247,7 @@ group_iter_reduce (int argc, VALUE *argv, VALUE self)
 
   /* min_count: / fill_value: are applied to the grouped result; any other
      keyword is refused before the work is done. */
-  rb_funcall(rb_cAxisGroup, rb_intern("__check_reduce_keywords__"), 2,
+  rb_funcall(self, rb_intern("check_reduce_keywords"), 2,
              op_sym, NIL_P(kw) ? rb_hash_new() : kw);
 
   /* group reduction */
@@ -262,14 +262,14 @@ group_iter_reduce (int argc, VALUE *argv, VALUE self)
   /* a count reads only the mask, so a payload the kernel cannot read
      (object, fixlen, ...) is counted through a boolean stand-in */
   if ( op_id == rb_intern("count") || op_id == rb_intern("count_not_masked") ) {
-    value = rb_funcall(rb_cAxisGroup, rb_intern("__count_stand_in__"), 1, value);
+    value = rb_funcall(rb_cAxisGroup, rb_intern("count_stand_in"), 1, value);
   }
   result = rb_funcall(value, id_axis_group_reduce, 3,
                       group_axes, bundles, op_sym);
   result = group_iter_shape_output(result, group_dims, perm, squeeze);
   if ( ! NIL_P(kw) ) {
-    result = rb_funcall(rb_cAxisGroup, rb_intern("__finish_reduction__"), 4,
-                        self, op_sym, kw, result);
+    result = rb_funcall(self, rb_intern("finish_reduction"), 3,
+                        op_sym, kw, result);
   }
   return result;
 }
@@ -287,16 +287,16 @@ Init_ca_group_iter (void)
   id_transpose         = rb_intern("transpose");
   id_labels            = rb_intern("labels");
 
-  rb_define_singleton_method(rb_cCArray, "__register_axis_group_classes__",
-                             rb_ca_register_axis_group_classes, 2);
+  rb_define_private_method(rb_singleton_class(rb_cCArray), "register_axis_group_classes",
+                           rb_ca_register_axis_group_classes, 2);
 
   rb_cCAGroupIterator =
     rb_define_class("CAGroupIterator",
                     rb_const_get(rb_cObject, rb_intern("CAIterator")));
   rb_gc_register_address(&rb_cCAGroupIterator);
 
-  rb_define_singleton_method(rb_cCAGroupIterator, "__build__",
-                             rb_ca_group_iter_build, 2);
+  rb_define_private_method(rb_singleton_class(rb_cCAGroupIterator), "build_for",
+                           rb_ca_group_iter_build, 2);
   rb_define_method(rb_cCAGroupIterator, "value",  rb_ca_group_iter_value,  0);
   rb_define_method(rb_cCAGroupIterator, "spec",   rb_ca_group_iter_spec,   0);
   rb_define_method(rb_cCAGroupIterator, "labels", rb_ca_group_iter_labels, -1);

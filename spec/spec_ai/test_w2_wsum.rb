@@ -156,7 +156,7 @@ class TestW2Wsum < Test::Unit::TestCase
   end if CArray::HAVE_COMPLEX
 
   # CA_OBJECT is now handled via the object_escape hook (runtime.rb
-  # __wsum_object__ = (self*w).sum), not rejected.  See test_object_wsum_wmean.
+  # wsum_object = (self*w).sum), not rejected.  See test_object_wsum_wmean.
   def test_object_source_works
     obj_a = CArray.object(3) { |i| (i + 1).to_f }
     obj_w = CArray.object(3) { 1.0 }

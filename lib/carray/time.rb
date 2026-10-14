@@ -651,7 +651,7 @@ class CATime
   #   @param unit [Resolution, Symbol, String] tick resolution.
   #   @return [CATime]
   def self.wrap(raw, unit: :ns)
-    __wrap__(raw, unit)
+    wrap_storage(raw, unit)
   end
 
   # Element-return class: a single time element carries both its
@@ -895,7 +895,7 @@ class CATimedelta
   #   @param unit [CATime::Resolution, Symbol, String] tick resolution.
   #   @return [CATimedelta]
   def self.wrap(raw, unit: :ns)
-    __wrap__(raw, unit)
+    wrap_storage(raw, unit)
   end
 
   # A single duration: an integer tick count plus the resolution those ticks

@@ -47,14 +47,14 @@ rb_ca_hold_forward (VALUE self, int axis)
   ca_iter_state st_in, st_out;
   int rc = ca_iter_state_init_l2(&st_in, ca, CA_SLAB_AXES, slab_axes, 1, 0);
   if ( rc != CA_ITER_OK ) {
-    rb_raise(rb_eRuntimeError, "__hold__: input init failed rc=%d", rc);
+    rb_raise(rb_eRuntimeError, "hold_forward: input init failed rc=%d", rc);
   }
   rc = ca_iter_state_init_l2_paired(&st_out, &st_in, co, CA_SLAB_AXES,
                                     slab_axes, 1,
                              CA_KERNEL_WRITE);
   if ( rc != CA_ITER_OK ) {
     ca_iter_state_finish(&st_in);
-    rb_raise(rb_eRuntimeError, "__hold__: output init failed rc=%d", rc);
+    rb_raise(rb_eRuntimeError, "hold_forward: output init failed rc=%d", rc);
   }
 
   /* Output mask allocated lazily on the first leading-masked (UNDEF) cell:
@@ -106,7 +106,7 @@ rb_ca_hold_forward (VALUE self, int axis)
   return vout;
 }
 
-/* __hold__(axis): private forward-hold primitive.  axis is a required
+/* hold_forward(axis): private forward-hold primitive.  axis is a required
    Integer (negative counts from the end).  The Ruby wrapper composes
    backward / flatten / linear on top of this. */
 static VALUE
@@ -117,7 +117,7 @@ rb_ca_hold_method (VALUE self, VALUE raxis)
   int axis = NUM2INT(raxis);
   if ( axis < 0 ) axis += ca->ndim;
   if ( axis < 0 || axis >= ca->ndim ) {
-    rb_raise(rb_eArgError, "__hold__: axis %d out of range for ndim %d",
+    rb_raise(rb_eArgError, "hold_forward: axis %d out of range for ndim %d",
              NUM2INT(raxis), ca->ndim);
   }
   return rb_ca_hold_forward(self, axis);
@@ -225,7 +225,7 @@ rb_ca_last (int argc, VALUE *argv, VALUE self)
 void
 Init_carray_hold (void)
 {
-  rb_define_private_method(rb_cCArray, "__hold__", rb_ca_hold_method, 1);
+  rb_define_private_method(rb_cCArray, "hold_forward", rb_ca_hold_method, 1);
   rb_define_method(rb_cCArray, "first", rb_ca_first, -1);
   rb_define_method(rb_cCArray, "last",  rb_ca_last,  -1);
 }

@@ -188,8 +188,8 @@ class CArray
     # type, and the Face stays while that type does not change.  Any other
     # Face leaves the set to the lookup, which brings it into the Face's
     # space or refuses it.
-    if face? && (storage = __face_storage__).data_type != data_type
-      unless __comparable_storage__
+    if face? && (storage = face_storage).data_type != data_type
+      unless comparable_storage?
         set = values.is_a?(Range) ? values.to_a : values
         return [self, set.is_a?(CArray) ? set : CArray.wrap_readonly(set)]
       end
@@ -248,7 +248,7 @@ class CArray
   # their values; anything else, or the same kind of array as self, is
   # taken as it is.  A record is left to be refused.
   def values_for_lookup (other)
-    return other if other.send(:__orderable_storage__)
+    return other if other.send(:orderable_storage?)
     return other if face? && other.class == self.class
     if other.respond_to?(:to_string)
       other.to_string

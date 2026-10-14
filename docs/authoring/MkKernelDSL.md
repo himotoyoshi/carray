@@ -333,11 +333,11 @@ per-cell object weighted-arithmetic kernel:
 ```ruby
 MkKernel.reduce :wsum,
   # ... numeric kernel as above ...
-  object_escape: :__wsum_object__    # CA_OBJECT -> runtime.rb composition
+  object_escape: :wsum_object    # CA_OBJECT -> runtime.rb composition
 ```
 
 The receiving method owns the full original signature, e.g.
-`def __wsum_object__(weights, opts = {})`; the trailing options `Hash`
+`def wsum_object(weights, opts = {})`; the trailing options `Hash`
 (`axis:` / `keep_axis:` / `min_count:` / `fill_value:`) arrives as a plain
 positional argument because the C escape forwards raw `argv`.
 

@@ -788,7 +788,7 @@ class CASegmentIterator < CAIterator
     if model.face? && model.read_only?
       CArray.new(CA_OBJECT, shape)
     else
-      model.__send__(:__blank_like__, shape)
+      model.__send__(:blank_like, shape)
     end
   end
 
@@ -1035,7 +1035,7 @@ class CASegmentIterator < CAIterator
             # the core answered in a Face, so the output is one too:
             # CATime#min hands back a CATime::Element, which only a CATime
             # has anywhere to put
-            kind.__send__(:__blank_like__, [@k])
+            kind.__send__(:blank_like, [@k])
           else
             # a read-only Face cannot be filled, so its answers are collected
             # as the surface objects they already are

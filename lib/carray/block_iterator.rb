@@ -794,7 +794,7 @@ class CABlockIterator < CAIterator
     if lagged.face? && lagged.read_only?
       CArray.object(*@source.shape)
     else
-      lagged.__send__(:__blank_like__, @source.shape)
+      lagged.__send__(:blank_like, @source.shape)
     end
   end
 
@@ -815,7 +815,7 @@ class CABlockIterator < CAIterator
       if pshape == @source.shape.to_a
         @source
       else
-        pad = @source.__send__(:__blank_like__, pshape)   # a Face stays one
+        pad = @source.__send__(:blank_like, pshape)   # a Face stays one
         pad[] = UNDEF
         pad[*@sndim.times.map { |i| 0...@source.shape[i] }] = @source
         pad

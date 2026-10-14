@@ -2949,7 +2949,7 @@ rb_ca_clip_uint64 (VALUE self)
      Numeric  -> CScalar, or #to_ca when the object answers it
      String   -> the whitespace / `,` / `;` / `_`->UNDEF parser, which reads
                  far more naturally in Ruby and so is the one branch that
-                 calls back out to it (CArray.__cast_string__ in
+                 calls back out to it (CArray.cast_string in
                  carray/basics.rb, eager-loaded).  It receives the data_type
                  as a Symbol.
 
@@ -3614,7 +3614,7 @@ Init_carray_cast (void)
      classes registered in ext/carray_data_type.c. */
   id_new_cast               = rb_intern("new");
   id_guess_array_shape_cast = rb_intern("guess_array_shape");
-  id_cast_string            = rb_intern("__cast_string__");
+  id_cast_string            = rb_intern("cast_string");
   id_to_ca_cast             = rb_intern("to_ca");
   id_length_cast            = rb_intern("length");
   id_begin_cast             = rb_intern("begin");

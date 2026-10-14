@@ -191,8 +191,8 @@ class CArray
   private def nearest_refuse_bytes(key, subject = nil, remedy = "match exact values with locate_addr")
     # A Face whose cells encode the value (a const string, a categorical)
     # is refused later by its own reconcile, which says why.
-    return unless key.is_a?(CArray) && key.__send__(:__orderable_storage__)
-    storage = key.face? ? key.__send__(:__face_storage__) : key
+    return unless key.is_a?(CArray) && key.__send__(:orderable_storage?)
+    storage = key.face? ? key.__send__(:face_storage) : key
     return unless storage.data_type == CA_FIXLEN
     subject ||= "locate_nearest_addr: a #{key.face? ? key.class.name : 'fixlen'} key"
     raise CArray::DataTypeError,
@@ -212,8 +212,8 @@ class CArray
         rs = rs.to_unit(u)
         q  = q.to_unit(u)
       end
-      q  = rs.__send__(:__reconcile_operand__, q, "locate_nearest_addr")
-      rs = rs.__send__(:__face_storage__)
+      q  = rs.__send__(:reconcile_operand, q, "locate_nearest_addr")
+      rs = rs.__send__(:face_storage)
     end
     t = value_match_type(CArray.result_type(q, rs), rs.data_type)
     rk = (rs.data_type == t) ? rs : rs.to_type(t)

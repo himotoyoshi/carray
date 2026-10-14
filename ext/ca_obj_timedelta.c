@@ -306,7 +306,7 @@ rb_ca_timedelta_wrap (VALUE parent_val, int8_t unit, int64_t count)
   return obj;
 }
 
-/* __wrap__(raw, unit_spec) — primitive; unit_spec is Symbol / String /
+/* wrap_storage(raw, unit_spec) — primitive; unit_spec is Symbol / String /
    Resolution / nil (normalized here). */
 static VALUE
 rb_ca_timedelta_wrap_method (VALUE klass, VALUE raw, VALUE unit_spec)
@@ -417,8 +417,8 @@ Init_ca_obj_timedelta (void)
   rb_define_method(rb_cCATimedelta, "initialize_copy",
                                     rb_ca_timedelta_initialize_copy, 1);
 
-  rb_define_singleton_method(rb_cCATimedelta, "__wrap__",
-                                    rb_ca_timedelta_wrap_method, 2);
+  rb_define_private_method(rb_singleton_class(rb_cCATimedelta), "wrap_storage",
+                           rb_ca_timedelta_wrap_method, 2);
   rb_define_method(rb_cCATimedelta, "unit", rb_ca_timedelta_unit, 0);
   rb_define_method(rb_cCATimedelta, "storage_to_element",
                                     rb_ca_timedelta_storage_to_element, 1);

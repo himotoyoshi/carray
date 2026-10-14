@@ -7400,7 +7400,7 @@ MkKernel.reduce :wsum,
                      shape: :rev5_strict, mask: :overlay },
   mask_policy:     :min_count,
   identity_on_empty: true,       # ERI.2: empty / all-masked -> 0.0 (weighted sum identity)
-  object_escape:   :__wsum_object__,   # CA_OBJECT -> (w*self).sum (runtime.rb)
+  object_escape:   :wsum_object,   # CA_OBJECT -> (w*self).sum (runtime.rb)
   bind_ruby:       true,
   public_method: true
 
@@ -7417,7 +7417,7 @@ MkKernel.reduce :wsum,
 #   - min_count semantic "max masked" -> "min valid required" (Phase E)
 #   - complex (CMPLX64/128) dropped (= ALL_NUMERIC + :raise)
 #   - per-axis support gained
-# CA_OBJECT is handled via object_escape (runtime.rb __wmean_object__), not
+# CA_OBJECT is handled via object_escape (runtime.rb wmean_object), not
 # the numeric kernel: weight-coerce vs object arithmetic is cleaner as a
 # (w*self).sum / Σw composition than a dedicated :object kernel branch.
 
@@ -7434,7 +7434,7 @@ MkKernel.reduce :wmean,
   array_arg:       { name: :weights, data_type: :promote,
                      shape: :rev5_strict, mask: :overlay },
   mask_policy:     :min_count,
-  object_escape:   :__wmean_object__,  # CA_OBJECT -> weighted mean via runtime.rb
+  object_escape:   :wmean_object,  # CA_OBJECT -> weighted mean via runtime.rb
   bind_ruby:       true,
   public_method: true
 

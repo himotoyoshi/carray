@@ -138,50 +138,7 @@ CATriOp#__triop_op2__
 CATriOp#__triop_op3__
 CATriOp.__build__
 
-# --- NOT YET SORTED.  Each of these is to be made private / protected with an
-#     ordinary name (or renamed and moved above with the user's permission).
-#     Remove a line when its method is done; never add one here.
-AxisGroup.__check_reduce_keywords__
-AxisGroup.__count_stand_in__
-AxisGroup.__finish_reduction__
+# --- constructors other classes call: the C build of a const string array,
+#     and an array without the zero fill (kept as they are, user's decision)
 CAConstString.__build__
-CAGroupIterator#__accumulate_by_kernel__
-CAGroupIterator#__all_folded__
-CAGroupIterator#__any_folded__
-CAGroupIterator#__count_present__
-CAGroupIterator#__max_by_kernel__
-CAGroupIterator#__mean_by_kernel__
-CAGroupIterator#__min_by_kernel__
-CAGroupIterator#__prod_by_kernel__
-CAGroupIterator#__stddev_by_kernel__
-CAGroupIterator#__stddevp_by_kernel__
-CAGroupIterator#__sum_by_kernel__
-CAGroupIterator#__variance_by_kernel__
-CAGroupIterator#__variancep_by_kernel__
-CAGroupIterator.__build__
-CATime.__wrap__
-CATimedelta.__wrap__
-CArray#__blank_like__
-CArray#__comparable_storage__
-CArray#__create_mask__
-CArray#__each_fiber_key__
-CArray#__face_clip__
-CArray#__face_storage__
-CArray#__gap_fill__
-CArray#__gap_fill_linear__
-CArray#__hold__
-CArray#__hold_axis__
-CArray#__interpolable__
-CArray#__linear_fiber__
-CArray#__linear_fill_along__
-CArray#__orderable_storage__
-CArray#__reconcile_operand__
-CArray#__strip_mask_const__
-CArray#__unmask_const__
-CArray#__wmean_object__
-CArray#__wsum_object__
 CArray.__alloc_uninit__
-CArray.__cast_string__
-CArray.__empty__
-CArray.__install_castruct_methods__
-CArray.__register_axis_group_classes__
