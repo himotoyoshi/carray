@@ -706,8 +706,13 @@ module MkKernel
   #                    the input is masked).  Aligns core cummax / cummin with
   #                    the reduction contract (empty max / min = UNDEF, no
   #                    identity) and the axis-group scan family.
+  # private:
+  #   false (default) -> bound as the public `<name>_ki`
+  #   true            -> bound only as the private method `<name>`, a part
+  #                      that lib reaches with `send` (not user surface)
   def self.scan(name, source:, output:, init:, step:, fallback: :raise,
-                acc_type: nil, axis_default: nil, empty: nil, face_gate: nil)
+                acc_type: nil, axis_default: nil, empty: nil, face_gate: nil,
+                private: false)
     raise "duplicate kernel #{name}" if KERNELS.any? { |k| k[:name] == name }
     source.each do |s|
       raise "unknown source data_type #{s}" unless DTYPES.key?(s)
@@ -749,6 +754,7 @@ module MkKernel
       axis_default: axis_default,
       empty:        empty,
       face_gate:    face_gate,
+      private:      private,
     }
   end
 
@@ -6758,12 +6764,16 @@ module MkKernel
       #   reduce: default false (E.8 retire), opt-in via bind_ruby: true
       #           (used by CF.1 count_equal smoke + future kernel testing)
       #   sort:   default true,  opt-out via bind_ruby: false
-      #   scan:   always bound (no opt-out)
+      #   scan:   bound as <name>_ki, or only privately as <name> (private:)
       bind = case k[:kind]
              when :reduce then k[:bind_ruby] == true
              when :sort   then k[:bind_ruby] != false
+             when :scan   then ! k[:private]
              else true
              end
+      if k[:kind] == :scan && k[:private]
+        io.puts %Q[  rb_define_private_method(rb_cCArray, "#{k[:name]}", rb_ca_#{k[:name]}_ki, #{arity});]
+      end
       # Smoke kernels (e.g. count_equal) expose their _ki binding only
       # in dev builds, gated by CARRAY_DEV_BUILD.  See
       # devel/PROPOSAL_SMOKE_DEV_BUILD_GATE.md.
@@ -6776,7 +6786,7 @@ module MkKernel
       # directly without a Ruby wrapper.  This is paired with
       # axis_default: :flatten because both express the legacy-compat
       # convenience of these specific scan kernels.
-      if k[:kind] == :scan && k[:axis_default] == :flatten
+      if k[:kind] == :scan && k[:axis_default] == :flatten && ! k[:private]
         io.puts %Q[  rb_define_method(rb_cCArray, "#{k[:name]}", rb_ca_#{k[:name]}_ki, #{arity});]
       end
       # Phase E rewire: when this kernel replaces a legacy CArray method,
@@ -7458,6 +7468,18 @@ MkKernel.scan :cumsum,
                   object:  'acc = rb_funcall(acc, rb_intern("+"), 1, v); r = acc' },
   fallback:     :raise,
   axis_default: :flatten
+
+# The running sum in the source's own integer type, added without a range
+# check (int64 wraps, as accumulate does).  CATimedelta#cumsum reads it
+# for an exact running sum of durations.
+MkKernel.scan :cumsum_in_own_type,
+  source:       MkKernel::INT_DTYPES,
+  output:       :preserve,
+  init:         "0",
+  step:         "acc += v; r = acc",
+  fallback:     :raise,
+  axis_default: :flatten,
+  private:      true
 
 MkKernel.scan :cumprod,
   source:       MkKernel::ALL_NUMERIC + MkKernel::CMPLX_DTYPES + [:bool, :object],

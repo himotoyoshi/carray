@@ -368,6 +368,7 @@ beyond the shared set:
 |---|---|
 | `acc_type:` | `nil` → `acc` is `T_OUT` (default). `:load_type` → `acc` is `T_LOAD` (the last seen *input* value, for adjacent-compare scans like `uniq_scan`); also exposes `first` (int, 1 on the first unmasked cell). |
 | `axis_default:` | `nil` → `axis:` is required. `:flatten` → no-arg form flattens and scans the 1-D result (legacy `cumsum` / `cumprod` / `cummax` / `cummin` / `cumcount`). |
+| `private:` | `false` (default) → bound as the public `<name>_ki`. `true` → bound only as the private method `<name>`, a part that lib reaches with `send` (e.g. `cumsum_in_own_type`, the running sum in the source's integer type). |
 | `empty:` | `nil` → a masked cell writes the running accumulator, unmasked (the identity before the first present cell). `:undef` → for an accumulator with no identity (`cummax` / `cummin`): cells before a fiber's first present cell are masked. |
 | `fallback:` | besides `:raise` / `:wrap_to_f64`, `:mask_count` is for a scan that reads only the mask (`cumcount`): a data type outside `source:` is answered as `is_not_masked.cumsum(axis:)` in int64, without converting its values. |
 
