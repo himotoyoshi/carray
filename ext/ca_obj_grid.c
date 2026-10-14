@@ -407,23 +407,27 @@ cag_parent_index_for (const cag_axis_t *ax, ca_size_t i)
   return ax->indices[i];
 }
 
-/* A mask grid reading its owner's stand-in gives way to the parent's own
-   mask once the parent has one, or by making it when a true is about to be
-   written.  Returns 1 while the stand-in is still read: it is all false,
-   so a write of nothing but false to it is a write of nothing. */
-static int
-cag_mask_reads_standin (CAGrid *m, int write_true)
+/* A mask grid over its owner's stand-in (ca_mask_standin_current): what
+   it reads from now on. */
+static void
+cag_mask_current (CAGrid *m)
 {
   CAGrid *o = m->mask_owner;
-  if ( o == NULL || o->mask_standin == NULL || m->parent != o->mask_standin ) {
-    return 0;
+  if ( o != NULL ) {
+    m->parent = ca_mask_standin_current((CArray *) m, m->parent, o->parent,
+                                        o->mask_standin);
   }
-  if ( write_true || ca_has_mask(o->parent) ) {
-    ca_create_mask(o->parent);
-    m->parent = o->parent->mask;
-    return 0;
+}
+
+/* After a write of n cells of `data` to a mask grid: a true that went
+   into the stand-in goes on to the parent's mask. */
+static void
+cag_mask_settle_after (CAGrid *m, const void *data, ca_size_t n)
+{
+  CAGrid *o = m->mask_owner;
+  if ( o != NULL && m->parent == o->mask_standin && ca_mask_any_true(data, n) ) {
+    ca_mask_standin_settle(o->parent, o->mask_standin);
   }
-  return 1;
 }
 
 /* What the GET of a hole writes when it reads no parent cell: true in a
@@ -481,22 +485,7 @@ ca_grid_holed_xfer (CAGrid *ca, ca_size_t n, const ca_size_t *addrs,
   if ( n <= 0 ) {
     return;
   }
-  if ( dir == CA_XFER_GET ) {
-    cag_mask_reads_standin(ca, 0);
-  }
-  else if ( ca->mask_owner ) {
-    /* a mask grid: written trues outside the holes need the parent's mask */
-    int any = 0;
-    for (i = 0; i < n && ! any; i++) {
-      if ( data[i] ) {
-        ca_addr2index((CArray *) ca, addrs ? addrs[i] : i, idx);
-        any = ! cag_parent_addr(ca, idx, &m);
-      }
-    }
-    if ( cag_mask_reads_standin(ca, any) ) {
-      return;
-    }
-  }
+  cag_mask_current(ca);
   parent = ca->parent;
   paddrs = ALLOCV_N(ca_size_t, h_addr, n);
   hole   = ALLOCV_N(uint8_t, h_hole, n);
@@ -528,6 +517,7 @@ ca_grid_holed_xfer (CAGrid *ca, ca_size_t n, const ca_size_t *addrs,
     }
     if ( m > 0 ) {
       ca_xfer_addrs(parent, m, paddrs, pdata, CA_XFER_PUT);
+      cag_mask_settle_after(ca, pdata, m);
     }
     ALLOCV_END(h_data);
   }
@@ -564,13 +554,11 @@ ca_grid_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
       return;
     }
   }
-  if ( cag_mask_reads_standin(ca, dir == CA_XFER_PUT && *(char *) data) ) {
-    if ( dir == CA_XFER_GET ) {
-      *(boolean8_t *) data = 0;
-    }
-    return;
-  }
+  cag_mask_current(ca);
   ca_xfer_index(ca->parent, idx0, data, dir);
+  if ( dir == CA_XFER_PUT ) {
+    cag_mask_settle_after(ca, data, 1);
+  }
 }
 
 /* Batched address gather/scatter.  Per-axis index remap
@@ -1013,9 +1001,7 @@ ca_grid_holed_fill (CAGrid *ca, void *ptr)
   if ( ca->elements <= 0 ) {
     return;
   }
-  if ( cag_mask_reads_standin(ca, *(char *) ptr) ) {
-    return;
-  }
+  cag_mask_current(ca);
   paddrs = ALLOCV_N(ca_size_t, holder, ca->elements);
   for (i = 0; i < ca->elements; i++) {
     ca_addr2index((CArray *) ca, i, idx);
@@ -1025,6 +1011,7 @@ ca_grid_holed_fill (CAGrid *ca, void *ptr)
   }
   if ( m > 0 ) {
     ca_fill_addrs(ca->parent, m, paddrs, ptr);
+    cag_mask_settle_after(ca, ptr, 1);
   }
   ALLOCV_END(holder);
 }
@@ -1071,16 +1058,10 @@ ca_grid_func_create_mask (void *ap)
 
   /* A grid with holes shows them without giving a parent that has no mask
      one: its mask grid reads an all-false stand-in until a true is written
-     outside the holes (cag_mask_reads_standin). */
+     outside the holes (ca_mask_standin_new). */
   if ( holed && ! ca_has_mask(ca->parent) ) {
     if ( ! ca->mask_standin ) {
-      CArray *z = carray_new(CA_BOOLEAN, ca->parent->ndim, ca->parent->dim,
-                             0, NULL);
-      MEMZERO(z->ptr, boolean8_t, z->elements);
-      if ( ca_is_readonly(ca->parent) ) {
-        ca_set_flag(z, CA_FLAG_READ_ONLY);
-      }
-      ca->mask_standin = z;
+      ca->mask_standin = ca_mask_standin_new(ca->parent);
     }
     mparent = ca->mask_standin;
   }
