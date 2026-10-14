@@ -354,8 +354,9 @@ class CAFrame
     end
 
     # Read one record. With no argument it becomes the column names; with a
-    # name it is a secondary header (e.g. units) -- read, returned, not used as
-    # names. Returns the record's fields either way.
+    # name it is a secondary header (e.g. units): its field j becomes the
+    # attribute +name+ of column j (an empty field gives none). Returns the
+    # record's fields either way.
     def header(name = nil)
       fields = @tok.read(@io)
       if fields.nil?
@@ -376,7 +377,12 @@ class CAFrame
         @header_line = @tok.record_line
         @names_to_check = nil
       else
-        (@named_headers ||= {})[name.to_s] = fields
+        key = name.to_s
+        @named_headers ||= {}
+        if @named_headers.key?(key)
+          raise ArgumentError, "from_csv: header(#{name.inspect}) is read twice"
+        end
+        @named_headers[key] = [fields, @tok.record_line, name]
       end
       fields
     end
@@ -738,6 +744,32 @@ class CAFrame
         buf << more
       end
       buf
+    end
+
+    # The attributes the named headers give the columns +result+ returns, as
+    # [{key => value}, ...] in the same order. A column of the file the
+    # selection left out takes no part.
+    def column_attrs (ncol)
+      return nil unless @named_headers
+      indexes = @selection ? selected_indexes(@names, ncol) : (0...ncol).to_a
+      attrs = indexes.map { {} }
+      @named_headers.each do |key, (fields, line, name)|
+        if fields.size > ncol
+          raise ArgumentError, "from_csv: header(#{name.inspect}) on line #{line} " \
+                               "has #{fields.size} fields for the #{ncol} columns"
+        end
+        indexes.each_with_index do |j, k|
+          value = fields[j]
+          attrs[k][key] = value unless value.nil?
+        end
+      end
+      attrs
+    end
+
+    # The number of columns of the file, once the data is read.
+    def file_ncol
+      return @table_ncol if @table
+      @names ? @names.size : ((@rows || []).map(&:size).max || 0)
     end
 
     # [names_or_nil, rows] for CAFrame.from_csv to build from. names is nil when

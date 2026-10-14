@@ -123,7 +123,7 @@ class CAFrame
     # body goes straight to Strings. missing: masks text in place, which
     # wants the Strings first, so it takes that path too.
     read_text_as_const_string = !types.nil? && missing.nil?
-    names, rows =
+    names, rows, column_attrs =
       if parser
         parser.call(source)
       elsif source.respond_to?(:gets)
@@ -147,6 +147,9 @@ class CAFrame
     mask_missing_tokens(frame, missing) if missing
     frame.cast(types, on_error: on_error, option_name: :types) unless types.nil?
     convert_const_string_columns_to_castring(frame)
+    column_attrs&.each_with_index do |attrs, j|
+      frame[frame.column_names[j]].set_attrs(attrs) unless attrs.empty?
+    end
     frame
   end
 
@@ -215,15 +218,16 @@ class CAFrame
   private_class_method :split_missing, :missing_tokens, :mask_missing_tokens
 
   # Drive the reading-control DSL over one open IO and hand back
-  # [names, rows]. Shared by the path and the IO source, so the two cannot
-  # come to read a file differently.
+  # [names, rows, column_attrs]. Shared by the path and the IO source, so the
+  # two cannot come to read a file differently.
   def self.read_csv (io, sep:, quote:, strip:, layout:, read_text_as_const_string: false, &block)
     reader = CSVReader.new(io, sep: sep, quote: quote, strip: strip,
                            read_text_as_const_string: read_text_as_const_string)
     reader.reporting do
       block ? block.call(reader) : reader.layout(**layout)
     end
-    reader.result
+    names, rows = reader.result
+    [names, rows, reader.column_attrs(reader.file_ncol)]
   end
 
   private_class_method :read_csv

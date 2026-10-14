@@ -211,6 +211,58 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
     end
   end
 
+  def test_dsl_named_header_becomes_column_attributes
+    csv = "date,temp,rh\n,K,%\n,temperature,\"\"\n2024-01-01,1,50\n"
+    df = CAFrame.from_csv(StringIO.new(csv), types: { "temp" => :float64 }) do |r|
+      r.header
+      r.header(:units)
+      r.header(:long_name)
+      r.data
+    end
+    assert_equal({ "units" => "K", "long_name" => "temperature" }, df["temp"].attrs)
+    assert_equal({ "units" => "%", "long_name" => "" }, df["rh"].attrs)
+    assert_equal({}, df["date"].attrs)
+    assert_nil df["date"].attr(:units)
+    assert_equal({ "units" => "K", "long_name" => "temperature" }, df.copy["temp"].attrs)
+  end
+
+  def test_dsl_named_header_follows_the_columns_selected
+    csv = "a,b,c\nu1,u2,u3\n1,2,3\n"
+    df = CAFrame.from_csv(StringIO.new(csv)) do |r|
+      r.header
+      r.header(:units)
+      r.columns("c", "a")
+      r.data
+    end
+    assert_equal ["c", "a"], df.column_names
+    assert_equal "u3", df["c"].attr(:units)
+    assert_equal "u1", df["a"].attr(:units)
+  end
+
+  def test_dsl_named_header_without_column_names
+    df = CAFrame.from_csv(StringIO.new("m,s\n1,2\n")) { |r| r.header(:units); r.data }
+    assert_equal "s", df["c1"].attr(:units)
+  end
+
+  def test_dsl_named_header_shorter_than_the_columns
+    df = CAFrame.from_csv(StringIO.new("a,b\nm\n1,2\n")) { |r| r.header; r.header(:units); r.data }
+    assert_equal "m", df["a"].attr(:units)
+    assert_nil df["b"].attr(:units)
+  end
+
+  def test_dsl_named_header_longer_than_the_columns_is_refused
+    err = assert_raise(ArgumentError) do
+      CAFrame.from_csv(StringIO.new("a,b\nm,s,x\n1,2\n")) { |r| r.header; r.header(:units); r.data }
+    end
+    assert_match(/header\(:units\) on line 2 has 3 fields for the 2 columns/, err.message)
+  end
+
+  def test_dsl_named_header_read_twice_is_refused
+    assert_raise(ArgumentError) do
+      CAFrame.from_csv(StringIO.new("a\nm\ns\n1\n")) { |r| r.header; r.header(:u); r.header(:u); r.data }
+    end
+  end
+
   def test_dsl_generated_names_when_headerless
     with_csv("1,2,3\n4,5,6\n") do |path|
       df = CAFrame.from_csv(path) { |r| r.data }

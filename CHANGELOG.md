@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: in a `CAFrame.from_csv` reading block, a header read with a name,
+  as `r.header(:units)`, gives each column an attribute of that name:
+  `df["temp"].attr(:units)` answers that column's field of the line. An
+  empty field gives no attribute. Before, the line was read and dropped.
+
 - Fix: a view joining several arrays (`CArray.stack`, `CArray.meld`,
   `CArray.montage`) no longer shows the first array's attributes
   (`attr`, `attrs`) as its own. It shows the keys every joined array

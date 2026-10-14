@@ -147,12 +147,14 @@ For anything else, pass a **reading block**. It is given the reader, which reads
 CAFrame.from_csv("obs.csv") do |r|
   r.skip 2              # drop 2 preamble lines
   r.header              # next line is the header
-  units = r.header(:units)   # a second header, read and returned
+  r.header(:units)      # a second header: each column's units attribute
   r.data                # the rest are data rows
 end
 
 CAFrame.from_csv("obs.csv") { it.skip 2; it.header; it.data }
 ```
+
+A header read with a name, as `r.header(:units)`, gives each column an attribute of that name: field j of the line becomes `attr(:units)` of column j, so `df["temp"].attr(:units)` answers `"K"` after reading. An empty field gives the column no such attribute (`attr` answers `nil`); a quoted `""` gives it the empty string, as in a data cell. The line may have fewer fields than the file has columns, but not more. The attributes stay with the column through row selection, `copy` and the other verbs that keep the column; a column computed from it has none. The line's fields are also returned, for a block that wants them there and then.
 
 The reader comes as the block's parameter rather than as `self`, so a local variable that happens to be named `data` or `header` cannot stand in for the verb; a block without a parameter raises. A block and `header:` / `data:` / `column_names:` / `columns:` cannot be given together.
 
