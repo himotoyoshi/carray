@@ -460,8 +460,22 @@ rb_ca_remap_mapper (VALUE self)
 static VALUE
 rb_ca_remap_dup (VALUE self)
 {
-  return rb_ca_remap_new(rb_ca_parent(self),
-                         rb_ivar_get(self, rb_intern("remap_idx")));
+  volatile VALUE rmapper = rb_ivar_get(self, rb_intern("remap_idx"));
+  if ( NIL_P(rmapper) ) {
+    /* The mask of a CARemap (it holds no index array of its own): another
+       remap over the same parent mask and index.  The array it is the mask
+       of keeps both alive, so the copy holds that array too. */
+    volatile VALUE obj;
+    CArray *ca, *cp;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+    cp = (CArray *) ca_remap_func_clone(ca);
+    ca_keep_chain_flags(cp, ca);
+    obj = TypedData_Wrap_Struct(rb_obj_class(self), &caremap_data_type, cp);
+    rb_ivar_set(obj, rb_intern("masked_array"),
+                rb_ivar_get(self, rb_intern("masked_array")));
+    return obj;
+  }
+  return rb_ca_remap_new(rb_ca_parent(self), rmapper);
 }
 
 static VALUE
