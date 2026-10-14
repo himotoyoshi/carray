@@ -116,14 +116,9 @@ CArray#__union__
 CArray#__unique_flat__
 CArray#__value_counts_flat__
 
-# --- NOT YET SORTED.  Each of these is to be made private / protected with an
-#     ordinary name (or renamed and moved above with the user's permission).
-#     Remove a line when its method is done; never add one here.
-AxisGroup.__check_reduce_keywords__
-AxisGroup.__count_stand_in__
-AxisGroup.__finish_reduction__
+# --- lazy expression nodes: the builder CArray's lazy dispatch calls, and
+#     what CArray::Fusion reads off a node (kept as they are, user's decision)
 CABinCmp#__bincmp_right__
-CABinCmp#__eps__
 CABinCmp#__op_id__
 CABinCmp#__trapping__
 CABinCmp.__build__
@@ -131,6 +126,24 @@ CABinOp#__binop_right__
 CABinOp#__op_id__
 CABinOp#__trapping__
 CABinOp.__build__
+CAMonCmp#__op_id__
+CAMonCmp#__trapping__
+CAMonCmp.__build__
+CAMonOp#__op_id__
+CAMonOp#__trapping__
+CAMonOp.__build__
+CATriOp#__op_id__
+CATriOp#__trapping__
+CATriOp#__triop_op2__
+CATriOp#__triop_op3__
+CATriOp.__build__
+
+# --- NOT YET SORTED.  Each of these is to be made private / protected with an
+#     ordinary name (or renamed and moved above with the user's permission).
+#     Remove a line when its method is done; never add one here.
+AxisGroup.__check_reduce_keywords__
+AxisGroup.__count_stand_in__
+AxisGroup.__finish_reduction__
 CAConstString.__build__
 CAGroupIterator#__accumulate_by_kernel__
 CAGroupIterator#__all_folded__
@@ -146,19 +159,8 @@ CAGroupIterator#__sum_by_kernel__
 CAGroupIterator#__variance_by_kernel__
 CAGroupIterator#__variancep_by_kernel__
 CAGroupIterator.__build__
-CAMonCmp#__op_id__
-CAMonCmp#__trapping__
-CAMonCmp.__build__
-CAMonOp#__op_id__
-CAMonOp#__trapping__
-CAMonOp.__build__
 CATime.__wrap__
 CATimedelta.__wrap__
-CATriOp#__op_id__
-CATriOp#__trapping__
-CATriOp#__triop_op2__
-CATriOp#__triop_op3__
-CATriOp.__build__
 CArray#__blank_like__
 CArray#__comparable_storage__
 CArray#__create_mask__

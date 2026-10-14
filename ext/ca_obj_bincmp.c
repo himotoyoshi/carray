@@ -74,10 +74,7 @@ typedef struct CABinCmp {
                                 target of both left & right, also the
                                 kernel lookup key) */
   double    eps;             /* Runtime tolerance slot for IS_CLOSE /
-                                IS_EQUIV; ignored for other ops.  The
-                                `eps` name is retained to keep the
-                                `__eps__` Ruby accessor stable across
-                                the dual purpose. */
+                                IS_EQUIV; ignored for other ops. */
   int8_t    sign_fix;        /* 0, or the side (1 left, 2 right) of an
                                 int64 operand compared with a uint64 one:
                                 the kernel compares both as uint64 and
@@ -743,14 +740,6 @@ rb_ca_bincmp_right (VALUE self)
   return rb_ivar_get(self, rb_intern("__bincmp_right__"));
 }
 
-static VALUE
-rb_ca_bincmp_eps (VALUE self)
-{
-  CABinCmp *bc;
-  TypedData_Get_Struct(self, CABinCmp, &cabincmp_data_type, bc);
-  return rb_float_new(bc->eps);
-}
-
 #ifdef CARRAY_DEV_BUILD
 static VALUE
 rb_ca_bincmp_s_reset_scratch_counter (VALUE klass)
@@ -857,7 +846,6 @@ Init_ca_obj_bincmp (void)
   rb_define_method(rb_cCABinCmp, "__trapping__", rb_ca_bincmp_trapping, 0);
   rb_define_method(rb_cCABinCmp, "__bincmp_right__",
                                   rb_ca_bincmp_right, 0);
-  rb_define_method(rb_cCABinCmp, "__eps__",       rb_ca_bincmp_eps, 0);
 
 #ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCABinCmp, "__reset_scratch_counter__",
