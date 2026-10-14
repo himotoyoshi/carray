@@ -190,6 +190,7 @@ class TestLazyReductionP451 < Test::Unit::TestCase
   # === arena lifecycle (= Phase 3 rev5 rb_ensure 経由) ===
 
   def test_arena_depth_balances_through_lazy_reduction
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     CArray.__lazy_arena_reset_counters__
     # A bunch of lazy reductions
     100.times do |k|

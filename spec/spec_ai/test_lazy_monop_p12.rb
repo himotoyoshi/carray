@@ -210,6 +210,7 @@ class TestLazyMonopP12 < Test::Unit::TestCase
   ## ====== A5: scratch counter depth-independence ======
 
   def test_a5_scratch_zero_for_f64_chain
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(10).seq + 1.0
     CAMonOp.__reset_scratch_counter__
     a.lazy.sqrt.sin.exp.log.to_ca
@@ -218,6 +219,7 @@ class TestLazyMonopP12 < Test::Unit::TestCase
   end
 
   def test_a5_scratch_one_for_int_chain_independent_of_depth
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.int32(10).seq + 1
     CAMonOp.__reset_scratch_counter__
     a.lazy.sqrt.to_ca

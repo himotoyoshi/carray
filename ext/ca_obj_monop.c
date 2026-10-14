@@ -1008,6 +1008,7 @@ rb_ca_monop_op_id (VALUE self)
    because in-place chain eval allocates no scratch; only attach (xfer_all
    → output) and the parent's own xfer_stride alloc, neither of which we
    count here.  */
+#ifdef CARRAY_DEV_BUILD
 static VALUE
 rb_ca_monop_s_reset_scratch_counter (VALUE klass)
 {
@@ -1033,6 +1034,7 @@ rb_ca_monop_s_materialise_count (VALUE klass)
 {
   return SIZE2NUM(ca_monop_materialise_call_count);
 }
+#endif /* CARRAY_DEV_BUILD */
 
 static VALUE
 rb_ca_monop_s_allocate (VALUE klass)
@@ -1142,6 +1144,7 @@ Init_ca_obj_monop (void)
   rb_define_method(rb_cCAMonOp, "__trapping__", rb_ca_monop_trapping, 0);
 
   /* Test instrumentation (not user-facing API).  */
+#ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCAMonOp, "__reset_scratch_counter__",
                              rb_ca_monop_s_reset_scratch_counter, 0);
   rb_define_singleton_method(rb_cCAMonOp, "__scratch_count__",
@@ -1150,4 +1153,5 @@ Init_ca_obj_monop (void)
                              rb_ca_monop_s_reset_materialise_counter, 0);
   rb_define_singleton_method(rb_cCAMonOp, "__materialise_count__",
                              rb_ca_monop_s_materialise_count, 0);
+#endif
 }

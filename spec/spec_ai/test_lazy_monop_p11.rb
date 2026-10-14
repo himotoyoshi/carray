@@ -55,6 +55,7 @@ class TestLazyMonopP11 < Test::Unit::TestCase
   end
 
   def test_chain_scratch_count_0_depth_3
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(10).seq + 1.0
     CAMonOp.__reset_scratch_counter__
     result = a.lazy.sqrt.sqrt.sqrt.to_ca
@@ -66,6 +67,7 @@ class TestLazyMonopP11 < Test::Unit::TestCase
   end
 
   def test_chain_scratch_count_0_depth_20
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(10).seq + 2.0
     CAMonOp.__reset_scratch_counter__
     chain = a.lazy

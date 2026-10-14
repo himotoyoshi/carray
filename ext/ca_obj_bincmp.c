@@ -751,6 +751,7 @@ rb_ca_bincmp_eps (VALUE self)
   return rb_float_new(bc->eps);
 }
 
+#ifdef CARRAY_DEV_BUILD
 static VALUE
 rb_ca_bincmp_s_reset_scratch_counter (VALUE klass)
 {
@@ -795,6 +796,7 @@ rb_ca_bincmp_s_leaf_inplace_count (VALUE klass)
   (void) klass;
   return SIZE2NUM(ca_bincmp_leaf_inplace_count);
 }
+#endif /* CARRAY_DEV_BUILD */
 
 static VALUE
 rb_ca_bincmp_s_allocate (VALUE klass)
@@ -857,6 +859,7 @@ Init_ca_obj_bincmp (void)
                                   rb_ca_bincmp_right, 0);
   rb_define_method(rb_cCABinCmp, "__eps__",       rb_ca_bincmp_eps, 0);
 
+#ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCABinCmp, "__reset_scratch_counter__",
                              rb_ca_bincmp_s_reset_scratch_counter, 0);
   rb_define_singleton_method(rb_cCABinCmp, "__scratch_count__",
@@ -869,4 +872,5 @@ Init_ca_obj_bincmp (void)
                              rb_ca_bincmp_s_reset_leaf_inplace_counter, 0);
   rb_define_singleton_method(rb_cCABinCmp, "__leaf_inplace_count__",
                              rb_ca_bincmp_s_leaf_inplace_count, 0);
+#endif
 }

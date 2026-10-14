@@ -715,6 +715,7 @@ rb_ca_binop_right (VALUE self)
 }
 
 /* Test instrumentation (mirrors CAMonOp counters). */
+#ifdef CARRAY_DEV_BUILD
 static VALUE
 rb_ca_binop_s_reset_scratch_counter (VALUE klass)
 {
@@ -740,6 +741,7 @@ rb_ca_binop_s_materialise_count (VALUE klass)
 {
   return SIZE2NUM(ca_binop_materialise_call_count);
 }
+#endif /* CARRAY_DEV_BUILD */
 
 static VALUE
 rb_ca_binop_s_allocate (VALUE klass)
@@ -820,6 +822,7 @@ Init_ca_obj_binop (void)
                                 rb_ca_binop_right, 0);
 
   /* Test instrumentation, not user-facing. */
+#ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCABinOp, "__reset_scratch_counter__",
                              rb_ca_binop_s_reset_scratch_counter, 0);
   rb_define_singleton_method(rb_cCABinOp, "__scratch_count__",
@@ -828,4 +831,5 @@ Init_ca_obj_binop (void)
                              rb_ca_binop_s_reset_materialise_counter, 0);
   rb_define_singleton_method(rb_cCABinOp, "__materialise_count__",
                              rb_ca_binop_s_materialise_count, 0);
+#endif
 }

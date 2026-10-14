@@ -98,8 +98,9 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     def mask_sync_data (d) ; raise "mask write failed" ; end
   end
 
+  # The arena depth is read only in a development build.
   def setup
-    @arena_depth = CArray.__lazy_arena_depth__
+    @arena_depth = CArray.__lazy_arena_depth__ if CArray.respond_to?(:__lazy_arena_depth__)
   end
 
   # None of these cases may move the lazy arena: a leaked arena level is
@@ -107,6 +108,7 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
   # the run.  Those cases live in test_attach_window_raise_process.rb, one
   # child process each.
   def teardown
+    return unless @arena_depth
     assert_equal @arena_depth, CArray.__lazy_arena_depth__,
                  "this case leaked a lazy arena level into the test process"
   end

@@ -748,6 +748,7 @@ ca_lazy_arena_mark_object_slots (void)
 
 /* Test instrumentation — exposed to Ruby for the arena smoke and
    regression assertions.  Not user-facing API. */
+#ifdef CARRAY_DEV_BUILD
 static VALUE
 rb_ca_lazy_arena_s_reset_counters (VALUE klass)
 {
@@ -810,6 +811,7 @@ rb_ca_lazy_arena_s_slot_capacities (VALUE klass)
   }
   return arr;
 }
+#endif /* CARRAY_DEV_BUILD */
 
 /* ------------------------------------------------------------------- */
 
@@ -862,6 +864,7 @@ Init_carray_lazy (void)
   rb_define_method(rb_cCALazyMarker, "initialize_copy",
                                       rb_ca_lazy_marker_initialize_copy, 1);
 
+#ifdef CARRAY_DEV_BUILD
   /* Arena test instrumentation (not user-facing).  Bound on CArray
      for symmetry with CAMonOp / CABinOp counters, but the arena is
      a singleton process-wide state. */
@@ -879,6 +882,7 @@ Init_carray_lazy (void)
                              rb_ca_lazy_arena_s_slot_in_use_count, 0);
   rb_define_singleton_method(rb_cCArray, "__lazy_arena_slot_capacities__",
                              rb_ca_lazy_arena_s_slot_capacities, 0);
+#endif
 
   Init_ca_mask_of_operands();
 }

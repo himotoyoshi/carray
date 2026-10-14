@@ -80,6 +80,7 @@ class TestNonLendingRootStrideBinop < Test::Unit::TestCase
   # count is the chunking policy's, so pin only that it is far below the
   # element count -- the defect was exactly one call per cell per operand.
   def test_root_is_asked_in_regions_not_per_cell
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     v0 = @lazy[0..N - 5, nil]
     v1 = @lazy[4..N - 1, nil]
     CABinOp.__reset_materialise_counter__

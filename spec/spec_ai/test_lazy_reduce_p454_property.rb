@@ -216,6 +216,7 @@ class TestLazyReduceP454Property < Test::Unit::TestCase
   # === arena lifecycle under reduction property load ===
 
   def test_arena_depth_stable_under_property_load
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     CArray.__lazy_arena_reset_counters__
     30.times do |seed_off|
       rng = Random.new(RNG_SEED + 6000 + seed_off)

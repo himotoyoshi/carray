@@ -666,6 +666,7 @@ rb_ca_triop_op3 (VALUE self)
 }
 
 /* Test instrumentation. */
+#ifdef CARRAY_DEV_BUILD
 static VALUE
 rb_ca_triop_s_reset_scratch_counter (VALUE klass)
 {
@@ -695,6 +696,7 @@ rb_ca_triop_s_materialise_count (VALUE klass)
   (void) klass;
   return SIZE2NUM(ca_triop_materialise_call_count);
 }
+#endif /* CARRAY_DEV_BUILD */
 
 static VALUE
 rb_ca_triop_s_allocate (VALUE klass)
@@ -754,6 +756,7 @@ Init_ca_obj_triop (void)
                                 rb_ca_triop_op3, 0);
 
   /* Test instrumentation. */
+#ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCATriOp, "__reset_scratch_counter__",
                              rb_ca_triop_s_reset_scratch_counter, 0);
   rb_define_singleton_method(rb_cCATriOp, "__scratch_count__",
@@ -762,4 +765,5 @@ Init_ca_obj_triop (void)
                              rb_ca_triop_s_reset_materialise_counter, 0);
   rb_define_singleton_method(rb_cCATriOp, "__materialise_count__",
                              rb_ca_triop_s_materialise_count, 0);
+#endif
 }

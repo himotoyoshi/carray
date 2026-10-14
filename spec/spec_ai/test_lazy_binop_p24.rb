@@ -117,6 +117,7 @@ class TestLazyBinopP24 < Test::Unit::TestCase
   # ----------------------- broadcast preserves scratch=1/node --
 
   def test_broadcast_scratch_count_per_node
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(64, 64).seq
     b = CArray.float64(64, 1).seq + 10
     CABinOp.__reset_scratch_counter__

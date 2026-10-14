@@ -26,6 +26,7 @@ class TestLazyArenaP31 < Test::Unit::TestCase
   # ------------------------------------------------- depth balance --
 
   def test_depth_returns_to_zero_after_to_ca
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(64).seq
     b = CArray.float64(64).seq + 1
     _ = (a.lazy + b).to_ca
@@ -34,6 +35,7 @@ class TestLazyArenaP31 < Test::Unit::TestCase
   end
 
   def test_all_slots_released_after_to_ca
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(64).seq
     b = CArray.float64(64).seq + 1
     c = CArray.float64(64).seq + 2
@@ -46,6 +48,7 @@ class TestLazyArenaP31 < Test::Unit::TestCase
   # ----------------------------------------- slot reuse (Phase 3 win) --
 
   def test_second_call_reuses_warm_slot
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(64).seq
     b = CArray.float64(64).seq + 1
     # warm up the arena
@@ -63,6 +66,7 @@ class TestLazyArenaP31 < Test::Unit::TestCase
   end
 
   def test_left_leaning_chain_reuses_single_slot
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     # Left-leaning `((a+b)+c)+d` releases scratch before each next
     # binop's xfer_stride begins, so a single 8MB slot serves all 3
     # binops via the freelist.  After warm-up, no xmalloc per call.
@@ -101,6 +105,7 @@ class TestLazyArenaP31 < Test::Unit::TestCase
   # ----------------------- universal entry — affine wraps lazy --
 
   def test_arena_hook_fires_through_affine_wrapping_lazy
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     # rev2/3 §3.3 load-bearing #2: the arena lifetime hook lives at
     # ca_xfer_all (= universal materialise entry), so even when the
     # outermost view is an affine wrapper around a lazy view, the
@@ -131,6 +136,7 @@ class TestLazyArenaP31 < Test::Unit::TestCase
   # ------------------------------ GC stress — arena survives GC --
 
   def test_arena_survives_gc
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     # Force GC inside a loop; the arena's xmalloc'd slot buffers are
     # held by C-level state and must NOT be reclaimed.
     a = CArray.float64(1000).seq
@@ -149,6 +155,7 @@ class TestLazyArenaP31 < Test::Unit::TestCase
   # -------------------------- exception path (Phase 3 rev5 補修) --
 
   def test_arena_depth_recovers_from_exception_in_xfer_all
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     # Phase 3 rev5 fix: rb_ensure around ca_xfer_all guarantees
     # _exit even when the kernel/xfer_stride raises mid-flight.  R3
     # reset (= slot in_use=0 at depth==0 entry) then collects any
@@ -188,6 +195,7 @@ class TestLazyArenaP31 < Test::Unit::TestCase
   # One scratch is held at a time here, so requests of growing size must
   # grow a free slot instead of opening a new slot per size.
   def test_growing_requests_do_not_open_new_slots
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     eval_at = lambda do |n|
       a = CArray.float64(n).seq
       b = CArray.float64(n).seq + 1
@@ -209,6 +217,7 @@ class TestLazyArenaP31 < Test::Unit::TestCase
   # The scratch that gathers an operand's mask stays held while that mask
   # is read, including when reading it needs a larger scratch of its own.
   def test_masked_operand_overlay_with_lazy_mask_source
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     n = 5000
     a = CArray.float64(n).seq
     m = CArray.float64(n).seq

@@ -111,6 +111,7 @@ class TestLazyBinopP21 < Test::Unit::TestCase
   # ---------------------------------------- scratch / materialise --
 
   def test_one_binop_uses_exactly_one_scratch
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(64).seq
     b = CArray.float64(64).seq
     CABinOp.__reset_scratch_counter__
@@ -123,6 +124,7 @@ class TestLazyBinopP21 < Test::Unit::TestCase
   end
 
   def test_two_binop_chain_uses_two_scratches_strahler_bound
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     # `(a.lazy + b) + c` — left-leaning chain, Strahler-style peak
     # along the in-place output corresponds to one scratch per node.
     # We pin "= number of CABinOp nodes" rather than a fixed 2 so the

@@ -478,6 +478,7 @@ rb_ca_moncmp_op_id (VALUE self)
   return UINT2NUM(mc->op_id);
 }
 
+#ifdef CARRAY_DEV_BUILD
 static VALUE
 rb_ca_moncmp_s_reset_scratch_counter (VALUE klass)
 {
@@ -522,6 +523,7 @@ rb_ca_moncmp_s_leaf_inplace_count (VALUE klass)
   (void) klass;
   return SIZE2NUM(ca_moncmp_leaf_inplace_count);
 }
+#endif /* CARRAY_DEV_BUILD */
 
 static VALUE
 rb_ca_moncmp_s_allocate (VALUE klass)
@@ -575,6 +577,7 @@ Init_ca_obj_moncmp (void)
   rb_define_method(rb_cCAMonCmp, "__op_id__", rb_ca_moncmp_op_id, 0);
   rb_define_method(rb_cCAMonCmp, "__trapping__", rb_ca_moncmp_trapping, 0);
 
+#ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCAMonCmp, "__reset_scratch_counter__",
                              rb_ca_moncmp_s_reset_scratch_counter, 0);
   rb_define_singleton_method(rb_cCAMonCmp, "__scratch_count__",
@@ -587,4 +590,5 @@ Init_ca_obj_moncmp (void)
                              rb_ca_moncmp_s_reset_leaf_inplace_counter, 0);
   rb_define_singleton_method(rb_cCAMonCmp, "__leaf_inplace_count__",
                              rb_ca_moncmp_s_leaf_inplace_count, 0);
+#endif
 }
