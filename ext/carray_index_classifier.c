@@ -145,8 +145,8 @@ ca_classifier_invalid_key (VALUE v, int axis)
            StringValueCStr(s), axis);
 }
 
-/* A Bignum key is past the end of any axis, but has no ca_size_t to report
-   through ca_index_out_of_range_at; it is reported as it was given. */
+/* An Integer past int64 is past the end of any axis, but has no ca_size_t
+   to report through ca_index_out_of_range_at; it is reported as given. */
 NORETURN(static void ca_classifier_key_too_large (VALUE v, const char *where));
 static void
 ca_classifier_key_too_large (VALUE v, const char *where)
@@ -156,11 +156,14 @@ ca_classifier_key_too_large (VALUE v, const char *where)
            ca_calling_method_name(), StringValueCStr(s), where);
 }
 
-/* A key names a position when it holds an integer: a Fixnum, or a Float
-   with no fraction (a count from `sum` is a Float).  Returns 1 with the
-   position in *out, 2 for an integer past any axis (a Bignum, or a Float
-   beyond the Fixnum range), and 0 for anything else (a Float with a
-   fraction, NaN, Inf, a Rational, a String). */
+/* A key names a position when it holds an integer that fits ca_size_t
+   (int64): an Integer of that size, Bignum included (an axis of a view that
+   holds no memory can be longer than a Fixnum reaches), or a Float with no
+   fraction while it is exact (|v| <= 2**53; past that it cannot tell
+   neighbouring integers apart, and a count from `sum` is a Float).
+   Returns 1 with the position in *out, 2 for an Integer past int64 (past
+   every axis, which is no longer than int64), and 0 for anything else (a
+   Float with a fraction or past 2**53, NaN, Inf, a Rational, a String). */
 static int
 ca_classifier_key_position (VALUE v, ca_size_t *out)
 {
@@ -170,17 +173,23 @@ ca_classifier_key_position (VALUE v, ca_size_t *out)
   }
   if ( RB_FLOAT_TYPE_P(v) ) {
     double d = RFLOAT_VALUE(v);
-    if ( ! isfinite(d) || d != floor(d) ) {
-      return 0;
+    if ( isfinite(d) && d == floor(d) && fabs(d) <= 9007199254740992.0 ) {
+      *out = (ca_size_t) d;
+      return 1;
     }
-    if ( d < -4.6e18 || d > 4.6e18 ) {
-      return 2;
-    }
-    *out = (ca_size_t) d;
-    return 1;
+    return 0;
   }
   if ( RB_TYPE_P(v, T_BIGNUM) ) {
-    return 2;
+    uint64_t mag;
+    int sign = rb_integer_pack(v, &mag, 1, sizeof(mag), 0,
+                               INTEGER_PACK_NATIVE_BYTE_ORDER);
+    if ( sign == 2 || sign == -2
+         || ( sign > 0 && mag > (uint64_t) INT64_MAX )
+         || ( sign < 0 && mag > (uint64_t) INT64_MAX + 1 ) ) {
+      return 2;                         /* does not fit int64 */
+    }
+    *out = ( sign < 0 ) ? (ca_size_t) (0 - mag) : (ca_size_t) mag;
+    return 1;
   }
   return 0;
 }
@@ -216,17 +225,15 @@ ca_index_key_is_scalar (VALUE arg)
   return FIXNUM_P(arg) || RB_FLOAT_TYPE_P(arg) || RB_TYPE_P(arg, T_BIGNUM);
 }
 
-/* A step: an integer like any key, except that one past any axis is not
-   past anything -- it is a step larger than any axis, so it reaches one
-   cell.  It is read as the largest Fixnum of its sign, which does the
-   same. */
+/* A step: an integer like any key, except that one past int64 is not past
+   anything -- it is a step larger than any axis, so it reaches one cell.
+   It is read as the largest int64 of its sign, which does the same. */
 static ca_size_t
 ca_classifier_key_step (VALUE v, int axis)
 {
   ca_size_t k;
   if ( ca_classifier_key_position(v, &k) == 2 ) {
-    int positive = RB_FLOAT_TYPE_P(v) ? ( RFLOAT_VALUE(v) > 0 ) : rb_big_sign(v);
-    return positive ? (ca_size_t) FIXNUM_MAX : (ca_size_t) FIXNUM_MIN;
+    return rb_big_sign(v) ? (ca_size_t) INT64_MAX : (ca_size_t) INT64_MIN;
   }
   return ca_classifier_key_int(v, axis);
 }
