@@ -35,6 +35,11 @@ class CArray
   #   element is `1` where `self` is masked and `0` where it is not.
   #   The returned view itself cannot carry a mask.
   #
+  #   The mask of a view is a view over its parent's mask: it follows
+  #   later changes to the parent's mask, and so does its `dup` or
+  #   `clone`, which is another view onto the same parent mask (a write
+  #   to it lands in the parent's mask). Use `copy` for a mask of its own.
+  #
   #   Returns `0` (Integer) if `self` has no mask array attached.
   #   @return [CArray, Integer]
   def mask; end

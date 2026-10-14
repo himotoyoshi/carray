@@ -1398,6 +1398,72 @@ rb_ca_mask_array (VALUE self)
   }
 }
 
+/* dup / clone of a mask.  The mask of a view is a view over its parent's
+   mask, and its dup, like the dup of any view, is another view onto the
+   same parent mask: it follows later changes and a write to it lands in
+   the parent's mask (copy makes a mask of its own).  A mask over a cast, a
+   byte swap, a Face or a lazy expression is shown as CArrayMask, whose
+   allocator makes an entity, so Object#dup would copy its cells; it is
+   rebuilt here from its own view instead.  The mask of an entity is an
+   entity and is copied. */
+static VALUE
+ca_mask_view_dup (VALUE self)
+{
+  volatile VALUE obj;
+  const rb_data_type_t *type;
+  CArray *ca, *cp;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  cp = (CArray *) ca_func[ca->obj_type].clone(ca);
+  ca_keep_chain_flags(cp, ca);
+  type = ca_typeddata[ca->obj_type];
+  if ( type->function.dfree != ca_free ) {
+    type = &carray_data_type;     /* the copy is this object's to free */
+  }
+  obj = TypedData_Wrap_Struct(rb_obj_class(self), type, cp);
+  rb_ivar_set(obj, rb_intern("masked_array"),
+              rb_ivar_get(self, rb_intern("masked_array")));
+  return obj;
+}
+
+static VALUE
+rb_ca_mask_dup (VALUE self)
+{
+  CArray *ca;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  if ( ! ca_is_view(ca) ) {
+    return rb_call_super(0, NULL);
+  }
+  return ca_mask_view_dup(self);
+}
+
+static VALUE
+rb_ca_mask_clone (int argc, VALUE *argv, VALUE self)
+{
+  VALUE opts = Qnil, vfreeze = Qnil;
+  volatile VALUE obj;
+  CArray *ca;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  if ( ! ca_is_view(ca) ) {
+    return rb_call_super_kw(argc, argv, RB_PASS_CALLED_KEYWORDS);
+  }
+  rb_scan_args(argc, argv, "0:", &opts);
+  if ( ! NIL_P(opts) ) {
+    /* rb_get_kwargs refuses any key but freeze:, as Kernel#clone does. */
+    ID kw[1];
+    VALUE val[1];
+    kw[0] = rb_intern("freeze");
+    rb_get_kwargs(opts, kw, 0, 1, val);
+    if ( val[0] != Qundef ) {
+      vfreeze = val[0];
+    }
+  }
+  obj = ca_mask_view_dup(self);
+  if ( RTEST(vfreeze) || ( NIL_P(vfreeze) && OBJ_FROZEN(self) ) ) {
+    rb_obj_freeze(obj);
+  }
+  return obj;
+}
+
 /* @overload mask= (new_mask)
 
 (Mask, Modification) 
@@ -2348,6 +2414,8 @@ Init_carray_mask (void)
 
   rb_define_method(rb_cCArray, "value",         rb_ca_value_array, 0);
   rb_define_method(rb_cCArray, "mask",          rb_ca_mask_array, 0);
+  rb_define_method(rb_cCArrayMask, "dup",   rb_ca_mask_dup,    0);
+  rb_define_method(rb_cCArrayMask, "clone", rb_ca_mask_clone, -1);
   rb_define_method(rb_cCArray, "mask=",         rb_ca_set_mask, 1);
   rb_define_method(rb_cCArray, "is_masked",     rb_ca_is_masked, 0);
   rb_define_method(rb_cCArray, "is_not_masked", rb_ca_is_not_masked, 0);

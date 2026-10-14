@@ -65,6 +65,50 @@ class TestViewMaskSecondPass < Test::Unit::TestCase
     assert_equal false, e.has_mask?
   end
 
+  # The dup of a view's mask is another view onto the same parent mask, for
+  # every kind of view: it follows later changes, a write to it lands in the
+  # parent's mask, and copy is the way to a mask of its own.
+  def test_dup_of_a_view_mask_stays_on_the_parent
+    views = {
+      "transpose"  => ->(a) { a.transpose },
+      "roll"       => ->(a) { a.roll(0, 0) },
+      "block"      => ->(a) { a[0..1, nil] },
+      "fake"       => ->(a) { a.fake(:float32) },
+      "swap_bytes" => ->(a) { a.swap_bytes },
+      "lazy"       => ->(a) { a.lazy + 1 },
+    }
+    views.each do |name, make|
+      [:dup, :clone].each do |how|
+        a = CArray.float64(2, 3).seq
+        a[0, 0] = UNDEF
+        m = make.(a).mask.send(how)
+        snap = make.(a).mask.copy
+        a[1, 1] = UNDEF
+        assert_equal 2, m.count(true), "#{name}.mask.#{how}"
+        assert_equal 1, snap.count(true), "#{name}.mask.copy"
+      end
+    end
+    t = CArray.int64(2, 3).seq.time(unit: :s)
+    t[0, 0] = UNDEF
+    m = t.transpose.mask.dup
+    t[1, 1] = UNDEF
+    assert_equal 2, m.count(true)
+
+    a = CArray.float64(2, 3).seq
+    a[0, 0] = UNDEF
+    d = a.fake(:float32).mask.dup
+    d[0, 1] = 1
+    assert_equal UNDEF, a[0, 1]
+
+    a = CArray.float64(2, 3).seq
+    a[0, 0] = UNDEF
+    d = a.mask.dup                      # the mask of an entity is copied
+    a[1, 1] = UNDEF
+    assert_equal 1, d.count(true)
+    assert_equal true, (a.lazy + 1).mask.dup.read_only?
+    assert_equal true, a.fake(:float32).mask.clone(freeze: true).frozen?
+  end
+
   def test_remap_mask_dup
     a = CArray.float64(3, 4).seq!
     a[0, 0] = UNDEF
