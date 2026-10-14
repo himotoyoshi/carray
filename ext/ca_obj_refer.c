@@ -776,7 +776,7 @@ rb_ca_flatten (VALUE self)
      before axis 0 twice              -> [1, 1, 2, 3]
 
    Returns a CARefer view (zero-copy alias to +self+'s data, via reshape).
-   Bound to the internal name __insert_axis_size1__; the user-facing
+   Bound to the private method insert_size_one_axes; the user-facing
    insert_axis (with the repeat: keyword) is the Ruby method in
    lib/carray/basics.rb, which builds on this primitive.
 
@@ -859,7 +859,7 @@ Init_ca_obj_refer (void)
   /* The bare size-1 primitive.  The user-facing `insert_axis` (with its
      `repeat:` keyword) is the Ruby method in lib/carray/basics.rb, which
      owns the name and calls this primitive. */
-  rb_define_method(rb_cCArray, "__insert_axis_size1__", rb_ca_insert_axis, -1);
+  rb_define_private_method(rb_cCArray, "insert_size_one_axes", rb_ca_insert_axis, -1);
   rb_define_alloc_func(rb_cCARefer, rb_ca_refer_s_allocate);
   rb_define_method(rb_cCARefer, "initialize_copy",
                                        rb_ca_refer_initialize_copy, 1);

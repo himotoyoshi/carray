@@ -76,7 +76,7 @@ class CArray
       :&  => :bit_and_i,  :|  => :bit_or_i,   :^  => :bit_xor_i,
       :<< => :bit_lshift, :>> => :bit_rshift,
     }.freeze
-    TRIOP_NAMES = { :__clip_ki__ => :clip }.freeze
+    TRIOP_NAMES = { :clamp_between => :clip }.freeze
 
     MONOP_BY_ID = CArray::LAZY_MONOP_OP_IDS.invert.freeze
     # A Float or Complex array to an Integer power is its own node, ipow,

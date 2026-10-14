@@ -15,7 +15,7 @@ class CArray
 
   # reshape / flatten / transpose! are defined in C
   # (ext/ca_obj_refer.c and ext/ca_obj_transpose.c).  The bare size-1
-  # insertion primitive is `__insert_axis_size1__` (C); `insert_axis` below
+  # insertion primitive is `insert_size_one_axes` (C); `insert_axis` below
   # is the user-facing method that owns the name and adds `repeat:`.
 
   # @overload insert_axis(*positions, repeat: nil)
@@ -58,7 +58,7 @@ class CArray
 
     # No repeat: -> plain size-1 insertion.  The source-frame C primitive
     # handles normalization, range check and multiplicity directly.
-    return __insert_axis_size1__(*flat) if repeat.nil?
+    return insert_size_one_axes(*flat) if repeat.nil?
 
     # Source frame: each position names the source axis the new axis goes
     # before.  Gaps live in [0, ndim] (ndim = append at end); negatives count
@@ -98,7 +98,7 @@ class CArray
     final = {}
     order.each_with_index { |i, k| final[i] = gaps[i] + k }
 
-    inter = __insert_axis_size1__(*order.map { |i| gaps[i] })
+    inter = insert_size_one_axes(*order.map { |i| gaps[i] })
     return inter unless order.any? { |i| reps[i] > 1 }
 
     shp = inter.shape
@@ -362,7 +362,7 @@ class CArray
     ufill = fill_value if ufill.nil?
 
     if lfill.nil? && ufill.nil?
-      return __clip_ki__(min, max) if !min.nil? && !max.nil?
+      return clamp_between(min, max) if !min.nil? && !max.nil?
       return pmax(min) if max.nil?
       return pmin(max)
     end

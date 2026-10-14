@@ -164,7 +164,7 @@ class TestLazyMarkerLiftMatrix < Test::Unit::TestCase
   def test_lifted_results_are_lazy_operands
     a = entity
     LIFTED.each do |name, f|
-      assert_equal true, f.call(a.lazy).__lazy_view__?, name
+      assert_equal true, f.call(a.lazy).send(:lazy_view?), name
     end
   end
 

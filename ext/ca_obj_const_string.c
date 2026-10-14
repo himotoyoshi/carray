@@ -1228,12 +1228,14 @@ Init_ca_obj_const_string (void)
   /* Native flat sort permutation / min / max (§3.7), byte-memcmp
      comparator.  The public ordering surface is built on these in
      lib/carray/const_string.rb; see the comment above their definitions. */
-  rb_define_method(rb_cCAConstString, "__sort_addr_bytes__",
-                                      rb_ca_const_string_sort_index, 0);
-  rb_define_method(rb_cCAConstString, "__min_bytes__", rb_ca_const_string_min, 0);
+  rb_define_private_method(rb_cCAConstString, "sort_addr_by_bytes",
+                           rb_ca_const_string_sort_index, 0);
+  rb_define_private_method(rb_cCAConstString, "min_string_by_bytes",
+                           rb_ca_const_string_min, 0);
   rb_define_private_method(rb_cCAConstString, "__factorize_appearance__",
                            rb_ca_const_string_factorize_appearance, 0);
-  rb_define_method(rb_cCAConstString, "__max_bytes__", rb_ca_const_string_max, 0);
+  rb_define_private_method(rb_cCAConstString, "max_string_by_bytes",
+                           rb_ca_const_string_max, 0);
 
   /* Y-pilot: Face-local C-level fast path for per-cell scalar fetch. */
   ca_face_register_storage_to_element(CA_OBJ_CONST_STRING, rb_ca_const_string_storage_to_element);

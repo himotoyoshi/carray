@@ -6,14 +6,14 @@ require "carray"
 # numo-narray-memoryview side (test/test_format_parser.rb) so that
 # both implementations cover the same (format, item_size) matrix.
 #
-# Uses the private CArray.__memory_view_parse_format__(format,
+# Uses the private CArray.parse_memory_view_format(format,
 # item_size) hook to exercise the parser without going through a
 # producer.
 
 class TestFormatParser < Test::Unit::TestCase
 
   def parse(format, item_size)
-    CArray.__memory_view_parse_format__(format, item_size)
+    CArray.send(:parse_memory_view_format, format, item_size)
   end
 
   # ============================================================

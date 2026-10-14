@@ -5,7 +5,7 @@
 #  Tests for CArray#insert_axis(*axes): inserts length-1 axes before the
 #  given source axes (source frame; a position names the existing axis the
 #  new axis goes before, ndim = append at end, duplicates stack).  The bare
-#  size-1 primitive is __insert_axis_size1__ (ext/ca_obj_refer.c); the
+#  size-1 primitive is insert_size_one_axes (ext/ca_obj_refer.c); the
 #  user-facing insert_axis lives in lib/carray/basics.rb.  The repeat:
 #  keyword is covered in test_insert_axis_repeat.rb.
 #

@@ -340,14 +340,6 @@ class CAStruct
     super
   end
 
-  protected
-
-  def __data__
-    @data
-  end
-
-  public
-
   # Member access.  A member is named by a String (`s["lat"]`) or its
   # Integer position (`s[0]`); its accessor (`s.lat`) reads it too.  A
   # Symbol is not a member name here, and a name that is not a member

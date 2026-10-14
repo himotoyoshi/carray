@@ -1711,13 +1711,14 @@ Init_carray_memory_view (void)
                              rb_ca_s_from_memory_view, -1);
   rb_define_singleton_method(rb_cCArray, "wrap_memory_view",
                              rb_ca_s_wrap_memory_view, -1);
-  /* Test hooks (used by spec_ai/test_format_parser.rb and
-     spec_ai/test_mv_struct_format.rb).  Private API; names start
-     with __ to discourage external use. */
-  rb_define_singleton_method(rb_cCArray, "__memory_view_parse_format__",
-                             rb_ca_s_parse_memory_view_format, 2);
-  rb_define_singleton_method(rb_cCArray, "__memory_view_format__",
-                             rb_ca_s_memory_view_format, 1);
+  /* The format parser and the format an array exports, for the specs
+     (test_format_parser.rb, test_mv_struct_format.rb).  Private. */
+  rb_define_private_method(rb_singleton_class(rb_cCArray),
+                           "parse_memory_view_format",
+                           rb_ca_s_parse_memory_view_format, 2);
+  rb_define_private_method(rb_singleton_class(rb_cCArray),
+                           "memory_view_format_of",
+                           rb_ca_s_memory_view_format, 1);
   rb_define_method(rb_const_get(rb_cObject, rb_intern("CARecord")),
                    "memory_view_field_names",
                    rb_ca_record_memory_view_field_names, 0);

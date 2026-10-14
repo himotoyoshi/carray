@@ -23,7 +23,7 @@ class TestMVStructFormat < Test::Unit::TestCase
   end
 
   def format_of (struct, n = 1)
-    CArray.__memory_view_format__(CARecord.new(struct, n))
+    CArray.send(:memory_view_format_of, CARecord.new(struct, n))
   end
 
   # --- core emission ----------------------------------------------------
@@ -95,7 +95,7 @@ class TestMVStructFormat < Test::Unit::TestCase
      CArray.union { int32 :a; float32 :b }].each do |s|
       a = CARecord.new(s, 1)
       refute CArray.memory_view_available?(a), s.inspect
-      assert_nil CArray.__memory_view_format__(a)
+      assert_nil CArray.send(:memory_view_format_of, a)
       assert_nil a.memory_view_field_names
     end
   end
@@ -111,7 +111,7 @@ class TestMVStructFormat < Test::Unit::TestCase
   def test_bare_fixlen_without_data_class_emits_ns
     a = CArray.new(:fixlen, [3], bytes: 4)
     assert CArray.memory_view_available?(a)
-    assert_equal "4s", CArray.__memory_view_format__(a)
+    assert_equal "4s", CArray.send(:memory_view_format_of, a)
   end
 
   # --- caching -----------------------------------------------------------------
@@ -119,17 +119,17 @@ class TestMVStructFormat < Test::Unit::TestCase
   def test_format_string_is_cached_and_frozen
     s = CArray.struct(pack: 1) { int32 :a; float64 :b }
     a = CARecord.new(s, 1)
-    assert_same CArray.__memory_view_format__(a), CArray.__memory_view_format__(a)
-    assert_predicate CArray.__memory_view_format__(a), :frozen?
+    assert_same CArray.send(:memory_view_format_of, a), CArray.send(:memory_view_format_of, a)
+    assert_predicate CArray.send(:memory_view_format_of, a), :frozen?
   end
 
   # --- top level -----------------------------------------------------------------
 
   def test_top_level_and_field_views
-    assert_equal "i", CArray.__memory_view_format__(CArray.int32(3))
-    assert_equal "?", CArray.__memory_view_format__(CArray.boolean(3))
+    assert_equal "i", CArray.send(:memory_view_format_of, CArray.int32(3))
+    assert_equal "?", CArray.send(:memory_view_format_of, CArray.boolean(3))
     s = CArray.struct(pack: 1) { int32 :id; float64 :x }
-    assert_equal "d", CArray.__memory_view_format__(CARecord.new(s, 5)["x"])
+    assert_equal "d", CArray.send(:memory_view_format_of, CARecord.new(s, 5)["x"])
   end
 
 end

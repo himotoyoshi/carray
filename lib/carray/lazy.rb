@@ -5,7 +5,7 @@
 # For each of the monop/monfunc methods, keep the existing eager
 # implementation as an UnboundMethod and redefine `<name>` to dispatch:
 #
-#   - if self.__lazy_view__? → CAMonOp.__build__(self, OP_<NAME>)
+#   - if self.lazy_view? → CAMonOp.__build__(self, OP_<NAME>)
 #     (cast node insertion handled in C if data_type mismatch)
 #   - else                   → the eager implementation
 #
@@ -90,7 +90,7 @@ class CArray
     eager_um = instance_method(name)
     # Redefine as lazy-or-eager dispatch.
     define_method(name) do
-      if __lazy_view__?
+      if lazy_view?
         CAMonOp.__build__(self, op_id)
       else
         eager_um.bind_call(self)
@@ -128,7 +128,7 @@ class CArray
   # @private
   eager_abs = instance_method(:abs)
   define_method(:abs) do
-    if __lazy_view__?
+    if lazy_view?
       # A boolean has no absolute value to change type for, as eager says.
       raise CArray::DataTypeError,
             "data_type-changing monop not implemented for input data_type " \
@@ -181,7 +181,7 @@ class CArray
   # @private
   eager_real = instance_method(:real)
   define_method(:real) do
-    if __lazy_view__?
+    if lazy_view?
       if complex?
         float_dt = (data_type == CA_CMPLX64) ? CA_FLOAT32 : CA_FLOAT64
         # float_dt is a Symbol; convert via data_type_code for kernel
@@ -202,7 +202,7 @@ class CArray
   # @!visibility private
   eager_imag = instance_method(:imag)
   define_method(:imag) do
-    if __lazy_view__?
+    if lazy_view?
       imag_i_node = CAMonOp.__build__(self, CAMonOp::OP_IMAG_I)
       if boolean?
         # imag_i reads a boolean as int64; the eager imag stays boolean.
@@ -243,7 +243,7 @@ class CArray
   # @private
   eager_arg = instance_method(:arg)
   define_method(:arg) do
-    if __lazy_view__?
+    if lazy_view?
       raise CArray::DataTypeError,
             "data_type-changing monop not implemented for input data_type " \
             "#{CArray.data_type_code(CA_BOOLEAN)}" if boolean?
@@ -320,7 +320,7 @@ class CArray
   LAZY_BINOP_OP_IDS.each do |method_name, op_id|
     eager_um = eager_binops[method_name] = instance_method(method_name)
     define_method(method_name) do |other|
-      if __lazy_view__? || (other.is_a?(CArray) && other.__lazy_view__?)
+      if lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
         CABinOp.__build__(self, other, op_id)
       else
         eager_um.bind_call(self, other)
@@ -373,7 +373,7 @@ class CArray
   # dispatches to CATriOp.__build__ when any of self / op2 / op3 is a
   # lazy view, and falls to the eager C method otherwise.
   #
-  # `clip` is the strict-clamp entry (`__clip_ki__`, called by the
+  # `clip` is the strict-clamp entry (`clamp_between`, called by the
   # lib/carray/basics.rb `clip` wrapper's both-bounds-present path).  The
   # nil-bound one-sided cases route through the wrapper's `pmax` / `pmin`
   # calls, which themselves lazy-fuse via LAZY_BINOP_OP_IDS above — so
@@ -382,17 +382,17 @@ class CArray
   # ---------------------------------------------------------------------------
 
   LAZY_TRIOP_OP_IDS = {
-    fma:         CATriOp::OP_FMA,
-    fms:         CATriOp::OP_FMS,
-    __clip_ki__: CATriOp::OP_CLIP,
+    fma:           CATriOp::OP_FMA,
+    fms:           CATriOp::OP_FMS,
+    clamp_between: CATriOp::OP_CLIP,
   }.freeze
 
   LAZY_TRIOP_OP_IDS.each do |method_name, op_id|
     eager_um = instance_method(method_name)
     define_method(method_name) do |op2, op3|
-      lazy_receiver = __lazy_view__? ||
-                      (op2.is_a?(CArray) && op2.__lazy_view__?) ||
-                      (op3.is_a?(CArray) && op3.__lazy_view__?)
+      lazy_receiver = lazy_view? ||
+                      (op2.is_a?(CArray) && op2.lazy_view?) ||
+                      (op3.is_a?(CArray) && op3.lazy_view?)
       if lazy_receiver
         CATriOp.__build__(self, op2, op3, op_id)
       else
@@ -400,6 +400,8 @@ class CArray
       end
     end
   end
+  # The clip kernel takes both bounds; the public entry is `clip`.
+  private :clamp_between
 
   # `**` integer-exponent lazy fast path.
   #
@@ -424,10 +426,10 @@ class CArray
   eager_pow = eager_binops.fetch(:**)
   define_method(:**) do |other|
     if other.is_a?(Integer) && (float? || complex?) &&
-       (__lazy_view__? || (other.is_a?(CArray) && other.__lazy_view__?))
+       (lazy_view? || (other.is_a?(CArray) && other.lazy_view?))
       CABinOp.__build__(self, CScalar.int64.tap { |s| s[0] = other },
                         CABinOp::OP_IPOWER)
-    elsif __lazy_view__? || (other.is_a?(CArray) && other.__lazy_view__?)
+    elsif lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
       CABinOp.__build__(self, other, CABinOp::OP_POW)
     else
       eager_pow.bind_call(self, other)
@@ -479,7 +481,7 @@ class CArray
   LAZY_BINCMP_OP_IDS.each do |method_name, op_id|
     eager_um = instance_method(method_name)
     define_method(method_name) do |other|
-      if __lazy_view__? || (other.is_a?(CArray) && other.__lazy_view__?)
+      if lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
         CABinCmp.__build__(self, other, op_id)
       else
         eager_um.bind_call(self, other)
@@ -499,7 +501,7 @@ class CArray
   LAZY_BINCMP_TOL_OP_IDS.each do |method_name, op_id|
     eager_um = instance_method(method_name)
     define_method(method_name) do |other, tol|
-      if __lazy_view__? || (other.is_a?(CArray) && other.__lazy_view__?)
+      if lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
         CABinCmp.__build__(self, other, op_id, tol.to_f.abs)
       else
         eager_um.bind_call(self, other, tol)
@@ -519,7 +521,7 @@ class CArray
   LAZY_MONCMP_OP_IDS.each do |name, op_id|
     eager_um = instance_method(name)
     define_method(name) do
-      if __lazy_view__?
+      if lazy_view?
         CAMonCmp.__build__(self, op_id)
       else
         eager_um.bind_call(self)
@@ -538,7 +540,7 @@ class CArray
       raise unless other.is_a?(Integer)
       return [OutOfRangeInteger.new(other, self, e), self]
     end
-    __lazy_view__? ? [scalar, self] : [scalar, receiver]
+    lazy_view? ? [scalar, self] : [scalar, receiver]
   end
 
   # An Integer the array's type cannot hold, on the left of an operator.

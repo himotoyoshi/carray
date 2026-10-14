@@ -101,7 +101,7 @@ class CArray
   # a CScalar of it, UNDEF a masked one.
   private def lazy_then_else? (x, y, dt)
     return false if scalar? || dt == CA_OBJECT || dt == CA_FIXLEN
-    [self, x, y].any? { |v| v.is_a?(CArray) && v.__lazy_view__? }
+    [self, x, y].any? { |v| v.is_a?(CArray) && v.lazy_view? }
   end
 
   # The types the lazy select cannot carry keep the strict form: a full

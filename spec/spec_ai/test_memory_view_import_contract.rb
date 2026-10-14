@@ -240,7 +240,7 @@ class TestMemoryViewImportContract < Test::Unit::TestCase
   # ---------- format vocabulary ----------
 
   def parse (fmt, size)
-    CArray.__memory_view_parse_format__(fmt, size)
+    CArray.send(:parse_memory_view_format, fmt, size)
   end
 
   def test_ruby_vocabulary_in_host_order

@@ -43,7 +43,7 @@ class TestMemoryViewLeaks < Test::Unit::TestCase
     assert_equal 12, m.byte_size
     assert m.readonly?
     m.release
-    assert_equal "4s", CArray.__memory_view_format__(a) if CArray.respond_to?(:__memory_view_format__)
+    assert_equal "4s", CArray.send(:memory_view_format_of, a) if CArray.respond_to?(:memory_view_format_of, true)
     assert_leaves_nothing "Fiddle::MemoryView.new(a).release",
                           "a = CArray.fixlen(*[1]*8, bytes: 4).freeze"
   end

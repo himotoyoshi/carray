@@ -157,7 +157,7 @@ class TestLazyMarkerViewContract < Test::Unit::TestCase
   # expression fused instead of falling out of the chain at the first view.
   def test_marker_rooted_view_is_a_lazy_operand
     m = @a.lazy
-    assert_equal true, m.shift(1, 0).__lazy_view__?
+    assert_equal true, m.shift(1, 0).send(:lazy_view?)
     assert_equal CABinOp, (m.shift(1, 0) + m.shift(-1, 0)).class
     assert_equal (@a.shift(1, 0) + @a.shift(-1, 0)).to_a,
                  (m.shift(1, 0) + m.shift(-1, 0)).to_ca.to_a

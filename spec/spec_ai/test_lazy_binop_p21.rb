@@ -203,6 +203,6 @@ class TestLazyBinopP21 < Test::Unit::TestCase
     a = CArray.float64(8).seq
     b = CArray.float64(8).seq
     v = a.lazy + b
-    assert_true v.__lazy_view__?
+    assert_true v.send(:lazy_view?)
   end
 end

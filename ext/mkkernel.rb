@@ -9256,13 +9256,13 @@ MkKernel.triop :fms,
 #     UNDEF-fill case can now be expressed as `out = a.clip(lo, hi);
 #     out[a.lt(lo) | a.gt(hi)] = UNDEF`).  Pinned in test.
 #
-# Bound at the C level as `__clip_ki__` (private kernel entry).  The
+# Bound at the C level as `clamp_between` (made private by lazy.rb).  The
 # public `CArray#clip` is a Ruby wrapper in lib/carray/math.rb that
 # restores the rich pre-3.0 API surface (nil-bound one-sided clip +
 # optional fill).  `clip!` is retired in 3.0 (view-by-default
 # convention) so the bang form is suppressed via `bang: false`.
 MkKernel.triop :clip,
-  op:     "__clip_ki__",
+  op:     "clamp_between",
   bang:   false,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {

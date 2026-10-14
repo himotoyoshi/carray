@@ -135,7 +135,7 @@ class CAConstString
   def sort_addr (*args, **kw)
     # The native scan has no notion of an incomparable sentinel, so a masked
     # column goes the same way a per-axis one does.
-    return __sort_addr_bytes__ if args.empty? && kw.empty? && ! has_mask?
+    return sort_addr_by_bytes if args.empty? && kw.empty? && ! has_mask?
     to_string.sort_addr(*args, **kw)
   end
 
@@ -146,7 +146,7 @@ class CAConstString
     if args.empty? && kw.empty? && ! has_mask?
       # With no axis the indices are those of the flattened array, which are
       # its addresses.
-      addr = __sort_addr_bytes__
+      addr = sort_addr_by_bytes
       return ndim == 1 ? addr : addr.flatten.copy
     end
     to_string.sort_index(*args, **kw)
@@ -169,7 +169,7 @@ class CAConstString
   #   every cell is masked or the array is empty.
   #   @return [String, CAConstString]
   def min (*args, **kw)
-    return __min_bytes__ || UNDEF if args.empty? && kw.empty?
+    return min_string_by_bytes || UNDEF if args.empty? && kw.empty?
     const_string_lift(to_string.min(*args, **kw))
   end
 
@@ -177,7 +177,7 @@ class CAConstString
   #   Byte-largest counterpart of {#min}.
   #   @return [String, CAConstString]
   def max (*args, **kw)
-    return __max_bytes__ || UNDEF if args.empty? && kw.empty?
+    return max_string_by_bytes || UNDEF if args.empty? && kw.empty?
     const_string_lift(to_string.max(*args, **kw))
   end
 

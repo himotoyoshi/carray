@@ -1133,10 +1133,10 @@ Init_ca_obj_monop (void)
   rb_define_singleton_method(rb_cCAMonOp, "__build__",
                              rb_ca_monop_s_build, 2);
 
-  /* Lazy-view predicate exposed on CArray (covers CAMonOp and
-     CALazyMarker).  */
-  rb_define_method(rb_cCArray, "__lazy_view__?",
-                   rb_ca_is_lazy_view_p, 0);
+  /* Lazy-view predicate on CArray (covers CAMonOp and CALazyMarker).
+     Protected: the lazy dispatch asks it of the other operands. */
+  rb_define_protected_method(rb_cCArray, "lazy_view?",
+                             rb_ca_is_lazy_view_p, 0);
 
   /* op_id accessor for inspect / dump_tree consumers in Ruby.  */
   rb_define_method(rb_cCAMonOp, "__op_id__",
