@@ -177,6 +177,7 @@ fz_complex_key (VALUE self)
   if ( ca_has_mask(ca) ) {
     ca_copy_mask(co, ca);
   }
+  RB_GC_GUARD(self);   /* read through ca after rb_carray_new allocates */
   return out;
 }
 
@@ -775,7 +776,13 @@ fz_levels_free (fz_levels *l)
    in the middle of a walk.  The walks' states live in this frame, outside the
    method's body, and ca_iter_ensure finishes them however the body leaves;
    the tables have owners the unwind collects (fz_tmp_alloc).  Slots 0
-   and 1 hold a method's own walks, slot 2 the walk of fz_intern_all. */
+   and 1 hold a method's own walks, slot 2 the walk of fz_intern_all.
+
+   A body that replaces self or an operand with an array it made (complex
+   keys, a Face's storage, an operand brought into self's space) writes the
+   new VALUE back into the frame.  The walks read it only through its
+   CArray *, so a C local alone would leave it to the collector halfway
+   through. */
 
 typedef struct {
   ca_iter_state st[3];
@@ -819,7 +826,7 @@ fz_factorize_appearance_body (VALUE arg)
   VALUE self = fr->self;
   CArray *ca;
   volatile VALUE face;
-  self = fz_face_descend(self, &face, "categorize");
+  fr->self = self = fz_face_descend(self, &face, "categorize");
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   int8_t dt = ca->data_type;
@@ -1190,7 +1197,7 @@ fz_unique_flat_body (VALUE arg)
   VALUE self = fr->self;
   CArray *ca;
   volatile VALUE face;
-  self = fz_face_descend(self, &face, "unique");
+  fr->self = self = fz_face_descend(self, &face, "unique");
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   int8_t dt = ca->data_type;
@@ -1431,8 +1438,8 @@ fz_is_in_body (VALUE arg)
   VALUE rvalues = fr->a;
   CArray *ca, *cv;
   volatile VALUE face;
-  self     = fz_face_descend(self, &face, "is_in");
-  rvalues  = fz_face_reconcile(face, rvalues, "is_in");
+  fr->self = self    = fz_face_descend(self, &face, "is_in");
+  fr->a    = rvalues = fz_face_reconcile(face, rvalues, "is_in");
   GetCArray(self, ca);
 
   int8_t dt = ca->data_type;
@@ -1598,8 +1605,8 @@ fz_locate_addr_body (VALUE arg)
      output is an address, so nothing is lifted back. */
   {
     volatile VALUE ref_face;
-    rref = fz_face_descend(rref, &ref_face, "locate_addr");
-    self = fz_face_reconcile(ref_face, self, "locate_addr");
+    fr->a    = rref = fz_face_descend(rref, &ref_face, "locate_addr");
+    fr->self = self = fz_face_reconcile(ref_face, self, "locate_addr");
   }
   GetCArray(self, ca);
 
@@ -1862,8 +1869,8 @@ fz_set_relation_body (VALUE arg)
   int keep_when_hit = fr->i;
   CArray *ca, *co;
   volatile VALUE face;
-  self   = fz_face_descend(self, &face, "set relation");
-  rother = fz_face_reconcile(face, rother, "set relation");
+  fr->self = self   = fz_face_descend(self, &face, "set relation");
+  fr->a    = rother = fz_face_reconcile(face, rother, "set relation");
   GetCArray(self, ca);
 
   int8_t dt = ca->data_type;
@@ -2057,8 +2064,8 @@ fz_set_union_body (VALUE arg)
   VALUE rother = fr->a;
   CArray *ca, *co;
   volatile VALUE face;
-  self   = fz_face_descend(self, &face, "union");
-  rother = fz_face_reconcile(face, rother, "union");
+  fr->self = self   = fz_face_descend(self, &face, "union");
+  fr->a    = rother = fz_face_reconcile(face, rother, "union");
   GetCArray(self, ca);
 
   int8_t dt = ca->data_type;
@@ -2150,7 +2157,7 @@ fz_value_counts_flat_body (VALUE arg)
   VALUE self = fr->self;
   CArray *ca;
   volatile VALUE face;
-  self = fz_face_descend(self, &face, "value_counts");
+  fr->self = self = fz_face_descend(self, &face, "value_counts");
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   int8_t dt = ca->data_type;
@@ -2693,7 +2700,7 @@ fz_mode_axis_body (VALUE arg)
   VALUE vaxis = fr->a;
   CArray *ca;
   volatile VALUE face;
-  self = fz_face_descend(self, &face, "mode");
+  fr->self = self = fz_face_descend(self, &face, "mode");
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   int8_t dt = ca->data_type;
