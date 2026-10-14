@@ -1968,9 +1968,13 @@ class CATimedelta
   # @overload cumsum(axis: nil)
   #   Returns the running sum of durations as a {CATimedelta} on `self`'s
   #   unit.  A masked cell holds the running sum, as {CArray#cumsum} does.
+  #   The running sum is exact: the unit counts are added in int64, as
+  #   {#sum} adds them.
   #   @return [CATimedelta]
+  #   @raise [RangeError] if any cell of the running sum does not fit int64.
   def cumsum(*args, **opts)
-    round_and_relift(parent.cumsum(*args, **opts))
+    exact_sum_relift(parent.send(:cumsum_in_own_type, *args, **opts),
+                     parent.cumsum(*args, **opts))
   end
 
   # @overload prod(*)

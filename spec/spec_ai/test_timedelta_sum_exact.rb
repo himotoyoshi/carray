@@ -2,7 +2,8 @@ require "test/unit"
 require "carray"
 
 # A sum of durations is an exact quantity: it is the int64 sum of the
-# storage when that fits int64, and RangeError when it does not.
+# storage when that fits int64, and RangeError when it does not.  The same
+# holds for each cell of a running sum.
 class TestTimedeltaSumExact < Test::Unit::TestCase
 
   DAY_NS = 86400 * 10**9
@@ -64,6 +65,29 @@ class TestTimedeltaSumExact < Test::Unit::TestCase
     a[0] = UNDEF
     a[1] = UNDEF
     assert_equal 0, a.sum.value
+  end
+
+
+  def test_a_running_sum_past_2_53_is_exact
+    x = ns([200 * DAY_NS, 1, 1])
+    assert_equal [200 * DAY_NS, 200 * DAY_NS + 1, 200 * DAY_NS + 2], x.cumsum.to_a.map(&:value)
+    assert_kind_of CATimedelta, x.cumsum
+    y = ns([200 * DAY_NS, 1, 300 * DAY_NS, 3], 2, 2)
+    assert_equal [[200 * DAY_NS, 200 * DAY_NS + 1], [300 * DAY_NS, 300 * DAY_NS + 3]],
+                 y.cumsum(axis: 1).to_a.map { |r| r.map(&:value) }
+  end
+
+  def test_a_running_sum_past_int64_raises
+    big = 2**62
+    assert_raise(RangeError) { ns([big, big, -big, -big]).cumsum }   # the second cell is 2**63
+    assert_raise(RangeError) { ns([1, 2, big, big], 2, 2).cumsum(axis: 1) }
+    assert_equal [big, 0, big], ns([big, -big, big]).cumsum.to_a.map(&:value)
+  end
+
+  def test_a_running_sum_keeps_the_mask_rule
+    x = ns([1, 2, 3])
+    x[1] = UNDEF
+    assert_equal [1, 1, 4], x.cumsum.to_a.map { |e| e.equal?(UNDEF) ? UNDEF : e.value }
   end
 
 end

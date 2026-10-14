@@ -696,10 +696,10 @@ td.stddev     # => CATimedelta::Element
 td.percentile(25, 75)  # => [Element, Element]
 ```
 
-`sum` adds the unit counts in `int64`, so it is exact (it does not pass
-through `float64`, which loses the last ticks of a `:ns` sum past about 104
-days). A sum, or any cell of a per-axis sum, that does not fit `int64`
-raises `RangeError`. The other reductions are statistics and are computed in
+`sum` and `cumsum` add the unit counts in `int64`, so they are exact (they
+do not pass through `float64`, which loses the last ticks of a `:ns` sum past
+about 104 days). A sum, or any cell of a per-axis sum or of a running sum,
+that does not fit `int64` raises `RangeError`. The other reductions are statistics and are computed in
 `float64`, then rounded to the array's unit.
 
 `variance` / `variancep` raise `CArray::DataTypeError`, as they do on
