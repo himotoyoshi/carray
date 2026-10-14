@@ -93,6 +93,26 @@ hc_check_data_type (VALUE self, VALUE flag, VALUE dt)
   return Qtrue;
 }
 
+static VALUE
+hc_check_same_data_type (VALUE self, VALUE a, VALUE b)
+{
+  ca_check_same_data_type(get(a), get(b));
+  return Qtrue;
+}
+
+static VALUE
+hc_promote_type (VALUE self, VALUE a, VALUE b)
+{
+  return INT2NUM(ca_promote_type((int8_t) NUM2INT(a), (int8_t) NUM2INT(b)));
+}
+
+static VALUE
+hc_unmask_without_fill (VALUE self, VALUE a)
+{
+  ca_unmask(get(a), NULL);
+  return a;
+}
+
 void
 Init_header_contract (void)
 {
@@ -108,6 +128,9 @@ Init_header_contract (void)
   rb_define_module_function(m, "obj_num", hc_obj_num, 0);
   rb_define_module_function(m, "install", hc_install, 1);
   rb_define_module_function(m, "check_data_type", hc_check_data_type, 2);
+  rb_define_module_function(m, "check_same_data_type", hc_check_same_data_type, 2);
+  rb_define_module_function(m, "promote_type", hc_promote_type, 2);
+  rb_define_module_function(m, "unmask_without_fill", hc_unmask_without_fill, 1);
   rb_define_const(m, "FUNC_SIZE", SIZET2NUM(sizeof(ca_operation_function_t)));
   rb_define_const(m, "XFER_INDEX_OFFSET",
                   SIZET2NUM(offsetof(ca_operation_function_t, xfer_index)));

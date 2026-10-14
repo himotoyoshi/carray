@@ -82,7 +82,8 @@ ca_check_same_data_type (void *ap1, void *ap2)
 {
   CArray *ca1 = (CArray *) ap1;
   CArray *ca2 = (CArray *) ap2;
-  if ( ca1->data_type != ca2->data_type ) {
+  if ( ca1->data_type != ca2->data_type ||
+       ( ca1->data_type == CA_FIXLEN && ca1->bytes != ca2->bytes ) ) {
     rb_raise(rb_eCADataTypeError, "data_type mismatch");
   }
 }

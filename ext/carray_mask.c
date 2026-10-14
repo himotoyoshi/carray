@@ -923,6 +923,10 @@ ca_unmask (void *ap, char *fill_value)
 {
   CArray *ca = (CArray *) ap;
 
+  if ( ca_is_readonly(ca) ) {
+    rb_raise(rb_eRuntimeError, "can not modify read-only array");
+  }
+
   ca_update_mask(ca);
   if ( ca->mask ) {
     if ( ! fill_value ) {

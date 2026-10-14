@@ -119,6 +119,29 @@ class TestHeaderContract < Test::Unit::TestCase
     assert_equal n, H.obj_num
   end
 
+  # Two fixlen arrays have the same data type only at the same width.
+  def test_check_same_data_type_compares_the_fixlen_width
+    a = CArray.fixlen(2, bytes: 8)
+    assert_equal true, H.check_same_data_type(a, CArray.fixlen(3, bytes: 8))
+    assert_raise(CArray::DataTypeError) { H.check_same_data_type(a, CArray.fixlen(2, bytes: 4)) }
+    assert_raise(CArray::DataTypeError) { H.check_same_data_type(CArray.int32(1), CArray.int64(1)) }
+  end
+
+  def test_promote_type_refuses_a_code_outside_the_data_types
+    assert_raise(ArgumentError) { H.promote_type(40, 40) }
+    assert_raise(ArgumentError) { H.promote_type(-1, 3) }
+  end
+
+  # Clearing the mask is a write: a read-only array refuses it, with or
+  # without a fill value.
+  def test_unmask_without_a_fill_value_refuses_a_read_only_array
+    a = CArray.int32(3)
+    a[1] = UNDEF
+    a.set_read_only_flag
+    assert_raise(RuntimeError) { H.unmask_without_fill(a) }
+    assert_equal 1, a.count_masked
+  end
+
   def test_check_data_type_takes_an_expression
     assert_equal true, H.check_data_type(true, :float64)
     assert_equal true, H.check_data_type(false, 0)

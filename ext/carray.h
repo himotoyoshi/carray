@@ -866,8 +866,10 @@ extern const char *  ca_type_name[CA_NTYPE];
 extern const int ca_cast_table[CA_NTYPE][CA_NTYPE];
 extern const int ca_cast_table2[CA_NTYPE][CA_NTYPE];
 
-/* data_type promotion reducer — pure function over ca_cast_table.  Used by
-   CArray.result_type and by the lazy view layer.  See ext/carray_cast.c
+/* data_type promotion reducer over ca_cast_table.  Used by
+   CArray.result_type and by the lazy view layer.  Raises ArgumentError for
+   a code outside the data types, and CArray::DataTypeError for a pair with
+   no common type.  See ext/carray_cast.c
    for the definition; this is the single source of the promotion rule. */
 int8_t ca_promote_type (int8_t a, int8_t b);
 
@@ -1567,6 +1569,9 @@ int     ca_is_valid_index (void *ap, ca_size_t *idx);
                      own.
 */
 
+/* ca_allocate opens a window for writing every cell: what the cells held
+   before is not kept, also when the array is already attached (object cells
+   are reset to 0 and the mask is cleared). */
 void    ca_allocate (void *ap);
 void    ca_attach (void *ca);
 /* Re-gather an attached view's buffer from its parent (one level: a parent

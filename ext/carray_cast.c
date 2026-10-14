@@ -2516,6 +2516,9 @@ int8_t
 ca_promote_type (int8_t a, int8_t b)
 {
   int test;
+  if ( a <= CA_NONE || a >= CA_NTYPE || b <= CA_NONE || b >= CA_NTYPE ) {
+    rb_raise(rb_eArgError, "invalid data_type id (%i, %i)", (int) a, (int) b);
+  }
   if ( a == b ) {
     return a;
   }

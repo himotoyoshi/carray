@@ -46,6 +46,7 @@ COUNTS = {
   "carray_histogram.c" => 4,
   "carray_hold.c" => 3,
   "carray_lazy.c" => 1,
+  "carray_mask.c" => 1,
   "carray_mathfunc.c" => 2,
   "carray_memory_view.c" => 3,
   "carray_operator.c" => 5,
