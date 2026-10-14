@@ -18,6 +18,11 @@
   lookup sits: the classifier must still recognise it structurally and
   read it directly, so the registration is a no-op and nothing attaches.
 
+  A fourth class, CAIterOffsetNoXfer, is the same conversion layer with no
+  xfer_stride slot, so a kernel walk over a view of it attaches it as the
+  root, and a sync that can be made to raise.  It pins that ca_iter_ensure
+  finishes every walk it opened when finishing one of them raises.
+
   The pair is the point.  Neither class is known to the classifier's
   built-in list, so the unregistered one reproduces what a companion gem
   sees today (every kernel refuses the array with rc=1) and the registered
@@ -39,11 +44,14 @@
 
 static int8_t CA_OBJ_ITER_OFFSET;
 static int8_t CA_OBJ_ITER_OFFSET_UNREG;
+static int8_t CA_OBJ_ITER_OFFSET_NOXFER;
 
 static VALUE rb_cCAIterOffset;
 static VALUE rb_cCAIterOffsetMask;
 static VALUE rb_cCAIterOffsetUnreg;
 static VALUE rb_cCAIterOffsetUnregMask;
+static VALUE rb_cCAIterOffsetNoXfer;
+static VALUE rb_cCAIterOffsetNoXferMask;
 
 typedef struct {
   /* CAView prefix — field-for-field identical to the core's views */
@@ -283,6 +291,10 @@ OFFSET_DATA_TYPE(caiteroffsetunreg_data_type, "CAIterOffsetUnregistered",
 OFFSET_DATA_TYPE(caiteroffsetunreg_mask_data_type,
                  "CAIterOffsetUnregisteredMask",
                  caiteroffsetunreg_data_type, ca_free_nop)
+OFFSET_DATA_TYPE(caiteroffsetnoxfer_data_type, "CAIterOffsetNoXfer",
+                 caview_data_type, ca_free)
+OFFSET_DATA_TYPE(caiteroffsetnoxfer_mask_data_type, "CAIterOffsetNoXferMask",
+                 caiteroffsetnoxfer_data_type, ca_free_nop)
 
 /* --- constructor ---------------------------------------------------- */
 
@@ -329,8 +341,9 @@ rb_offset_wrap (VALUE klass, VALUE parent_obj, VALUE roffset)
     rb_raise(rb_eArgError, "parent must be int32");
   }
 
-  ca = offset_new((klass == rb_cCAIterOffset) ? CA_OBJ_ITER_OFFSET
-                                              : CA_OBJ_ITER_OFFSET_UNREG,
+  ca = offset_new((klass == rb_cCAIterOffset)      ? CA_OBJ_ITER_OFFSET
+                  : (klass == rb_cCAIterOffsetNoXfer) ? CA_OBJ_ITER_OFFSET_NOXFER
+                  : CA_OBJ_ITER_OFFSET_UNREG,
                   parent, (int32_t) NUM2INT(roffset));
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, parent_obj);
@@ -400,6 +413,71 @@ rb_offset_register (VALUE klass, VALUE robj_type, VALUE rkind)
   return Qnil;
 }
 
+/* --- a view with no xfer_stride whose sync can raise ---------------- */
+
+static ca_operation_function_t noxfer_func;
+static int noxfer_fail_sync = 0;
+
+static void
+noxfer_func_sync (void *ap)
+{
+  if ( noxfer_fail_sync ) {
+    rb_raise(rb_eRuntimeError, "CAIterOffsetNoXfer: sync failed");
+  }
+  offset_func_sync(ap);
+}
+
+static VALUE
+rb_noxfer_set_fail_sync (VALUE klass, VALUE flag)
+{
+  (void) klass;
+  noxfer_fail_sync = RTEST(flag);
+  return flag;
+}
+
+typedef struct {
+  ca_iter_state *st;
+  VALUE          rsrc;
+  VALUE          wsrc;
+} noxfer_walks_t;
+
+/* Opens a READ walk over rsrc and a WRITE walk over wsrc, then writes 0
+   into every cell of wsrc. */
+static VALUE
+noxfer_walks_body (VALUE arg)
+{
+  noxfer_walks_t *w = (noxfer_walks_t *) arg;
+  CArray *r, *o;
+  char *p;
+  boolean8_t *m;
+  ca_size_t n, sb;
+
+  GetCArray(w->rsrc, r);
+  GetCArray(w->wsrc, o);
+  ca_iter_check_init(ca_iter_state_init_l2(&w->st[0], r, CA_SLAB_WHOLE,
+                                           NULL, 0, 0));
+  ca_iter_check_init(ca_iter_state_init_l2(&w->st[1], o, CA_SLAB_WHOLE,
+                                           NULL, 0, CA_KERNEL_WRITE));
+  while ( ca_iter_state_next_slab_strided(&w->st[1], &p, &m, &n, &sb) ) {
+    for ( ca_size_t i = 0; i < n; i++ ) {
+      *(int32_t *) (p + i * sb) = 0;
+    }
+    ca_iter_state_sync_slab(&w->st[1]);
+  }
+  return Qnil;
+}
+
+static VALUE
+rb_noxfer_ensure_walks (VALUE klass, VALUE rsrc, VALUE wsrc)
+{
+  ca_iter_state st[2];
+  noxfer_walks_t w = { st, rsrc, wsrc };
+  (void) klass;
+  rb_check_carray_object(rsrc);
+  rb_check_carray_object(wsrc);
+  return ca_iter_ensure(2, st, noxfer_walks_body, (VALUE) &w);
+}
+
 /* --- Init ----------------------------------------------------------- */
 
 void
@@ -424,6 +502,20 @@ Init_iter_source_kind (void)
                         rb_cCAIterOffsetUnregMask,
                         &caiteroffsetunreg_mask_data_type,
                         &offset_func, sizeof(offset_func));
+
+  noxfer_func = offset_func;
+  noxfer_func.xfer_stride = NULL;
+  noxfer_func.sync        = noxfer_func_sync;
+  rb_cCAIterOffsetNoXfer     = rb_define_class("CAIterOffsetNoXfer",
+                                               rb_cCAView);
+  rb_cCAIterOffsetNoXferMask = rb_define_class("CAIterOffsetNoXferMask",
+                                               rb_cCAIterOffsetNoXfer);
+  CA_OBJ_ITER_OFFSET_NOXFER =
+    ca_install_obj_type(rb_cCAIterOffsetNoXfer,
+                        &caiteroffsetnoxfer_data_type,
+                        rb_cCAIterOffsetNoXferMask,
+                        &caiteroffsetnoxfer_mask_data_type,
+                        &noxfer_func, sizeof(noxfer_func));
 
   stride_reg_func = ca_stride_func;
   stride_reg_func.attach   = stride_reg_func_attach;
@@ -463,6 +555,12 @@ Init_iter_source_kind (void)
                              rb_offset_wrap, 2);
   rb_define_singleton_method(rb_cCAIterStrideReg, "wrap",
                              rb_stride_reg_wrap, 1);
+  rb_define_singleton_method(rb_cCAIterOffsetNoXfer, "wrap",
+                             rb_offset_wrap, 2);
+  rb_define_singleton_method(rb_cCAIterOffsetNoXfer, "fail_sync=",
+                             rb_noxfer_set_fail_sync, 1);
+  rb_define_singleton_method(rb_cCAIterOffsetNoXfer, "ensure_walks",
+                             rb_noxfer_ensure_walks, 2);
 
   /* Expose the raise paths so the registration guards can be pinned from
      Ruby without a second fixture. */

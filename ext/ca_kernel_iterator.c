@@ -3644,19 +3644,39 @@ typedef struct {
   ca_iter_state *states;
 } ca_iter_ensure_t;
 
-/* Finishes the walks in reverse order of their slots, as nested windows
-   close.
+static VALUE
+ca_iter_ensure_finish_one (VALUE arg)
+{
+  ca_iter_state_finish((ca_iter_state *) arg);
+  return Qnil;
+}
 
-   CAREFUL: on a WRITE walk whose root is a view, ca_iter_state_finish
-   syncs the root (ca_sync_detach), and that sync goes through the view's
-   slots, which can raise.  Nothing here catches it, so a raise from one
-   finish leaves the states before it in the loop unfinished. */
+/* Finishes the walks in reverse order of their slots, as nested windows
+   close.  A finish can raise: on a WRITE walk whose root is a view, it
+   syncs the root (ca_sync_detach) through the view's slots.  Each finish
+   is therefore run under rb_protect, so a raise from one does not leave
+   the states before it unfinished; the first raise is re-raised once
+   every state is closed. */
 static VALUE
 ca_iter_ensure_close (VALUE arg)
 {
   ca_iter_ensure_t *e = (ca_iter_ensure_t *) arg;
+  int first = 0;
+  volatile VALUE first_err = Qnil;
   for ( int32_t i = e->n - 1; i >= 0; i-- ) {
-    ca_iter_state_finish(&e->states[i]);
+    int status = 0;
+    rb_protect(ca_iter_ensure_finish_one, (VALUE) &e->states[i], &status);
+    if ( status ) {
+      if ( ! first ) {
+        first     = status;
+        first_err = rb_errinfo();
+      }
+      rb_set_errinfo(Qnil);
+    }
+  }
+  if ( first ) {
+    rb_set_errinfo(first_err);
+    rb_jump_tag(first);
   }
   return Qnil;
 }
