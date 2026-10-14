@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: `CArray.load_arrow_tensor`, `CArray#save_arrow_tensor` and
+  `CArray::ArrowTensor`, the experimental Arrow tensor IPC reader and
+  writer, are removed.
+
 - New: C extensions: `CA_FOR_EACH_WHOLE(st, ca, flags, p, n)` and
   `CA_FOR_EACH_WHOLE_MASKED(st, ca, flags, p, n, m)` hand a kernel the
   whole array as one contiguous run in row-major order, gathering a copy

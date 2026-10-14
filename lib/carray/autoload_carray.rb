@@ -64,15 +64,6 @@ class CARecord
   autoload_method "marshal_dump",        "carray/serialize"
 end
 
-# ---- Arrow tensor IPC (interop) --------------------------------------------
-
-class CArray
-  arrow_tensor_rb = "carray/arrow_tensor"
-  autoload :ArrowTensor, arrow_tensor_rb
-  autoload_method "self.load_arrow_tensor", arrow_tensor_rb
-  autoload_method "save_arrow_tensor",      arrow_tensor_rb
-end
-
 # ---- Table (row-major dispatch helper) -------------------------------------
 
 class CArray
