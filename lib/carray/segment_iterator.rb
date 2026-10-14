@@ -916,7 +916,8 @@ class CASegmentIterator < CAIterator
     found = at.ge(lo) & at.lt(hi)
     out = grouped[at.pmin(n - 1).pmax(0)].copy
     out[found.not] = UNDEF
-    out
+    # A reduction carries no attributes, a picked value included.
+    grouped.__send__(:drop_carried_attrs, out)
   end
 
   # The members of segment `c` as a CArray slice of the grouped copy.  An empty

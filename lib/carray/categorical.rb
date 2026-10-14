@@ -749,3 +749,15 @@ class CArray
     CACategorical.from_codes(codes, labels_arr)
   end
 end
+
+# categorize is a conversion: the categories are the values in another
+# representation, so they show the attributes the values show.  Each of the
+# three implementations returns from several places, so the attributes are
+# carried here, around all of them.
+[CArray, CACategorical, CAConstString].each do |klass|
+  klass.prepend(Module.new do
+    def categorize (labels: nil, sort_labels: false)
+      carry_attrs(super)
+    end
+  end)
+end

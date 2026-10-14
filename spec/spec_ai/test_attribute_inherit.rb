@@ -220,6 +220,67 @@ class TestAttributeInherit < Test::Unit::TestCase
     assert_equal "w", l.join(r, on: "k")["w"].attr(:units)
   end
 
+  def test_conversions_carry_attributes
+    a = CA_INT32([3, 1, 2]).tap { |x| x.set_attr(:units, "m") }
+    assert_equal "m", a.categorize.attr(:units)
+    assert_equal "m", a.categorize(sort_labels: true).attr(:units)
+    csv = "t,b,c,i\nT,B,C,I\n2024-01-01,1,x,3\n2024-01-02,0,y,4\n"
+    read = -> { CAFrame.from_csv(StringIO.new(csv), attrs: [:units]) }
+    assert_equal "B", read.().cast("b" => :boolean)["b"].attr(:units)
+    assert_equal "I", read.().cast("i" => :int32).cast("i" => :boolean)["i"].attr(:units)
+    assert_equal "T", read.().cast("t" => :time)["t"].attr(:units)
+    assert_equal "C", read.().cast("c" => :categorical)["c"].attr(:units)
+    assert_equal "T", read.().parse_to_time("t")["t"].attr(:units)
+    assert_equal "I", read.().cast("i" => :int64).to_time("i", unit: :h, epoch: "2000-01-01")["i"].attr(:units)
+    assert_equal "I", read.().cast("i" => :int64).to_time("i", CATime::Grid.parse("hours since 1990-01-01"))["i"].attr(:units)
+  end
+
+  def test_reductions_that_pick_a_value_carry_no_attributes
+    v = CA_FLOAT64([1, 2, 3]).tap { |x| x.set_attr(:units, "K") }
+    cat = CA_INT32([1, 1, 2]).categorize
+    %i[first last min max].each do |op|
+      assert_equal({}, v.group_by_category(cat).public_send(op).attrs, op)
+    end
+    assert_equal({}, v.segments(lengths: CA_INT64([2, 1])).first.attrs)
+    assert_equal({}, v.unique.attrs)
+    g = CAFrame.new("g" => CA_INT32([1, 1, 2]), "v" => v)
+    assert_equal({}, g.group_by("g").first["v"].attrs)
+  end
+
+  def test_a_frame_index_from_a_key_shows_the_key_attributes
+    key = ->(v) { CA_INT32(v).tap { |x| x.set_attr(:units, "s") } }
+    g = CAFrame.new("g" => key.([1, 1, 2]), "v" => CA_FLOAT64([1, 2, 3]))
+    assert_equal "s", g.group_by("g").mean.index.attr(:units)
+    p = CAFrame.new("t" => key.([1, 1, 2, 2]), "s" => CA_OBJECT(%w[a b a b]),
+                    "v" => CA_FLOAT64([1, 2, 3, 4]).tap { |x| x.set_attr(:units, "K") })
+    assert_equal "s", p.pivot(index: "t", columns: "s", values: "v").index.attr(:units)
+    _, rows, = p.pivot_grid(index: "t", columns: "s", values: "v")
+    assert_equal "s", rows.attr(:units)
+    agg = p.pivot(index: "t", columns: "s", values: "v", aggregate: :mean)
+    assert_equal({}, agg["a"].attrs)
+  end
+
+  def test_delete_attr_removes_only_the_receivers_key
+    a = CA_INT32([1, 2]).tap { |x| x.set_attr(:units, "m") }
+    v = a[0..1]
+    v.set_attr(:slice, 1)
+    assert_equal 1, v.delete_attr(:slice)
+    assert_nil v.delete_attr(:units)
+    assert_equal({ "units" => "m" }, v.attrs)
+    assert_equal "m", a.delete_attr("units")
+    assert_equal({}, a.attrs)
+    assert_nil a.delete_attr(:none)
+    f = CA_INT32([1]).tap { |x| x.set_attr(:units, "m") }.freeze
+    assert_raise(FrozenError) { f.delete_attr(:units) }
+  end
+
+  def test_a_mask_array_takes_no_attribute
+    a = CA_INT32([1, 2])
+    a[0] = UNDEF
+    assert_raise(TypeError) { a.mask.set_attr(:units, "m") }
+    assert_raise(TypeError) { a.mask.set_attrs(units: "m") }
+  end
+
   def test_frame_meld_and_concatenate_agree
     f = CAFrame.new("t" => CA_FLOAT64([1, 2]).tap { |c| c.set_attr(:units, "K") })
     g = CAFrame.new("t" => CA_FLOAT64([3]).tap { |c| c.set_attr(:units, "K") })

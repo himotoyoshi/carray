@@ -36,6 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: `CArray#delete_attr(key)` removes an attribute from the array and
+  returns its value. On a view it removes only the view's own key; a key
+  the view shows from its parent stays visible.
+
+- Change: attributes follow conversions and not reductions. `categorize`
+  and a CAFrame `cast` (to boolean, time and categorical too),
+  `parse_to_time` and `to_time` keep a column's attributes. The `first`
+  and `last` of a categorical, segment or CAFrame group iterator no
+  longer carry them, as no other reduction does. A CAFrame index built
+  from a key column (group, `pivot`, `pivot_grid`) shows that column's
+  attributes. `set_attr` / `set_attrs` on a mask array raise `TypeError`.
+
 - Fix: C extensions: a whole-array kernel iterator write walk
   (`ca_iter_state_init_l1` with `CA_KERNEL_WRITE`) over a view that
   shows a cell of its array twice, such as `a[CA_INT64([0, 0, 2]), nil]`,

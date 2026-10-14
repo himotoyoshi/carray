@@ -48,12 +48,18 @@
 #  source cannot change the source.  A frozen array takes no new
 #  attribute.
 #
+#  A mask array (`a.mask`) holds no attributes: set_attr / set_attrs raise.
+#
 #  Copies: `dup` and `clone` give the new array its own Hash of the
 #  receiver's own attributes.  `copy` and `to_type` give the new array the attributes the
 #  source shows, as its own Hash; `concatenate`, `mosaic` and `tabulate`
 #  give it the keys every piece shows with the same value, as the views
-#  do.  Arithmetic and reductions do not carry them -- the result is a
-#  different quantity.
+#  do.  A conversion to another type or representation (`to_type`,
+#  `categorize`, a CAFrame `cast` / `parse_to_time` / `to_time`) carries
+#  them.  Arithmetic and reductions do not -- the result is a different
+#  quantity -- including those that pick a value (`first`, `last`, `min`,
+#  `max`, `unique`).  A CAFrame index built from a key column's values
+#  (group and pivot) shows the key column's attributes.
 
 class CArray
 
@@ -87,8 +93,9 @@ class CArray
   #   @raise [TypeError] when `key` or `value` is not accepted.
   #   @raise [ArgumentError] when `value` nests more than 32 levels.
   #   @raise [FrozenError] when `self` is frozen.
+  #   @raise [TypeError] when `self` is a mask array.
   def set_attr (key, value)
-    attr_check_not_frozen
+    attr_check_writable
     attr_validate_value(value)
     (@attr ||= {})[attr_normalize_key(key)] = attr_coerce_value(value)
   end
@@ -104,8 +111,9 @@ class CArray
   #   @raise [TypeError] when a key or a value is not accepted.
   #   @raise [ArgumentError] when a value nests more than 32 levels.
   #   @raise [FrozenError] when `self` is frozen.
+  #   @raise [TypeError] when `self` is a mask array.
   def set_attrs (hash)
-    attr_check_not_frozen
+    attr_check_writable
     unless hash.is_a?(Hash)
       raise TypeError, "set_attrs takes a Hash (got #{hash.class})"
     end
@@ -118,6 +126,21 @@ class CArray
       entries.each { |k, v| h[k] = v }
     end
     self
+  end
+
+  # @overload delete_attr(key)
+  #   Removes attribute `key` from `self` (not from any parent) and
+  #   returns its value, or `nil` when `self` has no such key. A key a
+  #   view shows from its parent stays visible after this, as `set_attr`
+  #   writes to `self` only.
+  #   @param key [Symbol, String] attribute key.
+  #   @return [Object, nil] the removed value.
+  #   @raise [FrozenError] when `self` is frozen.
+  def delete_attr (key)
+    k = attr_normalize_key(key)
+    return nil unless instance_variable_defined?(:@attr) && @attr
+    attr_check_not_frozen
+    @attr.delete(k)
   end
 
   # @overload attrs
@@ -187,6 +210,28 @@ class CArray
 
   def attr_check_not_frozen
     raise FrozenError.new("can't modify frozen #{self.class}: attributes", receiver: self) if frozen?
+  end
+
+  def attr_check_writable
+    attr_check_not_frozen
+    raise TypeError, "a mask array holds no attributes" if mask_array?
+  end
+
+  # Give `out`, a new array holding self's values in another type or
+  # representation, the attributes self shows; returns `out`.  A view of
+  # self that already shows them is left alone.
+  def carry_attrs (out)
+    return out if out.equal?(self)
+    shown = attrs
+    out.set_attrs(shown) unless shown.empty? || out.attrs == shown
+    out
+  end
+
+  # Remove what `out`, a new array a reduction made, holds of self's
+  # attributes; returns `out`.
+  def drop_carried_attrs (out)
+    out.remove_instance_variable(:@attr) if out.instance_variable_defined?(:@attr)
+    out
   end
 
   # The attributes every array in `list` shows with the same value.

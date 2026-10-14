@@ -118,7 +118,9 @@ class CAFrame
   # in order (nil beside numbers, numbers beside strings) are refused,
   # naming the key.
   private def pivot_sorted_keys(key, kw, name, verb)
-    key.unique(sort: true)
+    # The keys label rows or columns, so they show the key column's
+    # attributes, as a group index does.
+    key.__send__(:carry_attrs, key.unique(sort: true))
   rescue ArgumentError => e
     raise unless e.message.start_with?("sort:")
     raise ArgumentError,

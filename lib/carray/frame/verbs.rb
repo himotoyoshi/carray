@@ -365,7 +365,11 @@ class CAFrame
       end
     # Read every column before rebinding any, so a raise leaves the frame as
     # it was.
-    casted = types.map { |key, t| [key, cast_column(key, t, on_error)] }
+    # A conversion keeps what the column is, so the column's attributes
+    # come along whatever the target type.
+    casted = types.map do |key, t|
+      [key, @columns[key].__send__(:carry_attrs, cast_column(key, t, on_error))]
+    end
     casted.each { |key, col| @columns[key] = col }
     self
   end
@@ -502,7 +506,7 @@ class CAFrame
             "parse_to_time needs a string column (object / CAString / " \
             "CAConstString / CAFixlenString); #{key.inspect} is #{col.data_type}"
     end
-    @columns[key] = parse_time_column(key, col, format, unit, on_error)
+    @columns[key] = col.__send__(:carry_attrs, parse_time_column(key, col, format, unit, on_error))
     self
   end
 
@@ -553,7 +557,7 @@ class CAFrame
     raw = integer_serial_column(col, key)
     grid = unit if unit.is_a?(CATime::Grid)
     if grid.is_a?(CATime::Grid)
-      @columns[key] = grid.at(raw)
+      @columns[key] = col.__send__(:carry_attrs, grid.at(raw))
       return self
     end
     unless grid.nil?
@@ -564,7 +568,7 @@ class CAFrame
       # An Integer epoch is an instant in Unix seconds, whatever the unit.
       raw = raw + CATimeLiteral.to_time_array(epoch, CATime::Resolution.parse(unit), nil, :raise).ticks[0]
     end
-    @columns[key] = raw.time(unit: unit)
+    @columns[key] = col.__send__(:carry_attrs, raw.time(unit: unit))
     self
   end
 
@@ -676,10 +680,6 @@ class CAFrame
     if unreadable && !unreadable.empty?
       report_unreadable(key, col, type, unreadable, on_error)
     end
-    # The numbers are the column's values, as to_type gives them for an
-    # object column, so they show the column's attributes.
-    shown = col.attrs
-    parsed.set_attrs(shown) unless shown.empty?
     parsed
   end
 
