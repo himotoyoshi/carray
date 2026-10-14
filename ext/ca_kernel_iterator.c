@@ -42,7 +42,24 @@
    reduction itself.  The kept buffer is owned by nobody, and a walk that
    takes it owns it alone until it frees it again.  Each Ractor keeps its
    own (ractor-local storage), since walks in different Ractors run at
-   the same time. */
+   the same time.
+
+   Shortcut KEEP_SCRATCH (name tag; docs/internal/KernelIteratorEngine.md
+   section 3.4 has the table of all shortcuts).
+     Layer       data: where a scratch comes from.  The walk is unchanged.
+     Speeds up   walks with a scratch of 1 MiB or more, run one after
+                 another.
+     Why         no difference measured on macOS (a per-axis sum of a
+                 2000x2000 fake view); the page faults it
+                 avoids are expected to cost more on Linux (unmeasured).
+     Enters      ki_data_alloc: bytes >= KI_KEEP_MIN and a kept buffer
+                 that fits; ki_data_free: KI_KEEP_MIN <= bytes <=
+                 KI_KEEP_MAX.
+     Promises    4 (a kept buffer has no owner, so no exit can leave it
+                 held); 7 (object cells are cleared and held either way).
+     Switch      ca_fast_paths_enabled(): off, every scratch is fresh.
+     Checked by  test_iter_ractor_scratch.rb; the buffer count in
+                 test_iter_delivery_detectors.rb. */
 
 #define KI_KEEP_MIN ((ca_size_t) 1 << 20)
 #define KI_KEEP_MAX ((ca_size_t) 64 << 20)
@@ -97,7 +114,7 @@ ki_data_alloc (int8_t data_type, ca_size_t bytes)
 {
   void *p = NULL;
   KI_BUFFERS_OUT(1);
-  if ( bytes >= KI_KEEP_MIN ) {
+  if ( bytes >= KI_KEEP_MIN && ca_fast_paths_enabled() ) {
     ki_kept_t *k = ki_kept_slot();
     if ( k->p && bytes <= k->bytes ) {
       p = k->p;
@@ -122,7 +139,7 @@ ki_data_free (void *p, ca_size_t bytes)
 {
   KI_BUFFERS_OUT(-1);
   ca_gc_release_buffer(p);
-  if ( bytes >= KI_KEEP_MIN && bytes <= KI_KEEP_MAX ) {
+  if ( bytes >= KI_KEEP_MIN && bytes <= KI_KEEP_MAX && ca_fast_paths_enabled() ) {
     ki_kept_t *k = ki_kept_slot();
     if ( bytes > k->bytes ) {
       void *old = k->p;
@@ -791,7 +808,16 @@ ki_scratch_push_changed (ca_iter_state *st)
     }
   }
 
-  if ( whole && n_changed == n ) {
+  /* Shortcut PUSH_ALL_CHANGED.
+       Layer       write-back.
+       Speeds up   a whole-view write walk that changed every cell: one
+                   ca_xfer_all PUT instead of a list of all the addresses.
+       Why         about 5% on a whole write of a fake view of 1M cells.
+       Enters      whole && n_changed == n.
+       Promises    3 (the same cells go back; the list would hold them all).
+       Switch      ca_fast_paths_enabled(): off, the address list.
+       Checked by  the write rows of the delivery matrix (L1 / L2 whole). */
+  if ( whole && n_changed == n && ca_fast_paths_enabled() ) {
     ca_xfer_all(src, now, CA_XFER_PUT);
   }
   else if ( n_changed > 0 ) {
@@ -1087,12 +1113,24 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
         in_slab[ax] = 1;
       }
 
-      /* PROPOSAL_FIBER_PER_SOURCE_PATH F.6.3 hook (= parallel to
-         F.6.2 SRC_ATTACH hook): for descriptor views CAWindow /
-         CAShift (predicate returns 1 unconditionally per F.5 always-
-         win bench), skip materialise (alias / C.1 PER_SLAB / B.1.5)
-         and use per-fiber ca_xfer_stride which routes to the view's
-         X.1 OOB-fused per-region fast path. */
+      /* Shortcut PER_FIBER_FUSED (CAWindow / CAShift).
+         Layer       all three, per fiber: each fiber is fetched with the
+                     view's ca_xfer_stride (which fills out-of-bounds
+                     cells itself) and put back the same way.
+         Speeds up   a fiber walk of a CAWindow / CAShift whose innermost
+                     axis is SHIFT.
+         Why         none measured: about 8% slower than the descriptor
+                     route on a sort of a 2000x2000 shift view.
+         Enters      CA_KERNEL_FIBER_CONTIG, one slab axis, the view's
+                     own rank, and ca_iter_should_per_fiber_fused.  An
+                     outer-only SHIFT arrives as L2_ALIASABLE and never
+                     reaches this hook.
+         Promises    1 (the fiber scratch is contiguous), 2 (the mask is
+                     fetched into the fiber mask scratch), 3 (ca_xfer_stride
+                     PUT), 4 (CA_ITER_FLAG_WALK_MAY_RAISE).
+         Switch      ca_fast_paths_enabled(): off, the descriptor route.
+         Checked by  the fiber rows of the "shift" view in the delivery
+                     matrix. */
       if ( (flags & CA_KERNEL_FIBER_CONTIG) && naxes == 1
            && raw_ndim == src->ndim && ca_fast_paths_enabled() ) {
         int8_t    fiber_ax = axes[0];
@@ -1199,7 +1237,21 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       /* A slab with a SHIFT axis that leaves out the innermost view axis
          would be gathered one strided cell at a time, once per slab.  Read
          walks take the whole-view path below instead: the view is gathered
-         once, row by row, and the slabs are walked in the copy. */
+         once, row by row, and the slabs are walked in the copy.
+
+         Shortcut SHIFT_WHOLE_VIEW.
+         Layer       data; the fiber layer (ki_fiber_contig_*) sits on top.
+         Speeds up   read walks of a CAWindow / CAShift whose slab has a
+                     SHIFT axis and not the innermost axis.
+         Why         about 1.5x on a median along axis 0 of a 2000x2000
+                     shift view.
+         Enters      a non-stride slab axis, no INDEX slab axis, the
+                     innermost axis outside the slab, a read walk.
+         Promises    2 and 6 (the mask is gathered into scratch_mask, and
+                     only when the view has one).
+         Switch      ca_fast_paths_enabled(): off, the per-slab gather.
+         Checked by  the slab-axis rows of the "shift" and "window" views
+                     in the delivery matrix. */
       int whole_view = slab_has_non_stride && ! slab_has_index
                        && ! in_slab[src->ndim - 1]
                        && ! ( flags & CA_KERNEL_WRITE )
@@ -1322,11 +1374,20 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
         st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
         st->alias_ptr   = st->scratch_ptr;  /* refilled per slab in next_slab_axes */
 
-        /* Specialisation (B-1b, C.1b): if innermost slab axis is STRIDE
-           and no SHIFT axes anywhere in the view, use the hoisted
-           manual gather path (= outer + non-innermost-slab hoist,
-           inner pure STRIDE linear memcpy).  Else (innermost INDEX /
-           SHIFT-anywhere): use the engine fallback (A). */
+        /* Shortcut PER_SLAB_HOIST.
+           Layer       data; the fiber layer sits on top.
+           Speeds up   per-slab gathers whose innermost slab axis is STRIDE
+                       and with no SHIFT axis in the view: the outer and
+                       non-innermost slab offsets are hoisted and the inner
+                       run is copied with memcpy.
+           Why         no difference measured on a row-selected 2-D read.
+           Enters      at least one slab axis, the innermost slab axis
+                       STRIDE, no SHIFT axis.
+           Promises    2 and 6 (the mask is gathered into scratch_mask, and
+                       only when the view has one).
+           Switch      ca_fast_paths_enabled(): off, the PER_SLAB gather.
+           Checked by  the two-slab-axes rows of the grid parent in the
+                       delivery matrix. */
         int specialised_eligible = (sp > 0) && ca_fast_paths_enabled();
         if ( specialised_eligible ) {
           int8_t inner_view_ax = st->slab_axes_buf[sp - 1];
@@ -1672,6 +1733,19 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
          axes 1..N-1 = parent axes 0..N-2; for k_axis > 0 outer is stack
          axes [0..k_axis-1, k_axis+1..N-1] = parent axes [0..k_axis-1,
          k_axis..N-2]; either way outer_idx[m] = parent axis m). */
+      /* Shortcut STACK.
+         Layer       data and fiber: the slab is cut contiguous from the K
+                     parents through a tile cache.
+         Speeds up   read walks of an unmasked CAStack whose one slab axis
+                     is the stack axis.
+         Why         about 2x on a mean along the stack axis of 4 parents
+                     of 500x2000.
+         Enters      a CAStack, no mask, a read walk, one slab axis that is
+                     k_axis.
+         Promises    1 (the slab is contiguous), 6 (no mask exists to touch).
+         Switch      ca_fast_paths_enabled(): off, the transfer walk.
+         Checked by  the slab-axis and fiber rows of the stack parent along
+                     axis 0 in the delivery matrix. */
       if ( ca_func[src->obj_type].attach == ca_stack_func.attach
            && !ca_has_mask(src)
            && !(flags & CA_KERNEL_WRITE)
@@ -1792,6 +1866,20 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
          k_axis.  stack axis s maps to parent axis (s if s < k_axis else
          s - 1); only the K stack axis (s == k_axis) has no parent
          counterpart. */
+      /* Shortcut STACK_OUTER_K.
+         Layer       data; the fiber layer sits on top.
+         Speeds up   read walks of a CAStack whose stack axis is an outer
+                     axis: each slab is cut from the one parent the outer
+                     index picks, without gathering the stack.
+         Why         about 11x on a mean along axis 1 of 4 parents of
+                     500x2000.
+         Enters      a CAStack, a read walk, the stack axis outside the slab.
+         Promises    2 (the parents' masks are copied), 6 (masks are read
+                     only when a parent has one), 8 (alias_ptr stays NULL,
+                     so no slab is lent as a window).
+         Switch      ca_fast_paths_enabled(): off, the transfer walk.
+         Checked by  the slab-axis, fiber and two-slab-axes rows of the
+                     stack parent along axes 1 and 2 in the delivery matrix. */
       if ( ca_func[src->obj_type].attach == ca_stack_func.attach
            && !(flags & CA_KERNEL_WRITE)
            && naxes >= 1 && !in_slab[((CAStack *) src)->k_axis]
@@ -1925,11 +2013,20 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
         return CA_ITER_OK;
       }
 
-      /* PROPOSAL_FIBER_PER_SOURCE_PATH F.6.1 hook: try per-fiber fused
-         dispatch before whole-view materialise.  When predicate fires,
-         skip scratch alloc + xfer_all GET (= per-fiber ca_xfer_stride
-         is called on demand in next_slab_axes).  The predicate decides
-         which sources take this path. */
+      /* Shortcut PER_FIBER_FUSED (conversion views).
+         Layer       all three, per fiber: each fiber is fetched with the
+                     view's ca_xfer_stride into the fiber scratch, without
+                     gathering the whole view, and put back the same way.
+         Speeds up   a fiber walk of a fake or byte-swap view, or of a lazy
+                     monop that only casts, along its innermost axis.
+         Why         no difference measured on a sort along the last axis
+                     of a 2000x2000 fake view.
+         Enters      CA_KERNEL_FIBER_CONTIG, one slab axis, and
+                     ca_iter_should_per_fiber_fused.
+         Promises    1, 2, 3 and 4, as the CAWindow / CAShift hook above.
+         Switch      ca_fast_paths_enabled(): off, the transfer walk.
+         Checked by  the fiber rows of the fake parent in the delivery
+                     matrix. */
       int per_fiber_fused = 0;
       if ( (flags & CA_KERNEL_FIBER_CONTIG) && naxes == 1
            && ca_fast_paths_enabled() ) {
@@ -3358,11 +3455,28 @@ typedef struct {
   int               rc;
 } ca_iter_call_t;
 
-/* Whether next_slab / sync_slab on this walk need the protection. */
+/* Whether next_slab / sync_slab on this walk need the protection.
+
+   Shortcut PROTECT_ONLY_MAY_RAISE.
+     Layer       the exits (promise 4): which walks run next_slab /
+                 sync_slab under rb_protect.
+     Speeds up   walks that cannot raise there: they skip rb_protect.
+     Why         about 1.5x on a per-axis sum over 200k short fibers.
+     Enters      the route is not PER_FIBER_FUSED and the walk does not
+                 write back out of scratch.
+     Promises    4 (a walk left out cannot raise between init and finish).
+     Switch      ca_fast_paths_enabled(): off, every walk is protected.
+     Checked by  test_iter_raise_cleanup.rb; the raise rows of
+                 test_iter_delivery_detectors.rb. */
 static void
 ca_iter_mark_walk_may_raise (ca_iter_state *st)
 {
   if ( st == NULL ) return;
+  if ( ! ca_fast_paths_enabled() ) {
+    /* the general path protects every walk */
+    st->flags |= CA_ITER_FLAG_WALK_MAY_RAISE;
+    return;
+  }
   if ( st->alias_mode == CA_ITER_ALIAS_PER_FIBER_FUSED ) {
     /* gathers each fiber through the source's xfer_stride slot */
     st->flags |= CA_ITER_FLAG_WALK_MAY_RAISE;

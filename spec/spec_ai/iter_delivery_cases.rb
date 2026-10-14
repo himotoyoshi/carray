@@ -1,12 +1,13 @@
 # The cases the kernel iterator's delivery tests walk: parents x views, and
-# the four ways of walking (L1 whole, L2 whole, one slab axis, one
-# contiguous fiber).  Shared by test_iter_delivery_matrix.rb (the values a
+# the five ways of walking (L1 whole, L2 whole, one slab axis, one
+# contiguous fiber, two slab axes).  Shared by test_iter_delivery_matrix.rb (the values a
 # kernel receives and writes) and test_iter_delivery_detectors.rb (what a
 # walk must not leave behind).
 
 module IterDeliveryCases
 
-  MODES = { 0 => "L1 whole", 1 => "L2 whole", 2 => "slab axis", 3 => "fiber" }
+  MODES = { 0 => "L1 whole", 1 => "L2 whole", 2 => "slab axis", 3 => "fiber",
+            4 => "two slab axes" }
 
   # name => [root shape, root type, parent built on the root (rank 3)]
   PARENTS = {
@@ -77,21 +78,30 @@ module IterDeliveryCases
   end
 
   # Row-major addresses of the cells of each slab, in the order the
-  # iterator yields them: the outer axes row-major, the slab axis inside.
+  # iterator yields them: the outer axes row-major, the slab axes inside
+  # (row-major too when there are two: `axis` and the last axis).
   def slab_addresses (shape, mode, axis)
     n = shape.inject(1, :*)
     return [(0...n).to_a] if mode < 2
+    slab    = mode == 4 ? [axis, shape.size - 1] : [axis]
     strides = row_major_strides(shape)
-    outer   = (0...shape.size).reject { |k| k == axis }
+    outer   = (0...shape.size).reject { |k| slab.include?(k) }
     index_tuples(outer.map { |k| shape[k] }).map do |oi|
       base = outer.each_with_index.sum { |k, j| oi[j] * strides[k] }
-      (0...shape[axis]).map { |i| base + i * strides[axis] }
+      index_tuples(slab.map { |k| shape[k] }).map do |si|
+        base + slab.each_with_index.sum { |k, j| si[j] * strides[k] }
+      end
     end
   end
 
   def walks (v)
     MODES.flat_map do |mode, name|
-      (mode < 2 ? [0] : (0...v.ndim).to_a).map { |ax| [mode, ax, name] }
+      axes = case mode
+             when 0, 1 then [0]
+             when 4    then (0...v.ndim - 1).to_a
+             else           (0...v.ndim).to_a
+             end
+      axes.map { |ax| [mode, ax, name] }
     end
   end
 

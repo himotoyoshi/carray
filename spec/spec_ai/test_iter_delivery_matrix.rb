@@ -4,8 +4,9 @@
 # view's materialised copy, in the view's row-major order, and a write must
 # land on the root cells the view covers and nowhere else.
 #
-# The matrix is parents x views x masked/unmasked x four ways of walking
-# (L1 whole, L2 whole, one slab axis, one contiguous fiber), read and
+# The matrix is parents x views x masked/unmasked x five ways of walking
+# (L1 whole, L2 whole, one slab axis, one contiguous fiber, two slab
+# axes: the given one and the last), read and
 # write.  A whole walk may yield its cells as several row-major slabs; they
 # are compared joined.  The expected answers are built without the iterator: the read
 # from the view's copy, the write by storing the same values through the

@@ -137,6 +137,20 @@ A write on these routes is scattered back into the attached parent (`ca_axis_dis
 
 Each tests `ca_fast_paths_enabled()`, so `CARRAY_GENERAL_PATH=1` sends them to the general route of their `src_kind`. A write never takes `STACK` or `STACK_OUTER_K`: init declines them and the walk goes by transfer.
 
+Every shortcut in the engine carries a name tag in a comment beside its code: the layer it handles, what it speeds up, the measured reason, when it is taken, the promises of §6 it keeps, the switch, and the rows of the matrix that check it. `grep -n "Shortcut " ext/ca_kernel_iterator.c` lists them:
+
+| name | layer | measured against its general route | checked by |
+|---|---|---|---|
+| `KEEP_SCRATCH` | data (where a scratch comes from) | no difference on macOS; Linux unmeasured | `test_iter_ractor_scratch.rb`, the buffer count |
+| `PUSH_ALL_CHANGED` | write-back | about 5% | the matrix, whole writes |
+| `PER_FIBER_FUSED` (CAWindow / CAShift) | all three, per fiber | about 8% slower | the matrix, fiber rows of the shift view |
+| `SHIFT_WHOLE_VIEW` | data | about 1.5x | the matrix, slab-axis rows of the shift and window views |
+| `PER_SLAB_HOIST` | data | no difference | the matrix, two-slab-axes rows of the grid parent |
+| `STACK` | data and fiber | about 2x | the matrix, stack parent along axis 0 |
+| `STACK_OUTER_K` | data | about 11x | the matrix, stack parent along axes 1 and 2 |
+| `PER_FIBER_FUSED` (conversion views) | all three, per fiber | no difference | the matrix, fiber rows of the fake parent |
+| `PROTECT_ONLY_MAY_RAISE` | exits | about 1.5x | `test_iter_raise_cleanup.rb`, the detectors' raise rows |
+
 ---
 
 ## 4. The route table

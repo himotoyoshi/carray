@@ -268,6 +268,7 @@ iw_slab_fill_poisoned (VALUE klass, VALUE vdst, VALUE vaxis, VALUE vval)
      1  L2 whole        (init_l2 + next_slab_strided)
      2  one slab axis   (CA_SLAB_AXES, strided slab)
      3  one fiber       (CA_SLAB_AXES + FIBER_CONTIG, contiguous)
+     4  two slab axes   (CA_SLAB_AXES over `axis` and the last axis)
 
    A whole walk may still yield its cells as several slabs (an L2 walk over
    a strided source yields one row at a time); they come in row-major order.
@@ -281,8 +282,9 @@ iw_slab_fill_poisoned (VALUE klass, VALUE vdst, VALUE vaxis, VALUE vval)
 static int
 iw_open (ca_iter_state *st, CArray *ca, int mode, int8_t axis, uint32_t flags)
 {
-  int8_t ax[1];
+  int8_t ax[2];
   ax[0] = axis;
+  ax[1] = (int8_t) (ca->ndim - 1);
   switch ( mode ) {
     case 0:
       return ca_iter_state_init_l1(st, ca, CA_SLAB_WHOLE, NULL, 0, flags);
@@ -290,13 +292,17 @@ iw_open (ca_iter_state *st, CArray *ca, int mode, int8_t axis, uint32_t flags)
       return ca_iter_state_init_l2(st, ca, CA_SLAB_WHOLE, NULL, 0, flags);
     case 2:
       return ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, ax, 1, flags);
+    case 4:
+      return ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, ax, 2, flags);
     default:
       return ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, ax, 1,
                                    flags | CA_KERNEL_FIBER_CONTIG);
   }
 }
 
-/* Yields the next slab as (base, mask, n, value stride, mask stride). */
+/* Yields the next slab as (base, mask, n, value stride, mask stride).  A
+   two-axis slab (mode 4) gives n = its cell count and stride 0; its cells
+   are found with iw_cell. */
 static int
 iw_next (ca_iter_state *st, int mode, char **p, boolean8_t **m,
          ca_size_t *n, ca_size_t *s, ca_size_t *ms)
@@ -315,10 +321,32 @@ iw_next (ca_iter_state *st, int mode, char **p, boolean8_t **m,
       *n = st->slab_dims[0]; *s = st->slab_strides[0];
       *ms = st->slab_mask_strides[0];
       return 1;
+    case 4:
+      if ( ! ca_iter_state_next_slab_axes(st, p, m) ) return 0;
+      *n = st->slab_elements; *s = 0; *ms = 0;
+      return 1;
     default:
       if ( ! ca_iter_state_next_slab_axes(st, p, m) ) return 0;
       *n = st->slab_dims[0]; *s = st->bytes; *ms = 1;
       return 1;
+  }
+}
+
+/* The data and mask offsets of the i-th cell of the slab, row-major over
+   its axes. */
+static void
+iw_cell (ca_iter_state *st, int mode, ca_size_t i, ca_size_t s, ca_size_t ms,
+         ca_size_t *doff, ca_size_t *moff)
+{
+  if ( mode != 4 ) {
+    *doff = i * s;
+    *moff = i * ms;
+    return;
+  }
+  {
+    ca_size_t i0 = i / st->slab_dims[1], i1 = i % st->slab_dims[1];
+    *doff = i0 * st->slab_strides[0] + i1 * st->slab_strides[1];
+    *moff = i0 * st->slab_mask_strides[0] + i1 * st->slab_mask_strides[1];
   }
 }
 
@@ -341,14 +369,16 @@ iw_read_cells (VALUE klass, VALUE vsrc, VALUE vmode, VALUE vaxis)
   while ( iw_next(&st, mode, &p, &m, &n, &s, &ms) ) {
     VALUE slab = rb_ary_new_capa(n);
     for ( ca_size_t i = 0; i < n; i++ ) {
-      if ( m && m[i * ms] ) {
+      ca_size_t doff, moff;
+      iw_cell(&st, mode, i, s, ms, &doff, &moff);
+      if ( m && m[moff] ) {
         rb_ary_push(slab, Qnil);
       }
       else if ( src->data_type == CA_OBJECT ) {
-        rb_ary_push(slab, *(VALUE *)(p + i * s));
+        rb_ary_push(slab, *(VALUE *)(p + doff));
       }
       else {
-        rb_ary_push(slab, rb_float_new(*(double *)(p + i * s)));
+        rb_ary_push(slab, rb_float_new(*(double *)(p + doff)));
       }
     }
     rb_ary_push(out, slab);
@@ -378,9 +408,11 @@ iw_write_cells (VALUE klass, VALUE vdst, VALUE vmode, VALUE vaxis)
   while ( iw_next(&st, mode, &p, &m, &n, &s, &ms) ) {
     slab++;
     for ( ca_size_t i = 0; i < n; i++ ) {
+      ca_size_t doff, moff;
       double v = ( mode < 2 ) ? (double) (1000 + done + i)
                               : (double) (1000 * slab + i);
-      *(double *)(p + i * s) = v;
+      iw_cell(&st, mode, i, s, ms, &doff, &moff);
+      *(double *)(p + doff) = v;
     }
     done += n;
     ca_iter_state_sync_slab(&st);
@@ -540,7 +572,11 @@ iw_raise_cells_body (VALUE arg)
   ca_iter_check_init(iw_open(&c->st[0], c->src, c->mode, c->axis,
                              c->write ? CA_KERNEL_WRITE : 0));
   if ( iw_next(&c->st[0], c->mode, &p, &m, &n, &s, &ms) && c->write ) {
-    for ( ca_size_t i = 0; i < n; i++ ) *(double *)(p + i * s) = -1.0;
+    for ( ca_size_t i = 0; i < n; i++ ) {
+      ca_size_t doff, moff;
+      iw_cell(&c->st[0], c->mode, i, s, ms, &doff, &moff);
+      *(double *)(p + doff) = -1.0;
+    }
   }
   rb_raise(rb_eRuntimeError, "iw_raise_cells");
   return Qnil;

@@ -178,7 +178,7 @@ routes (the CAStride compose-fold, the descriptor walk, the CAStack and
 per-fiber paths). `rake spec_ai_transfer` runs spec_ai that way, and
 `CArray.__iter_by_transfer_only__` tells a test which run it is in.
 `spec/spec_ai/test_iter_delivery_matrix.rb` walks parents × views × mask
-four ways, read and write, and is the test the three runs are meant to
+five ways (one of them with two slab axes), read and write, and is the test the three runs are meant to
 compare.
 
 When you write a fast path, add the test to its condition. Leave it off a
