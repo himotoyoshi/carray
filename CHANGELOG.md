@@ -36,6 +36,59 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: an index that mixes a CArray with other keys (`a[i, 1..3]`,
+  `a[mask, -1..1]`) reads every other key as an index without a CArray
+  does.  A range there picked other cells: one ending before its start
+  read forwards (`a[i, -1..1]` read columns 3, 0, 1 where `a[2, -1..1]`
+  reads 3, 2, 1), `2..1` read nothing, and endless ranges and the
+  `[start, count]` form raised.  An Integer key there now drops its axis
+  (`a[i, 1]` has the shape of `i`; it kept a length-1 axis); a String or
+  a Float is refused (`a[i, "x"]` read nothing, `a[i, 1.5]` read column
+  1); a boolean key must be as long as its axis; and the rubber marker
+  (`false` / `:~`) and `:_` work there.
+
+- Change: a step says the direction, as in Ruby.  A step that points away
+  from the end of a run reads nothing (`a[(0..4).step(-1)]` read `a[0]`),
+  and an endless sequence with a negative step goes down to the first
+  cell (`a[3.step(by: -1)]` read only `a[3]`).
+
+- Change: a Float with a fraction in a range, an Array form or a step is
+  refused with `IndexError`; it was cut to an integer (`a[1.5..3]` read
+  from 1).  A Float that holds an integer, such as a count from `sum`, is
+  still read as that integer.  A Bignum index is out of range
+  (`IndexError`; it was `RangeError`); a Bignum step is a step larger than
+  any axis.
+
+- Change: a boolean selector of more than one axis must have the array's
+  shape (`a[mask]` with a (4, 3) mask on a (3, 4) array picked cells by
+  flat position); a 1-D one still picks by position among all the cells.
+
+- Change: `a[idx]` with an integer index array of `a`'s own shape takes
+  the indices as they are at the call and checks them then: an index out
+  of range raises from `a[idx]` (it raised at the first read), and a
+  later change to `idx` does not reach the view.
+
+- Change: an index of a single String is a member name.  A String
+  starting with `@` was read as an attribute, which no array has, and
+  raised `NoMethodError`.
+
+- Fix: `a[:eq, 2] = v` (and every `a[:method, ...] = v`) writes only the
+  cells the method picks.  It wrote the whole view back, so a view that
+  converts its values (`fake`, a `wrap_writable` of another type) rounded
+  every other cell.  The arguments after the symbol are the method's:
+  `:_` and `:>` among them are passed to it, not read as index markers.
+
+- Fix: storing a Ruby Array clears the mask of the cells it writes
+  (`a[] = [7, 8, 9]` left a masked cell masked).
+
+- Fix: a store into no cells checks the value as a store into some cells
+  does (`a[2...2] = [1, 2, 3]` and `a[2...2] = "x"` passed).
+  `CArray.<type>(0) { ... }` does not call its block, as
+  `Array.new(0) { ... }` does not.
+
+- Fix: on an axis of length 0, a range starting at 0 reads no cells
+  (`z[0..-1]` raised `IndexError`).
+
 - Fix: `CArray.wrap_memory_view` and `from_memory_view` check a
   producer's shape against the bytes it reports.  A shape larger than
   the buffer was read (and, for a writable wrap, written) past its end;

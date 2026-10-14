@@ -102,6 +102,16 @@ v[(0..9).step(2)]                  #  => [ 0, 2, 4, 6, 8 ]
 v[(1..8).step(3)]                  #  => [ 1, 4, 7 ]
 ```
 
+The step says the direction, as it does in Ruby: a negative step walks
+down, an endless one with a negative step goes down to the first element,
+and a step that points away from the end reads nothing.
+
+```ruby
+v[3.step(by: -1)]                  #  => [ 3, 2, 1, 0 ]
+v[(8..2).step(-3)]                 #  => [ 8, 5, 2 ]
+v[(0..4).step(-1)]                 #  => [ ]
+```
+
 A `step` of zero is a `ArgumentError`.
 
 * **Shape back:** the axis is kept at `(count, step)` length.
@@ -202,7 +212,7 @@ A CArray of integers or booleans in an index position triggers a different form,
 
 ### 3.1 Boolean CArray of the same shape — `SELECT`
 
-A boolean mask of matching `elements` picks out the cells where it is true, in row-major order, as a 1-D array.
+A boolean mask of the array's shape picks out the cells where it is true, in row-major order, as a 1-D array. A 1-D mask with as many elements as the array picks by position among all the cells.
 
 ```ruby
 a[a.gt(5)]
@@ -211,7 +221,7 @@ a[a.gt(5)]
 
 This is the form built on top of comparisons (see [Element-wise operations](03_elementwise.md)) and is the canonical way to filter elements.
 
-A boolean array of mismatched size is a `ArgumentError`.
+A boolean array of another shape, or a 1-D one of another size, is an `ArgumentError` (`.flatten` a mask of the right size but another shape to select by position).
 
 * **Shape back:** 1-D, length = number of true cells.
 * **Class back:** `CASelect`.
