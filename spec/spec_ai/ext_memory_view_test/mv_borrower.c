@@ -269,6 +269,176 @@ mv_producer_init (int argc, VALUE *argv, VALUE self)
   return self;
 }
 
+/* ------------------------------------------------------------------
+   MVBorrower::Crafted -- a producer whose every field (shape, strides,
+   offset, byte_size, readonly, get failing or raising) is chosen by the
+   test, for probing the consumer side against producers that misstate
+   their geometry.  Nothing is validated here on purpose.  gets / releases
+   count the protocol calls.
+   ------------------------------------------------------------------ */
+
+#define CRAFTED_MAXD 8
+
+typedef struct {
+  VALUE   src;            /* backing String, marked */
+  long    offset;         /* view->data = RSTRING_PTR(src) + offset */
+  long    byte_size;      /* -1 = len - offset */
+  int     has_format;
+  char    format[64];
+  long    item_size;
+  int     ndim;
+  ssize_t shape[CRAFTED_MAXD];
+  ssize_t strides[CRAFTED_MAXD];
+  int     shape_null, strides_null;
+  int     readonly;       /* view->readonly */
+  int     refuse_writable;/* get() returns false on WRITABLE */
+  int     fail_get;       /* get() returns false always */
+  int     raise_in_get;   /* get() raises */
+  int     available;
+  long    gets, releases;
+} crafted_t;
+
+static void crafted_mark (void *p) { rb_gc_mark(((crafted_t *) p)->src); }
+static void crafted_free (void *p) { xfree(p); }
+static size_t crafted_size (const void *p) { (void) p; return sizeof(crafted_t); }
+static const rb_data_type_t crafted_type = {
+  "MVBorrower::Crafted", { crafted_mark, crafted_free, crafted_size, }, 0, 0,
+  RUBY_TYPED_FREE_IMMEDIATELY,
+};
+
+static crafted_t *crafted_get_struct (VALUE obj)
+{
+  crafted_t *p;
+  TypedData_Get_Struct(obj, crafted_t, &crafted_type, p);
+  return p;
+}
+
+static bool
+crafted_get (VALUE obj, rb_memory_view_t *view, int flags)
+{
+  crafted_t *p = crafted_get_struct(obj);
+  if (p->raise_in_get) rb_raise(rb_eRuntimeError, "CraftedMV: get raised");
+  if (p->fail_get) return false;
+  if ((flags & RUBY_MEMORY_VIEW_WRITABLE) && p->refuse_writable) return false;
+  memset(view, 0, sizeof(*view));
+  view->obj       = obj;
+  view->data      = RSTRING_PTR(p->src) + p->offset;
+  view->byte_size = p->byte_size >= 0 ? p->byte_size
+                                      : (ssize_t) RSTRING_LEN(p->src) - p->offset;
+  view->readonly  = p->readonly ? true : false;
+  view->format    = p->has_format ? p->format : NULL;
+  view->item_size = p->item_size;
+  view->ndim      = p->ndim;
+  view->shape     = p->shape_null ? NULL : p->shape;
+  view->strides   = p->strides_null ? NULL : p->strides;
+  p->gets++;
+  return true;
+}
+
+static bool
+crafted_release (VALUE obj, rb_memory_view_t *view)
+{
+  (void) view;
+  crafted_get_struct(obj)->releases++;
+  return true;
+}
+
+static bool crafted_available_p (VALUE obj) { return crafted_get_struct(obj)->available; }
+
+static const rb_memory_view_entry_t crafted_entry = { crafted_get, crafted_release, crafted_available_p };
+
+static VALUE
+crafted_alloc (VALUE klass)
+{
+  crafted_t *p;
+  VALUE obj = TypedData_Make_Struct(klass, crafted_t, &crafted_type, p);
+  p->src = Qnil;
+  return obj;
+}
+
+static VALUE opt (VALUE h, const char *k) { return rb_hash_lookup(h, ID2SYM(rb_intern(k))); }
+static int flag (VALUE h, const char *k) { return RTEST(opt(h, k)); }
+
+/* Producer.new(bytes, format:, item_size:, shape:, strides: nil (=C order),
+                offset: 0, byte_size: nil, readonly: true, refuse_writable: false,
+                shape_null: false, strides_null: false, fail_get: false,
+                raise_in_get: false, available: true) */
+static VALUE
+crafted_init (int argc, VALUE *argv, VALUE self)
+{
+  crafted_t *p = crafted_get_struct(self);
+  VALUE bytes, h, v;
+  int k;
+  rb_scan_args(argc, argv, "1:", &bytes, &h);
+  if (NIL_P(h)) h = rb_hash_new();
+  StringValue(bytes);
+  p->src = rb_str_new(RSTRING_PTR(bytes), RSTRING_LEN(bytes));
+  v = opt(h, "format");
+  if (NIL_P(v)) { p->has_format = 0; }
+  else {
+    StringValue(v);
+    if (RSTRING_LEN(v) >= (long) sizeof(p->format)) rb_raise(rb_eArgError, "format too long");
+    p->has_format = 1;
+    memcpy(p->format, RSTRING_PTR(v), RSTRING_LEN(v));
+    p->format[RSTRING_LEN(v)] = '\0';
+  }
+  v = opt(h, "item_size"); p->item_size = NIL_P(v) ? 1 : NUM2LONG(v);
+  v = opt(h, "shape");
+  if (NIL_P(v)) { p->ndim = 1; p->shape[0] = RSTRING_LEN(bytes) / p->item_size; }
+  else {
+    Check_Type(v, T_ARRAY);
+    p->ndim = (int) RARRAY_LEN(v);
+    if (p->ndim > CRAFTED_MAXD) rb_raise(rb_eArgError, "ndim > %d", CRAFTED_MAXD);
+    for (k = 0; k < p->ndim; k++) p->shape[k] = NUM2LONG(rb_ary_entry(v, k));
+  }
+  v = opt(h, "strides");
+  if (NIL_P(v)) {
+    ssize_t s = p->item_size;
+    for (k = p->ndim - 1; k >= 0; k--) { p->strides[k] = s; s *= p->shape[k]; }
+  }
+  else {
+    Check_Type(v, T_ARRAY);
+    if (RARRAY_LEN(v) != p->ndim) rb_raise(rb_eArgError, "strides length != ndim");
+    for (k = 0; k < p->ndim; k++) p->strides[k] = NUM2LONG(rb_ary_entry(v, k));
+  }
+  v = opt(h, "offset");    p->offset = NIL_P(v) ? 0 : NUM2LONG(v);
+  v = opt(h, "byte_size"); p->byte_size = NIL_P(v) ? -1 : NUM2LONG(v);
+  v = opt(h, "readonly");  p->readonly = NIL_P(v) ? 1 : RTEST(v);
+  v = opt(h, "available"); p->available = NIL_P(v) ? 1 : RTEST(v);
+  p->refuse_writable = flag(h, "refuse_writable");
+  p->shape_null      = flag(h, "shape_null");
+  p->strides_null    = flag(h, "strides_null");
+  p->fail_get        = flag(h, "fail_get");
+  p->raise_in_get    = flag(h, "raise_in_get");
+  return self;
+}
+
+static VALUE crafted_bytes (VALUE self) { crafted_t *p = crafted_get_struct(self); return rb_str_new(RSTRING_PTR(p->src), RSTRING_LEN(p->src)); }
+static VALUE crafted_gets (VALUE self) { return LONG2NUM(crafted_get_struct(self)->gets); }
+static VALUE crafted_releases (VALUE self) { return LONG2NUM(crafted_get_struct(self)->releases); }
+static VALUE crafted_poke (VALUE self, VALUE off, VALUE byte)
+{
+  crafted_t *p = crafted_get_struct(self);
+  long o = NUM2LONG(off);
+  if (o < 0 || o >= RSTRING_LEN(p->src)) rb_raise(rb_eIndexError, "poke out of range");
+  RSTRING_PTR(p->src)[o] = (char) NUM2INT(byte);
+  return self;
+}
+/* Mutate a producer field after construction (e.g. make get() fail on the
+   second call): set(:fail_get, true) etc. */
+static VALUE crafted_set (VALUE self, VALUE key, VALUE val)
+{
+  crafted_t *p = crafted_get_struct(self);
+  ID id = SYM2ID(key);
+  if (id == rb_intern("fail_get")) p->fail_get = RTEST(val);
+  else if (id == rb_intern("raise_in_get")) p->raise_in_get = RTEST(val);
+  else if (id == rb_intern("available")) p->available = RTEST(val);
+  else if (id == rb_intern("readonly")) p->readonly = RTEST(val);
+  else if (id == rb_intern("refuse_writable")) p->refuse_writable = RTEST(val);
+  else rb_raise(rb_eArgError, "unknown key");
+  return self;
+}
+
 void
 Init_mv_borrower (void)
 {
@@ -281,6 +451,16 @@ Init_mv_borrower (void)
   rb_define_alloc_func(cProducer, mv_producer_alloc);
   rb_define_method(cProducer, "initialize", mv_producer_init, -1);
   rb_memory_view_register(cProducer, &mv_producer_entry);
+
+  VALUE cCrafted = rb_define_class_under(mod, "Crafted", rb_cObject);
+  rb_define_alloc_func(cCrafted, crafted_alloc);
+  rb_define_method(cCrafted, "initialize", crafted_init, -1);
+  rb_define_method(cCrafted, "bytes", crafted_bytes, 0);
+  rb_define_method(cCrafted, "gets", crafted_gets, 0);
+  rb_define_method(cCrafted, "releases", crafted_releases, 0);
+  rb_define_method(cCrafted, "poke", crafted_poke, 2);
+  rb_define_method(cCrafted, "set", crafted_set, 2);
+  rb_memory_view_register(cCrafted, &crafted_entry);
 
   /* Re-export the flag constants for Ruby tests. */
   rb_define_const(mod, "SIMPLE",            INT2NUM(RUBY_MEMORY_VIEW_SIMPLE));
