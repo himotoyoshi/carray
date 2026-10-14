@@ -28,6 +28,43 @@ class TestViewMaskSecondPass < Test::Unit::TestCase
     assert_equal (x + 1).shift(1, 1, fill_value: UNDEF).to_a, v.to_a
   end
 
+  # Masking the out-of-bounds cells of a shift or window gives the parent
+  # no mask; the window's mask follows a mask the parent is given later,
+  # and a true written through the window gives the parent its mask.
+  def test_bounds_mask_gives_the_parent_no_mask
+    a = CArray.float64(4, 5).seq!.freeze
+    v = a.shift(1, 1, fill_value: UNDEF)
+    assert_equal false, a.has_mask?
+    assert_equal 8, v.count_masked
+    assert_equal false, a.has_mask?
+
+    b = CArray.float64(4, 5).seq!
+    w = b.window(-1..4, nil, fill_value: UNDEF)
+    assert_equal 10, w.count_masked
+    assert_equal false, b.has_mask?
+    b[1, 1] = UNDEF
+    assert_equal UNDEF, w[2, 1]
+    assert_equal 11, w.count_masked
+    assert_equal w.to_a, b.window(-1..4, nil, fill_value: UNDEF).copy.to_a
+
+    c = CArray.float64(4, 5).seq!
+    s = c.shift(1, 1, fill_value: UNDEF)
+    s.mask.dup
+    s[2, 2] = UNDEF
+    assert_equal UNDEF, c[1, 1]
+    assert_equal 1, c.count_masked
+
+    t = CArray.float64(4, 5).seq!
+    u = t.shift(1, 1, fill_value: UNDEF)
+    u.invert_mask
+    assert_equal 12, t.count_masked
+
+    x = CArray.float64(4, 5).seq!
+    e = x.lazy + 1
+    e.shift(1, 1, fill_value: UNDEF).to_a
+    assert_equal false, e.has_mask?
+  end
+
   def test_remap_mask_dup
     a = CArray.float64(3, 4).seq!
     a[0, 0] = UNDEF

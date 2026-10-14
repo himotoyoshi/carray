@@ -268,10 +268,16 @@ ca_window_compose_fold (void *win_ap,
    for the window-over-parent mapping (ca_window_compose_fold) and composes
    f through it (ca_stride_compose_through).  Declines (returns 0) when the
    window is not interior-only, making the window the fold boundary. */
+int  ca_window_mask_reads_standin (CAWindow *m, int write_true);
+static void ca_window_mask_before_put (CAWindow *ca, const void *data, ca_size_t n);
+static void ca_window_mask_before_get (CAWindow *ca);
+static void ca_window_mask_give_way_in_sync (CAWindow *ca);
+
 static int
 ca_window_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
 {
   CAWindow *w = (CAWindow *) ap;
+  ca_window_mask_before_get(w);
   ca_size_t synth_strides[CA_RANK_MAX];
   ca_size_t synth_base;
   ca_size_t *synth_dim;
@@ -329,6 +335,12 @@ ca_window_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 {
   if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAWindow *w = (CAWindow *) ap;
+  if ( dir == CA_XFER_PUT ) {
+    ca_window_mask_before_put(w, data, ca_shape_elements(w->ndim, counts, 1));
+  }
+  else {
+    ca_window_mask_before_get(w);
+  }
   CArray   *parent = w->parent;
   int8_t    ndim = w->ndim;
   int8_t    inner = ndim - 1;
@@ -728,6 +740,8 @@ ca_window_setup (CAWindow *ca, CArray *parent,
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
+  ca->mask_standin = NULL;
+  ca->mask_owner   = NULL;
   /* Pool path: bounds/start/count/size0/embed_* are already wired into
      ca->_pool by ca_window_pool_init.  Legacy path: ALLOC_N each.  `fill`
      is bytes-sized (not ndim) so it stays on its own ALLOC_N in both
@@ -807,6 +821,7 @@ free_ca_window (void *ap)
   CAWindow *ca = (CAWindow *) ap;
   if ( ca != NULL ) {
     ca_free(ca->mask);
+    ca_free(ca->mask_standin);
     xfree(ca->fill);              /* always separate (bytes-sized) */
     if ( ca->_pool ) {
       /* bounds/start/count/size0/embed_* all live in ca->_pool. */
@@ -846,7 +861,82 @@ static void *
 ca_window_func_clone (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
-  return ca_window_new(ca->parent, ca->start, ca->count, ca->bounds, ca->fill);
+  CAWindow *cp = ca_window_new(ca->parent, ca->start, ca->count, ca->bounds,
+                               ca->fill);
+  cp->mask_owner = ca->mask_owner;
+  return cp;
+}
+
+/* A mask window reading its owner's stand-in gives way to the parent's own
+   mask once the parent has one, or by making it when a true is about to be
+   written.  Returns 1 while the stand-in is still read: it is all false, so
+   a write of nothing but false to it is a write of nothing.  Not while the
+   mask is attached: its buffer and its detach are those of the stand-in
+   (ca_window_mask_give_way_in_sync handles the sync of such a window). */
+int
+ca_window_mask_reads_standin (CAWindow *m, int write_true)
+{
+  CAWindow *o = (CAWindow *) m->mask_owner;
+  if ( o == NULL || o->mask_standin == NULL || m->parent != o->mask_standin ) {
+    return 0;
+  }
+  if ( m->attach > 0 ) {
+    return 1;
+  }
+  if ( write_true || ca_has_mask(o->parent) ) {
+    ca_create_mask(o->parent);
+    m->parent = o->parent->mask;
+    return 0;
+  }
+  return 1;
+}
+
+static int
+ca_window_any_true (const void *data, ca_size_t n)
+{
+  const boolean8_t *b = (const boolean8_t *) data;
+  ca_size_t i;
+  for ( i = 0; i < n; i++ ) {
+    if ( b[i] ) return 1;
+  }
+  return 0;
+}
+
+/* Before a write of n cells of `data` to a window, which may be a mask
+   window reading a stand-in. */
+static void
+ca_window_mask_before_put (CAWindow *ca, const void *data, ca_size_t n)
+{
+  if ( ca->mask_owner != NULL ) {
+    ca_window_mask_reads_standin(ca, ca_window_any_true(data, n));
+  }
+}
+
+static void
+ca_window_mask_before_get (CAWindow *ca)
+{
+  if ( ca->mask_owner != NULL ) {
+    ca_window_mask_reads_standin(ca, 0);
+  }
+}
+
+/* The sync of a mask window attached over its owner's stand-in: a true in
+   the buffer needs the parent's mask, which then takes the stand-in's place
+   for the scatter and the detach to come (attached here, so that the
+   detach balances). */
+static void
+ca_window_mask_give_way_in_sync (CAWindow *ca)
+{
+  CAWindow *o = (CAWindow *) ca->mask_owner;
+  if ( o == NULL || o->mask_standin == NULL || ca->parent != o->mask_standin
+       || ca->ptr == NULL || ! ca_window_any_true(ca->ptr, ca->elements) ) {
+    return;
+  }
+  ca_create_mask(o->parent);
+  /* takes the stand-in's place in the window this view has open */
+  ca_attach(o->parent->mask);   /* window: closed by the view's detach */
+  ca_detach(ca->parent);
+  ca->parent = o->parent->mask;
 }
 
 /* Per-cell access.  GET and PUT share the bound-normalised index walk; an OOB
@@ -856,6 +946,8 @@ static void
 ca_window_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
   CAWindow *ca = (CAWindow *) ap;
+  if ( dir == CA_XFER_PUT ) ca_window_mask_before_put(ca, data, 1);
+  else ca_window_mask_before_get(ca);
   ca_size_t *start = ca->start;
   ca_size_t *size0 = ca->size0;
   ca_size_t idx0[CA_RANK_MAX];
@@ -884,6 +976,8 @@ ca_window_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
                            void *data, int dir)
 {
   CAWindow *ca = (CAWindow *) ap;
+  if ( dir == CA_XFER_PUT ) ca_window_mask_before_put(ca, data, n);
+  else ca_window_mask_before_get(ca);
   ca_size_t *start = ca->start;
   ca_size_t *size0 = ca->size0;
   char      *d = (char *) data;
@@ -1038,6 +1132,7 @@ static void
 ca_window_func_allocate (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
+  ca_window_mask_before_get(ca);
   if ( ca_window_owns_buffer(ca) ) {
     ca->ptr = ca_alloc_cells((CArray *) ca);
     return;
@@ -1062,6 +1157,7 @@ static void
 ca_window_func_attach (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
+  ca_window_mask_before_get(ca);
   if ( ca_window_owns_buffer(ca) ) {
     ca_axis_view_attach_owned(ca);
     return;
@@ -1094,6 +1190,7 @@ static void
 ca_window_func_sync (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
+  ca_window_mask_give_way_in_sync(ca);
   if ( ca_window_owns_buffer(ca) ) {
     ca_axis_view_sync_owned(ca);
     return;
@@ -1176,6 +1273,8 @@ static void
 ca_window_func_xfer_all (void *ap, void *data, int dir)
 {
   CAWindow *ca = (CAWindow *) ap;
+  if ( dir == CA_XFER_PUT ) ca_window_mask_before_put(ca, data, ca->elements);
+  else ca_window_mask_before_get(ca);
   if ( ca->parent->ptr ) {
     ca_window_func_run_fast_path(ca, (char *) data, dir);
     return;
@@ -1277,6 +1376,7 @@ static void
 ca_window_func_fill_data (void *ap, void *ptr)
 {
   CAWindow *ca = (CAWindow *) ap;
+  ca_window_mask_before_put(ca, ptr, 1);
 
   /* embed_eligible (= no PERIODIC/REFLECT) covers both interior-only
      windows (embed_covers_all == 1) and OOB-bearing ones such as a CAShift
@@ -1361,12 +1461,29 @@ static void
 ca_window_func_create_mask (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
+  CArray *pmask;
   boolean8_t fill;
   uint8_t mbounds[CA_RANK_MAX];
   int8_t i;
   int any_mask;
 
-  ca_create_mask(ca->parent);
+  /* The mask lies over the parent's mask, or, while the parent has none,
+     over an all-false stand-in this window holds: masking the
+     out-of-bounds cells gives the parent no mask
+     (ca_window_mask_reads_standin). */
+  if ( ca_has_mask(ca->parent) ) {
+    ca_create_mask(ca->parent);
+    pmask = ca->parent->mask;
+  }
+  else {
+    if ( ca->mask_standin == NULL ) {
+      CArray *p = ca->parent;
+      CArray *z = carray_new(CA_BOOLEAN, p->ndim, p->dim, 0, NULL);
+      MEMZERO(z->ptr, boolean8_t, z->elements);
+      ca->mask_standin = z;
+    }
+    pmask = ca->mask_standin;
+  }
 
   /* Any MASK axis of the view becomes FILL in the mask sub-view, with the
      mask cell forced to 1 (= "masked").  Other axes keep their policy.  When
@@ -1387,9 +1504,14 @@ ca_window_func_create_mask (void *ap)
   {
     /* check: the mask window copies its own window's checked ranges */
     CAWindow *m = (CAWindow *) ca_array_alloc(ca->obj_type, ca->ndim);
-    ca_window_setup(m, ca->parent->mask,
-                    ca->start, ca->count, mbounds, (char*)&fill);
-    m->obj_type = ca->obj_type;
+    ca_window_setup(m, pmask, ca->start, ca->count, mbounds, (char*)&fill);
+    m->obj_type   = ca->obj_type;
+    m->mask_owner = (CArray *) ca;
+    if ( pmask == ca->mask_standin ) {
+      /* writes inside an attach window reach the stand-in through the
+         sync, where they can give way to the parent's mask */
+      m->embed_alias_eligible = 0;
+    }
     ca->mask = (CArray *) m;
   }
 }
@@ -1429,6 +1551,7 @@ ca_window_describe_axes (void *ap, ca_axis_desc_t *out,
                          ca_size_t *out_parent_dims)
 {
   CAWindow *ca = (CAWindow *) ap;
+  ca_window_mask_before_get(ca);
   int8_t k;
   for ( k = 0; k < ca->ndim; k++ ) {
     out_parent_dims[k] = ca->parent->dim[k];

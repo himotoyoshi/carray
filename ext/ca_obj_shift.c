@@ -154,7 +154,11 @@ ca_shift_func_clone (void *ap)
     }
   }
 
-  return ca_shift_new(ca->parent, shift, ca->fill, roll, fill_mask);
+  {
+    CAShift *cp = ca_shift_new(ca->parent, shift, ca->fill, roll, fill_mask);
+    cp->mask_owner = ca->mask_owner;
+    return cp;
+  }
 }
 
 

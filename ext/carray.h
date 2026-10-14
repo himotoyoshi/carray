@@ -635,6 +635,13 @@ typedef struct {
                                        (count[k] == parent->dim[k] && start[k]
                                        == 0 for k >= 1).  Embedded region
                                        must be contig in parent storage. */
+  /* A window over a parent that has no mask: the all-false mask its own
+     mask reads instead, so that masking the out-of-bounds cells gives the
+     parent no mask.  Owned by this window; NULL otherwise. */
+  CArray     *mask_standin;
+  /* On the mask of a window: the window whose mask it is, which holds the
+     stand-in and the parent whose mask replaces it.  NULL otherwise. */
+  CArray     *mask_owner;
 } CAWindow;                /* 56 + 16*(ndim) + 1*(bytes) + 1*ndim + 24*ndim (bytes) */
 
 /* CAShift is a pure typedef of CAWindow.  CAShift construction maps (shift[], roll[], fill,
