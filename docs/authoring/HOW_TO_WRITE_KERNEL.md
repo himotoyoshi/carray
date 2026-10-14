@@ -48,16 +48,31 @@ keeps the author surface stable across engine refactors.
 
 ### 0.1 Catalog
 
-| Macro | Delivery semantics | Use case | Status |
-|---|---|---|---|
-| `CA_FOR_EACH_SLAB` | per-slab strided delivery (general purpose, peak efficiency) | per-axis reduction / map / sort / any per-slab loop kernel | ✓ Landed (§6.1) |
-| `CA_FOR_EACH_SLAB_INOUT` | per-slab strided delivery, input + output in parallel | element-wise transform with input / output in distinct views | ✓ Landed (§6.2) |
-| `CA_FOR_EACH_FIBER` | per-axis fiber, **data contig-guaranteed**, no mask cursor | single-axis specialization for contig-required kernels (sort, search, per-axis SIMD, libc `qsort`) — removes both stride arithmetic and the `axes[]` boilerplate | ✓ Landed (§6.3) |
-| `CA_FOR_EACH_FIBER_INOUT` | per-axis fiber, data contig, INOUT in parallel, no mask cursor | `sort_copy` / `search_copy` / per-fiber map | ✓ Landed (§6.3) |
-| `CA_FOR_EACH_FIBER_MASKED` | per-axis fiber, **data contig** and **mask contig** — author writes `m[i]` directly | mask-aware per-fiber reduction / WRITE | ✓ Landed (§6.3) |
-| `CA_FOR_EACH_FIBER_INOUT_MASKED` | per-axis fiber, data contig, INOUT, mask contig | mask-aware per-fiber map | ✓ Landed (§6.3) |
-| `CA_FOR_EACH_WHOLE` | the whole array as one contig run, row-major, no mask cursor | a kernel that wants every cell and no axes (whole-array scan, hashing the values, handing the buffer to a library) | ✓ Landed (§6.3) |
-| `CA_FOR_EACH_WHOLE_MASKED` | the whole array as one contig run + contig mask | mask-aware whole-array kernel | ✓ Landed (§6.3) |
+The last column names a function in this tree that uses the macro; read
+it to see the whole pattern — the lifecycle, the mask, a body that can
+raise. A form that nothing in carray itself uses points at the spec
+suite's test fixture instead (`spec/` is in the repository, not in the
+installed gem). `rake kernel_surface_check` checks that each named
+function still uses its macro, and that every block macro has a row here.
+
+| Macro | Delivery semantics | Use case | Status | Example in the source |
+|---|---|---|---|---|
+| `CA_FOR_EACH_SLAB` | per-slab strided delivery (general purpose, peak efficiency) | per-axis reduction / map / sort / any per-slab loop kernel | ✓ Landed (§6.1) | `ext/ca_axis_group.c` `GROUP_WALK` |
+| `CA_FOR_EACH_SLAB_INOUT` | per-slab strided delivery, input + output in parallel | element-wise transform with input / output in distinct views | ✓ Landed (§6.2) | none |
+| `CA_FOR_EACH_FIBER` | per-axis fiber, **data contig-guaranteed**, no mask cursor | single-axis specialization for contig-required kernels (sort, search, per-axis SIMD, libc `qsort`) — removes both stride arithmetic and the `axes[]` boilerplate | ✓ Landed (§6.3) | `spec/spec_ai/ext_iter_write/iter_write.c` `iw_fiber_fill` |
+| `CA_FOR_EACH_FIBER_INOUT` | per-axis fiber, data contig, INOUT in parallel, no mask cursor | `sort_copy` / `search_copy` / per-fiber map | ✓ Landed (§6.3) | `ext/carray_partition.c` `rb_ca_partition_copy_c` |
+| `CA_FOR_EACH_FIBER_MASKED` | per-axis fiber, **data contig** and **mask contig** — author writes `m[i]` directly | mask-aware per-fiber reduction / WRITE | ✓ Landed (§6.3) | `ext/carray_factorize.c` `fz_value_counts_flat_body` |
+| `CA_FOR_EACH_FIBER_INOUT_MASKED` | per-axis fiber, data contig, INOUT, mask contig | mask-aware per-fiber map | ✓ Landed (§6.3) | `ext/carray_histogram.c` `rb_ca_histbin_ki` |
+| `CA_FOR_EACH_FIBER_PAIR` | one contig fiber from each of two sources at the same position | a C routine over two vectors of equal length (dot product, correlation) | ✓ Landed (§6.3) | `spec/spec_ai/ext_iter_pair/iter_pair.c` `ip_dot` |
+| `CA_FOR_EACH_FIBER_PAIR_MASKED` | the PAIR form + both mask cursors | mask-aware two-vector routine | ✓ Landed (§6.3) | `spec/spec_ai/ext_iter_pair/iter_pair.c` `ip_dot_masked` |
+| `CA_FOR_EACH_WHOLE` | the whole array as one contig run, row-major, no mask cursor | a kernel that wants every cell and no axes (whole-array scan, hashing the values, handing the buffer to a library) | ✓ Landed (§6.3) | `spec/spec_ai/ext_iter_write/iter_write.c` `iw_whole_write` |
+| `CA_FOR_EACH_WHOLE_MASKED` | the whole array as one contig run + contig mask | mask-aware whole-array kernel | ✓ Landed (§6.3) | `ext/carray_factorize.c` `fz_unique_flat_body` |
+| `CA_SLAB_REDUCE_T` | single-expression reduction kernel (1 line init + REDUCE) | sum / count / min / max / mean / variance | ✓ Landed (§6.5) | `ext/carray_factorize.c` `fz_nunique_body` |
+| `CA_SLAB_REDUCE_T_PLUS_EX` / `_MIN_EX` / `_MAX_EX` / `_STAR_EX` | SIMD-licensed reduction variants (`#pragma omp simd reduction(+/min/max/*:acc)` on contig no-mask path) | sum / mean / variance / prod with 8x throughput on f64 entity | ✓ Landed (§6.7, SL.1.x 2026-06-12) | `ext/mkkernel.rb` (generated kernels) |
+| `CA_SLAB_REDUCE_ARRAY_T_PLUS_EX` | SIMD-licensed weighted reduction (FMA `fmla.2d` + reassoc, dual-stream) | wsum / wmean | ✓ Landed (§6.7, SL.1.4b) | `ext/mkkernel.rb` (generated kernels) |
+| `CA_SLAB_MAP_T` | single-expression element-wise map kernel | sqrt / sin / cos / abs / negate | ✓ Landed (§6.5) | none |
+| `CA_SLAB_SCAN_T` | single-expression prefix-scan kernel | cumsum / cumprod / cummax / cummin / cumcount | ✓ Landed (§6.5) | `ext/mkkernel.rb` (generated kernels) |
+| `CA_SLAB_SEARCH_T` | single-expression search-by-eq kernel | `bsearch` / `search_nearest` family | **Not built** as a one-expression macro. The search family (`find_value_index` / `bsearch` / `search` / `search_nearest` + `_addr`) ships via the mkkernel `MkKernel.search` DSL with an author-written per-slab C body — see [`MkKernelDSL.md`](MkKernelDSL.md) | — |
 
 **Note on contig guarantee**: All four `_FIBER` forms deliver contig
 buffers — data, mask (MASKED forms), and output (INOUT forms). Author
@@ -70,12 +85,6 @@ axes) transparently. INOUT forms require input and output views of
 without MASKED in the name hand out no mask cursor: a masked source is
 walked with its masked cells read as values unless the flags include
 `CA_KERNEL_NO_MASK`, which refuses it.
-| `CA_SLAB_REDUCE_T` | single-expression reduction kernel (1 line init + REDUCE) | sum / count / min / max / mean / variance | ✓ Landed (§6.5) |
-| `CA_SLAB_REDUCE_T_PLUS_EX` / `_MIN_EX` / `_MAX_EX` / `_STAR_EX` | SIMD-licensed reduction variants (`#pragma omp simd reduction(+/min/max/*:acc)` on contig no-mask path) | sum / mean / variance / prod with 8x throughput on f64 entity | ✓ Landed (§6.7, SL.1.x 2026-06-12) |
-| `CA_SLAB_REDUCE_ARRAY_T_PLUS_EX` | SIMD-licensed weighted reduction (FMA `fmla.2d` + reassoc, dual-stream) | wsum / wmean | ✓ Landed (§6.7, SL.1.4b) |
-| `CA_SLAB_MAP_T` | single-expression element-wise map kernel | sqrt / sin / cos / abs / negate | ✓ Landed (§6.5) |
-| `CA_SLAB_SCAN_T` | single-expression prefix-scan kernel | cumsum / cumprod / cummax / cummin / cumcount | ✓ Landed (§6.5) |
-| `CA_SLAB_SEARCH_T` | single-expression search-by-eq kernel | `bsearch` / `search_nearest` family | **Not built** as a one-expression macro. The search family (`find_value_index` / `bsearch` / `search` / `search_nearest` + `_addr`) ships via the mkkernel `MkKernel.search` DSL with an author-written per-slab C body — see [`MkKernelDSL.md`](MkKernelDSL.md) |
 
 ### 0.2 How to pick
 

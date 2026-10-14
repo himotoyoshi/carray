@@ -750,6 +750,9 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    Wrap init_l2 / next_slab_axes / [sync_slab] / finish in a single
    block scope so kernel authors don't write lifecycle plumbing.
 
+   For a function in carray that uses each macro, see the catalog in
+   docs/authoring/HOW_TO_WRITE_KERNEL.md §0.1.
+
    --- Constraints ---
 
    - Author must pre-declare `char *p` and `boolean8_t *m` (or names of
