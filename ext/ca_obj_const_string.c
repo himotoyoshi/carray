@@ -580,7 +580,9 @@ rb_ca_const_string_copy (VALUE self)
 
   ca_detach((CArray *) ca);
 
-  return rb_ca_const_string_wrap(vout, rb_str_freeze(newbuf), ca->encoding_id);
+  vout = rb_ca_const_string_wrap(vout, rb_str_freeze(newbuf), ca->encoding_id);
+  rb_ca_inherit_attr(vout, self);
+  return vout;
 }
 
 /* to_ca descends to the same compacting copy.  The result is detached

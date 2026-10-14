@@ -299,6 +299,7 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
     obj = ca_face_lift(obj, self);
   }
 
+  rb_ca_inherit_attr(obj, self);
   return obj;
 }
 

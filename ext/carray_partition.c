@@ -454,7 +454,9 @@ static VALUE
 rb_ca_partition_copy (int argc, VALUE *argv, VALUE self)
 {
   pc_call_t c = { argc, argv, self };
-  return ca_answer_as_caller(pc_answer_body, (VALUE) &c);
+  VALUE out = ca_answer_as_caller(pc_answer_body, (VALUE) &c);
+  rb_ca_inherit_attr(out, self);
+  return out;
 }
 
 void

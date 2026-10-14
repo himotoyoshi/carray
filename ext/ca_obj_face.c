@@ -295,6 +295,12 @@ ca_face_lift (VALUE view, VALUE face_parent)
   lifted = rb_ca_face_template(face_parent, view_ca, view_ca->dim);
   /* Pin view as a GC root of lifted so the slice is not collected. */
   rb_ca_set_parent(lifted, view);
+  /* The Face the view was taken from is off the parent chain now; keep it
+     for the attributes set on it.  A fresh result the ordering kernels
+     re-wrap is not a view of it and takes none. */
+  if ( ca_is_view(view_ca) ) {
+    rb_ca_set_lifted_from(lifted, face_parent);
+  }
 
   /* Optional Ruby callback for ivar / state carry.  Faces holding
      semantic state in the struct tail (CATime / CATimedelta

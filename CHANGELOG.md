@@ -36,6 +36,24 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: an attribute value is stored as a frozen copy, nested Arrays
+  and Hashes included, and `set_attr` / `set_attrs` raise `FrozenError`
+  on a frozen array. Change an attribute by setting it again: changing
+  a value in place (`a.attr(:h)["k"] << 2`) now raises `FrozenError`,
+  where it changed the array and every copy sharing the value.
+
+- Fix: attributes set on a Face (`CATime`, `CAString`, `CAConstString`,
+  `CACategorical`, `CARecord`) show on its views, so a row selection of
+  a CAFrame text or time column keeps them. They were lost on every
+  view.
+
+- Fix: attributes are kept by `dup` and `clone` (as the copy's own, no
+  longer shared with the receiver), by Marshal of an array, an object
+  array and a record array, and by `sort_copy`, `partition_copy`,
+  `project`, `strip_mask` and `CAConstString#copy`; and through more
+  than 64 views. In a CAFrame they are kept by a text column's `cast` to
+  a number, by every `join`, and by the key of an outer `join`.
+
 - New: `CAFrame#to_csv(attrs: [:units, ...])` writes, below the name row,
   one line per attribute key, holding each column's value of that
   attribute; `CAFrame.from_csv(attrs: [:units, ...])` reads those lines

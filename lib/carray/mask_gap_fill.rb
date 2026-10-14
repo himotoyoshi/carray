@@ -66,15 +66,23 @@ class CArray
         raise ArgumentError,
               "strip_mask: pass either a constant fill value or method:, not both"
       end
-      return __gap_fill__(method, axis, "strip_mask")
+      return strip_mask_with_attrs(__gap_fill__(method, axis, "strip_mask"))
     end
     if fill.equal?(MASK_FILL_UNSET)
       raise ArgumentError, "strip_mask: a fill value is required (or method:)"
     end
-    __strip_mask_const__(fill)
+    strip_mask_with_attrs(__strip_mask_const__(fill))
   end
 
   private
+
+  # The new array strip_mask returns holds self's values, so it shows
+  # self's attributes, as a copy does.
+  def strip_mask_with_attrs (out)
+    shown = attrs
+    out.set_attrs(shown) unless shown.empty?
+    out
+  end
 
   # Dispatch a method-fill to a fresh array.  Residual (leading/trailing)
   # unfillable cells stay masked; a fully filled result carries no mask

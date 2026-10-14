@@ -34,12 +34,22 @@
 #    `a.lazy` itself (CALazyMarker) is a view of `a` and walks through,
 #    and so does a lazy type conversion (the cast lane `promote_list`
 #    and `wrap_readonly` build), for the reason `to_type` carries them.
+#    A view of a Face shows the attributes of the Face it was taken
+#    from (the walk goes to that Face, which the view's own parent
+#    chain skips).
 #    A view of several arrays (CAStack / CAMeld, so `stack`, `meld` and
 #    `montage`) shows, below its own @attr, the keys every one of its
 #    arrays shows with the same value; a key they disagree on, or one
 #    some of them lack, is not shown.
 #
-#  Copies: `copy` and `to_type` give the new array the attributes the
+#  Stored values are frozen copies, nested Arrays and Hashes included, so
+#  an attribute changes only through set_attr / set_attrs: a value read
+#  back cannot be changed in place, and a copy that shares it with its
+#  source cannot change the source.  A frozen array takes no new
+#  attribute.
+#
+#  Copies: `dup` and `clone` give the new array its own Hash of the
+#  receiver's own attributes.  `copy` and `to_type` give the new array the attributes the
 #  source shows, as its own Hash; `concatenate`, `mosaic` and `tabulate`
 #  give it the keys every piece shows with the same value, as the views
 #  do.  Arithmetic and reductions do not carry them -- the result is a
@@ -71,9 +81,14 @@ class CArray
   #   store.
   #   @param key [Symbol, String] attribute key.
   #   @param value [Object] JSON-compatible value.
-  #   @return [Object] the coerced stored value.
+  #   The value is stored as a frozen copy (nested Arrays and Hashes
+  #   too).
+  #   @return [Object] the stored value.
   #   @raise [TypeError] when `key` or `value` is not accepted.
+  #   @raise [ArgumentError] when `value` nests more than 32 levels.
+  #   @raise [FrozenError] when `self` is frozen.
   def set_attr (key, value)
+    attr_check_not_frozen
     attr_validate_value(value)
     (@attr ||= {})[attr_normalize_key(key)] = attr_coerce_value(value)
   end
@@ -87,7 +102,10 @@ class CArray
   #   @param hash [Hash{Symbol, String => Object}] attributes to set.
   #   @return [CArray] self.
   #   @raise [TypeError] when a key or a value is not accepted.
+  #   @raise [ArgumentError] when a value nests more than 32 levels.
+  #   @raise [FrozenError] when `self` is frozen.
   def set_attrs (hash)
+    attr_check_not_frozen
     unless hash.is_a?(Hash)
       raise TypeError, "set_attrs takes a Hash (got #{hash.class})"
     end
@@ -103,7 +121,7 @@ class CArray
   end
 
   # @overload attrs
-  #   Returns a frozen shallow Hash of all attributes visible on
+  #   Returns a frozen Hash of all attributes visible on
   #   `self`, merged along the parent chain (deeper writes shadow
   #   shallower ones on a per-key basis).
   #   @return [Hash{String => Object}]
@@ -143,14 +161,11 @@ class CArray
   private
 
   # Yield each non-nil @attr Hash along the parent chain (self first).
-  # Bounded to MAX_CHAIN_DEPTH for paranoia against unexpected cycles;
-  # real CArray view chains rarely exceed a handful of levels.
-  MAX_CHAIN_DEPTH = 64
-  private_constant :MAX_CHAIN_DEPTH
-
+  # The chain has no fixed bound; an array seen twice ends the walk.
   def attr_each_chain
     ca = self
-    MAX_CHAIN_DEPTH.times do
+    seen = nil
+    loop do
       if ca.instance_variable_defined?(:@attr)
         h = ca.instance_variable_get(:@attr)
         yield(h) if h
@@ -161,11 +176,17 @@ class CArray
         yield(shared) unless shared.empty?
         return nil
       end
-      parent = ca.respond_to?(:parent) ? ca.parent : nil
-      return nil if parent.nil? || parent.equal?(ca)
+      parent = ca.is_a?(CArray) ? ca.__send__(:attribute_parent) : nil
+      return nil if parent.nil?
+      seen ||= {}.compare_by_identity
+      return nil if seen.key?(parent)
+      seen[ca] = true
       ca = parent
     end
-    nil
+  end
+
+  def attr_check_not_frozen
+    raise FrozenError.new("can't modify frozen #{self.class}: attributes", receiver: self) if frozen?
   end
 
   # The attributes every array in `list` shows with the same value.
@@ -213,12 +234,13 @@ class CArray
 
   def attr_coerce_value (v)
     case v
-    when Symbol then v.to_s
-    when Array  then v.map { |e| attr_coerce_value(e) }
+    when Symbol then v.to_s.freeze
+    when String then v.frozen? ? v : v.dup.freeze
+    when Array  then v.map { |e| attr_coerce_value(e) }.freeze
     when Hash
       v.each_with_object({}) do |(k, vv), h|
-        h[k.is_a?(Symbol) ? k.to_s : k] = attr_coerce_value(vv)
-      end
+        h[(k.is_a?(Symbol) ? k.to_s : k.dup).freeze] = attr_coerce_value(vv)
+      end.freeze
     else
       v
     end

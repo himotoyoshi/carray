@@ -818,6 +818,7 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
   ALLOCV_END(aux_holder);
 
   RB_GC_GUARD(target);
+  rb_ca_inherit_attr(vout, self);
   return vout;
 }
 

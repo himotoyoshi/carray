@@ -1,5 +1,6 @@
 require "test/unit"
 require "carray"
+require "stringio"
 
 class TestAttributeInherit < Test::Unit::TestCase
 
@@ -123,6 +124,100 @@ class TestAttributeInherit < Test::Unit::TestCase
     m.set_attr(:units, "K")
     assert_equal "K", m.attr(:units)
     assert_equal "m/s", x.attr(:units)
+  end
+
+  def test_a_view_of_a_face_shows_the_faces_attributes
+    t = CArray.time(["2024-01-01", "2024-01-02", "2024-01-03"])
+    t.set_attr(:units, "days")
+    assert_equal "days", t[0..1].attr(:units)
+    assert_equal "days", t[0..1][0..0].attr(:units)
+    assert_equal "days", t.reshape(3, 1).attr(:units)
+    assert_equal "days", t[CA_BOOLEAN([1, 0, 1])].attr(:units)
+    assert_equal "days", t[0..1].copy.attr(:units)
+    t.parent.set_attr(:source, "x")
+    assert_equal "x", t[0..1].attr(:source)
+    s = CArray.string(CA_OBJECT(%w[a b]))
+    s.set_attr(:units, "m")
+    assert_equal "m", s[0..0].attr(:units)
+    c = CArray.const_string(%w[a b])
+    c.set_attr(:units, "m")
+    assert_equal "m", c[0..0].attr(:units)
+    assert_equal "m", c.copy.attr(:units)
+  end
+
+  def test_dup_and_clone_have_their_own_attributes
+    a = CArray.int32(2)
+    a.set_attr(:units, "m")
+    b = a.dup
+    b.set_attr(:units, "s")
+    c = a.clone
+    c.set_attr(:units, "t")
+    assert_equal ["m", "s", "t"], [a, b, c].map { |x| x.attr(:units) }
+    v = a[0..1]
+    v.dup.set_attr(:extra, 1)
+    assert_equal({ "units" => "m" }, v.attrs)
+  end
+
+  def test_marshal_keeps_attributes
+    a = CArray.int32(2).tap { |x| x.set_attr(:units, "m") }
+    o = CA_OBJECT([1, 2]).tap { |x| x.set_attr(:units, "m") }
+    [a, a[0..1], o, o[0..1]].each do |x|
+      assert_equal({ "units" => "m" }, Marshal.load(Marshal.dump(x)).attrs)
+    end
+  end
+
+  def test_copies_of_values_keep_attributes
+    a = CA_INT32([3, 1, 2]).tap { |x| x.set_attr(:units, "m") }
+    m = a.copy
+    m[0] = UNDEF
+    shown = { "units" => "m" }
+    [a.sort_copy, m.sort_copy, a.partition_copy(1), m.partition_copy(1),
+     a.project(CA_INT64([1, 0])), m.strip_mask(0),
+     m.strip_mask(method: :forward), m.strip_mask(method: :backward),
+     m.strip_mask(method: :linear)].each do |x|
+      assert_equal shown, x.attrs
+    end
+  end
+
+  def test_stored_values_are_frozen_copies
+    a = CArray.int32(2)
+    s = +"m"
+    a.set_attr(:units, s)
+    s << "!"
+    assert_equal "m", a.attr(:units)
+    a.set_attr(:h, { "k" => [1] })
+    assert_raise(FrozenError) { a.copy.attr(:h)["k"] << 2 }
+    assert_raise(FrozenError) { a.attrs["units"] << "x" }
+    assert_equal({ "k" => [1] }, a.attr(:h))
+  end
+
+  def test_a_frozen_array_takes_no_attribute
+    a = CA_INT32([1]).tap { |x| x.set_attr(:units, "m") }
+    a.freeze
+    assert_raise(FrozenError) { a.set_attr(:units, "s") }
+    assert_raise(FrozenError) { CA_INT32([1]).freeze.set_attrs(units: "s") }
+    assert_equal "m", a.attr(:units)
+  end
+
+  def test_a_long_view_chain_keeps_attributes
+    a = CA_INT32([1, 2]).tap { |x| x.set_attr(:units, "m") }
+    v = a
+    100.times { v = v.reshape(2) }
+    assert_equal "m", v.attr(:units)
+    assert_equal "m", v.copy.attr(:units)
+  end
+
+  def test_frame_text_cast_and_outer_join_keep_attributes
+    df = CAFrame.from_csv(StringIO.new("a,b\nK,m\n1,x\n2,y\n"), attrs: [:units])
+    assert_equal "m", df.head(1)["b"].attr(:units)
+    assert_equal "K", df.cast(:infer)["a"].attr(:units)
+    assert_equal "K", df.cast("a" => :float64)["a"].attr(:units)
+    key = ->(v) { CA_INT32(v).tap { |x| x.set_attr(:units, "k") } }
+    l = CAFrame.new("k" => key.([1, 2]), "v" => CA_INT32([1, 2]))
+    r = CAFrame.new("k" => key.([2, 3]), "w" => CA_INT32([5, 6]).tap { |x| x.set_attr(:units, "w") })
+    j = l.join(r, on: "k", how: :outer)
+    assert_equal "k", j["k"].attr(:units)
+    assert_equal "w", l.join(r, on: "k")["w"].attr(:units)
   end
 
   def test_frame_meld_and_concatenate_agree

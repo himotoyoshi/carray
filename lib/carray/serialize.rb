@@ -390,7 +390,7 @@ class CArray::Serializer   # :nodoc:
     if trailer.key?("attrs")
       attrs = trailer["attrs"]
       if attrs.is_a?(Hash) and not attrs.empty?
-        ca.instance_variable_set(:@attr, attrs)
+        ca.set_attrs(attrs)
       end
     end
     ca
@@ -615,7 +615,8 @@ class CArray
       ["object",
        target.shape,
        target.value.to_a,
-       (target.has_mask? ? target.mask.to_a : nil)]
+       (target.has_mask? ? target.mask.to_a : nil),
+       target.attrs.to_h]
     else
       ["portable", CArray.dump(target)]
     end
@@ -627,7 +628,10 @@ class CArray
   #   @param data [Array] Marshal payload.
   #   @return [void]
   def marshal_load (data)
-    initialize_copy(CArray.send(:array_from_marshal_payload, data))
+    source = CArray.send(:array_from_marshal_payload, data)
+    initialize_copy(source)
+    attrs = source.attrs
+    set_attrs(attrs) unless attrs.empty?
   end
 
   # The array a {#marshal_dump} payload describes.
@@ -635,19 +639,22 @@ class CArray
     tag, *rest = data
     case tag
     when "object"
-      shape, values, mask = rest
+      shape, values, mask, attrs = rest
       ca = CArray.object(*shape)
       ca[] = values
       if mask
         ca.mask = 0
         ca.mask[] = mask
       end
+      ca.set_attrs(attrs) if attrs && !attrs.empty?
       ca
     when "portable"
       CArray.load(StringIO.new(rest[0]))
     when "record"
-      data_class, storage = rest
-      CARecord.wrap(array_from_marshal_payload(storage), data_class)
+      data_class, storage, attrs = rest
+      ca = CARecord.wrap(array_from_marshal_payload(storage), data_class)
+      ca.set_attrs(attrs) if attrs && !attrs.empty?
+      ca
     else
       raise TypeError, "unrecognised CArray Marshal payload"
     end
@@ -719,7 +726,7 @@ class CARecord
   def marshal_dump
     return CArray.instance_method(:marshal_dump).bind_call(self) unless data_class.name
     ["record", data_class,
-     CArray.instance_method(:marshal_dump).bind_call(copy.parent)]
+     CArray.instance_method(:marshal_dump).bind_call(copy.parent), attrs.to_h]
   end
 
 end

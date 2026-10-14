@@ -133,6 +133,12 @@ ca_alloc_cells (const CArray *ca)
 /* Copy the attributes src shows onto dst (a new entity with src's values). */
 void    rb_ca_inherit_attr (VALUE dst, VALUE src);
 
+/* Give a dup / clone its own attribute Hash. */
+void    rb_ca_own_attr (VALUE self);
+
+/* Record the Face a lifted view was taken from, for the attribute walk. */
+void    rb_ca_set_lifted_from (VALUE lifted, VALUE face);
+
 /* A String read as a decimal number of an integer or float data_type
    (carray_cast.c): _to answers 1 / 0 (UNDEF), _store raises. */
 int     ca_decimal_string_to (VALUE str, int8_t data_type, void *out);

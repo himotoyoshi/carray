@@ -1209,6 +1209,7 @@ rb_ca_initialize_dup (VALUE self, VALUE other)
 {
   rb_call_super(1, &other);
   ca_dup_keep_state(self, other);
+  rb_ca_own_attr(self);
   return self;
 }
 
@@ -1226,6 +1227,7 @@ rb_ca_initialize_clone (int argc, VALUE *argv, VALUE self)
   rb_call_super_kw(argc, argv, RB_PASS_CALLED_KEYWORDS);
   rb_scan_args(argc, argv, "1:", &orig, &opts);
   ca_dup_keep_state(self, orig);
+  rb_ca_own_attr(self);
 
   if ( ! NIL_P(opts) ) {
     vfreeze = rb_hash_lookup2(opts, ID2SYM(rb_intern("freeze")), Qnil);
