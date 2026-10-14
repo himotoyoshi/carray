@@ -1911,7 +1911,10 @@ ca_sync_all (CArray **list, int32_t n)
    even when body raised or broke out -- the cells body wrote reach the
    parent, as they would for an entity, which has no separate buffer.  An
    'a' array is not synced after a raise: allocate did not gather, so its
-   cells body never wrote hold nothing faithful to push back.
+   cells body never wrote hold nothing faithful to push back.  Allocate
+   clears the mask as it opens, and an entity (or the parent under a view)
+   has no separate mask to fall back on, so the mask of an 'a' array is
+   copied before it opens and written back when body raises.
 
    Every array is detached, in reverse order, whatever happens.  body's
    own exception wins over one raised by a sync; when body returned and a
@@ -1927,7 +1930,53 @@ typedef struct {
   volatile VALUE sync_err;
   VALUE      (*body)(VALUE);
   VALUE        arg;
+  volatile VALUE masks;         /* per array: the mask bytes of an 'a' array, or nil */
 } ca_window_ctx_t;
+
+/* Copy the masks of the 'a' arrays before they open. */
+static void
+ca_attach_window_save_masks (ca_window_ctx_t *w)
+{
+  int32_t k;
+  w->masks = Qnil;
+  for ( k = 0; k < w->n; k++ ) {
+    CArray *ca = w->list[k];
+    if ( w->modes[k] != 'a' || ! ca || ! ca_has_mask(ca) ) {
+      continue;
+    }
+    if ( NIL_P(w->masks) ) {
+      w->masks = rb_ary_new_capa(w->n);
+    }
+    ca_update_mask(ca);
+    {
+      VALUE buf = rb_str_new(NULL, (long) ca->elements);
+      ca_copy_data(ca->mask, RSTRING_PTR(buf));
+      rb_ary_store(w->masks, k, buf);
+    }
+  }
+}
+
+/* Write the copied masks back, once every array is detached. */
+static void
+ca_attach_window_restore_masks (ca_window_ctx_t *w)
+{
+  int32_t k;
+  if ( NIL_P(w->masks) ) {
+    return;
+  }
+  for ( k = 0; k < w->n; k++ ) {
+    VALUE buf = rb_ary_entry(w->masks, k);
+    CArray *ca = w->list[k];
+    if ( NIL_P(buf) ) {
+      continue;
+    }
+    ca_update_mask(ca);
+    if ( ! ca->mask ) {
+      ca_create_mask(ca);
+    }
+    ca_xfer_all(ca->mask, RSTRING_PTR(buf), CA_XFER_PUT);
+  }
+}
 
 static VALUE
 ca_attach_window_open (VALUE varg)
@@ -1987,6 +2036,9 @@ ca_attach_window_close (VALUE varg)
       ca_detach(ca);
     }
   }
+  if ( ! w->body_done ) {
+    ca_attach_window_restore_masks(w);
+  }
   return Qnil;
 }
 
@@ -2007,6 +2059,7 @@ ca_attach_window (int32_t n, CArray **list, const char *modes,
   w.sync_err  = Qnil;
   w.body      = body;
   w.arg       = arg;
+  ca_attach_window_save_masks(&w);
 
   rb_protect(ca_attach_window_open, (VALUE) &w, &tag);
   if ( tag ) {
@@ -2016,6 +2069,7 @@ ca_attach_window (int32_t n, CArray **list, const char *modes,
         ca_detach(w.list[w.opened]);
       }
     }
+    ca_attach_window_restore_masks(&w);
     rb_jump_tag(tag);
   }
 
