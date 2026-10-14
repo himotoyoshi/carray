@@ -1166,7 +1166,7 @@ ca_grid_build_body (VALUE arg)
   return rb_ca_grid_new(c->self, c->ca->ndim, c->protos);
 }
 
-/* A key that is an Integer picks one cell along its axis, and that axis is
+/* A scalar key (an Integer or a Float) picks one cell along its axis, and that axis is
    not in the result -- as it is not in a block reference.  The view is
    built with the axis at length 1 and the axis then dropped. */
 static VALUE
@@ -1175,7 +1175,7 @@ ca_grid_drop_scalar_axes (VALUE obj, int argc, VALUE *argv)
   VALUE idx[CA_RANK_MAX];
   int i, any = 0;
   for (i = 0; i < argc; i++) {
-    if ( rb_obj_is_kind_of(argv[i], rb_cInteger) ) {
+    if ( ca_index_key_is_scalar(argv[i]) ) {
       idx[i] = INT2FIX(0);
       any = 1;
     }

@@ -29,6 +29,8 @@ a[0, 0]      #  => 0
 a[2, 3]      #  => 11
 ```
 
+A Float that holds an integer is read as that integer (`a[1.0, 2.0]` is `a[1, 2]`; a count from `sum` is a Float). A Float with a fraction, NaN or Inf raises `IndexError`.
+
 Negative integers count from the end.
 
 ```ruby

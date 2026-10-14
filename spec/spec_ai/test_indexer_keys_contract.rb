@@ -103,6 +103,47 @@ class TestIndexerKeysContract < Test::Unit::TestCase
     assert_equal [1, 2],    b[[1, 2.0]].to_a
   end
 
+  def test_a_scalar_key_takes_a_float_that_holds_an_integer
+    b = CArray.int32(5).seq
+    assert_equal 2, b[2.0]
+    assert_equal 4, b[-1.0]
+    b[2.0] = 9
+    assert_equal [0, 1, 9, 3, 4], b.to_a
+
+    a = a34
+    assert_equal 6, a[1.0, 2.0]
+    assert_equal 6, a[1, 2.0]
+    assert_equal 7, a[7.0]            # address
+    assert_equal 11, a[-1.0]
+    assert_equal [4, 5], a[1.0, 0..1].to_a
+    a[7.0] = 70
+    a[0.0, 0.0] = 50
+    assert_equal [50, 70], [a[0, 0], a[1, 3]]
+
+    # beside a CArray (grid / CASelectAxis)
+    a = a34
+    assert_equal a[CA_INT32([2, 0]), 1].to_a, a[CA_INT32([2, 0]), 1.0].to_a
+    sel = CA_BOOLEAN([true, false, true])
+    assert_equal a[sel, 3].to_a, a[sel, 3.0].to_a
+  end
+
+  def test_a_scalar_key_refuses_a_float_that_is_not_an_integer
+    b = CArray.int32(5)
+    a = a34
+    [1.5, -0.5, Float::NAN, Float::INFINITY, -Float::INFINITY, 1e19, -1e30].each do |k|
+      assert_raise(IndexError, k.inspect) { b[k] }
+      assert_raise(IndexError, k.inspect) { b[k] = 1 }
+      assert_raise(IndexError, k.inspect) { a[k] }        # address
+      assert_raise(IndexError, k.inspect) { a[k] = 1 }
+      assert_raise(IndexError, k.inspect) { a[1, k] }
+      assert_raise(IndexError, k.inspect) { a[CA_INT32([0]), k] }
+    end
+    assert_raise(IndexError) { b[5.0] }
+    assert_raise(IndexError) { a[12.0] }
+    # a Float array is not an index array
+    assert_raise(IndexError) { b[CA_FLOAT64([1.0])] }
+  end
+
   def test_a_bignum_key_is_out_of_range
     b = CArray.int32(4)
     [2**70, -(2**70), 0..2**70].each do |k|

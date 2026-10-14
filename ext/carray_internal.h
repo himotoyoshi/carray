@@ -655,5 +655,9 @@ VALUE ca_mv_wrap (VALUE obj, VALUE mask_obj, VALUE target_class,
 int  ca_index_axis_key (VALUE arg, ca_size_t dim, int axis,
                         ca_size_t *start, ca_size_t *count, ca_size_t *step);
 long ca_index_expand_rubber (int ndim, long argc, const VALUE *argv, VALUE *out);
+/* Whether a key is a scalar one (an Integer or a Float), which picks one
+   cell and drops its axis.  Whether it names a cell is checked when the
+   key is read. */
+int  ca_index_key_is_scalar (VALUE arg);
 
 #endif /* CARRAY_INTERNAL_H */

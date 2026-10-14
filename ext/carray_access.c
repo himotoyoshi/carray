@@ -1335,7 +1335,7 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
       nunder++;
       continue;
     }
-    if ( FIXNUM_P(a) || RB_TYPE_P(a, T_BIGNUM) ) {
+    if ( ca_index_key_is_scalar(a) ) {
       nscalar++;
     }
     if ( a == sym_gt || a == sym_perc
@@ -1388,7 +1388,7 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
   {
     int nkeys = 0, extra, ncarray = 0;
     for (i = 0; i < nclean; i++) {
-      if ( ! ( FIXNUM_P(clean[i]) || RB_TYPE_P(clean[i], T_BIGNUM) ) ) {
+      if ( ! ca_index_key_is_scalar(clean[i]) ) {
         nkeys++;
         if ( rb_obj_is_carray(clean[i]) ) ncarray++;
       }
@@ -1402,7 +1402,7 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
         final_dims[nfinal++] = 1;
         continue;
       }
-      if ( FIXNUM_P(a) || RB_TYPE_P(a, T_BIGNUM) ) {
+      if ( ca_index_key_is_scalar(a) ) {
         /* scalar index -> axis dropped in base; contributes no output axis */
         continue;
       }
@@ -1523,7 +1523,7 @@ rb_ca_fetch_slab_sigil (int argc, VALUE *argv, VALUE self)
       rb_ary_push(slab_axes, INT2NUM(i));
       clean[i] = Qnil;
     }
-    else if ( FIXNUM_P(a) || RB_TYPE_P(a, T_BIGNUM) ) {
+    else if ( ca_index_key_is_scalar(a) ) {
       /* Promote Integer to length-1 Range so the recursed view keeps
          the axis (matches the existing :> dispatcher semantics where
          scalars become length-1 BLOCKs via finalize_reg). */

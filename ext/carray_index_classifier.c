@@ -135,9 +135,6 @@ ca_classifier_normalize_flat_address (ca_size_t addr, ca_size_t elements, int ra
   return addr;
 }
 
-/* An integer key, as the indexer takes it: a Fixnum.  A Bignum is past
-   the end of any axis, and anything else (a Float, a Rational, a String)
-   is not a position; both are IndexError, as a scalar key is. */
 NORETURN(static void ca_classifier_invalid_key (VALUE v, int axis));
 static void
 ca_classifier_invalid_key (VALUE v, int axis)
@@ -159,37 +156,77 @@ ca_classifier_key_too_large (VALUE v, const char *where)
            ca_calling_method_name(), StringValueCStr(s), where);
 }
 
-/* An integer key inside a Range, an Array form or a step.  A Float that
-   holds an integer is taken as it (a count from `sum` is a Float); one
-   with a fraction names no cell and is refused rather than cut. */
-static ca_size_t
-ca_classifier_key_int (VALUE v, int axis)
+/* A key names a position when it holds an integer: a Fixnum, or a Float
+   with no fraction (a count from `sum` is a Float).  Returns 1 with the
+   position in *out, 2 for an integer past any axis (a Bignum, or a Float
+   beyond the Fixnum range), and 0 for anything else (a Float with a
+   fraction, NaN, Inf, a Rational, a String). */
+static int
+ca_classifier_key_position (VALUE v, ca_size_t *out)
 {
   if ( FIXNUM_P(v) ) {
-    return (ca_size_t) FIX2LONG(v);
+    *out = (ca_size_t) FIX2LONG(v);
+    return 1;
   }
   if ( RB_FLOAT_TYPE_P(v) ) {
     double d = RFLOAT_VALUE(v);
-    if ( d == floor(d) && d >= -4.6e18 && d <= 4.6e18 ) {
-      return (ca_size_t) d;
+    if ( ! isfinite(d) || d != floor(d) ) {
+      return 0;
     }
+    if ( d < -4.6e18 || d > 4.6e18 ) {
+      return 2;
+    }
+    *out = (ca_size_t) d;
+    return 1;
   }
   if ( RB_TYPE_P(v, T_BIGNUM) ) {
-    char where[32];
-    snprintf(where, sizeof(where), " on axis %d", axis);
-    ca_classifier_key_too_large(v, where);
+    return 2;
   }
-  ca_classifier_invalid_key(v, axis);
+  return 0;
 }
 
-/* A step: an integer like any key, except that a Bignum is not past
-   anything -- it is a step larger than any axis, so it reaches one cell.
-   It is read as the largest Fixnum of its sign, which does the same. */
+/* A key that has to name a position: a scalar key, or one inside a Range,
+   an Array form or a step.  `where` follows the value in the out-of-range
+   message. */
+static ca_size_t
+ca_classifier_key_int_where (VALUE v, int axis, const char *where)
+{
+  ca_size_t k;
+  switch ( ca_classifier_key_position(v, &k) ) {
+  case 1:
+    return k;
+  case 2:
+    ca_classifier_key_too_large(v, where);
+  default:
+    ca_classifier_invalid_key(v, axis);
+  }
+}
+
+static ca_size_t
+ca_classifier_key_int (VALUE v, int axis)
+{
+  char where[32];
+  snprintf(where, sizeof(where), " on axis %d", axis);
+  return ca_classifier_key_int_where(v, axis, where);
+}
+
+int
+ca_index_key_is_scalar (VALUE arg)
+{
+  return FIXNUM_P(arg) || RB_FLOAT_TYPE_P(arg) || RB_TYPE_P(arg, T_BIGNUM);
+}
+
+/* A step: an integer like any key, except that one past any axis is not
+   past anything -- it is a step larger than any axis, so it reaches one
+   cell.  It is read as the largest Fixnum of its sign, which does the
+   same. */
 static ca_size_t
 ca_classifier_key_step (VALUE v, int axis)
 {
-  if ( RB_TYPE_P(v, T_BIGNUM) ) {
-    return ( rb_big_sign(v) ) ? (ca_size_t) FIXNUM_MAX : (ca_size_t) FIXNUM_MIN;
+  ca_size_t k;
+  if ( ca_classifier_key_position(v, &k) == 2 ) {
+    int positive = RB_FLOAT_TYPE_P(v) ? ( RFLOAT_VALUE(v) > 0 ) : rb_big_sign(v);
+    return positive ? (ca_size_t) FIXNUM_MAX : (ca_size_t) FIXNUM_MIN;
   }
   return ca_classifier_key_int(v, axis);
 }
@@ -237,8 +274,8 @@ ca_classifier_try_point_fast_path (ca_classifier_ctx_t *ctx)
   for (i = 0; i < ctx->argc; i++) {
     ca_size_t k = FIX2LONG(ctx->argv[i]);
     if ( ctx->info->range_check ) {
-      /* Bignum is rejected by FIXNUM_P above; the slow path's
-         rb_obj_is_kind_of(arg, rb_cInteger) picks it up so the
+      /* Bignum and Float are rejected by FIXNUM_P above; the slow path's
+         integer-key branch picks them up so the
          Integer semantics are preserved end-to-end. */
       k = ca_classifier_normalize_axis_index(k, ctx->ca_dim[i], (int) i,
                                    ctx->info->range_check);
@@ -588,7 +625,7 @@ ca_classifier_dispatch_axis_arg (ca_classifier_ctx_t *ctx, int axis, VALUE arg,
   CAIndexInfo *info = ctx->info;
   ca_size_t   dim   = ctx->ca_dim[axis];
 
-  if ( rb_obj_is_kind_of(arg, rb_cInteger) ) {
+  if ( ca_index_key_is_scalar(arg) ) {
     ca_size_t k = ca_classifier_key_int(arg, axis);
     info->index_type[axis] = CA_IDX_SCALAR;
     if ( info->range_check ) {
@@ -888,14 +925,11 @@ ca_classifier_try_argc1_special (ca_classifier_ctx_t *ctx)
              ca_type_name[cs->data_type]);
   }
 
-  /* ndim > 1 with Integer → ADDRESS.  Fixnum was caught by the
-     fast path; this branch handles Bignum. */
-  if ( ctx->ca_ndim > 1 && rb_obj_is_kind_of(arg, rb_cInteger) ) {
-    ca_size_t addr;
-    if ( ! FIXNUM_P(arg) ) {
-      ca_classifier_key_too_large(arg, "");
-    }
-    addr = FIX2LONG(arg);
+  /* ndim > 1 with an integer key → ADDRESS.  Fixnum was caught by the
+     fast path; this branch handles Bignum and Float. */
+  if ( ctx->ca_ndim > 1
+       && ca_index_key_is_scalar(arg) ) {
+    ca_size_t addr = ca_classifier_key_int_where(arg, 0, "");
     info->type = CA_REG_ADDRESS;
     info->ndim = 1;
     if ( info->range_check ) {

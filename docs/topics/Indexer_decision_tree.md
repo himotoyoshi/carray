@@ -85,11 +85,11 @@ way and stores through it, writing only the cells it picks.
 
 | condition                                  | region              | `info.index`                       |
 |--------------------------------------------|---------------------|------------------------------------|
-| `argv[0]` is `Integer`                     | `ADDRESS`           | `[addr]`                           |
+| `argv[0]` is `Integer` or `Float`          | `ADDRESS`           | `[addr]` (the key read as `key(v)`, §3.3.1) |
 | `argv[0] == nil`                           | `FLATTEN`           | `[]`                               |
 | anything else (`Range`, `ArithSeq`, `Array`, …) | `ADDRESS_COMPLEX` | `[[start, count, step]]` (see §2.4) |
 
-When `argc == 1`, `ndim == 1`, and `argv[0]` is an `Integer`, none of
+When `argc == 1`, `ndim == 1`, and `argv[0]` is an `Integer` or `Float`, none of
 the above match and the call falls through to the main loop (§3),
 where it is classified as `POINT` with a single SCALAR axis.
 
@@ -141,7 +141,7 @@ Each `argv[i]` is classified, populating `info.index_type[i]` and
 
 | `argv[i]`                                       | `index_type`        | `index[i]` payload                          | error path                                   |
 |-------------------------------------------------|---------------------|---------------------------------------------|----------------------------------------------|
-| `Integer`                                       | `SCALAR`            | `scalar = k` (negative normalised)          | `IndexError` on out-of-range, a `Bignum` included |
+| `Integer` or `Float`                            | `SCALAR`            | `scalar = key(v)` (§3.3.1, negative normalised) | `IndexError` on out-of-range (a `Bignum` included) and on a `Float` that is not an integer |
 | `nil`                                           | `ALL`               | none                                        | —                                            |
 | `false` or `:~`                                 | rubber expansion: fill `rndim = ndim - argc + 1` axes with `ALL` (`:~` = rubber sigil, RB.1; `false` legacy) | — | —                  |
 | `Range`                                         | `BLOCK`             | `{start, count, step = ±1}` (see §3.3.1)    | range check; an empty range (`2...2`, or `2..` at the end) is `{start, 0, 1}` and may start at the end of the axis |
@@ -174,10 +174,13 @@ excl  = RTEST(iv_excl)
 step  = key(arg.step) if ArithmeticSequence,
         else ±1 (+1 when last >= start, -1 otherwise)
 
-key(v): an Integer; a Float that holds an integer (a count from `sum`)
-        is that integer; a Float with a fraction, or anything else, raises
-        IndexError; a Bignum endpoint is out of range (IndexError); a
-        Bignum step is a step larger than any axis (one cell)
+key(v): the one rule for a key that names a position, a scalar key
+        included: an Integer; a Float that holds an integer (a count from
+        `sum`) is that integer; a Float with a fraction, NaN, Inf, or
+        anything else, raises IndexError; an integer past the Fixnum range
+        (a Bignum, or a Float that large) is out of range (IndexError) as
+        an endpoint or a scalar key, and a step larger than any axis (one
+        cell) as a step.  A Float CArray is not an index array.
 
 if dim[i] == 0: a range starting at 0 reads no cells; any other start
                 is out of range
