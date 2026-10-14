@@ -109,4 +109,9 @@ Init_header_contract (void)
   rb_define_module_function(m, "install", hc_install, 1);
   rb_define_module_function(m, "check_data_type", hc_check_data_type, 2);
   rb_define_const(m, "FUNC_SIZE", SIZET2NUM(sizeof(ca_operation_function_t)));
+  rb_define_const(m, "XFER_INDEX_OFFSET",
+                  SIZET2NUM(offsetof(ca_operation_function_t, xfer_index)));
+  rb_define_const(m, "XFER_ALL_END",
+                  SIZET2NUM(offsetof(ca_operation_function_t, xfer_all) +
+                            sizeof(((ca_operation_function_t *) 0)->xfer_all)));
 }

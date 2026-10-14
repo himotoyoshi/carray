@@ -325,10 +325,11 @@ ca_install_obj_type (VALUE klass,
 {
   int obj_type;
 
-  if ( ca_obj_num + 1 >= CA_OBJ_TYPE_MAX ) {
+  /* The obj_type parameters of ca_array_alloc / ca_stride_setup are
+     int8_t, so a number of 128 or above cannot be passed to them. */
+  if ( ca_obj_num > INT8_MAX || ca_obj_num + 1 >= CA_OBJ_TYPE_MAX ) {
     rb_raise(rb_eRuntimeError,
-             "internal: too many CArray object types installed <CA_OBJ_TYPE_MAX = %i>",
-             CA_OBJ_TYPE_MAX);
+             "internal: too many CArray object types installed (an obj_type is numbered below 128)");
   }
 
   if ( func_size > sizeof(ca_operation_function_t) ) {
@@ -338,14 +339,15 @@ ca_install_obj_type (VALUE klass,
              func_size, sizeof(ca_operation_function_t));
   }
 
-  /* Everything from xfer_index on was appended after the table's first
-     shape, so a caller may legitimately stop short of it.  Anything shorter
-     than that cannot dispatch at all. */
-  if ( func_size < offsetof(ca_operation_function_t, xfer_index) ) {
+  /* xfer_index, xfer_addrs and xfer_all have no default, so the table
+     reaches through xfer_all; the slots after it fall back when NULL. */
+  if ( func_size < offsetof(ca_operation_function_t, xfer_all) +
+                   sizeof(((ca_operation_function_t *) 0)->xfer_all) ) {
     rb_raise(rb_eRuntimeError,
              "operation table is too small to dispatch (%zu < %zu)",
              func_size,
-             (size_t) offsetof(ca_operation_function_t, xfer_index));
+             (size_t) (offsetof(ca_operation_function_t, xfer_all) +
+                       sizeof(((ca_operation_function_t *) 0)->xfer_all)));
   }
 
   /* A refused table takes no number. */

@@ -110,6 +110,15 @@ class TestHeaderContract < Test::Unit::TestCase
     assert_equal n, H.obj_num
   end
 
+  # The slots without a default (xfer_index, xfer_addrs, xfer_all) are
+  # required: a table that stops before the end of xfer_all is refused.
+  def test_a_table_short_of_xfer_all_is_refused
+    n = H.obj_num
+    assert_raise(RuntimeError) { H.install(H::XFER_INDEX_OFFSET) }
+    assert_raise(RuntimeError) { H.install(H::XFER_ALL_END - 1) }
+    assert_equal n, H.obj_num
+  end
+
   def test_check_data_type_takes_an_expression
     assert_equal true, H.check_data_type(true, :float64)
     assert_equal true, H.check_data_type(false, 0)

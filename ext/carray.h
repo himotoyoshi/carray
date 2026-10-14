@@ -1407,8 +1407,16 @@ void    ca_broadcast_pair (volatile VALUE *self, volatile VALUE *other);
      ca_install_obj_type(klass, &td, mask_klass, &mask_td,
                          &my_func, sizeof(my_func));
 
+   The table must reach at least through xfer_all: xfer_index, xfer_addrs
+   and xfer_all have no default.  fold_stride may be NULL (the view is a
+   fold boundary); xfer_stride, the pool slots, fill_addrs and fill_stride
+   fall back to a default when NULL.  A shorter table raises RuntimeError.
    A func_size larger than this build's struct means the caller was compiled
-   against a newer carray; that is reported rather than truncated. */
+   against a newer carray; that is reported rather than truncated.
+
+   The obj_type parameters of ca_array_alloc, ca_array_pool_alloc,
+   ca_stride_setup and ca_stride_new are int8_t, so an obj_type is numbered
+   below 128: an install that would number one at 128 or above raises. */
 
 int
 ca_install_obj_type (VALUE klass,
@@ -1577,6 +1585,9 @@ void    ca_detach_n (int n, ...);
 /* API : copying */
 
 void   *ca_clone (void *ap);          /* use rb_obj_clone() */
+/* A CA_OBJECT copy holds VALUEs the GC does not see until the struct is
+   wrapped, and wrapping allocates: for an object array use rb_ca_copy, which
+   keeps them alive and returns the wrapped copy. */
 CArray *ca_copy (void *ap);           /* use rb_ca_copy() */
 CArray *ca_template (void *ap);       /* use rb_ca_template() */
 CArray *ca_template_safe (void *ap);  /* use rb_ca_template() */
