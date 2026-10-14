@@ -62,6 +62,22 @@ class TestBoundAwareViews < Test::Unit::TestCase
     assert_raise(IndexError) { a.window(-1..3, bounds: "strict").to_a }
   end
 
+  # A "strict" or "ruby" window reaching outside the array is refused when
+  # it is made, so no write can change part of it before raising.
+  def test_window_strict_and_ruby_refuse_a_range_outside
+    a = CArray.int(5).seq
+    assert_raise(IndexError) { a.window(-1..3, bounds: "strict") }
+    assert_raise(IndexError) { a.window(3..5, bounds: "strict") }
+    assert_raise(IndexError) { a.window(3..5, bounds: "ruby") }
+    assert_raise(IndexError) { a.window(-6..-4, bounds: "ruby") }
+    assert_equal [4, 0, 1], a.window(-1..1, bounds: "ruby").to_a
+    assert_equal [1, 2, 3], a.window(1..3, bounds: "strict").to_a
+    assert_equal [0, 1, 2, 3, 4], a.to_a
+    b = CArray.int(2, 3).seq
+    assert_raise(IndexError) { b.window(0..1, 1..3, bounds: "strict") }
+    assert_equal [[1, 2], [4, 5]], b.window(0..1, 1..2, bounds: "strict").to_a
+  end
+
   # ------------------------------------------------------------------
   # CAWindow — explicit fill_value
   # ------------------------------------------------------------------

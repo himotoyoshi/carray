@@ -688,6 +688,27 @@ ca_window_setup (CAWindow *ca, CArray *parent,
   }
   elements = ca_shape_elements(ndim, count, bytes);
 
+  /* Under "ruby" or "strict" an index outside the parent raises.  The
+     parent's shape is fixed, so a window that reaches outside it would raise
+     on every whole read or write, and a write would have changed the cells
+     before the one that raised.  It is refused here instead. */
+  for (i=0; i<ndim; i++) {
+    ca_size_t lo, hi, size = dim[i];
+    if ( count[i] == 0 ) {
+      continue;
+    }
+    lo = start[i];
+    hi = start[i] + count[i] - 1;
+    if ( bounds[i] == CA_BOUNDS_STRICT ) {
+      if ( lo < 0 ) ca_index_out_of_range(lo, size, "index");
+      if ( hi >= size ) ca_index_out_of_range(hi, size, "index");
+    }
+    else if ( bounds[i] == CA_BOUNDS_RUBY ) {
+      if ( lo < -size ) ca_index_out_of_range(lo, size, "index");
+      if ( hi >= size ) ca_index_out_of_range(hi, size, "index");
+    }
+  }
+
   /* ca == NULL asks for the checks above only, so that a constructor can
      run them before it allocates. */
   if ( ca == NULL ) {

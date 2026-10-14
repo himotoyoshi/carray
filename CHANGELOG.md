@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: `window(..., bounds: "strict")` raises `IndexError` when it is
+  made if a range reaches outside the array, and `bounds: "ruby"` when a
+  range reaches past the end or before the first cell counted from the end.
+  Such a window raised on every read and write anyway, and a write changed
+  the cells in range before raising.
+
 - Fix: `convert` yields `true` / `false` for a boolean array and the element
   for a Face (a `CATime` gave its storage bytes), as `map!` and `ca[i]` do.
   A `CAObject` of boolean type receives `true` / `false` in `store_addr`,

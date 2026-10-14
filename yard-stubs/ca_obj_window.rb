@@ -50,6 +50,9 @@ class CArray
   #     cyclic shift).
   #   @raise [ArgumentError] when `bounds` conflicts with `fill_value: UNDEF`,
   #     or when `bounds` is not a recognised value.
+  #   @raise [IndexError] when `bounds` is `"strict"` and a range reaches
+  #     outside `self`, or `"ruby"` and a range reaches past the end or
+  #     before the first cell counted from the end.
   def window(*ranges, fill_value: 0, bounds: "fill"); end
 
   # @!endgroup
