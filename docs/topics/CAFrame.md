@@ -116,11 +116,12 @@ Which operations share and which copy is listed operation by operation in [View,
 
 ## Building a frame
 
-There are three constructors, one per shape the data arrives in:
+There are four ways in, one per shape the data arrives in:
 
 | the data is… | constructor |
 |---|---|
 | arrays you already have, one per column | `CAFrame.new` |
+| one array whose columns lie along an axis | `CArray#to_frame` |
 | an Array of row Hashes (parsed JSON) | `CAFrame.from_records` |
 | a CSV file or IO | `CAFrame.from_csv` |
 
@@ -150,6 +151,31 @@ CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_INT32([1, 2, 3]))
 CAFrame.new(temp: CA_INT32([1, 2, 3]))          # ArgumentError (stray Symbol keyword)
 CAFrame.new("index" => CA_INT32([1, 2, 3]))     # a column named "index"
 ```
+
+### `CArray#to_frame`
+
+Show an array you already have as a table. Rows run along axis 0 and there is one column per position along `axis` (the last axis unless named). Each column is a **view** of the array, with that axis removed from its shape, so nothing is copied and a write through either one is seen by the other, mask included:
+
+```ruby
+a  = CArray.float64(3, 2).seq!
+df = a.to_frame("x", "y")
+df["y"]                  # => a[nil, 1]
+df["y"][2] = -1.0        # a[2, 1] is now -1.0
+
+a.to_frame.column_names  # => ["c0", "c1"]
+```
+
+An array of more than two dimensions gives [N-D columns](#n-d-columns), and `axis:` picks which axis the columns are taken along:
+
+```ruby
+img = CArray.uint8(480, 640, 3)
+img.to_frame("r", "g", "b")["r"].shape        # => [480, 640]
+
+b = CArray.float64(2, 3, 4)
+b.to_frame("u", "v", "w", axis: 1)["w"].shape  # => [2, 4]
+```
+
+The names must be Strings, one per column and none repeated. Axis 0 holds the rows and cannot be the column axis, so a 1-D array is refused; give it a column axis with `:_`, as in `a[nil, :_].to_frame("x")`.
 
 ### `CAFrame.from_records`
 

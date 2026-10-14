@@ -99,3 +99,77 @@ class CAFrame
     end
   end
 end
+
+class CArray
+  # @overload to_frame(*names, axis: -1)
+  #   Shows this array as a table: a CAFrame whose rows run along axis 0 and
+  #   whose columns are the positions along `axis`. Column `j` is the view of
+  #   `self` with `j` at `axis` and every other axis whole, so its shape is
+  #   `self`'s shape without `axis`. A 2-D array gives 1-D columns, an array
+  #   of more dimensions gives N-D columns:
+  #
+  #   ```
+  #   a = CArray.float64(3, 2).seq!
+  #   df = a.to_frame("x", "y")
+  #   df["y"]          # => a[nil, 1], shape [3]
+  #
+  #   img = CArray.uint8(480, 640, 3)
+  #   img.to_frame("r", "g", "b")["r"].shape   # => [480, 640]
+  #   ```
+  #
+  #   Nothing is copied: each column is a view, so writes through the frame
+  #   reach `self` and writes to `self` show in the frame, values and mask
+  #   alike. Use `copy` on the frame for an independent one.
+  #
+  #   Without names the columns are called `"c0"`, `"c1"`, ... A 1-D array
+  #   has no axis to take columns from; give it one with `a[nil, :_]`.
+  #
+  #   @param names [Array<String>] column names, one per position along `axis`.
+  #   @param axis [Integer] the axis the columns are taken along; it cannot
+  #     be axis 0, which holds the rows.
+  #   @return [CAFrame]
+  #   @raise [TypeError] when a name is not a String or `axis` is not an
+  #     Integer.
+  #   @raise [ArgumentError] when `axis` is out of range or is the row axis,
+  #     when the number of names differs from the length of `axis`, or when
+  #     a name repeats.
+  def to_frame (*names, axis: -1)
+    axis = -1 if axis.nil?
+    if ndim < 2
+      raise ArgumentError,
+            "to_frame: a #{ndim}-D array has no axis to take columns from " \
+            "besides the row axis (axis 0); give it one with a[nil, :_]"
+    end
+    ax = normalize_axis(axis, "to_frame")
+    if ax == 0
+      raise ArgumentError,
+            "to_frame: axis #{axis} is the row axis (axis 0); columns are " \
+            "taken along another axis"
+    end
+    ncol = shape[ax]
+    if names.empty?
+      names = Array.new(ncol) { |j| "c#{j}" }
+    else
+      bad = names.find { |name| !name.is_a?(String) }
+      if bad
+        raise TypeError, "to_frame: a column name is a String (got #{bad.inspect})"
+      end
+      unless names.size == ncol
+        raise ArgumentError,
+              "to_frame: #{names.size} names for #{ncol} columns " \
+              "(axis #{axis} has length #{ncol})"
+      end
+      dup = names.find { |name| names.count(name) > 1 }
+      if dup
+        raise ArgumentError, "to_frame: column name #{dup.inspect} is given twice"
+      end
+    end
+    index = Array.new(ndim, nil)
+    columns = {}
+    names.each_with_index do |name, j|
+      index[ax] = j
+      columns[name] = self[*index]
+    end
+    CAFrame.new(columns)
+  end
+end

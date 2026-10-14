@@ -36,6 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: `CArray::TableMethods` (`column_names=`, `column`, `row`,
+  `rows`, `select` on a 2-D array) is removed. Show the array as a table
+  with `CArray#to_frame` instead: `a.to_frame("x", "y")` gives a CAFrame
+  whose columns are views of `a`, so `df["x"]` takes a column and
+  `df.to_records[i]` a row as a Hash.
+
+- New: `CArray#to_frame(*names, axis: -1)` shows an array as a CAFrame:
+  rows along axis 0, one column per position along `axis`, each column a
+  view of the array (a 2-D array gives 1-D columns, a larger one N-D
+  columns). Names default to `"c0"`, `"c1"`, ... A 1-D array is refused;
+  give it a column axis with `a[nil, :_]`.
+
 - Change: `CArray.load_arrow_tensor`, `CArray#save_arrow_tensor` and
   `CArray::ArrowTensor`, the experimental Arrow tensor IPC reader and
   writer, are removed.

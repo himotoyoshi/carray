@@ -6,7 +6,7 @@
 #  after autoload_method_extension is installed.  Split by intent:
 #
 #    (1) Top-level feature files under carray/ — constant class + entry
-#        methods (Serializer, TableMethods, iterators, aggregation
+#        methods (Serializer, iterators, aggregation
 #        accumulators, categorical / axis-group).
 #    (2) Single-feature method files under carray/methods/ — each first
 #        call requires its file, whose definitions overwrite the stubs
@@ -62,12 +62,6 @@ end
 
 class CARecord
   autoload_method "marshal_dump",        "carray/serialize"
-end
-
-# ---- Table (row-major dispatch helper) -------------------------------------
-
-class CArray
-  autoload :TableMethods, "carray/table"
 end
 
 # ---- Fusion (reading a lazy expression as a plan) --------------------------
@@ -165,6 +159,10 @@ autoload :CAUnion,  "carray/struct"
 
 autoload :CAFrame,      "carray/frame"
 autoload :GroupedFrame, "carray/frame"
+
+class CArray
+  autoload_method "to_frame", "carray/frame"
+end
 
 class CArray
   struct_rb = "carray/struct"
