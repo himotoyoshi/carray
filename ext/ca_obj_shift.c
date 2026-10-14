@@ -313,6 +313,9 @@ rb_ca_shift_initialize_copy (VALUE self, VALUE other)
   }
   ca_shift_setup(ca, cs->parent, shift, cs->fill, roll, fill_mask);
   ca_window_create_bounds_mask((VALUE) ca);
+  /* a copy of a mask over a stand-in gives way to the parent's mask as
+     the original does */
+  ca->mask_owner = cs->mask_owner;
 
   return self;
 }
