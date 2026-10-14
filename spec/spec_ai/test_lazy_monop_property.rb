@@ -63,7 +63,7 @@ class TestLazyMonopProperty < Test::Unit::TestCase
   # Apply a chain to an array (eager).
   def apply_eager(arr, ops)
     ops.each_with_index.inject(arr) do |acc, (op, i)|
-      acc.__send__(:"__#{op}_eager__")
+      acc.__send__(op)
     end
   end
 

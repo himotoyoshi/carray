@@ -112,11 +112,11 @@ class TestLazyMonopP12 < Test::Unit::TestCase
         a = build_sample(data_type, op_name)
         next if a.nil?
         begin
-          eager = a.__send__(:"__#{op_name}_eager__")
+          eager = a.__send__(op_name)
         rescue StandardError, NotImplementedError
           next  # kernel not implemented eagerly; lazy will also not impl
         end
-        lazy_v = a.__send__(op_name)
+        lazy_v = a.lazy.__send__(op_name)
         next unless lazy_v.is_a?(CAMonOp)
         result = lazy_v.to_ca
         unless eager.dump_binary == result.dump_binary
@@ -135,11 +135,11 @@ class TestLazyMonopP12 < Test::Unit::TestCase
         a = build_sample(data_type, op_name)
         next if a.nil?
         begin
-          eager = a.__send__(:"__#{op_name}_eager__")
+          eager = a.__send__(op_name)
         rescue StandardError, NotImplementedError
           next
         end
-        lazy_v = a.__send__(op_name)
+        lazy_v = a.lazy.__send__(op_name)
         next unless lazy_v.is_a?(CAMonOp)
         result = lazy_v.to_ca
         unless eager.dump_binary == result.dump_binary
@@ -158,11 +158,11 @@ class TestLazyMonopP12 < Test::Unit::TestCase
         a = build_sample(data_type, op_name)
         next if a.nil?
         begin
-          eager = a.__send__(:"__#{op_name}_eager__")
+          eager = a.__send__(op_name)
         rescue StandardError, NotImplementedError
           next
         end
-        lazy_v = a.__send__(op_name)
+        lazy_v = a.lazy.__send__(op_name)
         next unless lazy_v.is_a?(CAMonOp)
         result = lazy_v.to_ca
         unless eager.dump_binary == result.dump_binary

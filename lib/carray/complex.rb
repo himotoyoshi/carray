@@ -1,7 +1,7 @@
 # Complex-component accessors (real / real= / imag / imag= / real? /
-# is_real).  Loaded eagerly BEFORE carray/lazy.rb, because lazy.rb does
-# `alias_method :__real_eager__, :real` (and the imag equivalent) at load
-# time -- these defs must exist by then.
+# is_real).  Loaded eagerly BEFORE carray/lazy.rb, because lazy.rb takes
+# `instance_method(:real)` (and the imag equivalent) at load time -- these
+# defs must exist by then.
 
 class CArray
 
@@ -40,9 +40,9 @@ class CArray
   # Architecturally:
   #   - lib/carray/lazy.rb's `real`/`imag` overrides dispatch to CAMonOp
   #     when self is a lazy view, and fall through to the defs here for eager
-  #     parents (via `alias_method :__real_eager__, :real` at load time).
+  #     parents (via `instance_method(:real)` taken at load time).
   #     This file MUST be required before carray/lazy.rb (see carray.rb), and
-  #     removing these defs would break that alias and the lazy.rb load.
+  #     removing these defs would break the lazy.rb load.
   #
   #   - ext/ca_obj_stride.c recognises `CAField .real/.imag over complex`
   #     as a first-class byte-mismatched reinterpret pattern.  Architectural
