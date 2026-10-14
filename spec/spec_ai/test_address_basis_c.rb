@@ -18,6 +18,20 @@ rescue LoadError
   return
 end
 
+# A CAObject view: cells come from Ruby, a write goes to a Hash.
+class ABComputed < CAObject
+  attr_reader :written
+  def initialize (rows, cols)
+    super(CA_FLOAT64, [rows, cols])
+    @cols = cols
+    @written = {}
+  end
+  private
+  def fetch_addr (addr) = @written.fetch(addr) { ((addr * 37) % 101).to_f }
+  def store_addr (addr, val) = (@written[addr] = val)
+  def create_mask; end
+end
+
 class TestAddressBasisC < Test::Unit::TestCase
 
   def base
@@ -37,6 +51,7 @@ class TestAddressBasisC < Test::Unit::TestCase
     "grid"      => ->(r) { r[CA_INT64([0, 2, 1, 4, 3, 5]), nil] },
     "fake"      => ->(r) { CArray.int32(6, 5) { |i| (i * 7) % 50 }.fake(:float64) },
     "lazy"      => ->(r) { (r.lazy * 2) + 1 },
+    "CAObject"  => ->(r) { ABComputed.new(6, 5) },
   }
 
   def test_a_stencil_reads_across_rows_of_any_source
@@ -58,6 +73,25 @@ class TestAddressBasisC < Test::Unit::TestCase
       CArray.ab_stencil(a, out)
       assert_equal expected(a), out.to_a, name
     end
+  end
+
+  def test_a_stencil_writes_into_a_caobject
+    a = base
+    out = ABComputed.new(4, 5)
+    before = out.to_a.flatten
+    CArray.ab_stencil(a, out)
+    assert_equal expected(a), out.to_a
+    # only the cells whose value changed are sent back
+    want = expected(a).flatten
+    changed = (0...want.size).reject { |i| before[i] == want[i] }
+    assert_equal changed, out.written.keys.sort
+  end
+
+  def test_a_box_write_reaches_a_caobject_only_inside_the_box
+    o = ABComputed.new(6, 5)
+    CArray.ab_fill_box(o, 1, 2, 2, 3, -1.0)
+    assert_equal [7, 8, 9, 12, 13, 14], o.written.keys.sort
+    assert o.written.values.all? { |v| v == -1.0 }
   end
 
   def test_a_box_write_leaves_the_cells_outside_it
