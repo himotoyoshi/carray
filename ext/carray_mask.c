@@ -423,89 +423,112 @@ ca_create_mask_attach (VALUE arg)
 }
 
 CArray *
-ca_multi_parent_mask (CArray *p, CArray **standin)
+ca_mask_standin_new (CArray *parent)
 {
-  *standin = NULL;
-  if ( ! ca_has_mask(p) ) {
-    CArray *z = carray_new(CA_BOOLEAN, p->ndim, p->dim, 0, NULL);
-    MEMZERO(z->ptr, boolean8_t, z->elements);
-    if ( ca_is_readonly(p) ) {
-      ca_set_flag(z, CA_FLAG_READ_ONLY);
-    }
-    *standin = z;
-    return z;
+  CArray *z = carray_new(CA_BOOLEAN, parent->ndim, parent->dim, 0, NULL);
+  MEMZERO(z->ptr, boolean8_t, z->elements);
+  if ( ca_is_readonly(parent) ) {
+    ca_set_flag(z, CA_FLAG_READ_ONLY);
   }
-  ca_create_mask(p);
-  return p->mask;
+  return z;
 }
 
 /* A value array or a mask array: a parent that can never be given a mask,
    whose stand-in therefore stays in place for good. */
 static int
-ca_multi_parent_mask_unmaskable (CArray *p)
+ca_mask_standin_parent_unmaskable (CArray *parent)
 {
-  return ca_is_value_array(p) || ca_is_mask_array(p);
+  return ca_is_value_array(parent) || ca_is_mask_array(parent);
+}
+
+CArray *
+ca_mask_standin_current (CArray *mask_view, CArray *reading, CArray *parent,
+                         CArray *standin)
+{
+  if ( standin == NULL || reading != standin
+       || ca_mask_standin_parent_unmaskable(parent) ) {
+    return reading;
+  }
+  /* Not inside an attach window whose buffer is out: that buffer and the
+     detach to come are those of the stand-in.  The attach and allocate
+     slots run before the buffer is published, and may still give way. */
+  if ( CAVIEW(mask_view)->attach > 0 && mask_view->ptr != NULL ) {
+    return reading;
+  }
+  /* A read-only parent (a lazy expression, a broadcast) is never given a
+     mask by a write, but can still have one later through its operand or
+     root. */
+  if ( ! ca_has_mask(parent) ) {
+    return reading;
+  }
+  ca_create_mask(parent);
+  return ( parent->mask != NULL ) ? parent->mask : reading;
+}
+
+void
+ca_mask_standin_settle (CArray *parent, CArray *standin)
+{
+  volatile VALUE holder = 0;
+  boolean8_t    *z, one = 1;
+  ca_size_t     *addrs;
+  ca_size_t      i, m = 0, n;
+
+  if ( standin == NULL || ca_test_flag(standin, CA_FLAG_READ_ONLY) ) {
+    return;
+  }
+  z = (boolean8_t *) standin->ptr;
+  n = standin->elements;
+  for ( i = 0; i < n && ! z[i]; i++ ) ;
+  if ( i == n ) {
+    return;
+  }
+  if ( ca_mask_standin_parent_unmaskable(parent) ) {
+    MEMZERO(z, boolean8_t, n);
+    rb_raise(rb_eTypeError, "can not create mask array for the %s array",
+             ca_is_value_array(parent) ? "value" : "mask");
+  }
+  ca_create_mask(parent);
+  /* The trues are added to the parent's mask, not copied over it: the
+     parent may have come to have masked cells of its own meanwhile. */
+  addrs = ALLOCV_N(ca_size_t, holder, n);
+  for ( ; i < n; i++ ) {
+    if ( z[i] ) {
+      addrs[m++] = i;
+    }
+  }
+  ca_fill_addrs(parent->mask, m, addrs, &one);
+  ALLOCV_END(holder);
+  MEMZERO(z, boolean8_t, n);
+}
+
+CArray *
+ca_multi_parent_mask (CArray *p, CArray **standin)
+{
+  *standin = NULL;
+  if ( ! ca_has_mask(p) ) {
+    *standin = ca_mask_standin_new(p);
+    return *standin;
+  }
+  ca_create_mask(p);
+  return p->mask;
 }
 
 void
 ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
-                              CArray **standins, int32_t n, int for_write)
-{
-  CAMultiParent *mp = (CAMultiParent *) mask;
-  int32_t k;
-  /* Not inside an attach window: its buffer and its detach are those of
-     the parents it was opened with.  The attach and allocate slots run
-     before the buffer is published, and replace the stand-ins then. */
-  if ( standins == NULL || ( CAVIEW(mask)->attach > 0 && mask->ptr != NULL ) ) {
-    return;
-  }
-  /* A replaced stand-in stays allocated until the view is freed: a copy
-     of the mask (dup) may still point at it. */
-  /* A read-only part (a lazy expression, a broadcast) is never given a
-     mask by a write, but can still have one later through its operand or
-     root, so its stand-in gives way to a mask it has come to have. */
-  for ( k = 0; k < n; k++ ) {
-    CArray *z = standins[k];
-    if ( z == NULL || mp->parents[k] != z
-         || ca_multi_parent_mask_unmaskable(parents[k]) ) {
-      continue;
-    }
-    if ( ! ( ( for_write && ! ca_test_flag(z, CA_FLAG_READ_ONLY) )
-             || ca_has_mask(parents[k]) ) ) {
-      continue;
-    }
-    ca_create_mask(parents[k]);
-    mp->parents[k] = parents[k]->mask;
-    if ( k == 0 ) {
-      CAVIEW(mask)->parent = parents[k]->mask;
-    }
-  }
-}
-
-void
-ca_multi_parent_mask_check (CArray *mask, CArray **parents,
-                            CArray **standins, int32_t n)
+                              CArray **standins, int32_t n)
 {
   CAMultiParent *mp = (CAMultiParent *) mask;
   int32_t k;
   if ( standins == NULL ) {
     return;
   }
+  /* A replaced stand-in stays allocated until the view is freed: a copy
+     of the mask (dup) may still point at it. */
   for ( k = 0; k < n; k++ ) {
-    CArray    *z = standins[k];
-    ca_size_t  i;
-    if ( z == NULL || mp->parents[k] != z
-         || ! ca_multi_parent_mask_unmaskable(parents[k]) ) {
-      continue;
-    }
-    for ( i = 0; i < z->elements && ! ((boolean8_t *) z->ptr)[i]; i++ ) ;
-    if ( i == z->elements ) {
-      continue;
-    }
-    MEMZERO(z->ptr, boolean8_t, z->elements);
-    rb_raise(rb_eTypeError, "can not create mask array for the %s array",
-             ca_is_value_array(parents[k]) ? "value" : "mask");
+    mp->parents[k] = ca_mask_standin_current(mask, mp->parents[k], parents[k],
+                                             standins[k]);
   }
+  CAVIEW(mask)->parent = mp->parents[0];
 }
 
 typedef struct {
@@ -568,7 +591,7 @@ ca_multi_parent_mask_refuse_first (CArray *mask, CArray **parents,
   }
   for ( k = 0; k < n; k++ ) {
     if ( standins[k] != NULL && mp->parents[k] == standins[k]
-         && ca_multi_parent_mask_unmaskable(parents[k]) ) {
+         && ca_mask_standin_parent_unmaskable(parents[k]) ) {
       break;
     }
   }
@@ -601,7 +624,7 @@ ca_multi_parent_mask_refuse_first (CArray *mask, CArray **parents,
     CArray    *z = t.blanks[k];
     ca_size_t  i;
     if ( standins[k] == NULL || t.saved[k] != standins[k]
-         || ! ca_multi_parent_mask_unmaskable(parents[k]) ) {
+         || ! ca_mask_standin_parent_unmaskable(parents[k]) ) {
       continue;
     }
     for ( i = 0; i < z->elements && ! ((boolean8_t *) z->ptr)[i]; i++ ) ;
@@ -623,26 +646,20 @@ ca_multi_parent_mask_settle (CArray *mask, CArray **parents,
                              CArray **standins, int32_t n)
 {
   CAMultiParent *mp = (CAMultiParent *) mask;
-  int32_t k;
+  int32_t k, pass;
   if ( standins == NULL ) {
     return;
   }
-  ca_multi_parent_mask_check(mask, parents, standins, n);
-  for ( k = 0; k < n; k++ ) {
-    CArray    *z = standins[k];
-    ca_size_t  i;
-    if ( z == NULL || mp->parents[k] != z
-         || ca_test_flag(z, CA_FLAG_READ_ONLY)
-         || ca_multi_parent_mask_unmaskable(parents[k]) ) {
-      continue;
+  /* The parts that can have no mask first, so that a refused true leaves
+     the other parts as they were. */
+  for ( pass = 0; pass < 2; pass++ ) {
+    for ( k = 0; k < n; k++ ) {
+      if ( standins[k] == NULL || mp->parents[k] != standins[k]
+           || ca_mask_standin_parent_unmaskable(parents[k]) != ( pass == 0 ) ) {
+        continue;
+      }
+      ca_mask_standin_settle(parents[k], standins[k]);
     }
-    for ( i = 0; i < z->elements && ! ((boolean8_t *) z->ptr)[i]; i++ ) ;
-    if ( i == z->elements ) {
-      continue;
-    }
-    ca_create_mask(parents[k]);
-    ca_xfer_all(parents[k]->mask, z->ptr, CA_XFER_PUT);
-    MEMZERO(z->ptr, boolean8_t, z->elements);
   }
 }
 

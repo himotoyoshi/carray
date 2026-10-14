@@ -528,33 +528,61 @@ ca_obj_extremum_replaces (VALUE v, VALUE acc, ID op)
   return ( op == rb_intern("<") ) ? ( c < 0 ) : ( c > 0 );
 }
 
+/* Mask stand-ins.  A view whose mask covers a parent that has no mask
+   reads an all-false stand-in there instead of giving the parent one:
+   asking about the mask, or writing nothing but false into it, gives the
+   parent no mask.  The stand-in gives way to the parent's own mask once
+   the parent has one, or once a true has been written into it.  A grid
+   with holes, a window or shift that masks its out-of-range cells, and a
+   stack or meld with parts that have no mask read their masks this way;
+   a new view that does should use these three and nothing of its own.
+
+   Every entry into the cells of such a mask (each transfer, fill, attach
+   and allocate slot, and any walk that reads its parents directly) first
+   asks ca_mask_standin_current what to read; every write that may have
+   put a true into the stand-in ends with ca_mask_standin_settle. */
+
+/* A new stand-in for `parent`: all false, read-only when the parent is. */
+CArray     *ca_mask_standin_new (CArray *parent);
+
+/* What `mask_view`, now reading `reading` in place of `parent`'s mask,
+   should read: the parent's own mask once the parent has one, otherwise
+   `reading` unchanged.  Also unchanged while mask_view is attached with
+   its buffer out. */
+CArray     *ca_mask_standin_current (CArray *mask_view, CArray *reading,
+                                     CArray *parent, CArray *standin);
+
+/* After a write into `standin`: add any true it now holds to the parent's
+   mask (made for it) and clear the stand-in.  A parent that can never
+   have a mask (a value array, a mask array) refuses a true with
+   TypeError, the stand-in cleared.  Nothing for a read-only stand-in. */
+void        ca_mask_standin_settle (CArray *parent, CArray *standin);
+
+/* Whether any of n boolean cells at data is true: whether a write of
+   them can have put a true into a stand-in. */
+static inline int
+ca_mask_any_true (const void *data, ca_size_t n)
+{
+  const boolean8_t *b = (const boolean8_t *) data;
+  ca_size_t i;
+  for ( i = 0; i < n; i++ ) {
+    if ( b[i] ) return 1;
+  }
+  return 0;
+}
+
 /* The mask a multi-parent view (CAStack, CAMeld) composes for parent `p`:
-   p's own mask when it has one.  A parent without one gets an all-false
-   stand-in, stored in *standin for the view to free, so that asking the
-   view about its mask does not give the parent a mask.  The stand-in of a
-   read-only (or frozen) parent is read-only.  The stand-in of a value
-   array or a mask array, which can never carry a mask, stays in place and
-   takes writes; writing false into it changes nothing, and a true written
-   into it is refused by ca_multi_parent_mask_check. */
+   p's own mask when it has one, otherwise a stand-in
+   (ca_mask_standin_new) stored in *standin for the view to free.  The
+   stand-in of a value array or a mask array, which can never carry a
+   mask, stays in place for good. */
 CArray     *ca_multi_parent_mask (CArray *p, CArray **standin);
 
-/* Let the stand-ins of a multi-parent view's mask give way to the parents'
-   own masks.  `mask` is the view's mask (a CAStack or CAMeld over the
-   parents' masks), `parents` / `standins` the view's.  A stand-in is
-   replaced when its parent has gained a mask (a read-only parent can gain
-   one through its operand or root), or, with for_write, a writable
-   stand-in by a mask created on the parent.  The mask's own transfer
-   functions call this on entry; it does nothing inside an attach window. */
+/* ca_mask_standin_current for each part of a multi-parent view's mask.
+   `mask` is the view's mask (a CAStack or CAMeld over the parents'
+   masks), `parents` / `standins` the view's. */
 void        ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
-                                          CArray **standins, int32_t n,
-                                          int for_write);
-
-/* After a write to a multi-parent view's mask: a true written into the
-   stand-in of a value array or a mask array is cleared again and refused
-   with the TypeError a direct write would raise.  A write that runs
-   ca_multi_parent_mask_refuse_first before it never gets here with one. */
-void        ca_multi_parent_mask_check (CArray *mask, CArray **parents,
-                                        CArray **standins, int32_t n);
+                                          CArray **standins, int32_t n);
 
 /* Before a write to a multi-parent view's mask: when a parent that can
    never carry a mask (a value array, a mask array) is among the parents,
@@ -567,10 +595,8 @@ void        ca_multi_parent_mask_refuse_first (CArray *mask, CArray **parents,
                                                VALUE (*body)(VALUE),
                                                VALUE arg);
 
-/* After a write inside an attach window, which went into the stand-ins
-   the window was opened with: move what was written into a stand-in to a
-   mask created on its parent.  The next refresh then reads the parent's
-   mask in its place. */
+/* ca_mask_standin_settle for each part of a multi-parent view's mask
+   still reading its stand-in, the parts that can have no mask first. */
 void        ca_multi_parent_mask_settle (CArray *mask, CArray **parents,
                                          CArray **standins, int32_t n);
 

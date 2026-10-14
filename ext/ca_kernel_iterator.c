@@ -703,10 +703,17 @@ ca_iter_check_init (int rc)
 
 /* Attaches a CAStack's parents and keeps their buffers.  stack_n_parents
    counts the parents attached so far, so an attach that raises leaves
-   finish with exactly those to detach (promise 4). */
+   finish with exactly those to detach (promise 4).  The mask of a stack
+   reads its parts' masks, some perhaps through stand-ins: those give way
+   first, as the stack's own slots would let them. */
 static void
 ki_attach_stack_parents (ca_iter_state *st, CAStack *stack)
 {
+  if ( stack->mask_owner != NULL ) {
+    CAStack *o = (CAStack *) stack->mask_owner;
+    ca_multi_parent_mask_refresh((CArray *) stack, o->parents,
+                                 o->mask_standins, o->n_parents);
+  }
   st->stack_n_parents = 0;
   st->stack_parent_ptrs =
       (char **) xmalloc(stack->n_parents * sizeof(char *));
@@ -1512,7 +1519,7 @@ ki_open_l2 (ca_iter_state *st, CArray *src, ca_slab_policy_t policy,
     if ( ca_has_mask(src) ) {
       ca_multi_parent_mask_refresh(src->mask, stack->parents,
                                    stack->mask_standins,
-                                   stack->n_parents, 0);
+                                   stack->n_parents);
       /* Zero-filled: a slot is set once its copy is made, and finish
          frees the copies whose slot is set. */
       st->stack_parent_mask_ptrs =
