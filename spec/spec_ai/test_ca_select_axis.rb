@@ -60,18 +60,18 @@ class TestCASelectAxis < Test::Unit::TestCase
   def test_dispatch_2d_mask_with_scalar
     a = CArray.int(4, 3).seq
     m = CArray.boolean(4).tap { |__a| __a[] = [1, 0, 1, 1] }
-    v = a[m, 1]
-    assert_equal CASelectAxis, v.class
-    assert_equal [3, 1], v.dim.to_a
-    assert_equal [[1], [7], [10]], v.to_a
+    v = a[m, 1]                        # the Integer's axis is dropped
+    assert_equal CASelectAxis, v.parent.class
+    assert_equal [3], v.shape
+    assert_equal [1, 7, 10], v.to_a
   end
 
   def test_dispatch_2d_mask_with_negative_scalar
     a = CArray.int(4, 3).seq
     m = CArray.boolean(4).tap { |__a| __a[] = [1, 0, 1, 1] }
     v = a[m, -1]
-    assert_equal CASelectAxis, v.class
-    assert_equal [[2], [8], [11]], v.to_a
+    assert_equal CASelectAxis, v.parent.class
+    assert_equal [2, 8, 11], v.to_a
   end
 
   def test_dispatch_3d_mask_outer
@@ -87,11 +87,11 @@ class TestCASelectAxis < Test::Unit::TestCase
     a = CArray.int(3, 4, 2).seq
     m = CArray.boolean(3).tap { |__a| __a[] = [1, 0, 1] }
     v = a[m, 1..2, 0]
-    assert_equal CASelectAxis, v.class
-    assert_equal [2, 2, 1], v.dim.to_a
+    assert_equal CASelectAxis, v.parent.class
+    assert_equal [2, 2], v.shape
     expected = [
-      [[2], [4]],     # row 0: a[0,1,0]=2, a[0,2,0]=4
-      [[18], [20]],   # row 2: a[2,1,0]=18, a[2,2,0]=20
+      [2, 4],     # row 0: a[0,1,0]=2, a[0,2,0]=4
+      [18, 20],   # row 2: a[2,1,0]=18, a[2,2,0]=20
     ]
     assert_equal expected, v.to_a
   end
@@ -152,23 +152,20 @@ class TestCASelectAxis < Test::Unit::TestCase
     omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:_csa_bypass=)
     a = CArray.int(8, 5).seq
     m = CArray.boolean(8).tap { |__a| __a[] = [1, 0, 1, 1, 0, 1, 0, 1] }
-    # NOTE: negative-range endpoints (e.g. `1..-1`) intentionally excluded
-    # here — CSA normalises -1 to dim-1 (Ruby semantics), while CAGrid
-    # treats `1..-1` as a reverse strided range.  The CSA-only test
-    # `test_dispatch_2d_mask_with_negative_range` covers CSA's normalisation
-    # path on its own; this cross-check stays on cases where both views
-    # agree on indexer semantics.
+    # Both views read their keys through the indexer's reader, so they
+    # agree on every key form.
     [
       [m, nil],
       [m, 0..2],
+      [m, 1..-1],
       [m, 2],
     ].each do |spec|
       csa = a[*spec]
-      assert_equal CASelectAxis, csa.class
+      assert_equal CASelectAxis, (csa.class == CASelectAxis ? csa : csa.parent).class
       CArray._csa_bypass = true
       grid = a[*spec]
       CArray._csa_bypass = false
-      assert_equal CAGrid, grid.class
+      assert_equal CAGrid, (grid.class == CAGrid ? grid : grid.parent).class
       assert_equal grid.to_a, csa.to_a, "mismatch for spec=#{spec.inspect}"
     end
   end

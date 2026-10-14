@@ -14,7 +14,6 @@ class TestErrorClassForCallerErrors < Test::Unit::TestCase
   end
 
   def test_the_wrong_kind_of_argument_is_a_type_error
-    assert_raise(TypeError) { CArray.int32(3, 3).seq.grid([0, 1], [0, 1]) }
     assert_raise(TypeError) { CAMath.zero(1.0) }
   end
 

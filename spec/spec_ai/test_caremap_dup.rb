@@ -21,7 +21,7 @@ class TestCARemapDup < Test::Unit::TestCase
     end
   end
 
-  def test_same_shape_index_dup_shares_parent_and_index
+  def test_same_shape_index_dup_shares_parent
     a = CArray.int32(2, 3).seq!
     i = CArray.int64(2, 3) { 5 }
     v = a[i]
@@ -29,8 +29,9 @@ class TestCARemapDup < Test::Unit::TestCase
     assert_equal [[5] * 3] * 2, d.to_a
     a[1, 2] = 50                       # parent written: the copy sees it
     assert_equal [[50] * 3] * 2, d.to_a
-    i[0, 0] = 0                        # index written: the copy sees it too
-    assert_equal 0, d[0, 0]
+    i[0, 0] = 0                        # index written after: neither reads it
+    assert_equal 50, d[0, 0]
+    assert_equal 50, v[0, 0]
     d[1, 1] = 7                        # writing through the copy reaches a
     assert_equal 7, a[1, 2]
   end

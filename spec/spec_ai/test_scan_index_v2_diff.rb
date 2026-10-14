@@ -483,7 +483,7 @@ class TestScanIndexV2Diff < Test::Unit::TestCase
   def test_error_msg_select_mismatch
     # "mismatch of # of elements ( %lld <=> %lld ) in reference by selection"
     a = CArray.int(3, 3).seq!
-    mask = a.eq(4)   # 9 elements
+    mask = a.eq(4).flatten   # 9 elements, a 1-D selector picks by position
     e1 = (CArray.scan_index([3, 4], [mask]) rescue $!)   # 12 elements
     e2 = (CArray._scan_index_v2([3, 4], [mask]) rescue $!)
     assert_equal e1.class, e2.class

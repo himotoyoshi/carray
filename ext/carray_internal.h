@@ -631,4 +631,11 @@ VALUE ca_mv_wrap (VALUE obj, VALUE mask_obj, VALUE target_class,
                   int8_t explicit_data_type, int8_t typeless_data_type,
                   int writable);
 
+/* The indexer's reading of one non-CArray key along an axis, and of the
+   rubber marker (carray_index_classifier.c).  grid and CASelectAxis read
+   their keys through these, so a key means the same cells on every path. */
+int  ca_index_axis_key (VALUE arg, ca_size_t dim, int axis,
+                        ca_size_t *start, ca_size_t *count, ca_size_t *step);
+long ca_index_expand_rubber (int ndim, long argc, const VALUE *argv, VALUE *out);
+
 #endif /* CARRAY_INTERNAL_H */

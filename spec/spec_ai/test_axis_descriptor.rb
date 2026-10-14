@@ -49,7 +49,7 @@ class TestAxisDescriptorCSA < Test::Unit::TestCase
   def test_mask_outer_with_scalar
     a = CArray.int(4, 3).seq
     m = CArray.boolean(4).tap { |__a| __a[] = [1, 0, 1, 1] }
-    desc = a[m, 1]._describe_axes
+    desc = a[m, 1..1]._describe_axes
     assert_equal [:index,  3, [0, 2, 3]], desc[0]
     assert_equal [:stride, 1, 1, 1],      desc[1]
   end

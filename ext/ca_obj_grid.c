@@ -180,16 +180,15 @@ ca_grid_check_protos (CArray *parent, int8_t ndim, const cag_axis_t *protos)
     if (protos[k].kind == CAG_AXIS_STRIDE) {
       ca_size_t first = protos[k].start;
       ca_size_t last  = first + (protos[k].count - 1) * protos[k].step;
-      CA_CHECK_INDEX(first, parent->dim[k]);
-      if (protos[k].count > 1) CA_CHECK_INDEX(last, parent->dim[k]);
+      ca_index_in_range_at(first, parent->dim[k], k);
+      if (protos[k].count > 1) ca_index_in_range_at(last, parent->dim[k], k);
     }
     else {
       for (j = 0; j < protos[k].count; j++) {
-        ca_size_t v = protos[k].indices[j];
         if ( protos[k].holes && protos[k].holes[j] ) {
           continue;
         }
-        CA_CHECK_INDEX(v, parent->dim[k]);
+        ca_index_in_range_at(protos[k].indices[j], parent->dim[k], k);
       }
     }
   }
@@ -1129,41 +1128,6 @@ rb_ca_grid_new (VALUE cary, int8_t ndim, cag_axis_t *protos)
   return obj;
 }
 
-/* Detect a plain Ruby Range (Integer first/last, exclude_end?, step=1
-   implicit) and convert it to STRIDE (start, count, step=1).
-   Returns 1 on success (fills *out_start, *out_count), 0 on fallback
-   (caller should materialise to INDEX).  Negative endpoints are
-   normalised against dim_size like everywhere else in CArray. */
-static int
-cag_range_to_stride (VALUE range, ca_size_t dim_size,
-                     ca_size_t *out_start, ca_size_t *out_count)
-{
-  VALUE rb_first, rb_last;
-  ca_size_t first, last, count;
-  int exclude_end;
-
-  if ( ! rb_obj_is_kind_of(range, rb_cRange) ) return 0;
-  rb_first = rb_funcall(range, rb_intern("first"), 0);
-  rb_last  = rb_funcall(range, rb_intern("last"),  0);
-  if ( ! FIXNUM_P(rb_first) || ! FIXNUM_P(rb_last) ) return 0;
-  exclude_end = RTEST(rb_funcall(range, rb_intern("exclude_end?"), 0));
-
-  first = NUM2SIZE(rb_first);
-  last  = NUM2SIZE(rb_last);
-  if (first < 0) first += dim_size;
-  if (last  < 0) last  += dim_size;
-  if (exclude_end) last -= 1;
-
-  if (first < 0 || first >= dim_size) return 0;
-  if (last  < first - 1)              return 0;   /* empty range */
-  if (last  >= dim_size)              return 0;
-  count = last - first + 1;
-
-  *out_start = first;
-  *out_count = count;
-  return 1;
-}
-
 /* The INDEX axes of rb_ca_grid, read with their index arrays attached,
    and the view built from them. */
 
@@ -1202,47 +1166,72 @@ ca_grid_build_body (VALUE arg)
   return rb_ca_grid_new(c->self, c->ca->ndim, c->protos);
 }
 
+/* A key that is an Integer picks one cell along its axis, and that axis is
+   not in the result -- as it is not in a block reference.  The view is
+   built with the axis at length 1 and the axis then dropped. */
+static VALUE
+ca_grid_drop_scalar_axes (VALUE obj, int argc, VALUE *argv)
+{
+  VALUE idx[CA_RANK_MAX];
+  int i, any = 0;
+  for (i = 0; i < argc; i++) {
+    if ( rb_obj_is_kind_of(argv[i], rb_cInteger) ) {
+      idx[i] = INT2FIX(0);
+      any = 1;
+    }
+    else {
+      idx[i] = Qnil;
+    }
+  }
+  if ( ! any ) {
+    return obj;
+  }
+  return rb_ca_fetch2(obj, argc, idx);
+}
+
+/* ca[k0, k1, ...] with a CArray among the keys.  An integer CArray picks
+   the cells it lists along its axis, a boolean one the cells it marks (it
+   must be as long as the axis).  Every other key is read as the indexer
+   reads it (ca_index_axis_key): an Integer picks one cell and drops the
+   axis, a Range / ArithmeticSequence / Array form a run, nil the axis. */
 VALUE
 rb_ca_grid (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE obj, ridx, rval;
+  volatile VALUE obj, rval;
   volatile VALUE list = rb_ary_new();
   CArray *ca;
   CArray *ci[CA_RANK_MAX];          /* CAWrap holders for INDEX axes; NULL for STRIDE */
   cag_axis_t protos[CA_RANK_MAX];
+  VALUE expanded[CA_RANK_MAX];
+  long n;
   ca_size_t i;
-
-  /* Dispatch hook: route mixed AP + single boolean to CASelectAxis
-     (slab-copy optimised path).  Falls through to per-cell CAGrid gather
-     when not eligible (integer index, multiple INDIRECT axes, indirect
-     not on axis 0).  Inline argv[0] type check avoids the function call
-     when axis 0 is nil/Integer (most patterns with INDIRECT on inner axes). */
-  extern int ca_csa_dispatch_bypass;
-  if ( ! ca_csa_dispatch_bypass && argc > 0 && TYPE(argv[0]) == T_DATA ) {
-    if ( rb_ca_select_axis_eligible_p(argc, argv, self) ) {
-      return rb_ca_select_axis(argc, argv, self);
-    }
-  }
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  ridx = rb_ary_new4(argc, argv);
+  n = ca_index_expand_rubber(ca->ndim, argc, argv, expanded);
+  if ( n >= 0 ) {
+    argc = (int) n;
+    argv = expanded;
+  }
 
-  if ( RARRAY_LEN(ridx) > ca->ndim ) {
+  if ( argc > ca->ndim ) {
     rb_raise(rb_eArgError, "# of arguments doesn't equal to the ndim");
   }
-  else if ( RARRAY_LEN(ridx) < ca->ndim ) {
+  else if ( argc < ca->ndim ) {
     volatile VALUE ref;
     CArray *cv;
     ca_size_t rdim[CA_RANK_MAX];
-    ca_size_t rndim = RARRAY_LEN(ridx);
+    ca_size_t rndim = argc;
     ca_size_t j = 0, k;
     for (i=0; i<rndim; i++) {
-      rval = rb_ary_entry(ridx, i);
+      rval = argv[i];
       if ( rb_obj_is_carray(rval) ) {
         TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
         rdim[i] = 1;
         for (k=0; k<cv->ndim; k++) {
+          if ( j >= ca->ndim ) {
+            rb_raise(rb_eArgError, "invalid total ndim of args");
+          }
           rdim[i] *= ca->dim[j];
           j += 1;
         }
@@ -1259,44 +1248,43 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
     return rb_ca_grid(argc, argv, ref);
   }
 
-  /* Build per-axis protos:
-     nil    -> STRIDE(0, parent.dim, 1), no CArray
-     Range  -> STRIDE if plain integer Range, else fall through to INDEX
-     CArray -> INDEX with indices = (ca_size_t*)ca_wrap_readonly(...)->ptr */
+  /* Dispatch hook: route a boolean on axis 0 with plain keys elsewhere to
+     CASelectAxis (slab-copy optimised path).  Falls through to CAGrid when
+     not eligible.  The inline argv[0] type check avoids the call when axis
+     0 is nil / Integer (most patterns with the CArray on an inner axis). */
+  extern int ca_csa_dispatch_bypass;
+  if ( ! ca_csa_dispatch_bypass && argc > 0 && TYPE(argv[0]) == T_DATA ) {
+    if ( rb_ca_select_axis_eligible_p(argc, argv, self) ) {
+      return ca_grid_drop_scalar_axes(rb_ca_select_axis(argc, argv, self),
+                                      argc, argv);
+    }
+  }
+
   for (i = 0; i < ca->ndim; i++) {
     ca_size_t dim_size = ca->dim[i];
-    rval = rb_ary_entry(ridx, i);
+    rval = argv[i];
     ci[i] = NULL;
-    if ( NIL_P(rval) ) {
+    if ( ! rb_obj_is_carray(rval) ) {
+      ca_size_t start, count, step;
+      ca_index_axis_key(rval, dim_size, (int) i, &start, &count, &step);
       protos[i].kind    = CAG_AXIS_STRIDE;
-      protos[i].count   = dim_size;
-      protos[i].start   = 0;
-      protos[i].step    = 1;
+      protos[i].count   = count;
+      protos[i].start   = start;
+      protos[i].step    = step;
       protos[i].indices = NULL;
       protos[i].holes   = NULL;
       continue;
     }
-    if ( rb_obj_is_kind_of(rval, rb_cRange) ) {
-      ca_size_t start, count;
-      if ( cag_range_to_stride(rval, dim_size, &start, &count) ) {
-        protos[i].kind    = CAG_AXIS_STRIDE;
-        protos[i].count   = count;
-        protos[i].start   = start;
-        protos[i].step    = 1;
-        protos[i].indices = NULL;
-        protos[i].holes   = NULL;
-        continue;
+    if ( rb_ca_is_boolean_type(rval) ) {
+      CArray *cb;
+      TypedData_Get_Struct(rval, CArray, &carray_data_type, cb);
+      if ( cb->elements != dim_size ) {
+        rb_raise(rb_eArgError,
+                 "mismatch of # of elements ( %lld <=> %lld ) in reference "
+                 "by selection on axis %d",
+                 (long long) cb->elements, (long long) dim_size, (int) i);
       }
-      /* fallback: materialise to integer array */
-      rval = rb_funcall(rb_mKernel, rb_intern("CA_SIZE"), 1, rval);
-    }
-    else if ( rb_obj_is_carray(rval) ) {
-      if ( rb_ca_is_boolean_type(rval) ) {
-        rval = rb_ca_where(rval);
-      }
-    }
-    else if ( TYPE(rval) == T_ARRAY ) {
-      rb_raise(rb_eTypeError, "grid: an axis is an Integer, a Range, nil or a CArray of indices (got Array)");
+      rval = rb_ca_where(rval);
     }
 
     /* INDEX axis: converted here, read once the window below opens */
@@ -1322,7 +1310,7 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
                            (VALUE) &c);
   }
 
-  return obj;
+  return ca_grid_drop_scalar_axes(obj, argc, argv);
 }
 
 static VALUE

@@ -441,8 +441,9 @@ rb_ca_remap_new (VALUE cary, VALUE rmapper)
 }
 
 /* Read-only accessor for the per-cell index CArray that defines this
-   CARemap's mapping.  Returns the same CArray VALUE the caller passed
-   to ca[mapper] (= shared reference, not a copy).  Companion to
+   CARemap's mapping: the array the view reads.  For ca[mapper] it is a
+   copy of mapper taken at the call, so a later change to mapper does
+   not reach the view.  Companion to
    CABlock#start / CAStride#strides / CAWindow#count etc. — the view
    hierarchy is preserved so each named view class exposes its own
    defining semantic state. */

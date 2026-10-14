@@ -20,14 +20,14 @@ COUNTS = {
   "ca_obj_block.c" => 1,
   "ca_obj_const_string.c" => 2,
   "ca_obj_meld.c" => 1,
-  "ca_obj_select_axis.c" => 5,
+  "ca_obj_select_axis.c" => 2,
   "ca_obj_stack.c" => 1,
   "ca_obj_stride.c" => 1,
   "ca_obj_tile.c" => 1,
   "ca_obj_window.c" => 1,
-  "carray_access.c" => 18,
+  "carray_access.c" => 17,
   "carray_element.c" => 2,
-  "carray_index_classifier.c" => 13,
+  "carray_index_classifier.c" => 14,  # + a Bignum key, which has no ca_size_t for the part
   "carray_test.c" => 1,
   "carray_utils.c" => 4,
 }.freeze

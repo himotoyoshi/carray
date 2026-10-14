@@ -951,8 +951,13 @@ rb_ca_initialize (int argc, VALUE *argv, VALUE self)
          with the multi-dimensional subscript yielded as individual
          integer arguments, so |i|, |i,j|, |i,j,k| all work uniformly
          across ranks.  Block forms that want the whole subscript as
-         an Array should write |*idx|. */
-    if ( rb_proc_arity(rb_block_proc()) == 0 ) {
+         an Array should write |*idx|.
+       An array of no cells calls neither, as Array.new(0) { ... } does
+       not. */
+    if ( ca->elements == 0 ) {
+      ;
+    }
+    else if ( rb_proc_arity(rb_block_proc()) == 0 ) {
       volatile VALUE rval = rb_yield_values2(0, NULL);
       rb_ca_store_all(self, rval);
     }
