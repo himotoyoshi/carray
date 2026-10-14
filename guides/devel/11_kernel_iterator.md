@@ -32,8 +32,8 @@ mechanically pins the frozen names.
   family;
 - the raw entry points the macros expand to — `ca_iter_state_init_l1`,
   `ca_iter_state_init_l2`, `ca_iter_state_next_slab`,
-  `ca_iter_state_next_slab_strided`, `ca_iter_state_next_slab_axes`,
-  `ca_iter_state_sync_slab`, `ca_iter_state_finish`;
+  `ca_iter_state_next_slab_axes`, `ca_iter_state_sync_slab`,
+  `ca_iter_state_finish`;
 - the tokens authors write literally — `CA_SLAB_AXES`, `CA_SLAB_WHOLE`,
   `CA_SLAB_FREE`, `CA_KERNEL_WRITE`, `CA_KERNEL_NO_MASK`,
   `CA_KERNEL_FIBER_CONTIG`, `CA_KERNEL_CHUNK_HINT`, `CA_ITER_OK`,
@@ -47,7 +47,7 @@ mechanically pins the frozen names.
   (accumulator), `idx` (flat slab index), `first` (first-unmasked flag).
 
 **Internal** (refactor freely): the state-machine bodies (`init_l1` /
-`next_slab` / `next_slab_strided` / `ca_iter_route_source` /
+`next_slab` / `ca_iter_route_source` /
 `ca_iter_can_alias` internals), the `alias_mode` / `src_kind` routing
 constants (`CA_ITER_ALIAS_*` / `CA_ITER_SRC_*`), and every non-frozen
 `ca_iter_state` field (scratch, fiber-cache, descriptor cache, stack-tile
@@ -240,12 +240,6 @@ int  ca_iter_state_next_slab         (ca_iter_state *st,
                                       boolean8_t   **out_mask,
                                       ca_size_t     *out_n);
 
-int  ca_iter_state_next_slab_strided (ca_iter_state *st,
-                                      char         **out_ptr,
-                                      boolean8_t   **out_mask,
-                                      ca_size_t     *out_n,
-                                      ca_size_t     *out_stride_bytes);
-
 int  ca_iter_state_next_slab_axes    (ca_iter_state *st,
                                       char         **out_ptr,
                                       boolean8_t   **out_mask);
@@ -269,26 +263,24 @@ int  ca_iter_can_alias (void *ap, int level);   /* level = 1 | 2 | 3 */
   buffer); descriptor views and `CA_ITER_SRC_ATTACH` views → scratch;
   a source the classifier does not recognise → `CA_ITER_ERR_NOT_CHEAP`.
   `init_l1` takes `CA_SLAB_WHOLE` only.
-- **`init_l2`** prepares an **L2 strided** walk. The kernel sees per-slab
-  pointers with an explicit byte stride argument. Source routing covers
-  entity / CAStride contig (alias, stride = `bytes`), CAStride non-contig
-  (alias, multi-slab walk over prefix axes, no scratch), and the
-  descriptor-framework views (CAGrid / CASelect / CAMapping / CAWindow /
-  CAShift / CSA) via the per-axis-descriptor engine.
+- **`init_l2`** prepares an **L2 strided** walk over the axes you name.
+  The kernel sees per-slab pointers and reads the byte strides from the
+  state. Source routing covers entity / CAStride contig (alias),
+  CAStride non-contig (alias, no scratch), and the descriptor-framework
+  views (CAGrid / CASelect / CAMapping / CAWindow / CAShift / CSA) via the
+  per-axis-descriptor engine. `init_l2` takes `CA_SLAB_AXES` only; to
+  walk the array one strided row at a time, name the last axis.
 
 `init_l2` is the entry point modern kernels use; `init_l1` is kept for
 strictly contig-only paths.
 
-### The three `next_slab*` callees
+### The two `next_slab*` callees
 
-The three pull variants correspond to three slab grains. **Use the one
+The two pull variants correspond to two slab grains. **Use the one
 that matches your init**:
 
 - `ca_iter_state_next_slab` — paired with `init_l1`. Yields one whole
   contig 1-D slab (the whole array in step 1; later phases may chunk it).
-- `ca_iter_state_next_slab_strided` — paired with `init_l2` for the
-  legacy strided walk: the kernel walks `*out_n` cells stepping
-  `*out_stride_bytes` per cell, mask in lockstep.
 - `ca_iter_state_next_slab_axes` — paired with `init_l2(... CA_SLAB_AXES,
   axes, naxes, ...)`. This is the K-D slab API: the kernel reads
   `st.slab_dims[]` / `st.slab_strides[]` (constant across the walk) and
@@ -388,7 +380,7 @@ the same walk in three lines.
 
 ## Slab policies
 
-`policy` to `init_l2`:
+`policy` to `init_l1` / `init_l2`:
 
 ```c
 typedef enum {
@@ -399,8 +391,9 @@ typedef enum {
 ```
 
 `CA_SLAB_AXES` is the workhorse — it is what gives reductions / scans /
-maps their per-axis semantics. `CA_SLAB_WHOLE` is the L1 entry point for
-"give me everything as one contig run". `CA_SLAB_FREE` is reserved for
+maps their per-axis semantics, and the only policy `init_l2` takes.
+`CA_SLAB_WHOLE` is the L1 entry point for "give me everything as one
+contig run"; `init_l2` refuses it with `CA_ITER_ERR_POLICY`. `CA_SLAB_FREE` is reserved for
 a chunk-hinted walk; init returns `CA_ITER_ERR_POLICY` for it.
 
 ## Kernel flags

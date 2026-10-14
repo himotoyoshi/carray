@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: C extensions: `ca_iter_state_next_slab_strided` is removed,
+  and `ca_iter_state_init_l2` takes `CA_SLAB_AXES` only (`CA_SLAB_WHOLE`
+  returns `CA_ITER_ERR_POLICY`). The walk it gave, one strided run per
+  innermost row, is `ca_iter_state_init_l2` with `CA_SLAB_AXES` and the
+  last axis, read with `ca_iter_state_next_slab_axes` (`st->slab_dims[0]`
+  cells, `st->slab_strides[0]` bytes apart). The whole array as one
+  contiguous run is `CA_FOR_EACH_WHOLE`.
+
 - New: in a `CAFrame.from_csv` reading block, a header read with a name,
   as `r.header(:units)`, gives each column an attribute of that name:
   `df["temp"].attr(:units)` answers that column's field of the line. An

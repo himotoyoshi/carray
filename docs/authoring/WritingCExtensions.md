@@ -2142,8 +2142,8 @@ related kernels are built on.
 
 ### 12.2 A glimpse of the code
 
-A reduction-style kernel looks roughly like this (Float64, sum over a
-chosen set of axes):
+A reduction-style kernel looks roughly like this (Float64, sum along one
+chosen axis):
 
 ```c
 static VALUE
@@ -2161,23 +2161,25 @@ rb_ca_sum_ki (int argc, VALUE *argv, VALUE self)
   VALUE   vout = rb_ca_new_reduced(self, axes, naxes, CA_FLOAT64);
   CArray *out; GetCArray(vout, out);
 
-  ca_iter_state_t st;
-  ca_iter_init_l2(&st, ca, CA_SLAB_AXES, axes, naxes, 0);
+  ca_iter_state st;
+  ca_iter_state_init_l2(&st, ca, CA_SLAB_AXES, axes, naxes, 0);
 
   ca_attach(out);
   double *op = (double *)out->ptr;
   ca_size_t outer = 0;
 
-  const char *p; ca_size_t n, stride;
-  while (ca_iter_next_slab_strided(&st, &p, &n, &stride)) {
+  char *p;
+  while (ca_iter_state_next_slab_axes(&st, &p, NULL)) {
+    /* one slab axis: slab_dims[0] cells, slab_strides[0] bytes apart */
+    ca_size_t n = st.slab_dims[0], stride = st.slab_strides[0];
     double acc = 0.0;
     for (ca_size_t i = 0; i < n; i++) {
       acc += *(const double *)(p + i * stride);
     }
     op[outer++] = acc;
   }
-  ca_iter_finish(&st);
-  ca_sync(out); ca_detach(out);
+  ca_iter_state_finish(&st);
+  ca_sync_detach(out);
   return vout;
 }
 ```

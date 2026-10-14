@@ -12,7 +12,7 @@
 # pins behaviour that is correct -- `test_sound_` for the invariant the
 # working half rests on, and plain names for what has since been fixed.
 #
-# The invariant that makes the sound cells sound: under CA_SLAB_WHOLE the
+# The invariant that makes the sound cells sound: in a whole-array walk the
 # gather extent and the scatter extent are the same, so what was collected
 # is what gets pushed back.  Every broken cell below is a CA_SLAB_AXES path
 # that broke that equality -- it gathers slab-sized or fiber-sized and then
@@ -194,8 +194,8 @@ class TestIterWriteBack < Test::Unit::TestCase
     end
   end
 
-  # next_slab_strided hands out the mask on every source the WHOLE walk
-  # takes; on an entity and a CAStride it used to give none.
+  # An L2 walk hands out the mask on every source; on an entity and a
+  # CAStride the strided walk used to give none.
   def test_a_strided_walk_hands_out_the_mask
     {
       "entity"    => ->(b) { b },
@@ -301,6 +301,14 @@ class TestIterWriteBack < Test::Unit::TestCase
     assert_equal 2, CArray.iw_init_rc(base[base.gt(0)], 1, WRITE), "1-D view, axis 1"
     assert_equal 0, CArray.iw_init_rc(base.shift(1, 0), 0, WRITE), "shift + WRITE"
     assert_equal 0, CArray.iw_init_rc(base.shift(1, 0), 0, 0), "shift READ is fine"
+  end
+
+  # init_l2 walks named axes only.  The whole array is init_l1's walk, and
+  # one strided run per innermost row is CA_SLAB_AXES with the last axis.
+  def test_init_l2_refuses_the_whole_array_policy
+    [base, base.transpose, base[CA_INT64([0, 2]), nil], base.fake(:int32)].each do |v|
+      assert_equal 2, CArray.iw_l2_whole_rc(v), v.class.name
+    end
   end
 
   # The header promises CA_ITER_ERR_FLAGS for a NULL source.

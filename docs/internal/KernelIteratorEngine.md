@@ -16,14 +16,13 @@ The description is of the engine as it stands; the route table in §4 was taken 
 
 ## 0. The question, and how to check an answer
 
-**The question.** For a source `v`, a walk (one of the four below) and a direction (read or write): which way does the engine deliver the cells, and who keeps each promise of §6 on that way?
+**The question.** For a source `v`, a walk (one of the three below) and a direction (read or write): which way does the engine deliver the cells, and who keeps each promise of §6 on that way?
 
-The four walks a kernel can ask for:
+The three walks a kernel can ask for:
 
 | walk | entry | what the kernel receives |
 |---|---|---|
 | L1 whole | `ca_iter_state_init_l1(…, CA_SLAB_WHOLE, …)` + `next_slab` (`CA_FOR_EACH_WHOLE`) | the whole view, as one contiguous slab |
-| L2 whole | `ca_iter_state_init_l2(…, CA_SLAB_WHOLE, …)` + `next_slab_strided` | the view as 1-D strided runs in row-major order: one run per innermost row where the walk reads memory in place (§3.2, §3.3), the whole view as one run where it reads a scratch |
 | slab axes | `init_l2(…, CA_SLAB_AXES, axes, …)` + `next_slab_axes` (`CA_FOR_EACH_SLAB`) | one slab per index of the other axes, walked with `slab_strides` |
 | fiber | slab axes with one axis and `CA_KERNEL_FIBER_CONTIG` (`CA_FOR_EACH_FIBER`) | one contiguous fiber per index of the other axes |
 
@@ -42,7 +41,7 @@ CArray.iw_route(b[CA_INT64([2, 0]), nil, nil], 3, 0, true)
 #    the same walk as a write goes by transfer
 ```
 
-`walk` is 0 = L1 whole, 1 = L2 whole, 2 = slab axis, 3 = fiber. The numbers are the `CA_ITER_SRC_*` and `CA_ITER_ALIAS_*` constants of `ext/ca_kernel_iterator.h`.
+`walk` is 0 = L1 whole, 2 = slab axis, 3 = fiber (4 = two slab axes, the given one and the last). The numbers are the `CA_ITER_SRC_*` and `CA_ITER_ALIAS_*` constants of `ext/ca_kernel_iterator.h`.
 
 ---
 
@@ -116,8 +115,6 @@ The parent is attached (`st->root`) and the descriptor engine (`ca_axis_dispatch
 | walk | case | `alias_mode` |
 |---|---|---|
 | L1 whole | any | `NONE`: the view gathered into scratch by `ca_axis_dispatch_gather` |
-| L2 whole | innermost axis a stride, no SHIFT outer axis | `STRIDED` over the parent, the outer prefix walked with the classified prefix |
-| L2 whole | otherwise | `NONE`, as L1 |
 | slab axes | all slab axes STRIDE, no outer SHIFT | `STRIDED` over the parent |
 | slab axes | an outer axis is SHIFT, or a SHIFT slab axis that leaves the innermost axis out | `NONE`: the whole view gathered, then walked with row-major strides |
 | slab axes, read | a slab axis is INDEX or SHIFT (other than the above) | `PER_SLAB`: one slab gathered at a time; `PER_SLAB_HOIST` when the innermost slab axis is a stride and no axis is SHIFT (a slab of two or more axes) |
@@ -157,21 +154,21 @@ Every shortcut in the engine carries a name tag in a comment beside its code: th
 
 Taken with `iw_route` (§0) on `b = CArray.float64(3, 4, 5).seq!`. R = read, W = write; `+g` = the fiber was gathered into the fiber scratch (it is not contiguous where it lies). Where read and write agree only one is given.
 
-| source | L1 whole | L2 whole | slab axis | fiber |
-|---|---|---|---|---|
-| `b`, `b[1..2, nil, nil]`, `b.reshape(12, 5)` | CONTIG | CONTIG | CONTIG | CONTIG (`+g` off the last axis) |
-| `b[nil, 1..2, 1..3]`, `b.transpose` | CAStride `NONE` (copy) | STRIDED | STRIDED | STRIDED (`+g` where not contiguous) |
-| `b[CA_INT64([2, 0]), nil, nil]` (grid, INDEX on axis 0) | descriptor `NONE` | descriptor STRIDED (alias) | axis 0: R `PER_SLAB`, W transfer; others: STRIDED | as slab axis |
-| `b[nil, nil, CA_INT64([4, 0, 2])]` (grid, INDEX innermost) | descriptor `NONE` | descriptor `NONE` | axis 2: R `PER_SLAB`, W transfer; others: STRIDED | as slab axis |
-| `b[CA_BOOLEAN([1, 0, 1]), nil, nil]` (select axis) | descriptor `NONE` | descriptor STRIDED (alias) | STRIDED | STRIDED |
-| `b.window(0..1, 1..3, 2..4)` (in bounds) | descriptor `NONE` | descriptor STRIDED (alias) | STRIDED | STRIDED |
-| `b.shift(1, 0, 0)`, `b.window(-1..1, nil, nil)` (SHIFT on axis 0) | descriptor `NONE` | descriptor `NONE` | axis 0: R `NONE` (whole view), W transfer; others: `NONE` | as slab axis |
-| `b.shift(0, 0, 1)` (SHIFT innermost) | descriptor `NONE` | descriptor `NONE` | axes 0, 1: `NONE` (outer SHIFT); axis 2: R `PER_SLAB`, W transfer | `PER_FIBER_FUSED` on every axis |
-| `b.swap_bytes`, `b.roll(1, 0, 0)`, `b.tile(1, 2, 1)`, CAMeld | transfer | transfer | transfer | transfer |
-| `CArray.int32(3,4,5).fake(:float64)` | transfer | transfer | transfer | axis 2: `PER_FIBER_FUSED`; others: transfer |
-| `CArray.stack(…)` over three slices | transfer | transfer | axis 0: R `STACK`; axes 1, 2: R `STACK_OUTER_K`; W transfer | as slab axis |
-| a grid over a fake | transfer | transfer | transfer | transfer |
-| `b.lazy * 2` | transfer | transfer | transfer | transfer (W refused: read-only) |
+| source | L1 whole | slab axis | fiber |
+|---|---|---|---|
+| `b`, `b[1..2, nil, nil]`, `b.reshape(12, 5)` | CONTIG | CONTIG | CONTIG (`+g` off the last axis) |
+| `b[nil, 1..2, 1..3]`, `b.transpose` | CAStride `NONE` (copy) | STRIDED | STRIDED (`+g` where not contiguous) |
+| `b[CA_INT64([2, 0]), nil, nil]` (grid, INDEX on axis 0) | descriptor `NONE` | axis 0: R `PER_SLAB`, W transfer; others: STRIDED | as slab axis |
+| `b[nil, nil, CA_INT64([4, 0, 2])]` (grid, INDEX innermost) | descriptor `NONE` | axis 2: R `PER_SLAB`, W transfer; others: STRIDED | as slab axis |
+| `b[CA_BOOLEAN([1, 0, 1]), nil, nil]` (select axis) | descriptor `NONE` | STRIDED | STRIDED |
+| `b.window(0..1, 1..3, 2..4)` (in bounds) | descriptor `NONE` | STRIDED | STRIDED |
+| `b.shift(1, 0, 0)`, `b.window(-1..1, nil, nil)` (SHIFT on axis 0) | descriptor `NONE` | axis 0: R `NONE` (whole view), W transfer; others: `NONE` | as slab axis |
+| `b.shift(0, 0, 1)` (SHIFT innermost) | descriptor `NONE` | axes 0, 1: `NONE` (outer SHIFT); axis 2: R `PER_SLAB`, W transfer | `PER_FIBER_FUSED` on every axis |
+| `b.swap_bytes`, `b.roll(1, 0, 0)`, `b.tile(1, 2, 1)`, CAMeld | transfer | transfer | transfer |
+| `CArray.int32(3,4,5).fake(:float64)` | transfer | transfer | axis 2: `PER_FIBER_FUSED`; others: transfer |
+| `CArray.stack(…)` over three slices | transfer | axis 0: R `STACK`; axes 1, 2: R `STACK_OUTER_K`; W transfer | as slab axis |
+| a grid over a fake | transfer | transfer | transfer |
+| `b.lazy * 2` | transfer | transfer | transfer (W refused: read-only) |
 
 ---
 
@@ -179,7 +176,7 @@ Taken with `iw_route` (§0) on `b = CArray.float64(3, 4, 5).seq!`. R = read, W =
 
 A development build run with `CARRAY_GENERAL_PATH=2` switches the fast paths off (as `1` does) and makes the classifier return `SRC_ATTACH` for every source, so every walk is the transfer walk of §3.1. `CArray.__iter_by_transfer_only__` says which run a test is in; `rake spec_ai_transfer` runs the suite that way. `rake spec_ai`, `spec_ai_general` and `spec_ai_transfer` together compare every route with its general route and with the transfer walk.
 
-`spec/spec_ai/test_iter_delivery_matrix.rb` is the test the three runs are meant to compare: parents (entity, transpose, block, stepped block, reshape, grid, fake, swap, stack, meld, roll) × views × masked or not × the four walks, read and write. It checks the cells and mask flags the kernel received against the view's `copy`, and a write against a store of the same values through the same view.
+`spec/spec_ai/test_iter_delivery_matrix.rb` is the test the three runs are meant to compare: parents (entity, transpose, block, stepped block, reshape, grid, fake, swap, stack, meld, roll) × views × masked or not × the walks, read and write. It checks the cells and mask flags the kernel received against the view's `copy`, and a write against a store of the same values through the same view.
 
 The direction matters for the reference. On a read it is a plain `ca_xfer_all` GET. On a write it is GET, the kernel, then **only the changed cells** PUT — not a plain PUT, which on a view that shows the same root cell twice would let the position the kernel did not write overwrite the one it did.
 
@@ -192,7 +189,7 @@ The direction matters for the reference. On a read it is a plain `ca_xfer_all` G
 
 Each detector was checked by breaking the engine on purpose: a CAStack parent not detached, its tile cache not freed, a CAStack read creating a parent's mask, the object scratch not held for the GC, and the redirect of a descriptor view over a parent that lends no memory removed. Each break fails its detector; the last fails the partial-request detector and the GC detector both, because without the redirect such a view is gathered from the attached parent, whose buffer the walk does not hold for the GC.
 
-Tests that assert the route itself (an `alias_mode`, the number of slabs a whole walk yields, that `row.dup` in `each_slab` shows the row of its iteration) are skipped in the `2` run; they are true of the routes, not of the surface.
+Tests that assert the route itself (an `alias_mode`, the number of slabs a walk yields, that `row.dup` in `each_slab` shows the row of its iteration) are skipped in the `2` run; they are true of the routes, not of the surface.
 
 ---
 

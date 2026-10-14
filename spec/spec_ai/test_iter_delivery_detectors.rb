@@ -189,7 +189,7 @@ class TestIterDeliveryDetectors < Test::Unit::TestCase
         walks(v).each do |mode, ax, name|
           exp = slab_addresses(v.shape, mode, ax).map { |s| s.map { |a| cells[a] } }
           got = under_gc_stress { CArray.iw_read_cells(v, mode, ax) }
-          got = [got.flatten(1)] if mode < 2
+          got = [got.flatten(1)] if mode == 0
           assert_equal exp, got, "#{vn} of #{sn}: #{name} axis #{ax}"
           cases += 1
         end

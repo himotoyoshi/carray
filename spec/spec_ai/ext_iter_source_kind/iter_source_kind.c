@@ -451,14 +451,19 @@ noxfer_walks_body (VALUE arg)
   char *p;
   boolean8_t *m;
   ca_size_t n, sb;
+  int8_t rax, oax;
 
   GetCArray(w->rsrc, r);
   GetCArray(w->wsrc, o);
-  ca_iter_check_init(ca_iter_state_init_l2(&w->st[0], r, CA_SLAB_WHOLE,
-                                           NULL, 0, 0));
-  ca_iter_check_init(ca_iter_state_init_l2(&w->st[1], o, CA_SLAB_WHOLE,
-                                           NULL, 0, CA_KERNEL_WRITE));
-  while ( ca_iter_state_next_slab_strided(&w->st[1], &p, &m, &n, &sb) ) {
+  rax = (int8_t) (r->ndim - 1);
+  oax = (int8_t) (o->ndim - 1);
+  ca_iter_check_init(ca_iter_state_init_l2(&w->st[0], r, CA_SLAB_AXES,
+                                           &rax, 1, 0));
+  ca_iter_check_init(ca_iter_state_init_l2(&w->st[1], o, CA_SLAB_AXES,
+                                           &oax, 1, CA_KERNEL_WRITE));
+  while ( ca_iter_state_next_slab_axes(&w->st[1], &p, &m) ) {
+    n  = w->st[1].slab_dims[0];
+    sb = w->st[1].slab_strides[0];
     for ( ca_size_t i = 0; i < n; i++ ) {
       *(int32_t *) (p + i * sb) = 0;
     }

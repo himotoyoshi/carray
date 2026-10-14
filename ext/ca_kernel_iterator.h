@@ -35,7 +35,7 @@
 
     INTERNAL (free to refactor across 3.x — engine implementation):
       - the state-machine functions' bodies + init_l1 / next_slab /
-        next_slab_strided / ca_iter_can_alias
+        ca_iter_can_alias
       - the macros only the kernel generator (ext/mkkernel.rb) emits:
         CA_SLAB_REDUCE_SUM8_EX / MIN8_EX / MAX8_EX / STAR8_EX (8-way
         accumulator split; they take EXPR(x) rather than exposing v and
@@ -281,7 +281,7 @@ typedef struct {
   /* --- CAStride compose-fold cache (step 3+, L2 alias path) ---
      For CAStride-family sources at L2, init_l2 runs
      ca_stride_compose_to_root once to get the root + per-axis
-     byte strides + base offset.  Cached here so next_slab_strided's
+     byte strides + base offset.  Cached here so next_slab_axes's
      per-iter offset calc is just Σ outer_idx[k] * composed_strides[k].
      Inline CA_RANK_MAX array (no heap alloc) since CA_DIM_MAX=16 keeps
      the footprint at 128 bytes per state.  root is the array attached at
@@ -537,33 +537,31 @@ int  ca_iter_state_init_l1 (ca_iter_state    *st,
 /* Initialise `st` for an **L2 (strided kernel)** walk of `src`.
 
    Source routing:
-     - entity / CAStride contig: alias_mode = CONTIG.  Under
-       CA_SLAB_WHOLE an nd > 1 source is yielded one innermost row per
-       slab; stride = bytes (kernel still receives the explicit stride
-       arg)
-     - CAStride non-contig: alias_mode = STRIDED, multi-slab walk over
-       prefix axes, each yield carries native inner stride_bytes. No
-       scratch.
+     - entity / CAStride contig: alias_mode = CONTIG, the slab reads
+       the source's own memory
+     - CAStride non-contig: alias_mode = STRIDED, the slab reads the
+       root through the composed strides. No scratch.
      - descriptor views: aliased when the innermost axis is a STRIDE
-       axis, otherwise gathered into scratch (per slab under
-       CA_SLAB_AXES when a slab axis is an INDEX or SHIFT axis)
+       axis, otherwise gathered into scratch (per slab when a slab axis
+       is an INDEX or SHIFT axis)
      - SRC_ATTACH views: iterator-owned scratch filled through
        ca_xfer_all, written back with ki_scratch_push_changed (only the
-       changed cells).  Under CA_SLAB_AXES a CAStack may instead be
-       walked through its parents, and a single FIBER_CONTIG fiber of a
-       cast / byte-swap view through ca_xfer_stride (PER_FIBER_FUSED)
+       changed cells).  A CAStack may instead be walked through its
+       parents, and a single FIBER_CONTIG fiber of a cast / byte-swap
+       view through ca_xfer_stride (PER_FIBER_FUSED)
      - a source with no attach slot: CA_ITER_ERR_NOT_CHEAP
 
-   policy: CA_SLAB_WHOLE or CA_SLAB_AXES (CA_SLAB_FREE returns
-           CA_ITER_ERR_POLICY, as do out-of-range or duplicate axes, and
-           CA_SLAB_AXES over a descriptor view whose descriptor rank
-           differs from the view's rank).
+   policy: CA_SLAB_AXES only.  CA_SLAB_WHOLE and CA_SLAB_FREE return
+           CA_ITER_ERR_POLICY, as do out-of-range or duplicate axes,
+           and a descriptor view whose descriptor rank differs from the
+           view's rank.  The whole array as one contiguous run is L1
+           (init_l1 with CA_SLAB_WHOLE); one strided run per innermost
+           row is CA_SLAB_AXES with the last axis.
    flags:  as init_l1.  CA_KERNEL_WRITE is refused with
-           CA_ITER_ERR_FLAGS when a CA_SLAB_AXES slab axis is an INDEX
-           or SHIFT axis of a descriptor view.
+           CA_ITER_ERR_FLAGS when a slab axis is an INDEX or SHIFT
+           axis of a descriptor view.
 
-   Pair with ca_iter_state_next_slab_strided (CA_SLAB_WHOLE) or
-   ca_iter_state_next_slab_axes (CA_SLAB_AXES). */
+   Pair with ca_iter_state_next_slab_axes. */
 int  ca_iter_state_init_l2 (ca_iter_state    *st,
                             struct _CArray   *src,
                             ca_slab_policy_t  policy,
@@ -604,19 +602,6 @@ int  ca_iter_state_next_slab (ca_iter_state *st,
                               boolean8_t   **out_mask,
                               ca_size_t     *out_n);
 
-/* Pull the next L2 strided slab.  Returns 1 with *out_ptr /
-   *out_mask / *out_n / *out_stride_bytes when a slab is yielded;
-   returns 0 when the walk is complete.  The kernel walks `*out_n`
-   elements by stepping `*out_stride_bytes` between consecutive
-   elements starting at `*out_ptr`.  The mask, when non-NULL, is
-   contiguous whatever the value stride: mask[i] pairs with the value
-   at ptr + i * stride_bytes.  Only valid when init_l2 was used. */
-int  ca_iter_state_next_slab_strided (ca_iter_state *st,
-                                      char         **out_ptr,
-                                      boolean8_t   **out_mask,
-                                      ca_size_t     *out_n,
-                                      ca_size_t     *out_stride_bytes);
-
 /* Pull the next CA_SLAB_AXES slab (K-D block).  Returns 1 with *out_ptr
    / *out_mask set to the slab base when a slab is yielded; returns 0
    when the walk is complete.  Only valid when init_l2 was called with
@@ -653,7 +638,7 @@ int  ca_iter_state_next_slab_axes (ca_iter_state *st,
 /* Sync the just-yielded slab back to parent (WRITE path; READ no-op).
 
    Caller calls this **unconditionally** after each next_slab /
-   next_slab_strided + kernel invocation; the alias_mode branch lives
+   next_slab_axes + kernel invocation; the alias_mode branch lives
    inside the state machine so the caller never has to inspect it.
 
    Behaviour:

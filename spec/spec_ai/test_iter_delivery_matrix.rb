@@ -4,11 +4,10 @@
 # view's materialised copy, in the view's row-major order, and a write must
 # land on the root cells the view covers and nowhere else.
 #
-# The matrix is parents x views x masked/unmasked x five ways of walking
-# (L1 whole, L2 whole, one slab axis, one contiguous fiber, two slab
-# axes: the given one and the last), read and
-# write.  A whole walk may yield its cells as several row-major slabs; they
-# are compared joined.  The expected answers are built without the iterator: the read
+# The matrix is parents x views x masked/unmasked x four ways of walking
+# (L1 whole, one slab axis, one contiguous fiber, two slab axes: the given
+# one and the last), read and write.  The whole walk's cells are compared
+# joined.  The expected answers are built without the iterator: the read
 # from the view's copy, the write by storing the same values through the
 # same view of an unmasked copy of the root.
 #
@@ -49,7 +48,7 @@ class TestIterDeliveryMatrix < Test::Unit::TestCase
           walks(v).each do |mode, ax, name|
             exp = slab_addresses(v.shape, mode, ax).map { |s| s.map { |a| cells[a] } }
             got = CArray.iw_read_cells(v, mode, ax)
-            got = [got.flatten(1)] if mode < 2
+            got = [got.flatten(1)] if mode == 0
             assert_equal exp, got, "#{vn} of #{pn} masked=#{masked}: #{name} axis #{ax}"
             cases += 1
           end

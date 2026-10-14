@@ -170,7 +170,7 @@ refactors without touching the catalog:**
   (`CA_KERNEL_FIBER_CONTIG`) that tells the engine to gather strided
   fibers into per-state scratch (`fiber_data_scratch`,
   `fiber_mask_scratch`) so author sees contig `p[i]` / `m[i]`.
-- **`ca_iter_state_init_l1` / `next_slab` / `next_slab_strided` /
+- **`ca_iter_state_init_l1` / `next_slab` /
   `ca_iter_can_alias`** — alternate entry points not used by the catalog
   macros (the L1 contig path; see §9). Not part of the author contract.
 - **`CA_SLAB_WHOLE` / `CA_SLAB_FREE`** — engine policy enums authors never
@@ -1555,7 +1555,7 @@ and L2):
 | Level | Slab shape | Init / yield API |
 |---|---|---|
 | **L1** (contig kernel) | 1-D contig run, stride implicit = bytes | `init_l1` / `next_slab` |
-| **L2** (strided kernel) | 1-D or K-D, explicit strides | `init_l2` / `next_slab_strided` or `next_slab_axes` |
+| **L2** (strided kernel) | 1-D or K-D, explicit strides | `init_l2` (`CA_SLAB_AXES`) / `next_slab_axes` |
 | L3 (multi-D kernel) | reserved, Phase 1+ | future work |
 
 **Choose L1 when:**
@@ -1824,7 +1824,7 @@ own freedom (always-contig delivery, fused gather, …) is exercised through
 the `_FIBER` family and `flags`, not by changing this representation.
 
 **Everything else is INTERNAL and refactors freely**: the state-machine
-function bodies, `init_l1` / `next_slab` / `next_slab_strided` /
+function bodies, `init_l1` / `next_slab` /
 `ca_iter_can_alias`, the `alias_mode` / `src_kind` routing
 (`CA_ITER_ALIAS_*` / `CA_ITER_SRC_*` / `CA_KERNEL_FIBER_CONTIG` /
 `CA_SLAB_WHOLE` / `CA_SLAB_FREE`), every non-frozen `ca_iter_state` field,
