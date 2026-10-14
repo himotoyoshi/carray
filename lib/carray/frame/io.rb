@@ -610,7 +610,7 @@ class CAFrame
     # from_csv reads back as the same value, not as the double it widens
     # to ("0.10000000149011612"); cmplx64 has that in each part.
     if !col.face? && (col.data_type == CA_FLOAT32 || col.data_type == CA_CMPLX64)
-      col = col.__shortest_float64__
+      col = col.__widen_keeping_shortest_decimal__
     end
     # A boolean goes out as 0 / 1, as it does in every other serialization;
     # from_csv reads it back with types: { name => :boolean }.

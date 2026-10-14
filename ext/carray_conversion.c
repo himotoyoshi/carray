@@ -540,7 +540,7 @@ rb_ca_load_binary (VALUE self, VALUE io)
    to float.  Its digits are those of the decimal (at most 9, which a double
    holds), so Float#to_s writes them. */
 static double
-ca_float32_shortest (float x)
+ca_double_of_shortest_decimal_of_float32 (float x)
 {
   char buf[32];
   int lo = 1, hi = 9;
@@ -576,7 +576,7 @@ ca_float32_shortest (float x)
    double its shortest decimal reads as, for to_csv to write that decimal.
    The mask is kept. */
 static VALUE
-rb_ca_shortest_float64 (VALUE self)
+rb_ca_widen_keeping_shortest_decimal (VALUE self)
 {
   volatile VALUE out, holder = 0;
   CArray *ca, *co;
@@ -591,7 +591,7 @@ rb_ca_shortest_float64 (VALUE self)
     type = CA_CMPLX128;
   }
   else {
-    rb_raise(rb_eCADataTypeError, "__shortest_float64__ takes float32 or cmplx64");
+    rb_raise(rb_eCADataTypeError, "__widen_keeping_shortest_decimal__ takes float32 or cmplx64");
   }
   n = ca->elements * (ca->data_type == CA_CMPLX64 ? 2 : 1);
   out = rb_carray_new_safe(type, ca->ndim, ca->dim, 0, NULL);
@@ -601,7 +601,7 @@ rb_ca_shortest_float64 (VALUE self)
     double *dst = (double *) co->ptr;
     ca_copy_data(ca, (char *) src);
     for (i = 0; i < n; i++) {
-      dst[i] = ca_float32_shortest(src[i]);
+      dst[i] = ca_double_of_shortest_decimal_of_float32(src[i]);
     }
     ALLOCV_END(holder);
   }
@@ -627,7 +627,7 @@ Init_carray_conversion (void)
   rb_define_method(rb_cCArray, "dump_binary", rb_ca_dump_binary, -1);
   rb_define_method(rb_cCArray, "to_s", rb_ca_to_s, 0);
   rb_define_method(rb_cCArray, "load_binary", rb_ca_load_binary, 1);
-  rb_define_method(rb_cCArray, "__shortest_float64__", rb_ca_shortest_float64, 0);
+  rb_define_method(rb_cCArray, "__widen_keeping_shortest_decimal__", rb_ca_widen_keeping_shortest_decimal, 0);
 
   /* CAREFUL: do not bind #to_ary — implicit array coercion in Ruby core
      (splat / multiple assignment / Array()) then triggers on any CArray
