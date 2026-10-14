@@ -386,7 +386,10 @@ class CAFrame
                      else
                        lc.project(li)
                      end
-              common.project(code)
+              # The key takes the attributes both sides show alike, as a
+              # concatenation of the two would.
+              shared = CArray.__send__(:attrs_shared_by, [lkeys[j], rkeys[j]])
+              common.project(code).tap { |c| c.set_attrs(shared) unless shared.empty? }
             else                      project_rows(self[name], li)
             end
       name = join_name(name, plan[:lsuf], plan) unless j

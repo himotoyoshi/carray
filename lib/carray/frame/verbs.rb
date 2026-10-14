@@ -676,6 +676,10 @@ class CAFrame
     if unreadable && !unreadable.empty?
       report_unreadable(key, col, type, unreadable, on_error)
     end
+    # The numbers are the column's values, as to_type gives them for an
+    # object column, so they show the column's attributes.
+    shown = col.attrs
+    parsed.set_attrs(shown) unless shown.empty?
     parsed
   end
 
