@@ -1926,15 +1926,40 @@ class CATimedelta
 
   # @overload sum(*args, **opts)
   #   Returns the sum of durations as a {Element} for full reduction
-  #   or as a {CATimedelta} view for per-axis reduction.
+  #   or as a {CATimedelta} view for per-axis reduction.  The sum is exact:
+  #   the unit counts are added in int64, not in float64.
   #   @return [Element, CATimedelta]
+  #   @raise [RangeError] if a sum does not fit int64 (for a per-axis
+  #     reduction, if any of its cells does not).
   def sum(*args, **opts)
-    with_surface_fill(opts) { |o| round_and_relift(parent.sum(*args, **o)) }
+    with_surface_fill(opts) { |o|
+      exact_sum_relift(parent.accumulate(*args, **o), parent.sum(*args, **o))
+    }
   end
 
+  # int64 addition is exact modulo 2**64, so the int64 sum is the true sum
+  # whenever the true sum fits int64, whatever order the cells were added
+  # in.  Whether it fits is read from the float64 sum, whose error is far
+  # inside the factor of 2 between 2**62 and 2**63.
+  def exact_sum_relift (exact, approx)
+    past = case approx
+           when Numeric then approx.abs > 2.0**62
+           when CArray  then (approx.abs > 2.0**62).any
+           else false
+           end
+    raise RangeError, "sum of durations does not fit int64 (in #{unit})" if past
+    case exact
+    when Integer then Element.new(exact, unit)
+    when CArray  then exact.timedelta(unit: unit)
+    else exact
+    end
+  end
+  private :exact_sum_relift
+
   # @overload accumulate(*args, **opts)
-  #   Returns the sum of durations in the storage's own integer type, as
-  #   {#sum} does in float64.
+  #   Returns the sum of durations in the storage's integer type (int64),
+  #   added without a range check: a sum past int64 wraps.  {#sum} gives
+  #   the same answer when it fits and raises RangeError when it does not.
   #   @return [Element, CATimedelta]
   def accumulate(*args, **opts)
     with_surface_fill(opts) { |o| round_and_relift(parent.accumulate(*args, **o)) }
