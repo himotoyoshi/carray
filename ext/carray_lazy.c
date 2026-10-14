@@ -1451,7 +1451,12 @@ Init_ca_mask_of_operands (void)
 
    An operand can be given a mask later unless it is broadcast from one
    cell (a scalar the expression made from a literal), a value array, or a
-   read-only entity.  The shared mask is read-only, as the operation is. */
+   read-only entity.  The shared mask is read-only, as the operation is.
+
+   With no masked operand the mask is still made when asked for (a view
+   over the operation that masks cells of its own, such as a shift with
+   fill UNDEF, needs one to lie over): it reads all false until an
+   operand is given a mask. */
 CArray *
 ca_lazy_operation_mask (CArray *operation, int mode)
 {
@@ -1470,10 +1475,6 @@ ca_lazy_operation_mask (CArray *operation, int mode)
               && ! ( ca_is_entity(op) && ca_is_readonly(op) ) ) {
       n_open++;
     }
-  }
-
-  if ( n_masked == 0 ) {
-    return NULL;
   }
 
   if ( mode == CA_LAZY_MASK_OR && n_masked == 1 && n_open == 0
