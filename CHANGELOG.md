@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: a whole-array store whose conversion raised part way (a NaN stored
+  into an integer array, `ints[] = floats`) left the target's mask cleared,
+  and a store through a view cleared the parent's mask. The mask now comes
+  back as it was.
+
 - Change: `seq` and `seq!` on an integer array given a Float, Rational or
   BigDecimal `init_val` or `step` make each cell `init_val + step*i` cut
   toward zero, as a store takes a float: `int32.seq(0.5, 0.5)` is
