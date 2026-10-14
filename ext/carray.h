@@ -1594,6 +1594,58 @@ void    ca_update_n (int n, ...);
 void    ca_sync_n (int n, ...);
 void    ca_detach_n (int n, ...);
 
+/* API : lending the addresses of cells
+
+   A kernel that reads cells by address itself -- a stencil reading
+   a[i-1][j] and a[i+1][j] from its own loop -- needs, for each array, a
+   pointer to cell (0, ..., 0) and the byte distance between neighbours
+   along each axis.  ca_with_address_bases lends that for the duration of
+   `body`, whatever the arrays are, and puts back what the kernel wrote:
+
+     - an entity, or a view the engine can fold down to one (a slice, a
+       transpose, a reshape), is addressed in place;
+     - any other view (a selection, a conversion, a lazy expression) has
+       the cells the kernel touches copied into a buffer, which is lent
+       instead and, for a writable array, sent back afterwards: only the
+       cells the kernel changed, through the view.
+
+   `box_start[i]` / `box_count[i]` (ndim values each) say which cells
+   array i's kernel touches -- its loop range, widened by how far the
+   kernel reaches (one cell each way for a[i-1] .. a[i+1]).  They decide
+   what the second case copies; the first case lends the whole array
+   either way.  Pass NULL for `box_start` and `box_count` (or for an
+   entry of them) to lend the whole array.  A box outside the array is
+   refused.  Address only the box, whichever way the array was lent.
+
+   `writable[i]` says whether the kernel writes array i (NULL: none is
+   written); a read-only array is refused for writing.  An object array
+   is refused (its cells are Ruby values, not numbers), and so is a view
+   with a mask that reinterprets the element size (its mask cells do not
+   map one to one onto the parent's).
+
+   A masked array also lends its mask: one boolean8_t per cell (nonzero =
+   masked), addressed with mask_strides the same way.  A write to the
+   mask is put back like a write to a cell.  `mask` is NULL for an array
+   with no mask.
+
+   `body` may raise: the arrays are still written back and closed.
+   Returns what `body` returns.  The CArray pointers must stay alive for
+   the call (keep the VALUEs they came from). */
+typedef struct {
+  char       *ptr;                        /* cell (0, ..., 0) */
+  ca_size_t   strides[CA_RANK_MAX];       /* byte step along each axis */
+  boolean8_t *mask;                       /* NULL when no mask */
+  ca_size_t   mask_strides[CA_RANK_MAX];  /* byte step in the mask */
+  int         writable;
+} ca_address_basis_t;
+
+VALUE   ca_with_address_bases (int32_t n, CArray **arrays, const int *writable,
+                               const ca_size_t *const *box_start,
+                               const ca_size_t *const *box_count,
+                               VALUE (*body)(ca_address_basis_t *bases,
+                                             VALUE arg),
+                               VALUE arg);
+
 /* API : copying */
 
 void   *ca_clone (void *ap);          /* use rb_obj_clone() */

@@ -27,7 +27,8 @@ carray knows by name (see ch. 10 for why that exception exists).
 
 If you are writing a kernel, you want ch. 11, not this chapter. Come here
 only when the code that will run is *generated* and addresses cells on its
-own terms.
+own terms — or when a hand-written C kernel has to read cells by address
+across rows, which is what the C entry (below) is for.
 
 ## Why it is not one of the four surfaces
 
@@ -64,6 +65,71 @@ which is what a caller uses to decide whether a fast path applies.
   (`RuntimeError`);
 - a masked view that reinterprets the element size (see *Masks* below,
   `ArgumentError`).
+
+## The C entry: `ca_with_address_bases`
+
+A C extension does not go through Ruby. It calls the same machinery
+directly, declared in `carray.h`:
+
+```c
+typedef struct {
+  char       *ptr;                        /* cell (0, ..., 0) */
+  ca_size_t   strides[CA_RANK_MAX];       /* byte step along each axis */
+  boolean8_t *mask;                       /* NULL when no mask */
+  ca_size_t   mask_strides[CA_RANK_MAX];  /* byte step in the mask */
+  int         writable;
+} ca_address_basis_t;
+
+VALUE ca_with_address_bases (int32_t n, CArray **arrays, const int *writable,
+                             const ca_size_t *const *box_start,
+                             const ca_size_t *const *box_count,
+                             VALUE (*body)(ca_address_basis_t *bases, VALUE arg),
+                             VALUE arg);
+```
+
+It opens the `n` arrays, calls `body` with one basis per array, and closes
+them all on the way out, including when `body` raises. Everything this
+chapter says about `open` holds for it: the same refusals, the same three
+tiers, the same masks, the same closing. Two things differ.
+
+- **The tier is not shown.** A basis is a pointer, strides, a mask and a
+  flag; the C caller addresses cells through it the same way whichever tier
+  produced it. A cell is at `ptr + Σ idx[k] * strides[k]`, its mask byte at
+  `mask + Σ idx[k] * mask_strides[k]`.
+- **The box is given per array, as start and count.** `box_start[i]` and
+  `box_count[i]` hold `ndim` values each for array `i`. Pass `NULL` for both
+  pointers, or for one array's entries, to lend the whole array. Give them
+  as a pair — a start without a count is refused.
+
+The region rules below apply unchanged: the box decides what tier 3 copies,
+tiers 1 and 2 lend the whole array either way, and the kernel must address
+only the box.
+
+A three-point stencil over rows, reading `a` and writing `out`:
+
+```c
+static VALUE
+stencil_body (ca_address_basis_t *b, VALUE arg)
+{
+  Info *info = (Info *) arg;               /* rows and columns of out */
+  for (ca_size_t i = 0; i < info->rows; i++)
+    for (ca_size_t j = 0; j < info->cols; j++) {
+      double v0 = *(double *)(b[0].ptr + i * b[0].strides[0] + j * b[0].strides[1]);
+      double v2 = *(double *)(b[0].ptr + (i + 2) * b[0].strides[0] + j * b[0].strides[1]);
+      *(double *)(b[1].ptr + i * b[1].strides[0] + j * b[1].strides[1]) = v0 + v2;
+    }
+  return Qnil;
+}
+
+CArray *arrays[2] = { a, out };
+int writable[2] = { 0, 1 };
+ca_with_address_bases(2, arrays, writable, NULL, NULL, stencil_body, (VALUE) &info);
+```
+
+`a` may be a transposed view, a gathered view, an integer array seen through
+`fake(:float64)` or a lazy expression; `out` may be a view of another array.
+The kernel does not change. The `CArray` pointers must stay alive for the
+call, so keep the `VALUE`s they came from on the stack.
 
 ## The three tiers
 
@@ -278,6 +344,12 @@ mask slots, the refusals, and the packed layout above, plus the closing path
 twice over: functionally (a raising block's writes still land) and by
 measurement (the malloc zone does not grow across two hundred raising opens;
 macOS only, omitted elsewhere).
+
+`spec/spec_ai/test_address_basis_c.rb` drives the C entry from an extension
+compiled outside carray (`spec/spec_ai/ext_address_basis/`): a stencil over
+entities, folded views, gathered views, conversions and lazy expressions, a
+box write that leaves the cells outside the box alone, and a raising body
+whose write still lands.
 
 ## Related chapters
 

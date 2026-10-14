@@ -78,10 +78,15 @@ typedef struct {
   ca_size_t *region_start;    /* count * CA_RANK_MAX */
   ca_size_t *region_count;
   VALUE      bases;
-  VALUE      box_starts;      /* per array, per axis; nil for "all of it" */
-  VALUE      box_counts;
+  int       *has_box;         /* per slot: 1 when box_start/box_count hold a box */
+  ca_size_t *box_start;       /* slots * CA_RANK_MAX; the whole array when */
+  ca_size_t *box_count;       /*   has_box is 0 */
   int        body_done;       /* the block returned without raising */
   volatile VALUE put_error;   /* the first write-back that raised, or nil */
+  /* ca_with_address_bases: the caller's body and what it is handed */
+  VALUE    (*c_body)(ca_address_basis_t *bases, VALUE arg);
+  VALUE      c_arg;
+  ca_address_basis_t *c_bases;
 } open_state;
 
 /* The view's own row-major byte layout, which is the address space
@@ -147,28 +152,21 @@ verify_box (VALUE box_starts, VALUE box_counts, int index, CArray *ca)
   }
 }
 
-/* Reads one array's box out of the Ruby-side description, defaulting to the
-   whole array.  verify_box checked it, and checks it again here because this
-   is the last thing between a caller's numbers and pointer arithmetic. */
+/* Reads one array's box, the whole array when none was given.  The box was
+   checked when it was given, and is checked again here because this is the
+   last thing between a caller's numbers and pointer arithmetic. */
 static void
 read_box (open_state *state, int index, CArray *ca,
           ca_size_t *starts, ca_size_t *counts)
 {
-  VALUE per_array_start = Qnil, per_array_count = Qnil;
   int8_t k;
-
-  if ( ! NIL_P(state->box_starts) ) {
-    per_array_start = rb_ary_entry(state->box_starts, index);
-    per_array_count = rb_ary_entry(state->box_counts, index);
-  }
-
   for ( k = 0; k < ca->ndim; k++ ) {
-    if ( NIL_P(per_array_start) ) {
+    if ( state->has_box[index] ) {
+      starts[k] = state->box_start[index * CA_RANK_MAX + k];
+      counts[k] = state->box_count[index * CA_RANK_MAX + k];
+    } else {
       starts[k] = 0;
       counts[k] = ca->dim[k];
-    } else {
-      starts[k] = NUM2LL(rb_ary_entry(per_array_start, k));
-      counts[k] = NUM2LL(rb_ary_entry(per_array_count, k));
     }
     if ( outside_axis(starts[k], counts[k], ca->dim[k]) ) {
       rb_raise(rb_eArgError,
@@ -202,14 +200,13 @@ size_array (ca_size_t *values, int8_t count)
 /* Refuses what a generated kernel cannot express, rather than letting it
    produce quietly wrong numbers. */
 static void
-verify_usable (VALUE object, CArray *ca, int writable)
+verify_usable (VALUE klass, CArray *ca, int writable)
 {
   if ( ca->data_type == CA_OBJECT ) {
     rb_raise(rb_eArgError, "object arrays hold Ruby values, not numbers");
   }
   if ( writable && ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "%"PRIsVALUE" is read-only",
-             rb_obj_class(object));
+    rb_raise(rb_eRuntimeError, "%"PRIsVALUE" is read-only", klass);
   }
 }
 
@@ -238,7 +235,7 @@ folds_to_an_entity (CArray *ca)
    express that.  Checked for every tier: a box transfer moves the same
    mask, and the neighbour is marked when it is written back. */
 static void
-verify_mask_cells (VALUE object, CArray *ca)
+verify_mask_cells (VALUE klass, CArray *ca)
 {
   CArray   *root;
   ca_size_t strides[CA_RANK_MAX];
@@ -249,7 +246,7 @@ verify_mask_cells (VALUE object, CArray *ca)
     rb_raise(rb_eArgError,
              "%"PRIsVALUE" reinterprets the element size and carries a mask; "
              "its mask cells do not map one to one onto the parent's",
-             rb_obj_class(object));
+             klass);
   }
 }
 
@@ -578,6 +575,74 @@ packed_body (VALUE argument)
   }
 }
 
+/* Allocates the state for n arrays and fills it: the arrays and their masks,
+   their tiers, which ones are written, and the boxes.  The caller has
+   checked every argument already: nothing here raises, so a refusal never
+   finds a block to free.  `box_start` / `box_count` may be NULL (every
+   array whole), and an entry of them may be NULL (that array whole). */
+static void
+ab_prepare (open_state *state, int n, CArray **arrays, const int *writable,
+            const ca_size_t *const *box_start, const ca_size_t *const *box_count)
+{
+  int i;
+
+  state->count = n;
+  state->slots = n * 2;
+  /* One allocation, carved up.  Every array here is the same length in
+     slots and lives exactly as long as the open, so there is nothing for
+     separate lifetimes to buy -- and this is a per-call cost on a path
+     whose whole point is to be cheap enough to cross often.  Zeroed once
+     as a block, which is also what the slots want to start as: a NULL
+     array, a NULL root, not writable, not attached, no region, no box. */
+  {
+    size_t m        = (size_t) state->slots + 1;
+    size_t pointers = ROUND_UP_8(m * sizeof(CArray *));
+    size_t chars    = ROUND_UP_8(m * sizeof(char *));
+    size_t sizes    = ROUND_UP_8(m * CA_RANK_MAX * sizeof(ca_size_t));
+    size_t ints     = ROUND_UP_8(m * sizeof(int));
+    size_t bases    = ROUND_UP_8((size_t) (n + 1) * sizeof(ca_address_basis_t));
+    size_t total = 2 * pointers + chars + 4 * sizes + 4 * ints + bases;
+    char  *p;
+    state->block = ALLOC_N(char, total);
+    MEMZERO(state->block, char, total);
+    p = state->block;
+    state->carrays       = (CArray **)  p; p += pointers;
+    state->roots         = (CArray **)  p; p += pointers;
+    state->region        = (char **)    p; p += chars;
+    state->region_start  = (ca_size_t *) p; p += sizes;
+    state->region_count  = (ca_size_t *) p; p += sizes;
+    state->box_start     = (ca_size_t *) p; p += sizes;
+    state->box_count     = (ca_size_t *) p; p += sizes;
+    state->tier          = (int *)      p; p += ints;
+    state->writable      = (int *)      p; p += ints;
+    state->attached_root = (int *)      p; p += ints;
+    state->has_box       = (int *)      p; p += ints;
+    state->c_bases       = (ca_address_basis_t *) p;
+  }
+  state->body_done = 0;
+  state->put_error = Qnil;
+
+  for ( i = 0; i < n; i++ ) {
+    CArray *ca = arrays[i];
+    state->carrays[i]  = ca;
+    state->writable[i] = writable ? writable[i] : 0;
+    state->tier[i]     = tier_for(ca);
+    if ( box_start && box_start[i] ) {
+      state->has_box[i] = 1;
+      memcpy(&state->box_start[i * CA_RANK_MAX], box_start[i],
+             ca->ndim * sizeof(ca_size_t));
+      memcpy(&state->box_count[i * CA_RANK_MAX], box_count[i],
+             ca->ndim * sizeof(ca_size_t));
+    }
+    if ( ca->mask ) {
+      CArray *mask = ca->mask;
+      state->carrays[n + i]  = mask;
+      state->writable[n + i] = state->writable[i];
+      state->tier[n + i]     = tier_for(mask);
+    }
+  }
+}
+
 /*
  * Opens every array, yields what it opened, and closes them all on the way
  * out -- including when the block raises.
@@ -592,7 +657,7 @@ address_basis_open (int argc, VALUE *argv, VALUE module)
 {
   VALUE arrays, writable_flags, box_start, box_count, packed;
   open_state state;
-  int i;
+  int i, n;
 
   rb_scan_args(argc, argv, "23", &arrays, &writable_flags, &box_start,
                &box_count, &packed);
@@ -612,73 +677,61 @@ address_basis_open (int argc, VALUE *argv, VALUE module)
   if ( RARRAY_LEN(arrays) != RARRAY_LEN(writable_flags) ) {
     rb_raise(rb_eArgError, "one writable flag per array is required");
   }
+  n = (int) RARRAY_LEN(arrays);
 
-  /* Every argument is checked before the block below is allocated: a
-     refusal raises, and it must find nothing to free. */
-  for ( i = 0; i < (int) RARRAY_LEN(arrays); i++ ) {
+  /* Every argument is checked before the state is allocated: a refusal
+     raises, and it must find nothing to free. */
+  for ( i = 0; i < n; i++ ) {
     VALUE   object = rb_ary_entry(arrays, i);
     CArray *ca;
     GetCArray(object, ca);
     /* A view takes its mask from its parent when first asked for it; one
        added to the parent after the view was made is not on ca->mask yet. */
     ca_update_mask(ca);
-    verify_usable(object, ca, RTEST(rb_ary_entry(writable_flags, i)));
-    verify_mask_cells(object, ca);
+    verify_usable(rb_obj_class(object), ca, RTEST(rb_ary_entry(writable_flags, i)));
+    verify_mask_cells(rb_obj_class(object), ca);
     verify_box(box_start, box_count, i, ca);
   }
 
-  state.count         = (int) RARRAY_LEN(arrays);
-  state.slots         = state.count * 2;
+  {
+    /* The boxes and flags in C form, on the stack: they are copied into
+       the state, and nothing below raises before that. */
+    /* Laid out widest first, so every part is aligned. */
+    VALUE      vholder = 0;
+    CArray   **carrays = (CArray **) ALLOCV(vholder, (size_t) n * (sizeof(CArray *)
+                           + 2 * sizeof(ca_size_t *)
+                           + 2 * CA_RANK_MAX * sizeof(ca_size_t)
+                           + sizeof(int)) + 1);
+    const ca_size_t **bs = (const ca_size_t **) (carrays + n);
+    const ca_size_t **bc = bs + n;
+    ca_size_t *cells   = (ca_size_t *) (bc + n);
+    int       *flags   = (int *) (cells + (size_t) n * 2 * CA_RANK_MAX);
+    for ( i = 0; i < n; i++ ) {
+      VALUE   object = rb_ary_entry(arrays, i);
+      VALUE   starts = NIL_P(box_start) ? Qnil : rb_ary_entry(box_start, i);
+      VALUE   counts = NIL_P(box_count) ? Qnil : rb_ary_entry(box_count, i);
+      int8_t  k;
+      GetCArray(object, carrays[i]);
+      flags[i] = RTEST(rb_ary_entry(writable_flags, i));
+      bs[i] = bc[i] = NULL;
+      if ( ! NIL_P(starts) ) {
+        ca_size_t *s0 = cells + (size_t) i * 2 * CA_RANK_MAX;
+        ca_size_t *c0 = s0 + CA_RANK_MAX;
+        for ( k = 0; k < carrays[i]->ndim; k++ ) {
+          s0[k] = NUM2LL(rb_ary_entry(starts, k));
+          c0[k] = NUM2LL(rb_ary_entry(counts, k));
+        }
+        bs[i] = s0;
+        bc[i] = c0;
+      }
+    }
+    ab_prepare(&state, n, carrays, flags, bs, bc);
+    ALLOCV_END(vholder);
+  }
   /* Our own copy: the caller's Array can be emptied inside the block, and
      the arrays it held are attached until open_ensure has run. */
-  state.arrays        = rb_ary_dup(arrays);
-  state.bases         = rb_ary_new_capa(state.count);
-  /* One allocation, carved up, rather than eight.  Every array here is the
-     same length in slots and lives exactly as long as the open, so there is
-     nothing for eight separate lifetimes to buy -- and this is a per-call
-     cost on a path whose whole point is to be cheap enough to cross often.
-     Zeroed once as a block, which is also what the slots want to start as:
-     a NULL array, a NULL root, not writable, not attached, no region. */
-  {
-    size_t n        = (size_t) state.slots + 1;
-    size_t pointers = ROUND_UP_8(n * sizeof(CArray *));
-    size_t chars    = ROUND_UP_8(n * sizeof(char *));
-    size_t sizes    = ROUND_UP_8(n * CA_RANK_MAX * sizeof(ca_size_t));
-    size_t ints     = ROUND_UP_8(n * sizeof(int));
-    size_t total = 2 * pointers + chars + 2 * sizes + 3 * ints;
-    char  *p;
-    state.block = ALLOC_N(char, total);
-    MEMZERO(state.block, char, total);
-    p = state.block;
-    state.carrays       = (CArray **)  p; p += pointers;
-    state.roots         = (CArray **)  p; p += pointers;
-    state.region        = (char **)    p; p += chars;
-    state.region_start  = (ca_size_t *) p; p += sizes;
-    state.region_count  = (ca_size_t *) p; p += sizes;
-    state.tier          = (int *)      p; p += ints;
-    state.writable      = (int *)      p; p += ints;
-    state.attached_root = (int *)      p;
-  }
-  state.box_starts    = box_start;
-  state.box_counts    = box_count;
-  state.body_done     = 0;
-  state.put_error     = Qnil;
-
-  for ( i = 0; i < state.count; i++ ) {
-    VALUE   object = rb_ary_entry(state.arrays, i);
-    CArray *ca;
-    GetCArray(object, ca);
-    state.carrays[i]  = ca;
-    state.writable[i] = RTEST(rb_ary_entry(writable_flags, i));
-    state.tier[i] = tier_for(ca);
-
-    if ( ca->mask ) {
-      CArray *mask = ca->mask;
-      state.carrays[state.count + i]  = mask;
-      state.writable[state.count + i] = state.writable[i];
-      state.tier[state.count + i] = tier_for(mask);
-    }
-  }
+  state.arrays = rb_ary_dup(arrays);
+  state.bases  = rb_ary_new_capa(n);
 
   {
     VALUE result = RTEST(packed)
@@ -687,6 +740,79 @@ address_basis_open (int argc, VALUE *argv, VALUE module)
     RB_GC_GUARD(state.arrays);
     return result;
   }
+}
+
+/* The body of ca_with_address_bases: lends each array's basis, then runs
+   the caller's body on them. */
+static VALUE
+c_body (VALUE argument)
+{
+  open_state *state = (open_state *) argument;
+  int i;
+  for ( i = 0; i < state->count; i++ ) {
+    ca_address_basis_t *b = &state->c_bases[i];
+    b->ptr      = acquire_basis(state, i, b->strides);
+    b->writable = state->writable[i];
+    if ( state->carrays[state->count + i] ) {
+      b->mask = (boolean8_t *) acquire_basis(state, state->count + i,
+                                             b->mask_strides);
+    }
+  }
+  {
+    VALUE result = state->c_body(state->c_bases, state->c_arg);
+    state->body_done = 1;
+    return result;
+  }
+}
+
+VALUE
+ca_with_address_bases (int32_t n, CArray **arrays, const int *writable,
+                       const ca_size_t *const *box_start,
+                       const ca_size_t *const *box_count,
+                       VALUE (*body)(ca_address_basis_t *bases, VALUE arg),
+                       VALUE arg)
+{
+  open_state state;
+  int32_t    i;
+  int8_t     k;
+
+  if ( n < 0 || (n > 0 && arrays == NULL) || body == NULL ) {
+    rb_raise(rb_eArgError, "ca_with_address_bases: no arrays or no body");
+  }
+  if ( (box_start == NULL) != (box_count == NULL) ) {
+    rb_raise(rb_eArgError, "a region needs both starts and counts");
+  }
+  /* Every argument is checked before the state is allocated. */
+  for ( i = 0; i < n; i++ ) {
+    CArray *ca = arrays[i];
+    VALUE   klass;
+    if ( ca == NULL ) {
+      rb_raise(rb_eArgError, "ca_with_address_bases: array %d is NULL", (int) i);
+    }
+    klass = ca_class[ca->obj_type];
+    ca_update_mask(ca);
+    verify_usable(klass, ca, writable ? writable[i] : 0);
+    verify_mask_cells(klass, ca);
+    if ( box_start && ((box_start[i] == NULL) != (box_count[i] == NULL)) ) {
+      rb_raise(rb_eArgError, "a region needs both starts and counts");
+    }
+    if ( box_start && box_start[i] ) {
+      for ( k = 0; k < ca->ndim; k++ ) {
+        if ( outside_axis(box_start[i][k], box_count[i][k], ca->dim[k]) ) {
+          rb_raise(rb_eArgError,
+                   "the requested region falls outside the array on axis %d",
+                   (int) k);
+        }
+      }
+    }
+  }
+
+  ab_prepare(&state, (int) n, arrays, writable, box_start, box_count);
+  state.arrays = Qnil;
+  state.bases  = Qnil;
+  state.c_body = body;
+  state.c_arg  = arg;
+  return rb_ensure(c_body, (VALUE) &state, open_ensure, (VALUE) &state);
 }
 
 /* Reports how an array would be opened, without opening it. */
