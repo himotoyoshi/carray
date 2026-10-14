@@ -1,27 +1,45 @@
 /* ---------------------------------------------------------------------------
 
-  ca_kernel_iterator.c
+  ca_kernel_iterator.c -- the kernel iterator engine
 
-  The engine behind the author surface declared in ca_kernel_iterator.h:
-  init_l1 / init_l2 / init_l2_paired, the next_slab family, sync_slab,
-  finish, close and ca_iter_ensure.
+  A C kernel asks for the cells of an array, one slab at a time, and gets
+  them whatever the array is: an entity, a view of a view, a selection, a
+  lazy expression.  This file decides, for each source, how to deliver
+  them (borrow its memory, gather a copy, walk a stack's parents) and, on
+  a write, how the cells the kernel changed get back to the array.
 
-  For each source the engine decides how to deliver its cells
-  (ca_iter_classify_source, then alias_mode): borrow the source's memory,
-  gather the cells into a scratch buffer, or walk the parents of a stack.
-  It hands the kernel one slab at a time, and on a WRITE walk sends the
-  cells the kernel changed back through the source.  READ and WRITE walks,
-  masks, CA_SLAB_WHOLE and CA_SLAB_AXES, CA_KERNEL_NO_MASK and
-  CA_KERNEL_FIBER_CONTIG are supported.  A source is refused as
-  unreadable (CA_ITER_ERR_NOT_CHEAP) only when it has no attach slot.
+  Where to read first:
+    - writing a kernel: guides/devel/11_kernel_iterator.md and
+      docs/authoring/HOW_TO_WRITE_KERNEL.md; the surface itself is
+      ca_kernel_iterator.h
+    - how the engine works (its routes, the promises every route keeps,
+      and which part keeps each): docs/internal/KernelIteratorEngine.md
+
+  Map of this file:
+    - scratch buffers (ki_data_alloc / ki_data_free) and helpers
+    - classification: ca_iter_classify_source, ca_iter_route_source
+    - the promise parts every route calls: ki_take_mask_copy,
+      ki_gather_view, ki_scratch_push_changed, ki_attach_stack_parents,
+      ki_fiber_contig_data / _mask
+    - opening a walk: init_l1, and for L2 ki_choose_l2_route (decides)
+      then ki_open_l2 (builds the state, with ki_lay_out_slabs)
+    - handing out slabs: next_slab, next_slab_axes
+    - writing back: sync_slab
+    - closing: finish, close, and the raise-safe entry points
+      (ca_iter_protect, ca_iter_ensure)
+    - development-build test surface (CARRAY_DEV_BUILD), at the end
+
+  A route added for speed is a shortcut, tagged next to its code with
+  "Shortcut NAME" and a fixed set of fields; each one is switched off by
+  ca_fast_paths_enabled().
 
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
 #include "carray_internal.h"   /* per-obj_type view constructors */
 #include "ca_kernel_iterator.h"
-#include "ca_monop_dispatch.h"   /* P.6.2.d: ca_monop_view_is_single_cast for F.6.2 gate */
-#include "ca_obj_face.h"      /* PROPOSAL_CAFACE_PHASE_2 F.2.6 — ca_strip_face for SRC_* entry */
+#include "ca_monop_dispatch.h"   /* ca_monop_view_is_single_cast */
+#include "ca_obj_face.h"      /* ca_strip_face, to walk what a Face wraps */
 
 #include <assert.h>
 #include <string.h>
@@ -159,20 +177,19 @@ ki_data_free (void *p, ca_size_t bytes)
 extern int  ca_attach_is_alias (void *ap);
 extern int  ca_root_lends_no_memory (void *ap);
 
-/* CAStride family attach-fn marker (step 1-4). */
+/* CAStride family attach-fn marker. */
 extern ca_operation_function_t ca_stride_func;
 
-/* Descriptor framework view ops (step 5+).  Each view's describe_axes
-   emits the per-axis descriptor + parent dim snapshot consumed by
-   the P3 ca_axis_dispatch_* substrate.  CAShift uses ca_window_func
-   (Phase G typedef pattern, ca_shift_func is a copy with only free /
-   clone / create_mask overridden) so it routes via attach pointer
-   match against ca_window_func.attach. */
+/* Descriptor framework view ops.  Each view's describe_axes emits the
+   per-axis descriptor + parent dim snapshot consumed by the
+   ca_axis_dispatch_* engine.  CAShift shares CAWindow's operation table
+   (ca_shift_func is a copy with only free / clone / create_mask
+   overridden), so it is recognised by its attach pointer matching
+   ca_window_func.attach. */
 extern ca_operation_function_t ca_select_axis_func;
 extern ca_operation_function_t ca_grid_func;
 extern ca_operation_function_t ca_select_func;
 extern ca_operation_function_t ca_window_func;
-/* ca_mapping_func retired in R.3 (PROPOSAL_CAMAPPING_REMOVAL). */
 
 /* Operation tables the classifier compares a source's attach slot
    against.  Every view below is delivered as CA_ITER_SRC_ATTACH: the
@@ -283,7 +300,7 @@ ca_iter_classify_source (CArray *src)
   if ( ca_is_entity(src) )                return CA_ITER_SRC_CASTRIDE;
   if ( ca_iter_is_castride_family(src) )  return CA_ITER_SRC_CASTRIDE;
 
-  /* Externally installed obj_types declare their routing (2026-08-07).
+  /* Externally installed obj_types declare their routing.
      Placed after the two structural cases and before the built-in list:
      entity and CAStride-family sources are recognised from the struct
      itself and are read directly, so a registration must not be able to
@@ -349,8 +366,7 @@ ca_iter_classify_source (CArray *src)
   return CA_ITER_SRC_NONE;
 }
 
-/* F-2 (PROPOSAL_F2_KERNEL_ITERATOR_ALIAS rev6): route a source by
-   running classify_source and, for descriptor-routed views, also calling
+/* Routes a source by running classify_source and, for descriptor-routed views, also calling
    describe_axes to inspect the innermost axis kind.  A descriptor view
    comes back as SRC_DESCRIPTOR_L2_ALIASABLE (innermost axis STRIDE) or
    SRC_DESCRIPTOR, and then out_descs / out_parent_dims / out_ndim are
@@ -359,13 +375,10 @@ ca_iter_classify_source (CArray *src)
    the out_* arguments are not touched; nor are they for any other kind,
    whose classify_source verdict is returned as-is.
 
-   Cost analysis: classify_source is O(1) pointer compares.  For
-   SRC_DESCRIPTOR candidates we add one describe_axes call (O(ndim) with
-   ndim ≤ CA_RANK_MAX = 16) plus one innermost-axis kind compare.
-   Per-walk overhead = 1 describe_axes call (descriptor sources only),
-   which init was going to do anyway -- so the routing is net zero cost
-   compared to the pre-rev6 path where classify_source + init both
-   computed describe_axes redundantly.  See prep doc rev2 §4.1.1. */
+   Cost: classify_source is O(1) pointer compares; a descriptor view
+   adds one describe_axes call (O(ndim)), which init would make anyway,
+   and init reads the descriptors from here instead of describing the
+   axes again. */
 static uint8_t ca_iter_classify_source (CArray *src);
 static void    ca_iter_describe_axes  (CArray *src, ca_axis_desc_t *,
                                        ca_size_t *, int8_t *);
@@ -406,9 +419,8 @@ ca_iter_route_source (CArray         *src,
   return CA_ITER_SRC_DESCRIPTOR;
 }
 
-/* Dispatch to the view's describe_axes.  Routing keyed on the
-   shared attach pointer (CAShift shares with CAWindow per Phase G
-   typedef). */
+/* Dispatch to the view's describe_axes, keyed on the attach pointer
+   (CAShift shares CAWindow's). */
 static void
 ca_iter_describe_axes (CArray         *src,
                        ca_axis_desc_t *out_descs,
@@ -443,7 +455,8 @@ ca_iter_describe_axes (CArray         *src,
   *out_ndim = 0;
 }
 
-/* Public alias eligibility predicate (proposal §11.3 case (a)). */
+/* Public alias eligibility predicate: whether a walk at `level` could
+   read the source's own memory in place. */
 int
 ca_iter_can_alias (void *ap, int level)
 {
@@ -459,9 +472,8 @@ ca_iter_can_alias (void *ap, int level)
       return ca_iter_is_castride_family(ca);
 
     default:
-      /* L3 (and any future level) — not implemented in Phase 1; L1
-         fallback so the predicate stays well-defined for callers that
-         probe ahead. */
+      /* L3 (and any future level) is not implemented; answer as L1 so
+         the predicate stays well-defined for callers that probe ahead. */
       return ca_attach_is_alias(ca);
   }
 }
@@ -481,19 +493,19 @@ ca_iter_build_rowmajor_strides (ca_size_t       *strides,
   }
 }
 
-/* ---- PROPOSAL_FIBER_PER_SOURCE_PATH F.6.1 dispatch predicate -------- */
+/* ---- PER_FIBER_FUSED: which views take it ----------------------------- */
 
-/* Hybrid (rev2 Q2): coarse src_kind branch + view-specific func pointer
-   probe + fiber-axis effective stride check (Q3).  Returns nonzero for
+/* A src_kind branch, then a check of the view's operation table, then of
+   the fiber axis's stride.  Returns nonzero for
    CAFake / CAByteSwap / a single-cast CAMonOp under SRC_ATTACH when the
    fiber is contiguous in the parent, and for CAWindow / CAShift under
    SRC_DESCRIPTOR; zero otherwise.
 
    The fiber_axis_stride argument is the effective byte stride of the
    fiber axis on the view (= what next_slab_axes would yield as
-   slab_strides[0]).  Q3-equivalence: fiber_axis_stride == src->bytes
-   means the fiber is parent-memory contig, which is the precondition
-   for X.1/X.4 per-region fused paths to deliver a 1-pass result.
+   slab_strides[0]).  fiber_axis_stride == src->bytes means the fiber is
+   a contiguous run of the parent's memory, which is what lets the view's
+   region transfer deliver it in one pass.
 
    Called from two places in init_l2: the CA_SLAB_AXES descriptor branch
    and the SRC_ATTACH branch, each before it would materialise.  When it
@@ -508,23 +520,14 @@ ca_iter_should_per_fiber_fused (CArray   *src,
 {
   (void) fiber_axis;
 
-  /* F.6.2: CAFake / CAByteSwap (transform-fused, X.4 per-region).
-     Enable when fiber-axis effective stride == view cell bytes
-     (= Q3: fiber is parent-memory contig run, so ca_xfer_stride
-     routes into ca_xfer_stride_transform_fused inner-contig fast
-     path for 1-pass per-fiber delivery).
-
-     F.5 bench: innermost-axis fiber 30-35% faster than whole-view
-     materialise (CAFake) / 16-18% (CAByteSwap).  Non-innermost (=
-     fiber_axis_stride != bytes) was a loser, so the stride gate
-     keeps current path for that case.
-
-     Phase 6 P.6.2.d (Q13 α): single-cast CAMonOp (= post-migration
-     successor of CAFake numeric path) is recognised via
-     ca_monop_view_is_single_cast and routed through the same F.6.2
-     fast path.  Chain CAMonOp (depth ≥ 2) is excluded — its
-     materialise path (= arena-pooled scratches from Phase 3) is
-     structurally different from the X.4 inner-contig fast path.  */
+  /* CAFake / CAByteSwap: when the fiber is a contiguous run of the
+     parent's memory, ca_xfer_stride takes the view's converting fast
+     path (ca_xfer_stride_transform_fused) and delivers the fiber in one
+     pass.  A fiber along another axis was measured slower this way, so
+     the stride gate keeps it on the gathered route.  A single-cast
+     CAMonOp (ca_monop_view_is_single_cast) is the lazy form of the same
+     conversion and takes the same route; a chain of lazy operations
+     gathers through the lazy arena instead, which this does not fit. */
   void *attach = ca_func[src->obj_type].attach;
   /* A conversion view is read-only on this path.  Its put-back sends the
      whole fiber, and a cell the kernel did not write does not come back
@@ -539,64 +542,26 @@ ca_iter_should_per_fiber_fused (CArray   *src,
     }
   }
 
-  /* F.6.3: CAShift / CAWindow with OOB-fused materialise path (X.1).
-     Per-fiber ca_xfer_stride wins decisively when the view would
-     otherwise fall into a per-slab gather / whole-view materialise
-     path (= SRC_DESCRIPTOR, e.g. CAShift always, CAWindow with SHIFT
-     axes).  But when the view qualifies for the L2 alias fast path
-     (SRC_DESCRIPTOR_L2_ALIASABLE, = interior-only CAWindow with F-1
-     STRIDE promotion), the existing alias path is already optimal
-     (parent.ptr + composed offsets, zero materialise).  Per-fiber
-     dispatch in that case adds ca_xfer_stride per-call overhead with
-     no payoff -- F.6.3 bench measured 0.35-0.82x (regression).  Gate
-     on SRC_DESCRIPTOR only. */
+  /* CAShift / CAWindow: the view's region transfer fills out-of-bounds
+     cells itself, so a fiber can be fetched in one call instead of a
+     per-slab or whole-view gather (SRC_DESCRIPTOR).  A view that can
+     lend the parent's memory (SRC_DESCRIPTOR_L2_ALIASABLE, an interior
+     CAWindow) is already read in place; fetching it fiber by fiber was
+     measured slower (0.35-0.82x), so only SRC_DESCRIPTOR takes it. */
   if ( src_kind == CA_ITER_SRC_DESCRIPTOR ) {
-    /* Both CAWindow and CAShift match ca_window_func.attach (Phase G
-       typedef pattern: ca_shift_func = ca_window_func). */
+    /* CAWindow and CAShift share ca_window_func.attach. */
     if ( attach == ca_window_func.attach ) {
       return 1;
     }
   }
 
-  /* F.6.4 audit (devel/bench_f6_4_audit.rb): CSA (CASelectAxis) /
-     CAGrid / CASelect all kept on the whole-view
-     materialise path.  Per-fiber ca_xfer_stride is a LOSER for
-     these views (1.25-4.7x slower across all axis positions
-     measured) because the descriptor framework's
-     ca_axis_dispatch_gather is already a single batched per-axis
-     kind gather; splitting into N per-fiber calls loses the
-     batched throughput.  Structurally different from
-     CAFake/CAByteSwap (transform-fused at byte level, X.4) and
-     CAShift/CAWindow OOB (per-region fused with bound check, X.1):
-     descriptor framework views do not have a per-region fused fast
-     path designed for per-fiber entry.
-
-     Note (rev4): bench split fiber-axis kind shows STRIDE fiber
-     1.25x slower vs INDEX fiber 4-5x slower.  STRIDE-fiber case
-     is close to parity and could conceivably reach win with finer
-     gating (= bypass per-axis kind classification when the outer
-     prefix is homogeneous STRIDE).  Not pursued at current 1.25x
-     deficit; recorded as a future possible refinement should an
-     application motivate it.  See proposal §3.1 SRC_DESCRIPTOR
-     (CSA, CAGrid, ...) inline comment.
-
-     F.6.6 audit (devel/bench_f6_6_bit_audit.rb): CABitarray /
-     CABitfield kept on current path.  Bench measured via
-     bits.fake(:float64) (= production CAFake-wrap hot path) shows
-     per-fiber 1.23-5.86x slower on the F.6.2-gate-off axes.
-
-     The CAFake wrap overhead applies equally to both per-fiber and
-     whole-view paths (same total cell-cast cost), so the 5x ratio
-     is essentially the CABitarray whole-view-vs-per-fiber ratio
-     itself.  Phase A bench note "xfer_stride 0.98x parity" is a
-     single-call comparison: N per-fiber calls cumulatively cost
-     N x parity > 1 x xfer_all (+ N dispatch overhead + per-call
-     bit alignment math).  This reasoning generalises to direct
-     CABitarray / CABitfield source (= when a non-f64 fiber smoke
-     is added in a future phase) -- no separate audit needed for
-     that case.  Predicate stays unchanged.
-
-     CAReduce is not routed here either (returns 0). */
+  /* Not taken by the other views, each measured slower fiber by fiber:
+     CASelectAxis / CAGrid / CASelect (1.25-4.7x), whose descriptor
+     engine already gathers the whole view in one batched pass and has no
+     per-region fast path to enter; CABitarray / CABitfield (1.2-5.9x,
+     through a fake over them), where N per-fiber calls each pay the bit
+     alignment that one whole-view transfer pays once.  CAReduce is not
+     routed here either. */
   return 0;
 }
 
@@ -612,8 +577,8 @@ ca_iter_validate_inputs (ca_iter_state    *st,
                          uint32_t          flags)
 {
   if ( st == NULL || src == NULL )         return CA_ITER_ERR_FLAGS;
-  /* Phase A capstone: CA_SLAB_AXES accepted (init_l2 path only — init_l1
-     does not implement CA_SLAB_AXES yet, see init_l1's policy gate). */
+  /* CA_SLAB_AXES is accepted here and refused by init_l1 itself; init_l2
+     refuses CA_SLAB_WHOLE (see each init's policy gate). */
   if ( policy != CA_SLAB_WHOLE && policy != CA_SLAB_AXES )
     return CA_ITER_ERR_POLICY;
 
@@ -909,9 +874,9 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
   memset(st, 0, sizeof(*st));
   if ( src == NULL ) return CA_ITER_ERR_FLAGS;
 
-  /* PROPOSAL_CAFACE_PHASE_2 F.2.6 + PROPOSAL_LAZY_MARKER_LIFT Phase 0:
-     storage-identical wrapper strip at entry (= same rationale as init_l2
-     below).  Strip before validate_inputs.
+  /* A Face or a lazy marker wraps storage identical to its parent, so it
+     is stripped at entry (the same reason as in init_l2 below), before
+     validate_inputs.
 
      The WRITE rejection is taken against the wrapper, not what it wraps: a
      CALazyMarker is read-only while its parent is not, and stripping first
@@ -927,9 +892,8 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
   int rc = ca_iter_validate_inputs(st, src, policy, flags);
   if ( rc != CA_ITER_OK ) return rc;
 
-  /* Phase A capstone: CA_SLAB_AXES is L2-only (kernels needing K-D slab
-     yield use init_l2).  init_l1 rejects so callers don't get a silent
-     misdispatch. */
+  /* CA_SLAB_AXES is L2 only (a kernel that wants a K-D slab uses
+     init_l2); init_l1 refuses it rather than walking the whole array. */
   if ( policy == CA_SLAB_AXES ) return CA_ITER_ERR_POLICY;
 
   /* The same routing as init_l2: a descriptor view whose parent lends no
@@ -979,9 +943,9 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
        CAShift) ==========================================================
        describe_axes → prepare → layout, then gather the view into
        scratch with ca_axis_dispatch_gather and yield one contig slab
-       (alias_mode = NONE). The view-transparency
-       principle (proposal §0): kernel sees a flat slab regardless of
-       per-axis kind; INDEX / SHIFT mix is handled inside the engine. */
+       (alias_mode = NONE).  The kernel sees a flat slab whatever the
+       per-axis kinds are; an INDEX / SHIFT mix is handled inside the
+       engine. */
     ca_axis_desc_t raw_descs[CA_RANK_MAX];
     int8_t         raw_ndim = 0;
     ca_iter_describe_axes(src, raw_descs, st->parent_axis_dims, &raw_ndim);
@@ -1026,7 +990,7 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
     return CA_ITER_OK;
   }
 
-  /* === CAStride path (step 1-4) ============================== */
+  /* === CAStride path ========================================= */
   if ( ca_iter_can_alias(src, 1) ) {
     /* alias path: entity or CAStride contig */
     st->alias_mode = CA_ITER_ALIAS_CONTIG;
@@ -1811,12 +1775,10 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
     return 0;
   }
 
-  /* Phase C T3 specialised path (B-1b, C.1b, 2026-05-27): innermost
-     slab axis is STRIDE, no SHIFT axes anywhere.  Hoist outer + non-
-     innermost-slab axes (= per-cell switch evaluated once per slab row),
-     inner = pure STRIDE linear memcpy (= SIMD-friendly contig run, no
-     engine per-cell dispatch).  Target: 1.5-1.8x win for INDEX slab
-     with innermost STRIDE (= grid / select sparse projection use cases). */
+  /* PER_SLAB_HOIST (see its name tag in ki_open_l2): the innermost slab
+     axis is STRIDE and no axis is SHIFT.  The outer and non-innermost
+     slab offsets are computed once per slab row, and the inner run is a
+     plain memcpy instead of the descriptor engine's per-cell walk. */
   if ( st->alias_mode == CA_ITER_ALIAS_PER_SLAB_HOIST ) {
     int8_t    inner_view_ax   = st->slab_axes_buf[st->slab_ndim - 1];
     ca_size_t inner_count     = st->descs[inner_view_ax].count;
@@ -1919,11 +1881,8 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
      itself.  Mask: a pointer into the copy of parent k's mask that init
      took (stack_parent_mask_ptrs[k] + mask_off); a write through it
      reaches nothing.  The data is yielded in place unless FIBER_CONTIG
-     needs a strided fiber gathered (ki_fiber_contig_data).
-
-     K.3 (2026-06-20): parent_ax derivation generalised for arbitrary
-     k_axis -- stack axis s != k_axis maps to parent axis s if
-     s < k_axis else s - 1. */
+     needs a strided fiber gathered (ki_fiber_contig_data).  A stack axis
+     s other than k_axis is parent axis s, or s - 1 past k_axis. */
   if ( st->alias_mode == CA_ITER_ALIAS_STACK_OUTER_K ) {
     int8_t   kpos = st->stack_k_outer_pos;
     int32_t  k    = (int32_t) st->outer_idx[kpos];
@@ -1958,8 +1917,8 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
     return 1;
   }
 
-  /* PROPOSAL_CASTACK_LOOP_INTERCHANGE Vector A rev2: CAStack direct
-     per-parent ptr access path.  For each outer iter, compute the
+  /* CAStack read along its stack axis, from the parents' memory.  For
+     each outer index, compute the
      parent inner byte offset (= same across all K parents, uniform
      shape), and yield the K cells of that fiber out of stack_tile_cache,
      which is refilled TILE fibers at a time from the cached parent ptrs
@@ -1970,7 +1929,7 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
      axes are the stack axes other than k_axis, which are the parent axes
      in order: outer_idx[m] maps to parent axis m. */
   if ( st->alias_mode == CA_ITER_ALIAS_STACK ) {
-    /* pilot/castack-axis0-loop-interchange: tile cache.  Outer iter
+    /* Tile cache.  Outer iter
        walks parent storage in row-major order so parent_off increments
        by `bytes` per call monotonically.  Refill TILE fibers at once
        via K contig parent streams (= TILE consecutive cells from each
@@ -2040,11 +1999,10 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
     return 1;
   }
 
-  /* Phase C T3 fallback (C.1, 2026-05-27): per-slab materialise via
-     ca_axis_dispatch_gather with a subset descriptor built by pinning
-     outer axes at the current outer_idx position (D1.2 (A): caller-side
-     subset construction, engine API unchanged).  scratch_ptr is sized
-     for one max slab and reused across iters (D1.1 (B)). */
+  /* PER_SLAB: one slab gathered by ca_axis_dispatch_gather, from a
+     subset of the descriptors with the outer axes pinned at the current
+     outer_idx position.  scratch_ptr is sized for one slab and reused for
+     every slab. */
   if ( st->alias_mode == CA_ITER_ALIAS_PER_SLAB ) {
     ca_axis_desc_t subset_descs[CA_RANK_MAX];
     memcpy(subset_descs, st->descs, st->ndim * sizeof(ca_axis_desc_t));
@@ -2079,7 +2037,7 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
       }
     }
 
-    /* CAWindow fill value capture (= same lookup as B.1.5 init). */
+    /* CAWindow fill value (the same lookup as in ki_open_l2). */
     const void *bound_fill = NULL;
     if ( ca_func[st->src->obj_type].attach == ca_window_func.attach ) {
       bound_fill = ((CAWindow *) st->src)->fill;
@@ -2089,8 +2047,8 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
                             st->ndim, st->bytes, st->slab_elements,
                             bound_fill, st->scratch_ptr);
 
-    /* Mask offset into whole-view scratch_mask (T3 path keeps mask
-       layout view-row-major to match slab_mask_strides). */
+    /* Mask offset into the whole-view mask copy, which is view
+       row-major to match slab_mask_strides. */
     ca_size_t mask_off = 0;
     for ( int8_t m = 0; m < st->outer_ndim; m++ ) {
       mask_off += st->outer_idx[m] * st->outer_mask_strides[m];
@@ -2117,10 +2075,9 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
      (element units, view row-major).  Both are zero when outer_ndim
      == 0 (= all-axes WHOLE-equivalent case).
 
-     STRIDE outer axes (Phase A SRC_CASTRIDE, and Phase B
-     SRC_DESCRIPTOR STRIDE-kind axes) use outer_idx[m] directly as the
-     multiplier.  INDEX outer axes (Phase B SRC_DESCRIPTOR INDEX-kind)
-     need an indices[] lookup: multiplier = descs[axis].indices[outer_idx[m]].
+     STRIDE outer axes (SRC_CASTRIDE, and the STRIDE axes of a descriptor
+     view) use outer_idx[m] directly as the multiplier.  INDEX outer axes
+     of a descriptor view need an indices[] lookup: multiplier = descs[axis].indices[outer_idx[m]].
      Mask offset uses outer_idx[m] directly in both cases (= mask
      scratch is in view row-major order, outer_idx walks view-axis
      positions). */
@@ -2140,13 +2097,12 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
     mask_off += st->outer_idx[m] * st->outer_mask_strides[m];
   }
 
-  /* PROPOSAL_FIBER_PER_SOURCE_PATH F.6.1: per-fiber fused dispatch.
-     When init_l2 selected CA_ITER_ALIAS_PER_FIBER_FUSED, there is no
-     whole-view buffer to alias from.  Build the fiber region from
-     outer_idx + fiber_axis and call ca_xfer_stride(src, ..., GET)
-     directly into fiber_data_scratch.  For fused-aware views (X.1
-     OOB-fused / X.4 transform-fused) this routes to a 1-pass per-
-     region path.
+  /* PER_FIBER_FUSED: there is no whole-view buffer to alias from.  Build
+     the fiber region from outer_idx + fiber_axis and call
+     ca_xfer_stride(src, ..., GET) directly into fiber_data_scratch; the
+     view's region transfer (out-of-bounds filling for CAWindow / CAShift,
+     the conversion for a fake or byte-swap view) delivers it in one
+     pass.
 
      last_data_off carries the fiber region's outer footprint so
      sync_slab can reconstruct the same region for WRITE PUT.  Encode
@@ -2170,8 +2126,8 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
     /* Build fiber region: fiber_axis spans the full fiber, all other
        axes pinned to outer_idx position (count=1).  Cache starts[] in
        state so sync_slab can rebuild the same region for WRITE PUT
-       (= captured BEFORE outer_idx advance below, same hazard pattern
-       as F.1a last_data_off). */
+       (= captured BEFORE the outer_idx advance below, the same hazard as
+       last_data_off; see sync_slab). */
     {
       int8_t op = 0;
       for ( int8_t k = 0; k < nd; k++ ) {
@@ -2231,16 +2187,15 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
     return 1;
   }
 
-  /* PROPOSAL_FIBER_DELIVERY F.1a: per-axis fiber contig delivery.
-     For naxes==1 (= single slab axis = fiber) the catalog contract
+  /* Contiguous fiber delivery (promise 1).  For naxes==1 (= single slab axis = fiber) the catalog contract
      CA_FOR_EACH_FIBER promises contig data delivery.  When the fiber
      is not innermost-contig (= slab_strides[0] != bytes), the engine
      gathers the fiber into fiber_data_scratch before yielding so the
      author can write p[i] without stride math.
 
      Capture last_data_off BEFORE the outer_idx advance below; sync_slab
-     consumes it for WRITE scatter.  See header field doc + PROPOSAL
-     §4.3.2 hazard comment in sync_slab. */
+     consumes it for WRITE scatter.  See the header field and the hazard
+     comment in sync_slab. */
   /* sync_slab finds the slab here: the fiber it scatters back, and the
      cells of a whole-view scratch it compares. */
   st->last_data_off = data_off;
@@ -2287,8 +2242,6 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
   /* ======================================================================
    *           !!! CORRECTNESS HAZARD - DO NOT MOVE !!!
    *
-   * (PROPOSAL_FIBER_DELIVERY F.1a)
-   *
    * Per-fiber scratch reuse + scatter correctness depends on the strict
    * evaluation order of the CA_FOR_EACH_FIBER_* macro sandwich:
    *
@@ -2315,14 +2268,13 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
    * instead of reusing -- separate phase, separate design.
    * ====================================================================== */
 
-  /* PROPOSAL_FIBER_PER_SOURCE_PATH F.6.1: per-fiber fused WRITE PUT.
-     When alias_mode == CA_ITER_ALIAS_PER_FIBER_FUSED, the author
+  /* PER_FIBER_FUSED write: the author
      wrote into fiber_data_scratch and there is no whole-view buffer
      to xfer_all PUT.  Rebuild the same fiber region from cached
      fiber_region_starts[] (= captured pre-advance in next_slab_axes,
-     same hazard pattern as F.1a last_data_off) and call
-     ca_xfer_stride(src, ..., PUT) which routes through the view's
-     fused PUT path (X.1 / X.4) for 1-pass scatter back. */
+     the same hazard as last_data_off) and call ca_xfer_stride(src, ...,
+     PUT), which puts the fiber back through the view's region transfer
+     in one pass. */
   if ( st->alias_mode == CA_ITER_ALIAS_PER_FIBER_FUSED ) {
     ca_size_t fiber_n = st->slab_dims[0];
     int8_t    nd      = st->ndim;
@@ -2337,7 +2289,7 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
     return;
   }
 
-  /* Per-fiber gather path scatter (PROPOSAL_FIBER_DELIVERY F.1a).
+  /* Per-fiber gather path scatter.
      When next_slab_axes gathered the fiber into fiber_data_scratch
      (= naxes==1 + slab_strides[0] != bytes), scatter it back to the
      source layout via the strided write.  When the fiber was the
@@ -2366,9 +2318,8 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
        below is skipped. */
   }
 
-  /* alias path: kernel wrote through alias_ptr into parent directly
-     (case A semantics, PROPOSAL_T1_WRITE_SEMANTICS.md §(a)).  No
-     scatter needed.  Applies to all CAStride alias and to
+  /* alias path: the kernel wrote through alias_ptr into the memory the
+     walk borrowed, so nothing is scattered.  Applies to all CAStride alias and to
      STRIDE-only descriptor alias (SRC_DESCRIPTOR_L2_ALIASABLE), whose
      scratch_ptr is NULL too.  An alias walk over a view root is written
      back once, by finish (ca_sync_detach on the root). */
@@ -2431,7 +2382,7 @@ ca_iter_state_finish (ca_iter_state *st)
     xfree(st->scratch_mask);
     st->scratch_mask = NULL;
   }
-  /* PROPOSAL_FIBER_DELIVERY F.1a/F.1b: per-fiber scratch lifecycle. */
+  /* The per-fiber scratch. */
   if ( st->fiber_data_scratch ) {
     ki_data_free(st->fiber_data_scratch, st->fiber_data_scratch_cap);
     st->fiber_data_scratch     = NULL;
@@ -2454,7 +2405,7 @@ ca_iter_state_finish (ca_iter_state *st)
     xfree(st->stack_parent_ptrs);
     st->stack_parent_ptrs = NULL;
   }
-  /* pilot/castack-axis0-loop-interchange: free tile cache. */
+  /* The STACK tile cache. */
   if ( st->stack_tile_cache ) {
     ki_data_free(st->stack_tile_cache, 0);
     st->stack_tile_cache = NULL;
@@ -2487,10 +2438,9 @@ ca_iter_state_finish (ca_iter_state *st)
   } else if ( st->alias_mode == CA_ITER_ALIAS_CONTIG
               || st->alias_mode == CA_ITER_ALIAS_STRIDED ) {
     /* alias path (CONTIG/STRIDED for CAStride family): we attached
-       src directly at init, so detach it here.
-       Note: SRC_ATTACH used to be in this list (ALIAS_ATTACH); after
-       the 2026-05-31 refactor it owns its own scratch (alias_mode =
-       NONE, scratch_ptr xfree'd above), so no src.detach needed. */
+       src directly at init, so detach it here.  A SRC_ATTACH walk owns
+       its own scratch (alias_mode = NONE, freed above) and attached
+       nothing to detach. */
     ca_detach(st->src);
   }
   if ( st->flags & CA_ITER_FLAG_OWNS_SRC ) {
@@ -2938,8 +2888,6 @@ ca_iter_ensure (int32_t n, ca_iter_state *states,
  * or `CARRAY_DEV=1 rake build_ext`).  These helpers expose internal
  * engine state to Ruby for spec_ai regression pins.  Do not consume
  * from user code.
- *
- * See devel/PROPOSAL_SMOKE_DEV_BUILD_GATE.md
  * ============================================================ */
 
 /* The innermost-axis walk the L2 smokes run: one strided run per
@@ -3005,7 +2953,7 @@ rb_t1_smoke (VALUE klass, VALUE vsrc)
   return result;
 }
 
-/* L2 smoke (step 3): CArray.t1_smoke_strided(ca) -> Hash with
+/* L2 smoke: CArray.t1_smoke_strided(ca) -> Hash with
      rc            => Integer
      slabs         => Integer (= total_slabs)
      total_elems   => Integer
@@ -3014,8 +2962,6 @@ rb_t1_smoke (VALUE klass, VALUE vsrc)
                      reported (ptr, n, stride_bytes) tuples, in
                      iteration order; should equal view.to_ca.dump_binary
      strides       => Array<Integer> — stride_bytes per yielded slab
-                     (constant across yields under WHOLE policy in
-                     step 3; surfaced for inspection)
    On error rc != OK, the walk fields are 0 / empty. */
 static VALUE
 rb_t1_smoke_strided (VALUE klass, VALUE vsrc)
@@ -3089,9 +3035,9 @@ rb_t1_smoke_sum_strided_f64 (VALUE klass, VALUE vsrc)
   }
 
   while ( t1_smoke_next_row(&st, &p, &n, &stride_bytes) ) {
-    /* Step 8.1: macro picks contig fast path when stride == sizeof(double),
-       falls back to strided loop otherwise.  Removes the SIMD inhibition
-       observed in step 5.5 §10.4.5 on descriptor materialise paths. */
+    /* CA_L2_FOR_EACH takes a contiguous loop when stride ==
+       sizeof(double), which the compiler can vectorise, and a strided
+       loop otherwise. */
     CA_L2_FOR_EACH(double, p, n, stride_bytes, dp, {
       acc += *dp;
     });
@@ -3132,9 +3078,8 @@ rb_t1_smoke_write_fill_f64 (VALUE klass, VALUE vsrc, VALUE vval)
   return INT2NUM(CA_ITER_OK);
 }
 
-/* WRITE smoke: in-place fill via L2 strided dispatch.  Used by the
-   step 5.5 aggregate bench to round out the matrix (L1 WRITE was
-   already in t1_smoke_write_fill_f64).  Kernel walks the strided
+/* WRITE smoke: in-place fill via an L2 walk (the L1 form is
+   t1_smoke_write_fill_f64).  Kernel walks the strided
    slab and writes val at every position; sync_slab scatters back. */
 static VALUE
 rb_t1_smoke_write_fill_strided_f64 (VALUE klass, VALUE vsrc, VALUE vval)
@@ -3155,9 +3100,8 @@ rb_t1_smoke_write_fill_strided_f64 (VALUE klass, VALUE vsrc, VALUE vval)
   if ( rc != CA_ITER_OK ) return INT2NUM(rc);
 
   while ( t1_smoke_next_row(&st, &p, &n, &stride) ) {
-    /* Step 8.1: contig fast path via macro (stride == sizeof(double)
-       on materialise scratch, which is the descriptor L2 path that
-       hit +18-22% in step 5.5 — macro removes that overhead). */
+    /* Contiguous loop when stride == sizeof(double) (a gathered
+       scratch), strided otherwise. */
     CA_L2_FOR_EACH(double, p, n, stride, dp, {
       *dp = v;
     });
@@ -3229,9 +3173,7 @@ cmp_double (const void *a, const void *b)
    kernel materialises into a tight contig scratch, qsorts, then
    writes back via the same stride.  This exercises L2 WRITE
    mechanics (multi-slab walk, per-slab fill of strided cells)
-   without over-engineering a strided qsort itself — that would be a
-   Pattern H specialised op, out of step 4 scope (reviewer advice #3).
-*/
+   without a strided qsort of its own. */
 static VALUE
 rb_t1_smoke_sort_row_f64 (VALUE klass, VALUE vsrc)
 {
@@ -3255,8 +3197,8 @@ rb_t1_smoke_sort_row_f64 (VALUE klass, VALUE vsrc)
       ca_iter_state_finish(&st);
       rb_raise(rb_eRuntimeError, "row too large for smoke scratch");
     }
-    /* strided -> contig scratch.  Step 8.1: macro handles the
-       stride == bytes contig fast path automatically. */
+    /* strided -> contig scratch (CA_L2_FOR_EACH takes the contiguous
+       loop when stride == bytes). */
     ca_size_t _sc_i = 0;
     CA_L2_FOR_EACH(double, p, n, stride_bytes, dp, {
       scratch[_sc_i++] = *dp;
@@ -3264,7 +3206,7 @@ rb_t1_smoke_sort_row_f64 (VALUE klass, VALUE vsrc)
     /* in-place qsort on the contig scratch */
     qsort(scratch, n, sizeof(double), cmp_double);
     /* contig scratch -> strided (writes back to parent via alias_ptr,
-       case A direct write).  Step 8.1: macro contig fast path. */
+       a direct write). */
     ca_size_t _wb_i = 0;
     CA_L2_FOR_EACH(double, p, n, stride_bytes, dp, {
       *dp = scratch[_wb_i++];
@@ -3275,7 +3217,7 @@ rb_t1_smoke_sort_row_f64 (VALUE klass, VALUE vsrc)
   return INT2NUM(CA_ITER_OK);
 }
 
-/* Step 6 smoke: L1 walk that exposes BOTH the value slab and the
+/* Mask smoke: L1 walk that exposes BOTH the value slab and the
    mask slab.  Used to pin "mask is delivered to kernel" semantics.
    Returns rc + mask_seen (Boolean: was out_mask non-NULL at first
    yield) + mask_bytes (String: concatenated mask bytes). */
@@ -3351,7 +3293,7 @@ rb_t1_smoke_attach (VALUE klass, VALUE vsrc)
   return SIZE2NUM(total);
 }
 
-/* L2 bench-grade smoke (sub-step 5.3+).  Same shape as t1_smoke_attach
+/* L2 bench-grade smoke.  Same shape as t1_smoke_attach
    but walks the innermost axis through init_l2 so descriptor sources
    can be exercised through the L2 path. */
 static VALUE
@@ -3378,7 +3320,7 @@ rb_t1_smoke_attach_strided (VALUE klass, VALUE vsrc)
   return SIZE2NUM(total);
 }
 
-/* step 7: minimal smoke that exposes the `flags` argument to Ruby
+/* Flags smoke: minimal smoke that exposes the `flags` argument to Ruby
    tests.  Just runs init_l1 with the requested flags and returns
    the rc — used to verify NO_MASK enforcement (and any future
    flag-gated rejection paths) without needing a full kernel walk. */
@@ -3397,7 +3339,7 @@ rb_t1_smoke_init_rc (VALUE klass, VALUE vsrc, VALUE vflags)
   return INT2NUM(rc);
 }
 
-/* ---- Phase A capstone: CA_SLAB_AXES smoke -------------------------
+/* ---- CA_SLAB_AXES smoke ----------------------------------------------
    sum a float64 source over user-specified slab axes via init_l2 +
    next_slab_axes.  K-D walk over slab dims using slab_strides for data
    and slab_mask_strides for mask (so non-contig CAStride sources work
@@ -3467,7 +3409,7 @@ rb_t1_smoke_sum_axes_f64 (int argc, VALUE *argv, VALUE klass)
   return DBL2NUM(acc);
 }
 
-/* ---- Phase B.3 helper smoke: rb_ca_parse_reduce_axes ---------------
+/* ---- helper smoke: rb_ca_parse_reduce_axes ---------------------------
    Calls the helper and returns the parsed axes as a Ruby Array of
    Integer.  Lets tests inspect parsing behaviour directly.
    Signature: CArray.t1_test_parse_reduce_axes(ca, *args) */
@@ -3493,7 +3435,7 @@ rb_t1_test_parse_reduce_axes (int argc, VALUE *argv, VALUE klass)
   return arr;
 }
 
-/* ---- API harmonisation A.1 smoke: rb_ca_parse_reduce_axes_kw -------
+/* ---- helper smoke: rb_ca_parse_reduce_axes_kw ------------------------
    Calls the kwarg helper and returns the parsed axes as a Ruby Array.
    Lets tests inspect kwarg-form parsing (Qnil / Integer / Array) +
    validation parity with the variadic entry.
@@ -3521,7 +3463,7 @@ rb_test_parse_reduce_axes_kw (int argc, VALUE *argv, VALUE klass)
   return arr;
 }
 
-/* ---- Phase A.3 helper smoke: rb_ca_new_reduced ---------------------
+/* ---- helper smoke: rb_ca_new_reduced ---------------------------------
    Exposes rb_ca_new_reduced (carray_core.c) for unit testing.  Returns
    the newly allocated output CArray (= tests verify shape + data_type).
    Signature: CArray.t1_test_new_reduced(ca, data_type, axis1, axis2, ...) */
@@ -3536,9 +3478,8 @@ rb_t1_test_new_reduced (int argc, VALUE *argv, VALUE klass)
     rb_raise(rb_eArgError,
              "t1_test_new_reduced expects (ca, data_type, axis...) with >= 1 axis");
   }
-  /* PROPOSAL_DTYPE_SYMBOL_FLIP: accept Symbol / Integer / Class / String
-     uniformly via rb_ca_guess_type so post-flip CA_* (Symbol) callers
-     and legacy Integer-code callers both work. */
+  /* Accept Symbol / Integer / Class / String alike through
+     rb_ca_guess_type. */
   data_type = (int32_t) rb_ca_guess_type(argv[1]);
   naxes = (int8_t) (argc - 2);
   if ( naxes > CA_RANK_MAX ) {
@@ -3551,7 +3492,7 @@ rb_t1_test_new_reduced (int argc, VALUE *argv, VALUE klass)
   return rb_ca_new_reduced(argv[0], axes, naxes, data_type, 0);
 }
 
-/* ---- step 9.3: CAReduce-specific smoke -----------------------------
+/* ---- CAReduce smoke --------------------------------------------------
    CAReduce has no public Ruby ctor (it's an internal class used by
    CARefer mask handling).  Tests need to drive kernel_iterator over
    a CAReduce, so we expose a thin construction helper plus dedicated
@@ -3654,8 +3595,8 @@ rb_t1_smoke_reduce_write_broadcast (VALUE klass, VALUE vparent,
   return INT2NUM(CA_ITER_OK);
 }
 
-/* ---- M.6: CARemap kernel_iterator smoke helpers --------------------
-   CARemap has no public Ruby ctor (internal-only per §2.2), so we
+/* ---- CARemap smoke helpers --------------------------------------------
+   CARemap has no public Ruby constructor, so we
    construct it from C using the (ref, idx) args.  Pattern mirrors
    rb_t1_smoke_reduce_*: build the view, run the iterator state
    machine, return the standard hash (rc / slabs / total_elems /
@@ -3782,7 +3723,7 @@ rb_t1_smoke_remap_write_fill_f64 (VALUE klass, VALUE vref, VALUE vidx,
   return INT2NUM(CA_ITER_OK);
 }
 
-/* ---- Phase C C.3: CA_FOR_EACH_SLAB macro smoke surfaces -------------
+/* ---- CA_FOR_EACH_SLAB macro smoke surfaces ---------------------------
    Smoke kernels that exercise the block macros end-to-end.  Used by
    spec_ai/test_ca_for_each_slab_macros.rb to pin behavioural
    correctness of the macro expansion (= same byte-parity result as
@@ -3926,11 +3867,11 @@ rb_caf_smoke_double_f64 (VALUE klass, VALUE vsrc)
   return vout;
 }
 
-/* ---- PROPOSAL_FIBER_DELIVERY F.2: catalog macro smokes -------------
+/* ---- CA_FOR_EACH_FIBER macro smokes ----------------------------------
    Exercise each of the 4 catalog forms end-to-end with float64 fibers,
    verifying contig delivery for both innermost (= stride==bytes) and
    non-innermost (= stride>bytes, gather path) axis positions.  Used by
-   spec_ai/test_fiber_delivery.rb (= F.3). */
+   spec_ai/test_fiber_delivery.rb. */
 
 /* form 1 (NO_MASK single): per-axis sum, returns total sum.
    Catalog: CA_FOR_EACH_FIBER. */
@@ -4040,7 +3981,7 @@ rb_caf_fiber_smoke_zero_masked_f64 (VALUE klass, VALUE vsrc, VALUE vaxis)
   return vout;
 }
 
-/* F.5 bench helper: sort_copy via CA_FOR_EACH_FIBER_INOUT.
+/* Bench helper: sort_copy via CA_FOR_EACH_FIBER_INOUT.
    Functional equivalent of the per-axis sort_copy (rb_ca_sort_copy in
    ext/carray_sort.c).
    The macro form lets us A/B the author-side overhead of stride math
@@ -4085,7 +4026,7 @@ rb_caf_fiber_bench_sort_copy_f64 (VALUE klass, VALUE vsrc, VALUE vaxis)
   return vout;
 }
 
-/* F.5 bench helper variant: sort_copy via SLAB macro + manual
+/* Bench helper variant: sort_copy via SLAB macro + manual
    gather/scatter (= what hand-rolled sort_copy effectively does, but
    driven through the public CA_FOR_EACH_SLAB_INOUT macro instead of
    the raw next_slab_axes API).  Lets us isolate macro overhead from
@@ -4151,7 +4092,7 @@ rb_caf_slab_bench_sort_copy_f64 (VALUE klass, VALUE vsrc, VALUE vaxis)
   return vout;
 }
 
-/* F.5 follow-up bench: per-fiber fused xfer_stride direct into a contig
+/* Bench helper: per-fiber fused xfer_stride direct into a contig
    scratch, skipping the kernel_iterator SRC_ATTACH whole-view materialise.
    Tests user's hypothesis: for transform views (CAFake/CAByteSwap etc.),
    does bypassing the whole-view scratch_ptr and calling ca_xfer_stride
@@ -4247,7 +4188,7 @@ Init_ca_kernel_iterator (void)
 
 #ifdef CARRAY_DEV_BUILD
   /* ==== smoke surface registrations (dev-only, stripped in release) ====
-   * See PROPOSAL_SMOKE_DEV_BUILD_GATE.md.  All `t1_smoke_*`, `caf_smoke_*`,
+   * All `t1_smoke_*`, `caf_smoke_*`,
    * `caf_fiber_smoke_*`, `caf_*_bench_*`, helper smokes, and `T1_*` test
    * constants are gated here together — none of them are consumed by
    * production code (lib/ / other ext/), only by spec_ai regression pins. */
@@ -4275,20 +4216,20 @@ Init_ca_kernel_iterator (void)
                              rb_t1_smoke_with_mask, 1);
   rb_define_singleton_method(rb_cCArray, "t1_smoke_init_rc",
                              rb_t1_smoke_init_rc, 2);
-  /* Phase A capstone: CA_SLAB_AXES smoke (variadic axes) */
+  /* CA_SLAB_AXES smoke (variadic axes) */
   rb_define_singleton_method(rb_cCArray, "t1_smoke_sum_axes_f64",
                              rb_t1_smoke_sum_axes_f64, -1);
-  /* Phase A.3: rb_ca_new_reduced helper smoke */
+  /* rb_ca_new_reduced helper smoke */
   rb_define_singleton_method(rb_cCArray, "t1_test_new_reduced",
                              rb_t1_test_new_reduced, -1);
-  /* Phase B.3: rb_ca_parse_reduce_axes helper smoke */
+  /* rb_ca_parse_reduce_axes helper smoke */
   rb_define_singleton_method(rb_cCArray, "t1_test_parse_reduce_axes",
                              rb_t1_test_parse_reduce_axes, -1);
 
-  /* API harmonisation A.1: rb_ca_parse_reduce_axes_kw helper smoke */
+  /* rb_ca_parse_reduce_axes_kw helper smoke */
   rb_define_singleton_method(rb_cCArray, "test_parse_reduce_axes_kw",
                              rb_test_parse_reduce_axes_kw, -1);
-  /* CAReduce-specific (step 9.3): no public Ruby API */
+  /* CAReduce: no public Ruby API */
   rb_define_singleton_method(rb_cCArray, "t1_make_reduce",
                              rb_t1_make_reduce, 3);
   rb_define_singleton_method(rb_cCArray, "t1_smoke_reduce_read",
@@ -4296,19 +4237,19 @@ Init_ca_kernel_iterator (void)
   rb_define_singleton_method(rb_cCArray, "t1_smoke_reduce_write_broadcast",
                              rb_t1_smoke_reduce_write_broadcast, 4);
 
-  /* M.6 CARemap kernel_iterator smokes (test-only). */
+  /* CARemap smokes (test-only). */
   rb_define_singleton_method(rb_cCArray, "t1_smoke_remap_read",
                              rb_t1_smoke_remap_read, 2);
   rb_define_singleton_method(rb_cCArray, "t1_smoke_remap_read_strided",
                              rb_t1_smoke_remap_read_strided, 2);
   rb_define_singleton_method(rb_cCArray, "t1_smoke_remap_write_fill_f64",
                              rb_t1_smoke_remap_write_fill_f64, 3);
-  /* Phase C C.3 (2026-05-27): block macro smokes */
+  /* block macro smokes */
   rb_define_singleton_method(rb_cCArray, "caf_smoke_sum_f64",
                              rb_caf_smoke_sum_f64, -1);
   rb_define_singleton_method(rb_cCArray, "caf_smoke_double_f64",
                              rb_caf_smoke_double_f64, 1);
-  /* PROPOSAL_FIBER_DELIVERY F.2: catalog macro smokes */
+  /* fiber macro smokes */
   rb_define_singleton_method(rb_cCArray, "caf_fiber_smoke_sum_f64",
                              rb_caf_fiber_smoke_sum_f64, 2);
   rb_define_singleton_method(rb_cCArray, "caf_fiber_smoke_double_f64",
@@ -4317,7 +4258,7 @@ Init_ca_kernel_iterator (void)
                              rb_caf_fiber_smoke_unmasked_sum_f64, 2);
   rb_define_singleton_method(rb_cCArray, "caf_fiber_smoke_zero_masked_f64",
                              rb_caf_fiber_smoke_zero_masked_f64, 2);
-  /* F.5 bench helper */
+  /* bench helper */
   rb_define_singleton_method(rb_cCArray, "caf_fiber_bench_sort_copy_f64",
                              rb_caf_fiber_bench_sort_copy_f64, 2);
   rb_define_singleton_method(rb_cCArray, "caf_slab_bench_sort_copy_f64",

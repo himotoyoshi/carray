@@ -1,13 +1,28 @@
 /* ---------------------------------------------------------------------------
 
-  ca_kernel_iterator.h
+  ca_kernel_iterator.h -- the kernel iterator, for C extension authors
 
-  T1 kernel_iterator — C extension author surface.
+  A kernel written against this header receives the cells of any CArray
+  -- an entity, a view of a view, a selection, a lazy expression -- one
+  slab at a time, with the mask beside them, and on a write the cells it
+  changes reach the array.  How the cells are delivered is the engine's
+  business (ca_kernel_iterator.c); the kernel only names the axes it
+  wants and walks what it is given.
 
-  Status: TWO-TIER FREEZE CONTRACT (3.0 onward).  The surface is split
+  Where to start:
+    - guides/devel/11_kernel_iterator.md: the surface and its contract,
+      with worked kernels
+    - docs/authoring/HOW_TO_WRITE_KERNEL.md: the reference, and which
+      macro to pick for a reduction, a map, a scan or a whole-array walk
+    - the block macros below (CA_FOR_EACH_SLAB / _FIBER / _WHOLE) are
+      the usual way in; the raw entry points (ca_iter_state_init_l1 /
+      init_l2 ...) are for kernels that handle the return codes
+      themselves
+
+  Freeze contract (3.0 onward).  The surface is split
   so the engine can be re-implemented across 3.x (the surface stays fixed)
-  without breaking ext-gem kernels.  See docs/authoring/HOW_TO_WRITE_KERNEL.md
-  §0/§13 for the prose contract; utils/check_kernel_surface_freeze.rb
+  without breaking ext-gem kernels.  docs/authoring/HOW_TO_WRITE_KERNEL.md
+  states the contract in prose; utils/check_kernel_surface_freeze.rb
   (rake kernel_surface_check) is the mechanical pin.
 
     FROZEN (do NOT rename / re-arity / change semantics; additions only):
@@ -24,7 +39,8 @@
         can raise) and ca_iter_register_source_kind (an externally
         installed view class)
       - the enum/status tokens authors write literally: CA_SLAB_AXES,
-        CA_KERNEL_WRITE, CA_KERNEL_NO_MASK, CA_ITER_OK, CA_ITER_ERR_*
+        CA_SLAB_WHOLE, CA_KERNEL_WRITE, CA_KERNEL_NO_MASK, CA_ITER_OK,
+        CA_ITER_ERR_*
       - the slab-delivery representation = the ca_iter_state fields a
         kernel reads (marked "FROZEN author contract" at the struct):
         slab_ndim / slab_dims / slab_strides / slab_mask_strides /
@@ -42,7 +58,7 @@
         when a :min / :max / :prod kernel does not take the 8-way form),
         CA_SLAB_SCAN_T_GATED, and CA_SLAB_REDUCE_T_VAR_EX (no caller)
       - alias_mode / src_kind routing (CA_ITER_ALIAS_* / CA_ITER_SRC_* /
-        CA_KERNEL_FIBER_CONTIG / CA_SLAB_FREE / CA_SLAB_WHOLE)
+        CA_KERNEL_FIBER_CONTIG / CA_SLAB_FREE)
       - every ca_iter_state field NOT marked frozen (scratch / stack /
         fiber / composed / descriptor bookkeeping) + physical layout
 
@@ -62,7 +78,7 @@
 #include "carray.h"
 #include "ca_iter_substrate.h"   /* ca_axis_desc_t, ca_op_prefix_axis_t */
 
-/* ---- slab policy (proposal §2.2) ------------------------------------- */
+/* ---- slab policy ------------------------------------------------------ */
 typedef enum {
   CA_SLAB_FREE  = 0,    /* engine-chosen chunk.  Not implemented:
                            init returns CA_ITER_ERR_POLICY.          */
@@ -70,29 +86,28 @@ typedef enum {
   CA_SLAB_WHOLE = 2     /* whole array in one slab                    */
 } ca_slab_policy_t;
 
-/* ---- kernel flags (proposal §2.2) ------------------------------------ */
+/* ---- kernel flags ------------------------------------------------------ */
 #define CA_KERNEL_READ        0x0
-#define CA_KERNEL_WRITE       0x1    /* step 4+ */
-#define CA_KERNEL_NO_MASK     0x2    /* step 7  */
+#define CA_KERNEL_WRITE       0x1    /* the kernel writes the slab back  */
+#define CA_KERNEL_NO_MASK     0x2    /* the kernel cannot take a mask:
+                                        a masked source is refused     */
 #define CA_KERNEL_CHUNK_HINT  0x4    /* reserved: init refuses it
                                         with CA_ITER_ERR_FLAGS          */
-#define CA_KERNEL_FIBER_CONTIG 0x8   /* PROPOSAL_FIBER_DELIVERY F.1a:
-                                        when set with policy=CA_SLAB_AXES
-                                        and naxes==1, next_slab_axes
-                                        guarantees contig data delivery
-                                        (= gathers strided fibers into
+#define CA_KERNEL_FIBER_CONTIG 0x8   /* with policy=CA_SLAB_AXES and
+                                        naxes==1, next_slab_axes hands
+                                        out every fiber contiguous
+                                        (gathering a strided one into
                                         fiber_data_scratch).  Set by the
-                                        CA_FOR_EACH_FIBER macro family
-                                        (F.2).  Direct callers that want
-                                        the original L2 strided semantic
-                                        (= *out_ptr is alias_ptr + offset,
-                                        caller walks via slab_strides[0])
-                                        leave this bit clear. */
+                                        CA_FOR_EACH_FIBER macro family.
+                                        Direct callers that walk the
+                                        slab with slab_strides[0]
+                                        themselves leave it clear. */
 
-/* ---- alias mode (proposal §3.1) -------------------------------------- */
-#define CA_ITER_ALIAS_NONE     0     /* scratch materialize. step 2+.   */
-#define CA_ITER_ALIAS_CONTIG   1     /* parent.ptr+offset direct slab.   */
-#define CA_ITER_ALIAS_STRIDED  2     /* L2 stride-aware. step 3+.        */
+/* ---- alias mode: where the slabs are cut from (internal) --------------- */
+#define CA_ITER_ALIAS_NONE     0     /* a scratch the walk gathered      */
+#define CA_ITER_ALIAS_CONTIG   1     /* the source's own memory          */
+#define CA_ITER_ALIAS_STRIDED  2     /* the root's or parent's memory,
+                                        through composed strides        */
 #define CA_ITER_ALIAS_ATTACH   3     /* Not set by the engine.  A
                                         SRC_ATTACH walk runs with
                                         CA_ITER_ALIAS_NONE over an
@@ -100,31 +115,48 @@ typedef enum {
                                         ca_xfer_all and written back with
                                         ki_scratch_push_changed (only the
                                         changed cells).  */
-#define CA_ITER_ALIAS_PER_SLAB 4     /* Phase C T3 fallback: per-slab
-                                        materialise via ca_axis_dispatch_gather
-                                        with subset descriptor (= caller-built
-                                        outer-pinned). scratch_ptr reused
-                                        across outer iters (D1.1 (B): max slab
-                                        size, refilled in next_slab_axes).
-                                        Read walks only; a write walk takes
-                                        the transfer walk instead.  */
-#define CA_ITER_ALIAS_PER_FIBER_FUSED 6 /* PROPOSAL_FIBER_PER_SOURCE_PATH
-                                          F.6.1: per-fiber fused xfer
-                                          dispatch.  Engine skips
-                                          whole-view materialise and
-                                          calls ca_xfer_stride GET/PUT
-                                          per fiber, routing into the
-                                          view's fused fast path (X.1
-                                          OOB-fused, X.4 transform-
-                                          fused).  Selected by
-                                          ca_iter_should_per_fiber_fused
-                                          (= hybrid src_kind + view func
-                                          probe + fiber axis effective
-                                          stride predicate).  Yields
-                                          from fiber_data_scratch with
-                                          mask in fiber_mask_scratch
-                                          (= rev2 §3.3, (data,mask)
-                                          pair). */
+#define CA_ITER_ALIAS_PER_SLAB 4     /* a descriptor view read one slab at
+                                        a time: ca_axis_dispatch_gather
+                                        over a subset of the descriptors
+                                        with the outer axes pinned, into
+                                        one slab-sized scratch refilled
+                                        in next_slab_axes.  Read walks
+                                        only; a write walk takes the
+                                        transfer walk instead.  */
+#define CA_ITER_ALIAS_PER_SLAB_HOIST 5 /* PER_SLAB when the innermost slab
+                                          axis is STRIDE and no axis is
+                                          SHIFT: the outer and
+                                          non-innermost slab offsets are
+                                          computed once per slab row and
+                                          the inner run is a memcpy. */
+#define CA_ITER_ALIAS_PER_FIBER_FUSED 6 /* each fiber is fetched (and on a
+                                          write put back) with the view's
+                                          ca_xfer_stride, without
+                                          gathering the whole view: a
+                                          CAWindow / CAShift fiber, or a
+                                          read of the innermost fiber of
+                                          a conversion view.  Chosen by
+                                          ca_iter_should_per_fiber_fused.
+                                          The fiber is handed out from
+                                          fiber_data_scratch, its mask
+                                          from fiber_mask_scratch. */
+#define CA_ITER_ALIAS_STACK    7     /* a CAStack read with slab_axes ==
+                                        [k_axis] (the stack axis alone,
+                                        e.g. view.mean(axis: k_axis)).
+                                        init_l2 attaches the K parents
+                                        and caches their pointers and
+                                        their common native strides;
+                                        next_slab_axes hands out each
+                                        fiber's K cells from a tile cache
+                                        (K * tile * bytes, tile 8..64
+                                        fibers) refilled from the parents'
+                                        memory, without ca_xfer_stride.
+                                        Only for slab_axes == [k_axis]
+                                        and an unmasked stack; any other
+                                        stack walk takes STACK_OUTER_K or
+                                        the transfer walk.  Delivery
+                                        through ca_xfer_stride was tried
+                                        and measured ~16x slower. */
 #define CA_ITER_ALIAS_STACK_OUTER_K 8 /* CAStack source + CA_SLAB_AXES
                                         whose slab leaves out the stack
                                         axis (k_axis), which is then an
@@ -141,52 +173,6 @@ typedef enum {
                                         that is not contiguous in its
                                         parent is gathered (FIBER_CONTIG).
                                         READ only. */
-#define CA_ITER_ALIAS_STACK    7     /* PROPOSAL_CASTACK_LOOP_INTERCHANGE
-                                        Vector A rev2 (direct per-parent
-                                        ptr access): CAStack source +
-                                        CA_SLAB_AXES with slab_axes ==
-                                        [k_axis] (= the stack axis alone,
-                                        e.g. view.mean(axis: k_axis)).
-                                        init_l2 attaches K parents up
-                                        front (= O(1) per entity parent),
-                                        caches parent->ptr aliases +
-                                        uniform parent-native byte
-                                        strides.  next_slab_axes yields
-                                        each fiber's K cells out of a
-                                        tile cache (K * tile * bytes,
-                                        tile 8..64 fibers) refilled from
-                                        parents[k]->ptr + parent_off,
-                                        bypassing ca_xfer_stride
-                                        entirely (= no per-call dispatch
-                                        / cyclic_check / strided_walk
-                                        function-boundary overhead), not
-                                        K * parent.elements * bytes.
-                                        Limited to slab_axes == [k_axis]:
-                                        arbitrary slab shapes require
-                                        per-cell index decode which
-                                        loses the inner contig fast
-                                        path; covers the demand-driving
-                                        case (= reduce along the stacked
-                                        K-axis).  Mask-bearing CAStack
-                                        falls back to SRC_ATTACH whole-
-                                        view path (per-slab mask gather
-                                        = future extension).  Rev1
-                                        explored xfer_stride-based
-                                        delivery (see PROPOSAL
-                                        rev2 §11) and was rejected for
-                                        ~16x wall-clock regression. */
-#define CA_ITER_ALIAS_PER_SLAB_HOIST 5 /* Phase C T3 specialised (B-1b,
-                                          C.1b): innermost slab axis is
-                                          STRIDE and no SHIFT axes
-                                          anywhere.  Manual gather:
-                                          outer + non-innermost-slab axes
-                                          hoisted (computed once per slab
-                                          row), inner = pure STRIDE
-                                          linear memcpy (= no engine
-                                          per-cell switch, SIMD-friendly
-                                          contig run).  Target: 1.5-1.8x
-                                          win vs (A) fallback for INDEX
-                                          slab with innermost STRIDE. */
 
 /* ---- error codes ----------------------------------------------------- */
 #define CA_ITER_OK              0
@@ -205,9 +191,9 @@ typedef enum {
 #define CA_ITER_ERR_MASK        5    /* reserved: no entry point returns
                                         it (masked sources are accepted) */
 #define CA_ITER_ERR_MASK_NOT_ALLOWED 6  /* NO_MASK flag set on a masked source */
-/* ---- source kind (step 5+, internal routing) ------------------------- */
+/* ---- source kind (internal routing) ------------------------------------ */
 #define CA_ITER_SRC_NONE       0
-#define CA_ITER_SRC_CASTRIDE   1     /* entity / CAStride family (step 1-4) */
+#define CA_ITER_SRC_CASTRIDE   1     /* entity / CAStride family         */
 #define CA_ITER_SRC_DESCRIPTOR 2     /* CASelectAxis / CAGrid / CASelect /
                                         CAWindow / CAShift: per-axis
                                         descriptors (describe_axes)      */
@@ -218,14 +204,11 @@ typedef enum {
                                         registered external obj_type: the
                                         view's own transfer gathers it */
 #define CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE 4
-                                     /* F-2 (PROPOSAL_F2_KERNEL_ITERATOR_ALIAS
-                                        rev6): descriptor view whose innermost
-                                        axis is STRIDE kind.  init_l2 takes the
-                                        alias path (= no scratch alloc, parent.ptr
-                                        + outer-prefix-offset + inner-byte-start
-                                        is yielded with inner_byte_stride). Only
-                                        emitted by ca_iter_route_source after
-                                        describe_axes inspection. */
+                                     /* a descriptor view whose innermost axis
+                                        is STRIDE kind, so an L2 walk can read
+                                        the parent's memory in place.  Only
+                                        returned by ca_iter_route_source,
+                                        after describe_axes. */
 
 /* ---- source-kind registration for externally installed obj_types -----
 
@@ -259,18 +242,18 @@ typedef enum {
    materialising path), and consults this table before the built-in list.  */
 void ca_iter_register_source_kind (int obj_type, uint8_t kind);
 
-/* ---- iter state (proposal §3.1, step 1 subset) ----------------------- */
+/* ---- iter state ------------------------------------------------------- */
 /* The state lives on the ext author's stack, so its layout is fixed: a
    field is never removed, and the ones no path uses any more (chunk_pos,
    alias_stride) stay as zero-initialised slots. */
 typedef struct {
   /* --- inputs (fixed at init) --- */
   struct _CArray   *src;
-  uint8_t           src_kind;          /* CA_ITER_SRC_* (step 5+) */
-  int8_t            level;             /* 1=L1 contig, 2=L2 strided (step 3+) */
+  uint8_t           src_kind;          /* CA_ITER_SRC_* */
+  int8_t            level;             /* 1=L1 contig, 2=L2 strided */
   ca_slab_policy_t  policy;
   int8_t            ndim;
-  int8_t            naxes;             /* [step 5+] AXES policy axis count */
+  int8_t            naxes;             /* AXES policy axis count */
   void             *pair;              /* the other state of a two-state
                                           walk (ca_iter_state_init_l2_paired),
                                           else NULL; finished with this one
@@ -278,7 +261,7 @@ typedef struct {
   uint32_t          flags;
   ca_size_t         bytes;             /* element size                     */
 
-  /* --- CAStride compose-fold cache (step 3+, L2 alias path) ---
+  /* --- CAStride compose-fold cache (L2 alias path) ---
      For CAStride-family sources at L2, init_l2 runs
      ca_stride_compose_to_root once to get the root + per-axis
      byte strides + base offset.  Cached here so next_slab_axes's
@@ -322,7 +305,7 @@ typedef struct {
   ca_size_t         chunk_pos;
   ca_size_t         chunk_size;
 
-  /* --- scratch buffer [step 2+] --- */
+  /* --- scratch buffer --- */
   char             *scratch_ptr;
   boolean8_t       *scratch_mask;
   ca_size_t         scratch_cap;
@@ -337,10 +320,10 @@ typedef struct {
   boolean8_t       *alias_mask;
   ca_size_t         alias_stride;      /* unused, kept for layout          */
 
-  /* --- WRITE-path sync timing [step 4+] --- */
+  /* --- WRITE-path sync timing --- */
   uint8_t           write_dirty;
 
-  /* --- CA_SLAB_AXES policy fields (Phase A capstone, T1) ---
+  /* --- CA_SLAB_AXES policy fields ---
      Populated when init_l2 is called with policy = CA_SLAB_AXES, for
      every kind of source.  The kernel reads slab metadata directly
      from these fields (= per-walk metadata, unchanged across slabs).
@@ -372,7 +355,7 @@ typedef struct {
   ca_size_t         outer_strides[CA_RANK_MAX];   /* per-outer-axis data byte stride */
   ca_size_t         outer_mask_strides[CA_RANK_MAX]; /* per-outer-axis mask element stride */
 
-  /* --- Per-fiber contig scratch (PROPOSAL_FIBER_DELIVERY F.1a) ---
+  /* --- Per-fiber contig scratch ---
      For naxes==1 (= per-axis fiber, the catalog CA_FOR_EACH_FIBER target)
      on the paths of next_slab_axes that yield a fiber in place (the
      default fall-through and STACK_OUTER_K; ki_fiber_contig_data), when
@@ -394,7 +377,7 @@ typedef struct {
   ca_size_t         fiber_data_scratch_cap;
   ca_size_t         last_data_off;
 
-  /* PROPOSAL_FIBER_DELIVERY F.1b: per-fiber contig mask scratch.
+  /* Per-fiber contig mask scratch.
      Symmetric to fiber_data_scratch.  When the source carries a mask
      (= alias_mask != NULL) and slab_mask_strides[0] != 1, the engine
      gathers the fiber's mask into contig boolean8_t order here so the
@@ -405,7 +388,7 @@ typedef struct {
   boolean8_t       *fiber_mask_scratch;
   ca_size_t         fiber_mask_scratch_cap;
 
-  /* --- PROPOSAL_FIBER_PER_SOURCE_PATH F.6.1 substrate ---
+  /* --- PER_FIBER_FUSED fields ---
      When alias_mode == CA_ITER_ALIAS_PER_FIBER_FUSED, next_slab_axes
      builds a fiber region from outer_idx + fiber_axis and calls
      ca_xfer_stride(src, ..., GET) into fiber_data_scratch instead of
@@ -417,18 +400,16 @@ typedef struct {
   ca_size_t         fiber_native_strides[CA_RANK_MAX];
   /* fiber_region_starts[] cached by next_slab_axes BEFORE outer_idx
      advance so sync_slab can reconstruct the same ca_xfer_stride
-     region for WRITE PUT.  Same hazard pattern as last_data_off
-     (= F.1a). */
+     region for WRITE PUT.  The same hazard as last_data_off. */
   ca_size_t         fiber_region_starts[CA_RANK_MAX];
 
-  /* --- PROPOSAL_CASTACK_LOOP_INTERCHANGE Vector A rev2 (direct per-
-     parent ptr access) --- */
+  /* --- CAStack read from its parents (STACK / STACK_OUTER_K) --- */
   /* When alias_mode is CA_ITER_ALIAS_STACK or STACK_OUTER_K, init_l2
      attaches all K parents (= O(1) per entity parent) and caches their
      ptr aliases here so next_slab_axes reads them without going through
      ca_xfer_stride.  Owned by iter (xfree in finish).
      stack_parent_strides[] are the uniform parent-native byte strides
-     (= all CAStack parents are uniform shape per MEMO §3.2). */
+     (all the parents of a CAStack have one shape). */
   char            **stack_parent_ptrs;             /* [n_parents] */
   int32_t           stack_n_parents;               /* = ((CAStack *)src)->n_parents */
   ca_size_t         stack_parent_strides[CA_RANK_MAX]; /* parent-space byte strides */
@@ -447,7 +428,6 @@ typedef struct {
      when alias_mode == CA_ITER_ALIAS_STACK_OUTER_K; next_slab_axes uses
      outer_idx[stack_k_outer_pos] to pick the active parent. */
   int8_t            stack_k_outer_pos;
-  /* --- pilot/castack-axis0-loop-interchange (2026-06-19) --- */
   /* CA_ITER_ALIAS_STACK tile cache.  Refills TILE fibers (= K cells each)
      at once via K contig parent reads, then serves the next TILE next_slab
      calls from L1d-resident buffer.  Layout: cache[t][k] so a fiber at
@@ -460,10 +440,9 @@ typedef struct {
   ca_size_t         stack_tile_have;      /* fibers actually present in current tile */
 } ca_iter_state;
 
-/* ---- alias eligibility predicate (proposal §11.3) ------------------- */
+/* ---- alias eligibility predicate ---------------------------------------- */
 
-/* Generalises ca_attach_is_alias (carray_core.c, renamed from
-   ca_attach_is_cheap in T1 step 9.4a) so the alias decision can be
+/* Generalises ca_attach_is_alias (carray_core.c) so the alias decision can be
    made level-aware.  Level is the dispatch level the caller intends
    to use:
 
@@ -486,8 +465,8 @@ typedef struct {
        L1 fallback is an engine-policy choice, not an eligibility one.
 
      level == 3  (L3, multi-d kernel)
-       Not implemented in Phase 1 — falls back to L1 semantics so the predicate
-       stays well-defined for callers that probe ahead.
+       Not implemented — answered as L1 so the predicate stays
+       well-defined for callers that probe ahead.
 
    Descriptor views (CASelectAxis / CAGrid / CASelect / CAWindow /
    CAShift) and conversion views (CAFake / CAByteSwap / CABitfield /
@@ -496,13 +475,12 @@ typedef struct {
    (CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE); this predicate does not
    report that case.
 
-   ca_attach_is_alias is retained as the level=1 oracle for the Tier A
-   (PROPOSAL_DELEGATE_COPY_DATA) defer site; callers that already use
-   it keep working unchanged.  New code in the kernel_iterator path
-   should call ca_iter_can_alias with an explicit level. */
+   ca_attach_is_alias stays the level=1 answer for its existing callers;
+   new code in the kernel iterator path should call ca_iter_can_alias
+   with an explicit level. */
 int  ca_iter_can_alias (void *ap, int level);
 
-/* ---- state machine (proposal §3.2) ---------------------------------- */
+/* ---- state machine ------------------------------------------------------ */
 
 /* Initialise `st` for an **L1 (contig kernel)** walk of `src`.
 
@@ -729,8 +707,7 @@ int ca_iter_check_same_shape (struct _CArray *a, struct _CArray *b);
 VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
                       VALUE (*body)(VALUE), VALUE arg);
 
-/* ---- Phase C C.3: kernel author block macros ------------------------
-   (PROPOSAL_CAPSTONE_PHASE_C.md D3.1 (A) do/while/for + D3.2 (C) 2 kinds)
+/* ---- kernel author block macros -----------------------------------------
 
    Wrap init_l2 / next_slab_axes / [sync_slab] / finish in a single
    block scope so kernel authors don't write lifecycle plumbing.
@@ -771,13 +748,11 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    - Macros are not statement-equivalent (= they expand to nested for
      constructs).  Don't follow them with `else` etc. */
 
-/* ---- T1 kernel_iterator mask helper macros (step 6+) ---------------------
-   These macros let kernel_iterator kernels handle masked sources
+/* ---- mask helper macro ---------------------------------------------------
+   This macro lets a kernel handle masked sources
    uniformly: pass NULL for `mask` if the source has no mask (= treat
    all cells as unmasked), or a `boolean8_t *` of length n where
    non-zero entries indicate masked (= "skip this cell").
-
-   PROPOSAL_T1_KERNEL_ITERATOR.md §2.4.
    --------------------------------------------------------------------- */
 
 #define CA_FOR_EACH_UNMASKED(p, mask, n, body) do { \
@@ -789,7 +764,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     } \
 } while (0)
 
-/* ---- L2 inner-loop macros (step 8+) -----------------------------------
+/* ---- L2 inner-loop macro ------------------------------------------------
    `CA_L2_FOR_EACH(T, ptr, n, stride, p, body)` wraps the strided
    callback signature `(ptr, n, stride_bytes)` with a
    `stride == sizeof(T)` fast-path branch.  When the runtime stride
@@ -800,16 +775,14 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    The split is intentional: L2 strided callbacks are deliberately
    universal — they accept arbitrary stride and so the compiler cannot
    prove contig on the kernel-side loop.  When the iterator hands a
-   contig scratch (= descriptor materialise path, stride == bytes), the
-   universal-dispatch cost (step 5.5 §10.4.5) shows up as an 18-22%
-   SIMD inhibition on the kernel.  This macro lets kernel authors recover
-   the contig autovectorisation without giving up the L2 surface.
+   contig scratch (a gathered view, stride == bytes), a loop written for
+   any stride was measured 18-22% slower than a contiguous one.  This
+   macro lets kernel authors recover the contig autovectorisation
+   without giving up the L2 surface.
 
    This is the standard pattern for L2 kernels: write the body once,
-   the macro picks the right loop shape.  Step 8 verifies the speed-up
-   empirically; the framing (universal dispatch is the abstraction,
-   kernel-side macros are the speed knob) is `PROPOSAL_T1_KERNEL_
-   ITERATOR.md` §13.1.
+   the macro picks the right loop shape.  The walk stays the same for
+   every source; the loop shape is the kernel's knob for speed.
 
    Usage:
      CA_L2_FOR_EACH(double, ptr, n, stride, p, {
@@ -883,8 +856,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
             ca_iter_state_next_slab_axes(&(st_out), &(p_out), &(m_out));      \
             ca_iter_state_sync_slab(&(st_out)) )
 
-/* ---- PROPOSAL_FIBER_DELIVERY F.2: per-axis fiber catalog macros ----
-   (rev4 §3 catalog contract)
+/* ---- per-axis fiber macros ----------------------------------------------
 
    Author-facing surface for "deliver one contig fiber along `axis` to
    the kernel".  Contig delivery is contract:
@@ -894,7 +866,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
      - output (INOUT forms): contig same as data; CA_KERNEL_WRITE auto-set
 
    The CA_KERNEL_FIBER_CONTIG flag is auto-set; engine gathers strided
-   fibers into per-state scratch when slab_strides[0] != bytes (= F.1a/b).
+   fibers into per-state scratch when slab_strides[0] != bytes.
 
    `axis`, `ca`, `ca_in` and `ca_out` may be evaluated more than once:
    pass variables, not expressions with side effects.  `n` is set to the
@@ -1121,7 +1093,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     for ( ; ca_iter_state_next_slab(&(st), &(p), &(m), &(n));                 \
             ca_iter_state_sync_slab(&(st)) )
 
-/* ---- Phase D: per-data_type reduction macro suite ----------------------- */
+/* ---- per-data_type reduction macro suite ------------------------------- */
 
 /* CA_SLAB_REDUCE_T(T, ...): generic per-data_type slab reduction.  T is the
    element load type (`double`, `float`, `int32_t`, `int64_t`, ...).
@@ -1279,8 +1251,6 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
  *
  * The pragma is a no-op on compilers that don't support `-fopenmp-simd`
  * (extconf.rb probe — graceful degradation, code stays correct).
- *
- * Q1-Q6 closure (sparring round 1 2026-06-12): see proposal §5.
  * --------------------------------------------------------------------*/
 
 #define _CA_STR(x)        #x
@@ -1290,15 +1260,15 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
 #define _CA_SIMD_MAX(var)   _Pragma(_CA_XSTR(omp simd reduction(max:var)))
 #define _CA_SIMD_STAR(var)  _Pragma(_CA_XSTR(omp simd reduction(*:var)))
 
-/* CA_SLAB_REDUCE_T_PLUS_EX (SL.1.1):
+/* CA_SLAB_REDUCE_T_PLUS_EX:
  *   Same structure as CA_SLAB_REDUCE_T_EX, but the **no-mask + contig**
  *   inner loop carries `#pragma omp simd reduction(+:acc)` so clang/gcc
  *   are licensed to reassoc the accumulator and emit SIMD reduction
  *   sequences.  All other branches (masked-contig, non-contig, masked-
- *   non-contig) are byte-identical to _EX — proposal §2.2 defers
- *   strided/masked SIMD to Phase 2 (output-buffered loop interchange).
+ *   non-contig) are byte-identical to _EX: a SIMD reduction there would
+ *   need an output-buffered loop interchange.
  *
- *   PoC (2026-06-12): N=1M f64 sum 906 us -> 116 us (= 7.8x, 68.8 GB/s).
+ *   Measured: N=1M f64 sum 906 us -> 116 us (= 7.8x, 68.8 GB/s).
  *   Parity: ε-close (relative error < 2e-16 for f64 sum), bit-exact
  *   not guaranteed (= the SIMD license; see guides/devel/11_kernel_iterator.md).
  *
@@ -1398,7 +1368,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     (void) idx;                                                              \
   } while (0)
 
-/* CA_SLAB_REDUCE_SUM8_EX (variance/stddev regression fix, 2026-07-18):
+/* CA_SLAB_REDUCE_SUM8_EX:
  *   8-way manual accumulator split for the no-mask + contig inner loop.
  *
  *   Why: GCC 11.5 with -march=native (FMA) does NOT split the pragma-simd
@@ -1510,9 +1480,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     }                                                                        \
   } while (0)
 
-/* CA_SLAB_REDUCE_MIN8_EX / _MAX8_EX / _STAR8_EX
- * (horizontal extension of the SUM8_EX pattern to standard reducers,
- *  2026-07-19):
+/* CA_SLAB_REDUCE_MIN8_EX / _MAX8_EX / _STAR8_EX (the SUM8_EX pattern for
+ * the other standard reducers):
  *
  * Same rationale as SUM8_EX — GCC does not split single-accumulator pragma
  * reductions into multiple independent chains on FMA/FADD-latency-bound
@@ -1803,7 +1772,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     }                                                                        \
   } while (0)
 
-/* CA_SLAB_REDUCE_T_MIN_EX (SL.1.2):
+/* CA_SLAB_REDUCE_T_MIN_EX (emitted by the kernel generator; not author surface):
  *   Same structure as PLUS_EX; no-mask + contig inner loop carries
  *   `#pragma omp simd reduction(min:acc)`.  The :min kernel in
  *   mkkernel.rb writes REDUCE as `acc = (v < acc) ? v : acc`, which
@@ -1907,7 +1876,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     (void) idx;                                                              \
   } while (0)
 
-/* CA_SLAB_REDUCE_T_MAX_EX (SL.1.2): same as MIN_EX with `_CA_SIMD_MAX`. */
+/* CA_SLAB_REDUCE_T_MAX_EX (generator-only): same as MIN_EX with `_CA_SIMD_MAX`. */
 #define CA_SLAB_REDUCE_T_MAX_EX(T, st, p, m, acc, INIT, REDUCE, masked_cnt) do { \
     (acc) = (INIT);                                                          \
     int8_t    __srK       = (st).slab_ndim;                                  \
@@ -2000,7 +1969,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     (void) idx;                                                              \
   } while (0)
 
-/* CA_SLAB_REDUCE_T_STAR_EX (SL.1.4):
+/* CA_SLAB_REDUCE_T_STAR_EX (emitted by the kernel generator; not author surface):
  *   Same structure as PLUS_EX; no-mask + contig inner loop carries
  *   `#pragma omp simd reduction(*:acc)`.  Used by :prod kernel
  *   (acc *= v).  f64 / f32 multiplication parity is ε-close (same
@@ -2104,15 +2073,12 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
  * stddev are computed in two passes (Σx for the mean, then Σ(x-mean)^2),
  * each a single-accumulator reduction through SUM8_EX / PLUS_EX.
  *
- * VAR_EX is **retained as a stub** here for future SL.2.x output-
- * buffered work or other multi-acc reductions that don't share the
- * variance pattern (= primary + derived sumsq).  The stub forwards
- * to PLUS_EX on acc1; acc2 is zero-initialised but otherwise left
- * to the enclosing REDUCE expression.  This is safe because no
- * kernel currently dispatches to VAR_EX (= reduce_macro_suffix never
- * returns "_VAR"; SL.1.0/1.1 reduce DSL has no :var value).
- *
- * Removal candidate if no caller materialises by SL.2 close.
+ * VAR_EX is kept as a stub for a future multi-accumulator reduction
+ * that does not share the variance pattern (primary + derived sumsq).
+ * The stub forwards to PLUS_EX on acc1; acc2 is zero-initialised but
+ * otherwise left to the enclosing REDUCE expression.  This is safe
+ * because no kernel dispatches to VAR_EX (reduce_macro_suffix never
+ * returns "_VAR"; the reduce DSL has no :var value).
  */
 #define CA_SLAB_REDUCE_T_VAR_EX(T, st, p, m, acc1, acc2,                     \
                                 INIT1, INIT2, REDUCE, masked_cnt) do {       \
@@ -2149,7 +2115,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    REDUCE expression binds BOTH `v` (source cell, type T) AND `w` (weights
    cell, type T_W), in addition to `acc` and `idx` from the base macro.
    The mask `m` applies to the SOURCE only (weights mask is overlaid onto
-   source mask at dispatcher time, per Q3 (A) legacy parity). */
+   source mask by the dispatcher). */
 #define CA_SLAB_REDUCE_ARRAY_T_EX(T, T_W, st, p, m, st_w, p_w, acc, INIT, REDUCE, masked_cnt) do { \
     (acc) = (INIT);                                                          \
     int8_t    __sraK       = (st).slab_ndim;                                 \
@@ -2256,7 +2222,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     (void) idx;                                                              \
   } while (0)
 
-/* CA_SLAB_REDUCE_ARRAY_T_PLUS_EX (SL.1.4b):
+/* CA_SLAB_REDUCE_ARRAY_T_PLUS_EX:
  *   Parallel-array PLUS variant of CA_SLAB_REDUCE_ARRAY_T_EX.
  *   no-mask + both-contig inner loop carries `#pragma omp simd
  *   reduction(+:acc)`.  Used by :wsum / :wmean — author REDUCE
@@ -2265,7 +2231,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
  *   reduction-tree merge.  Other branches (masked, non-contig)
  *   stay identical to _EX.
  *
- *   PoC bench (SL.1.4b, 2026-06-12):
+ *   Measured:
  *     wsum  f64 N=1M: 908 us -> ~150 us   (= the expected 50-60 GB/s)
  *     wmean f64 N=1M: 1212 us -> ~150 us  (same path + 1 extra acc)
  */
