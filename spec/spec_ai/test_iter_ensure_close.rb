@@ -52,6 +52,7 @@ class TestIterEnsureClose < Test::Unit::TestCase
   end
 
   def test_a_raising_finish_does_not_leave_the_other_walk_open
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     r, w = views
     CAIterOffsetNoXfer.fail_sync = true
     before = CArray.__attached_views__

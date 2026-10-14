@@ -60,6 +60,7 @@ class TestT1Step10CARefHardening < Test::Unit::TestCase
   end
 
   def test_case3_l1_read_unmasked
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     parent, view = build_case3
     r = CArray.t1_smoke(view)
     assert_equal OK,                  r[:rc]

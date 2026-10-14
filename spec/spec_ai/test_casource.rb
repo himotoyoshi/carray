@@ -253,6 +253,7 @@ class TestCASourceSubclass < Test::Unit::TestCase
   # never asked for the cells the caller did not name.
   def test_observed_attach_routing
     omit "requires CARRAY_DEV_BUILD (Ruby attach surface)" unless CArray.method_defined?(:attach!)
+    omit "counts the attaches of the iterator's route" if CArray.__iter_by_transfer_only__
     counters = lambda do |&op|
       @src.reset_counters
       op.call

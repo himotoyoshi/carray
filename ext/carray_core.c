@@ -1683,11 +1683,18 @@ rb_ca_s_attached_views (VALUE klass)
 
 /* Set once at load from CARRAY_GENERAL_PATH; see carray_internal.h. */
 int ca_fast_paths_on = 1;
+int ca_iter_transfer_only_on = 0;
 
 static VALUE
 rb_ca_s_fast_paths_enabled (VALUE klass)
 {
   return ca_fast_paths_on ? Qtrue : Qfalse;
+}
+
+static VALUE
+rb_ca_s_iter_by_transfer_only (VALUE klass)
+{
+  return ca_iter_transfer_only_on ? Qtrue : Qfalse;
 }
 #else
 #define CA_VIEW_ATTACH_STEP(ca, d) ( CAVIEW(ca)->attach += (d) )
@@ -3076,9 +3083,12 @@ Init_carray_core (void)
   {
     const char *general = getenv("CARRAY_GENERAL_PATH");
     ca_fast_paths_on = !( general && general[0] && strcmp(general, "0") );
+    ca_iter_transfer_only_on = ( general && ! strcmp(general, "2") );
   }
   rb_define_singleton_method(rb_cCArray, "__fast_paths_enabled__",
                              rb_ca_s_fast_paths_enabled, 0);
+  rb_define_singleton_method(rb_cCArray, "__iter_by_transfer_only__",
+                             rb_ca_s_iter_by_transfer_only, 0);
 #endif
 
   rb_define_method(rb_cCArray, "members", rb_ca_members, 0);

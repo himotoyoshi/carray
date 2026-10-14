@@ -589,13 +589,25 @@ ca_obj_equal (VALUE a, VALUE b)
    A branch that only lends a pointer, or drops to memcpy when the data is
    contiguous, runs the same code either way and does not test this.
 
+   CARRAY_GENERAL_PATH=2 goes one step further for the kernel iterator.
+   Besides switching the fast paths off, it makes the iterator deliver
+   every source the way it delivers a view it knows nothing about: the
+   whole view gathered into scratch through the view's own transfer
+   (ca_xfer_all), and on WRITE the changed cells sent back through it.
+   That walk keeps no promise of its own -- the view's transfer keeps
+   them -- so a run with 2 checks the iterator's other routes against
+   it.  ca_iter_by_transfer_only() is constant 0 in a release build.
+
 ---------------------------------------------------------------------------- */
 
 #ifdef CARRAY_DEV_BUILD
 extern int ca_fast_paths_on;
-#define ca_fast_paths_enabled() (ca_fast_paths_on)
+extern int ca_iter_transfer_only_on;
+#define ca_fast_paths_enabled()    (ca_fast_paths_on)
+#define ca_iter_by_transfer_only() (ca_iter_transfer_only_on)
 #else
-#define ca_fast_paths_enabled() (1)
+#define ca_fast_paths_enabled()    (1)
+#define ca_iter_by_transfer_only() (0)
 #endif
 
 /* A logical operator between a boolean array and an object array reads the

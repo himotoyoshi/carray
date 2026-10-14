@@ -38,6 +38,12 @@ class TestF2InnermostStride < Test::Unit::TestCase
   ALIAS_NONE    = CArray::T1_ITER_ALIAS_NONE
   ALIAS_STRIDED = CArray::T1_ITER_ALIAS_STRIDED
 
+  # These tests assert the route the iterator picks, which
+  # CARRAY_GENERAL_PATH=2 replaces with the transfer walk.
+  def setup
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
+  end
+
   # ====================================================================
   # CAWindow / CAShift — innermost-interior alias
   # ====================================================================

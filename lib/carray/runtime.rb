@@ -15,6 +15,15 @@ class CArray
     end
   end
 
+  # True when a development build runs with CARRAY_GENERAL_PATH=2: the
+  # kernel iterator then delivers every source through the view's own
+  # transfer.  A release build has no switch.
+  unless respond_to?(:__iter_by_transfer_only__)
+    def self.__iter_by_transfer_only__ # :nodoc:
+      false
+    end
+  end
+
   # String fallback for the global cast functions CA_INT32(data) etc.  The C
   # dispatcher (ext/carray_cast.c) handles every other input class in C and
   # delegates only String here, because the whitespace / `,` / `;` /

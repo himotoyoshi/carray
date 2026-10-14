@@ -3810,14 +3810,16 @@ module MkKernel
 
     # empty: :undef -> allocate the output mask up front when the input
     # carries one (a fiber can only go UNDEF on its leading masked cells,
-    # which exist only when the input is masked).  co_root / op_mask are the
-    # value / mask bases used to derive the per-fiber mask base parallel to
-    # the aliased output value slab.
+    # which exist only when the input is masked).  The output is a fresh
+    # row-major entity, and the walk cuts its slabs from a buffer laid out
+    # the same way (the output's memory, or the walk's scratch when it
+    # delivers by transfer), so a slab's offset from st_out.alias_ptr is
+    # its offset in the output, and op_mask + that offset / cell size is the
+    # fiber's mask base.
     mask_setup =
       if gated
         "\n" \
         "    boolean8_t *op_mask = NULL;\n" \
-        "    char       *co_root = (char *) co->ptr;\n" \
         "    if ( ca_has_mask(ca) ) {\n" \
         "      ca_create_mask(co);\n" \
         "      op_mask = (boolean8_t *) co->mask->ptr;\n" \
@@ -3832,7 +3834,7 @@ module MkKernel
         "                         st_out, po, #{init_expr}, #{step_stmt});"
       elsif gated
         "boolean8_t *mo_fiber = op_mask\n" \
-        "            ? op_mask + (ca_size_t)(po - co_root) / (ca_size_t) co->bytes\n" \
+        "            ? op_mask + (ca_size_t)(po - st_out.alias_ptr) / (ca_size_t) co->bytes\n" \
         "            : NULL;\n" \
         "          CA_SLAB_SCAN_T_GATED(#{si[:c]}, #{oi[:c]}, st_in, pi, mi,\n" \
         "                         st_out, po, mo_fiber, #{init_expr}, #{step_stmt});"
@@ -4540,13 +4542,15 @@ module MkKernel
       io.puts "    }"
       if mask_skip
         io.puts "    /* Mirror input mask to output (= UNDEF rank for masked"
-        io.puts "       cells).  Write via co->mask->ptr directly with the"
-        io.puts "       output slab offset, because the iter's mo isn't"
-        io.puts "       populated in CA_KERNEL_WRITE mode (= reduce form's"
-        io.puts "       op_mask pattern). */"
+        io.puts "       cells).  Write via co->mask->ptr directly, because a"
+        io.puts "       mask written through a WRITE walk's cursor does not"
+        io.puts "       reach the array.  co is a fresh row-major entity and"
+        io.puts "       the walk cuts its slabs from a buffer laid out the"
+        io.puts "       same way, so the slab's offset from st_out.alias_ptr"
+        io.puts "       is its offset in co. */"
         io.puts "    if ( mi && co->mask ) {"
         io.puts "      boolean8_t *omask_base = (boolean8_t *) co->mask->ptr"
-        io.puts "                              + ((po - (char *) co->ptr) / (ca_size_t) co->bytes);"
+        io.puts "                              + ((po - st_out.alias_ptr) / (ca_size_t) co->bytes);"
         io.puts "      ca_size_t mostride = st_out.slab_mask_strides[0];"
         io.puts "      for ( ca_size_t k = 0; k < fiber_n; k++ ) {"
         io.puts "        if ( mi[k * mstride] ) omask_base[k * mostride] = 1;"

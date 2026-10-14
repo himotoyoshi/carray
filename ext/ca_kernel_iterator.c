@@ -241,6 +241,15 @@ static uint8_t
 ca_iter_classify_source (CArray *src)
 {
   if ( src == NULL ) return CA_ITER_SRC_NONE;
+
+  /* Development build, CARRAY_GENERAL_PATH=2: every source takes the
+     transfer walk (see ki_open_by_transfer), the reference the other
+     routes are checked against. */
+  if ( ca_iter_by_transfer_only() ) {
+    return ca_func[src->obj_type].attach != NULL ? CA_ITER_SRC_ATTACH
+                                                 : CA_ITER_SRC_NONE;
+  }
+
   if ( ca_is_entity(src) )                return CA_ITER_SRC_CASTRIDE;
   if ( ca_iter_is_castride_family(src) )  return CA_ITER_SRC_CASTRIDE;
 
@@ -779,6 +788,43 @@ ki_scratch_push_changed (ca_iter_state *st)
   ALLOCV_END(h_addrs);
 }
 
+/* The transfer walk: the whole view gathered into scratch through the
+   view's own transfer, its mask likewise, and yielded as one contiguous
+   slab; on WRITE, sync_slab sends the changed cells back through the same
+   transfer (ki_scratch_push_changed).
+
+   Every promise the iterator makes is kept here by the view itself --
+   what a cell is, where its mask flag lives, which root cell a write
+   lands on -- so this walk is the reference the other routes are checked
+   against (CARRAY_GENERAL_PATH=2 sends every source through it).  It is
+   also the route for a view the classifier knows nothing more about.
+
+   The caller has filled src / src_kind / level / policy / ndim / flags /
+   bytes / naxes. */
+static void
+ki_open_by_transfer (ca_iter_state *st, CArray *src, uint32_t flags)
+{
+  ki_gather_view(st, src, flags, 0);
+  st->alias_mode          = CA_ITER_ALIAS_NONE;
+  st->alias_ptr           = st->scratch_ptr;
+  st->composed_strides[0] = src->bytes;
+  st->composed_base       = 0;
+  st->slab_n              = src->elements;
+  st->total_slabs         = 1;
+  st->slabs_emitted       = 0;
+  st->chunk_size          = st->slab_n;
+  st->outer_idx           = NULL;
+
+  if ( ca_has_mask(src) ) {
+    ca_size_t mcap = src->elements > 0 ? src->elements : 1;
+    st->scratch_mask = (boolean8_t *) xmalloc(mcap);
+    if ( src->elements > 0 ) {
+      ca_xfer_all(src->mask, (char *) st->scratch_mask, CA_XFER_GET);
+    }
+    st->alias_mask = st->scratch_mask;
+  }
+}
+
 static int
 ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
                        struct _CArray   *src,
@@ -835,30 +881,7 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
   st->chunk_size    = st->slab_n;
 
   if ( src_kind == CA_ITER_SRC_ATTACH ) {
-    /* === SRC_ATTACH path (every view classified SRC_ATTACH) ===========
-       View's xfer_all delivers materialised data through the unified
-       dispatch surface.  Previously used `ca_attach(src) + src->ptr`
-       (= view's attach slot) and `ca_sync(src)` for WRITE; now uses
-       `ca_xfer_all(src, scratch, GET/PUT)` with iterator-owned scratch.
-       Decouples kernel_iterator from per-view attach/sync lifecycle
-       and inherits xfer reform improvements (transform-fused, etc.)
-       automatically. */
-    ki_gather_view(st, src, flags, 0);
-    st->alias_mode          = CA_ITER_ALIAS_NONE;     /* scratch-owned, no src.detach */
-    st->alias_ptr           = st->scratch_ptr;
-    st->composed_strides[0] = src->bytes;
-    st->composed_base       = 0;
-    st->outer_idx           = NULL;
-    /* Step 6: mask gather (xfer_all on mask -- ca_copy_data is a thin
-       wrapper, this just removes the extra hop). */
-    if ( ca_has_mask(src) ) {
-      ca_size_t mcap = src->elements > 0 ? src->elements : 1;
-      st->scratch_mask = (boolean8_t *) xmalloc(mcap);
-      if ( src->elements > 0 ) {
-        ca_xfer_all(src->mask, (char *) st->scratch_mask, CA_XFER_GET);
-      }
-      st->alias_mask = st->scratch_mask;
-    }
+    ki_open_by_transfer(st, src, flags);
     return CA_ITER_OK;
   }
 
@@ -1972,10 +1995,9 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     src_kind = CA_ITER_SRC_DESCRIPTOR;
   }
 
-  /* L2 dispatch over SRC_ATTACH sources (every view classified
-     SRC_ATTACH, including descriptor views that route_source redirected).
-     Same shape as L1 SRC_ATTACH: iterator-owns
-     scratch + xfer_all GET/PUT.  Yield as one 1-D strided slab. */
+  /* L2 WHOLE over SRC_ATTACH sources (including descriptor views that
+     route_source redirected): the transfer walk, yielded as one 1-D
+     slab. */
   if ( src_kind == CA_ITER_SRC_ATTACH ) {
     st->src      = src;
     st->src_kind = CA_ITER_SRC_ATTACH;
@@ -1985,26 +2007,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     st->flags    = flags;
     st->bytes    = src->bytes;
     st->naxes    = naxes;
-
-    ki_gather_view(st, src, flags, 0);
-    st->alias_mode          = CA_ITER_ALIAS_NONE;
-    st->alias_ptr           = st->scratch_ptr;
-    st->composed_strides[0] = src->bytes;
-    st->composed_base       = 0;
-    st->slab_n              = src->elements;
-    st->total_slabs         = 1;
-    st->slabs_emitted       = 0;
-    st->chunk_size          = st->slab_n;
-    st->outer_idx           = NULL;
-
-    if ( ca_has_mask(src) ) {
-      ca_size_t mcap = src->elements > 0 ? src->elements : 1;
-      st->scratch_mask = (boolean8_t *) xmalloc(mcap);
-      if ( src->elements > 0 ) {
-        ca_xfer_all(src->mask, (char *) st->scratch_mask, CA_XFER_GET);
-      }
-      st->alias_mask = st->scratch_mask;
-    }
+    ki_open_by_transfer(st, src, flags);
     return CA_ITER_OK;
   }
 

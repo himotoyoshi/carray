@@ -59,10 +59,12 @@ rb_ca_hold_forward (VALUE self, int axis)
 
   /* Output mask allocated lazily on the first leading-masked (UNDEF) cell:
      a fiber can only go UNDEF on a leading masked run, so a fully filled
-     result carries no mask at all.  op_mask parallels the fresh contiguous
-     output value buffer co->ptr. */
+     result carries no mask at all.  The output is a fresh row-major entity
+     and the walk cuts its slabs from a buffer laid out the same way (the
+     output's memory, or the walk's scratch when it delivers by transfer),
+     so a slab's offset from st_out.alias_ptr is its offset in co, which
+     op_mask parallels. */
   boolean8_t *op_mask = NULL;
-  char       *co_root = (char *) co->ptr;
 
   char       *pi, *po;
   boolean8_t *mi, *mo;
@@ -73,7 +75,7 @@ rb_ca_hold_forward (VALUE self, int axis)
     ca_size_t   oS   = st_out.slab_strides[0];       /* output data byte stride */
     ca_size_t   iMS  = st_in.slab_mask_strides[0];   /* input mask element stride */
     ca_size_t   oMStep = oS / K;                     /* output mask element step */
-    ca_size_t   oMBase = (ca_size_t)(po - co_root) / K;
+    ca_size_t   oMBase = (ca_size_t)(po - st_out.alias_ptr) / K;
     const char *held = NULL;   /* last valid cell (points into input slab) */
 
     for ( ca_size_t j = 0; j < N; j++ ) {

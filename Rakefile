@@ -350,6 +350,16 @@ task :spec_ai_general do
   Rake::Task[:spec_ai].invoke
 end
 
+desc "Run spec_ai with the kernel iterator delivering every source by transfer"
+task :spec_ai_transfer do
+  # CARRAY_GENERAL_PATH=2 also switches the fast paths off, and makes the
+  # kernel iterator gather every source through the view's own transfer
+  # (ca_xfer_all) -- the walk that keeps no promise of its own.  This run,
+  # spec_ai_general and spec_ai compare the iterator's routes with it.
+  ENV["CARRAY_GENERAL_PATH"] = "2"
+  Rake::Task[:spec_ai].invoke
+end
+
 desc "Run the spec/UnitTest/ test-unit files (ruby -I ext -I lib)"
 task :spec_unit => :build_ext do
   # Carried over from 2.x, and test-unit rather than RSpec, so neither the

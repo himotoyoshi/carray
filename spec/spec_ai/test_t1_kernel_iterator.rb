@@ -39,6 +39,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   # ====================================================================
 
   def test_entity_1d
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     a = CArray.int32(10).seq
     r = CArray.t1_smoke(a)
     assert_equal OK,            r[:rc]
@@ -50,6 +51,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   end
 
   def test_entity_2d
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     a = CArray.float64(3, 4).seq
     r = CArray.t1_smoke(a)
     assert_equal OK,            r[:rc]
@@ -61,6 +63,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   end
 
   def test_entity_empty
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     a = CArray.int32(0)
     r = CArray.t1_smoke(a)
     assert_equal OK,            r[:rc]
@@ -71,6 +74,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   end
 
   def test_castride_contig_full_view
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     a = CArray.int32(2, 6).seq
     v = a.reshape(12)
     r = CArray.t1_smoke(v)
@@ -80,6 +84,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   end
 
   def test_castride_row_slice_contig
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     a = CArray.float64(5, 4).seq
     v = a[2, nil]
     r = CArray.t1_smoke(v)
@@ -274,6 +279,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   # ====================================================================
 
   def test_l2_entity_1d
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     a = CArray.float64(10).seq
     r = CArray.t1_smoke_strided(a)
     assert_equal OK,           r[:rc]
@@ -285,6 +291,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   end
 
   def test_l2_entity_2d_yields_per_row
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     # entity 3x4 should yield 3 row slabs, each n=4, stride=bytes.
     a = CArray.int32(3, 4).seq
     r = CArray.t1_smoke_strided(a)
@@ -297,6 +304,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   end
 
   def test_l2_castride_contig_yields_per_row
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     # CARefer reshape — contig CAStride, treated like entity.
     a = CArray.int32(2, 6).seq
     v = a.reshape(3, 4)
@@ -309,6 +317,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   end
 
   def test_l2_column_slice_alias_strided
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     # a[nil, 1] is 1-D non-contig; one strided slab covers the whole view.
     a = CArray.float64(5, 4).seq
     v = a[nil, 1]
@@ -323,6 +332,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   end
 
   def test_l2_transpose_yields_outer_rows
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     # transpose [3,4] -> [4,3]. Engine walks outer axis 0 (count=4),
     # each yield = 3 elements with stride = parent inner stride.
     a = CArray.float64(3, 4).seq
@@ -338,6 +348,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   end
 
   def test_l2_inner_step_alias_strided
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     # a[nil, [0..5, 2]] — every other column, shape [10, 3].
     # Strides [48, 16]. Outer walks 10 rows, each n=3 stride=16.
     a = CArray.float64(10, 6).seq
@@ -352,6 +363,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   end
 
   def test_l2_3d_noncontig
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     # 3D non-contig: a[nil, 0..3, 1..2]. Outer prefix walks the two
     # leading axes; each yield = inner dim count * inner stride.
     a = CArray.int32(2, 4, 4).seq
@@ -365,6 +377,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   end
 
   def test_l2_csa_alias
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     # F-2 (rev6): innermost axis is STRIDE (axis 1 full slice), outer is
     # INDEX (mask-selected rows).  L2 alias path activates: per outer-
     # selected row a strided slab is yielded with stride = bytes
@@ -383,6 +396,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   end
 
   def test_l2_cagrid_alias
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     # F-2 (rev6): innermost axis STRIDE (axis 1 full), outer axis INDEX
     # (explicit integer index).  L2 alias activates per selected row.
     a = CArray.int32(5, 5).seq
@@ -539,6 +553,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   end
 
   def test_l2_repeated_walks_balance
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     # attach/detach balance — large entity + non-contig view, many
     # iterations, no leak.
     a = CArray.float64(64, 64).seq
@@ -609,6 +624,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   end
 
   def test_write_l2_sort_per_row
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     a = CArray.float64(3, 4).seq
     a[0, nil] = CA_DOUBLE([3.0, 1.0, 4.0, 1.5])
     a[1, nil] = CA_DOUBLE([9.0, 2.0, 6.0, 5.0])
@@ -621,6 +637,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   end
 
   def test_write_l2_sort_transposed
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     # L2 dispatch on a transposed view exercises the strided WRITE
     # back through the same composed_strides path.  We sort the
     # transposed view per-row (= a column of the original).
@@ -642,6 +659,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   # ----- exception safety (proposal §(c)) -----
 
   def test_write_l1_alias_partial_write_on_raise
+    omit "asserts the iterator's route" if CArray.__iter_by_transfer_only__
     # alias path: writes prior to the raise are visible in parent
     # (partially-written semantics, case A direct write).
     a = CArray.float64(10).seq

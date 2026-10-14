@@ -371,12 +371,13 @@ ca_slab_setup_input_slab_view (ca_slab_iter_state_t *st, CArray *src,
            p_in via slab_strides into the scratch, present slab_view as
            a CAStride over the carrier with contig strides.
 
-       Path (a) needs p_in to lie in src's own buffer, which holds only
-       when src is an entity.  Any other source -- a view, whose cells the
-       iterator hands out from the root, a parent or its own scratch --
+       Path (a) needs p_in to lie in src's own buffer: src is an entity
+       and the iterator walks that buffer (alias_ptr is src->ptr, not a
+       scratch it gathered into).  Any other source -- a view, whose cells
+       the iterator hands out from the root, a parent or its own scratch --
        takes path (b): the iterator describes every slab by p_in and
        slab_strides, whatever its mode.                                  */
-    int contig = ca_is_entity(src)
+    int contig = ( ca_is_entity(src) && st->t1->alias_ptr == src->ptr )
                  && ca_slab_strides_are_row_major_contig(slab_ndim,
                                                          st->t1->slab_dims,
                                                          st->t1->slab_strides,
@@ -437,9 +438,10 @@ ca_slab_setup_input_slab_view (ca_slab_iter_state_t *st, CArray *src,
     dim[0]     = fiber_len;
     strides[0] = src->bytes;
     /* A window onto src only when the fiber lies in src's own buffer:
-       an entity whose fiber is contiguous.  A view's fiber comes from
-       the root or the iterator's scratch, so it goes through a carrier. */
-    in_alias   = ca_is_entity(src) && (in_stride == src->bytes);
+       an entity the iterator walks in place, whose fiber is contiguous.
+       A view's fiber comes from the root or the iterator's scratch, so it
+       goes through a carrier. */
+    in_alias   = ( ca_is_entity(src) && st->t1->alias_ptr == src->ptr ) && (in_stride == src->bytes);
 
     if ( in_alias ) {
       /* ALIAS: parent = src.  ca_stride_setup auto-creates slab_view->mask

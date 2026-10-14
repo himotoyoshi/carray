@@ -46,6 +46,7 @@ class TestSlabMultiAxisBetaXc < Test::Unit::TestCase
   # ---- each_slab multi-axis derived view (clone-path pin) preservation
 
   def test_each_slab_multi_axis_dup_per_iter
+    omit "relies on the in-place walk of an entity" if CArray.__iter_by_transfer_only__
     a = CArray.float64(2, 3, 4).seq!
     snapshots = []
     a.each_slab(axis: [1, 2]) { |slab| snapshots << slab.dup }

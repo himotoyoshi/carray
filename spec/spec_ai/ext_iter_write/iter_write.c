@@ -259,6 +259,132 @@ iw_slab_fill_poisoned (VALUE klass, VALUE vdst, VALUE vaxis, VALUE vval)
   return Qnil;
 }
 
+/* ---- delivery matrix ------------------------------------------------
+
+   iw_read_cells / iw_write_cells walk a float64 source the four ways a
+   kernel can ask for it:
+
+     0  L1 whole        (init_l1 + next_slab)
+     1  L2 whole        (init_l2 + next_slab_strided)
+     2  one slab axis   (CA_SLAB_AXES, strided slab)
+     3  one fiber       (CA_SLAB_AXES + FIBER_CONTIG, contiguous)
+
+   A whole walk may still yield its cells as several slabs (an L2 walk over
+   a strided source yields one row at a time); they come in row-major order.
+   iw_read_cells returns the slabs in the order they were yielded, each an
+   Array of the cell values with nil where the yielded mask is set.
+   iw_write_cells writes 1000 + the cell's position in the walk for a whole
+   walk, and 1000 * (slab number + 1) + position in the slab for the
+   others, so the test can tell where each root cell was reached from. */
+
+static int
+iw_open (ca_iter_state *st, CArray *ca, int mode, int8_t axis, uint32_t flags)
+{
+  int8_t ax[1];
+  ax[0] = axis;
+  switch ( mode ) {
+    case 0:
+      return ca_iter_state_init_l1(st, ca, CA_SLAB_WHOLE, NULL, 0, flags);
+    case 1:
+      return ca_iter_state_init_l2(st, ca, CA_SLAB_WHOLE, NULL, 0, flags);
+    case 2:
+      return ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, ax, 1, flags);
+    default:
+      return ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, ax, 1,
+                                   flags | CA_KERNEL_FIBER_CONTIG);
+  }
+}
+
+/* Yields the next slab as (base, mask, n, value stride, mask stride). */
+static int
+iw_next (ca_iter_state *st, int mode, char **p, boolean8_t **m,
+         ca_size_t *n, ca_size_t *s, ca_size_t *ms)
+{
+  switch ( mode ) {
+    case 0:
+      if ( ! ca_iter_state_next_slab(st, p, m, n) ) return 0;
+      *s = st->bytes; *ms = 1;
+      return 1;
+    case 1:
+      if ( ! ca_iter_state_next_slab_strided(st, p, m, n, s) ) return 0;
+      *ms = 1;
+      return 1;
+    case 2:
+      if ( ! ca_iter_state_next_slab_axes(st, p, m) ) return 0;
+      *n = st->slab_dims[0]; *s = st->slab_strides[0];
+      *ms = st->slab_mask_strides[0];
+      return 1;
+    default:
+      if ( ! ca_iter_state_next_slab_axes(st, p, m) ) return 0;
+      *n = st->slab_dims[0]; *s = st->bytes; *ms = 1;
+      return 1;
+  }
+}
+
+static VALUE
+iw_read_cells (VALUE klass, VALUE vsrc, VALUE vmode, VALUE vaxis)
+{
+  CArray       *src;
+  int           mode = NUM2INT(vmode);
+  int8_t        axis = (int8_t) NUM2INT(vaxis);
+  ca_iter_state st;
+  char         *p;
+  boolean8_t   *m;
+  ca_size_t     n, s, ms;
+  VALUE         out  = rb_ary_new();
+
+  (void) klass;
+  TypedData_Get_Struct(vsrc, CArray, &carray_data_type, src);
+
+  ca_iter_check_init(iw_open(&st, src, mode, axis, 0));
+  while ( iw_next(&st, mode, &p, &m, &n, &s, &ms) ) {
+    VALUE slab = rb_ary_new_capa(n);
+    for ( ca_size_t i = 0; i < n; i++ ) {
+      if ( m && m[i * ms] ) {
+        rb_ary_push(slab, Qnil);
+      }
+      else {
+        rb_ary_push(slab, rb_float_new(*(double *)(p + i * s)));
+      }
+    }
+    rb_ary_push(out, slab);
+    ca_iter_state_sync_slab(&st);
+  }
+  ca_iter_state_close(&st);
+  return out;
+}
+
+static VALUE
+iw_write_cells (VALUE klass, VALUE vdst, VALUE vmode, VALUE vaxis)
+{
+  CArray       *dst;
+  int           mode = NUM2INT(vmode);
+  int8_t        axis = (int8_t) NUM2INT(vaxis);
+  ca_iter_state st;
+  char         *p;
+  boolean8_t   *m;
+  ca_size_t     n, s, ms;
+  ca_size_t     slab = 0;
+  ca_size_t     done = 0;
+
+  (void) klass;
+  TypedData_Get_Struct(vdst, CArray, &carray_data_type, dst);
+
+  ca_iter_check_init(iw_open(&st, dst, mode, axis, CA_KERNEL_WRITE));
+  while ( iw_next(&st, mode, &p, &m, &n, &s, &ms) ) {
+    slab++;
+    for ( ca_size_t i = 0; i < n; i++ ) {
+      double v = ( mode < 2 ) ? (double) (1000 + done + i)
+                              : (double) (1000 * slab + i);
+      *(double *)(p + i * s) = v;
+    }
+    done += n;
+    ca_iter_state_sync_slab(&st);
+  }
+  ca_iter_state_close(&st);
+  return Qnil;
+}
+
 void
 Init_iter_write (void)
 {
@@ -272,4 +398,6 @@ Init_iter_write (void)
   rb_define_singleton_method(rb_cCArray, "iw_inout_copy", iw_inout_copy, 3);
   rb_define_singleton_method(rb_cCArray, "iw_fiber_fill_break", iw_fiber_fill_break, 3);
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill_poisoned", iw_slab_fill_poisoned, 3);
+  rb_define_singleton_method(rb_cCArray, "iw_read_cells", iw_read_cells, 3);
+  rb_define_singleton_method(rb_cCArray, "iw_write_cells", iw_write_cells, 3);
 }
