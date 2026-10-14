@@ -145,6 +145,13 @@ still passes, so nothing else would report it:
   checks that the count is the same after each test as before it. To get
   the check on a single file run by hand, load it with
   `-r ./spec/spec_ai/attach_balance.rb`.
+- **`CArray.__iter_buffers__`** (development build) counts the buffers the
+  kernel iterator took for a walk and has not given back.
+  `spec/spec_ai/test_iter_delivery_detectors.rb` compares it, with the
+  attached views, around every walk of the delivery matrix, and also checks
+  that a read walk creates nothing, that values a walk gathers survive a
+  collection, and that a partial view never asks a lazily backed root for
+  all of it.
 
 ### Fast paths and `rake spec_ai_general`
 

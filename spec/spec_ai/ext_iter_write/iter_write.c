@@ -272,7 +272,8 @@ iw_slab_fill_poisoned (VALUE klass, VALUE vdst, VALUE vaxis, VALUE vval)
    A whole walk may still yield its cells as several slabs (an L2 walk over
    a strided source yields one row at a time); they come in row-major order.
    iw_read_cells returns the slabs in the order they were yielded, each an
-   Array of the cell values with nil where the yielded mask is set.
+   Array of the cell values with nil where the yielded mask is set.  The
+   source is float64 or object.
    iw_write_cells writes 1000 + the cell's position in the walk for a whole
    walk, and 1000 * (slab number + 1) + position in the slab for the
    others, so the test can tell where each root cell was reached from. */
@@ -342,6 +343,9 @@ iw_read_cells (VALUE klass, VALUE vsrc, VALUE vmode, VALUE vaxis)
     for ( ca_size_t i = 0; i < n; i++ ) {
       if ( m && m[i * ms] ) {
         rb_ary_push(slab, Qnil);
+      }
+      else if ( src->data_type == CA_OBJECT ) {
+        rb_ary_push(slab, *(VALUE *)(p + i * s));
       }
       else {
         rb_ary_push(slab, rb_float_new(*(double *)(p + i * s)));
@@ -515,6 +519,45 @@ iw_whole_raise (VALUE klass, VALUE vdst, VALUE vk)
   return ca_iter_ensure(1, c.st, iw_whole_raise_body, (VALUE) &c);
 }
 
+/* Opens a walk inside ca_iter_ensure, takes its first slab (writing -1 into
+   it when write is true), and raises.  The walk must be closed by the
+   ensure however far it got. */
+typedef struct {
+  ca_iter_state st[1];
+  CArray       *src;
+  int           mode;
+  int8_t        axis;
+  int           write;
+} iw_raise_t;
+
+static VALUE
+iw_raise_cells_body (VALUE arg)
+{
+  iw_raise_t *c = (iw_raise_t *) arg;
+  char       *p;
+  boolean8_t *m;
+  ca_size_t   n, s, ms;
+  ca_iter_check_init(iw_open(&c->st[0], c->src, c->mode, c->axis,
+                             c->write ? CA_KERNEL_WRITE : 0));
+  if ( iw_next(&c->st[0], c->mode, &p, &m, &n, &s, &ms) && c->write ) {
+    for ( ca_size_t i = 0; i < n; i++ ) *(double *)(p + i * s) = -1.0;
+  }
+  rb_raise(rb_eRuntimeError, "iw_raise_cells");
+  return Qnil;
+}
+
+static VALUE
+iw_raise_cells (VALUE klass, VALUE vsrc, VALUE vmode, VALUE vaxis, VALUE vwrite)
+{
+  iw_raise_t c;
+  (void) klass;
+  TypedData_Get_Struct(vsrc, CArray, &carray_data_type, c.src);
+  c.mode  = NUM2INT(vmode);
+  c.axis  = (int8_t) NUM2INT(vaxis);
+  c.write = RTEST(vwrite);
+  return ca_iter_ensure(1, c.st, iw_raise_cells_body, (VALUE) &c);
+}
+
 void
 Init_iter_write (void)
 {
@@ -531,6 +574,7 @@ Init_iter_write (void)
   rb_define_singleton_method(rb_cCArray, "iw_read_cells", iw_read_cells, 3);
   rb_define_singleton_method(rb_cCArray, "iw_write_cells", iw_write_cells, 3);
   rb_define_singleton_method(rb_cCArray, "iw_route", iw_route, 4);
+  rb_define_singleton_method(rb_cCArray, "iw_raise_cells", iw_raise_cells, 4);
   rb_define_singleton_method(rb_cCArray, "iw_whole_read", iw_whole_read, 2);
   rb_define_singleton_method(rb_cCArray, "iw_whole_write", iw_whole_write, 1);
   rb_define_singleton_method(rb_cCArray, "iw_whole_break", iw_whole_break, 2);

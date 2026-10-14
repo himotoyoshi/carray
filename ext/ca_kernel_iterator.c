@@ -81,10 +81,22 @@ ki_kept_slot (void)
   return k;
 }
 
+/* Development build: the number of buffers ki_data_alloc has handed out
+   that ki_data_free has not taken back (CArray.__iter_buffers__).  A walk
+   that ends leaves the count where it found it; the spec suite compares it
+   around each walk. */
+#ifdef CARRAY_DEV_BUILD
+static long ki_buffers_out = 0;
+#define KI_BUFFERS_OUT(d) ( ki_buffers_out += (d) )
+#else
+#define KI_BUFFERS_OUT(d) ((void) 0)
+#endif
+
 static void *
 ki_data_alloc (int8_t data_type, ca_size_t bytes)
 {
   void *p = NULL;
+  KI_BUFFERS_OUT(1);
   if ( bytes >= KI_KEEP_MIN ) {
     ki_kept_t *k = ki_kept_slot();
     if ( k->p && bytes <= k->bytes ) {
@@ -108,6 +120,7 @@ ki_data_alloc (int8_t data_type, ca_size_t bytes)
 static void
 ki_data_free (void *p, ca_size_t bytes)
 {
+  KI_BUFFERS_OUT(-1);
   ca_gc_release_buffer(p);
   if ( bytes >= KI_KEEP_MIN && bytes <= KI_KEEP_MAX ) {
     ki_kept_t *k = ki_kept_slot();
@@ -5001,6 +5014,14 @@ rb_caf_bench_per_fiber_xfer_sum_f64 (VALUE klass, VALUE vsrc, VALUE vaxis)
   return rb_float_new(total);
 }
 
+/* CArray.__iter_buffers__: see ki_buffers_out. */
+static VALUE
+rb_ki_buffers_out (VALUE klass)
+{
+  (void) klass;
+  return LONG2NUM(ki_buffers_out);
+}
+
 #endif /* CARRAY_DEV_BUILD — end smoke surface fence */
 
 void
@@ -5014,6 +5035,8 @@ Init_ca_kernel_iterator (void)
    * `caf_fiber_smoke_*`, `caf_*_bench_*`, helper smokes, and `T1_*` test
    * constants are gated here together — none of them are consumed by
    * production code (lib/ / other ext/), only by spec_ai regression pins. */
+  rb_define_singleton_method(rb_cCArray, "__iter_buffers__",
+                             rb_ki_buffers_out, 0);
   rb_define_singleton_method(rb_cCArray, "t1_smoke",
                              rb_t1_smoke, 1);
   rb_define_singleton_method(rb_cCArray, "t1_smoke_strided",
