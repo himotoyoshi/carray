@@ -105,6 +105,11 @@ task :leak_matrix do
   ruby "-Iext", "-Ilib", "utils/leak_matrix.rb" or exit($?.exitstatus)
 end
 
+desc "Check that a mask stand-in is made, read and settled only through the parts"
+task :mask_standin_check do
+  ruby "utils/check_mask_standins.rb" or exit($?.exitstatus)
+end
+
 desc "Check that a buffer for an array's cells is valid before it is published"
 task :cell_buffer_check do
   ruby "utils/check_cell_buffers.rb" or exit($?.exitstatus)
@@ -385,7 +390,7 @@ task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_parts_check
                   :runtime_error_check, :index_error_check, :cell_buffer_check,
                   :view_setup_mask_check, :protect_parts_check,
                   :setup_before_alloc_check, :integer_store_check, :one_sided_cast_check,
-                  :empty_walk_check,
+                  :empty_walk_check, :mask_standin_check,
                   :build_ext, :dunder_method_check,
                   :build_mv_borrower, :build_mock_unattachable,
                   :build_xfer_smoke, :build_author_surface_smoke] do
