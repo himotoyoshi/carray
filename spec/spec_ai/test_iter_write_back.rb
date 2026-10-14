@@ -124,6 +124,38 @@ class TestIterWriteBack < Test::Unit::TestCase
     end
   end
 
+  # A slab along a shifted or index-selected axis: the per-slab gather of
+  # such an axis reads only, so the write takes the transfer walk.  It was
+  # refused with rc=3.
+  def test_a_view_receives_the_write_along_its_shifted_or_selected_axis
+    {
+      "shift" => ->(b) { b.shift(1, 0) },
+      "grid"  => ->(b) { b[CA_INT64([2, 0]), nil] },
+    }.each do |name, mk|
+      %i[iw_fiber_fill iw_slab_fill].each do |entry|
+        b = base
+        CArray.send(entry, mk.call(b), 0, -1.0)
+        want = base
+        mk.call(want)[] = -1.0
+        assert_equal want.to_a, b.to_a, "#{name} #{entry}"
+      end
+    end
+  end
+
+  # A whole-array walk (init_l1) is routed as the per-axis walk is: a
+  # selection of a converting view goes by transfer, which writes masked
+  # cells as well.  The L1 walk attached the converting view instead, whose
+  # write-back skipped the masked cells.
+  def test_a_whole_write_through_a_selection_of_a_converting_view_reaches_masked_cells
+    b = CArray.int32(3, 4).seq!
+    b[1, 1] = UNDEF
+    b[2, 3] = UNDEF
+    CArray.iw_write_cells(b.fake(:float64)[CA_BOOLEAN([1, 1, 1]), nil], 0, 0)
+    assert_equal (1000..1011).to_a, b.value.to_a.flatten
+    assert_equal [[false] * 4, [false, true, false, false], [false, false, false, true]],
+                 b.mask.to_a
+  end
+
   # A shifted view walked with its shift axis outside the slab: the walk
   # gathers the whole view, and has to scatter all of it back.
   def test_a_shifted_view_receives_the_write_along_its_other_axis

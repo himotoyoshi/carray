@@ -37,9 +37,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 ## 3.0.4 (unreleased)
 
 - Fix: C extensions: a kernel iterator write walk over a single slab
-  axis (`CA_FOR_EACH_SLAB` with `CA_KERNEL_WRITE`) of a shifted view
-  (`a.shift(...)`) no longer fails with "flag combination is not
-  supported" (rc=3); the write reaches the array.
+  axis (`CA_FOR_EACH_SLAB` with `CA_KERNEL_WRITE`) of a shifted view or
+  one selected by an index array (`a.shift(...)`,
+  `a[CA_INT64([0, 2]), nil]`) along the shifted or selected axis no
+  longer fails with "flag combination is not supported" (rc=3); the
+  write reaches the array.
 
 - Fix: C extensions: a whole-array kernel iterator write walk
   (`ca_iter_state_init_l1`) over a selection of a type-converting view,
