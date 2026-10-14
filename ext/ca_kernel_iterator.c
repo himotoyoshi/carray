@@ -1,24 +1,19 @@
 /* ---------------------------------------------------------------------------
 
-  T1 kernel_iterator MVP — Phase 1 step 1 + step 2 + step 3 implementation.
+  ca_kernel_iterator.c
 
-  Scope after step 3 (PROPOSAL_T1_KERNEL_ITERATOR.md §10.3):
-    - ca_iter_state struct + init / next_slab / next_slab_strided /
-      finish state machine
-    - CA_SLAB_WHOLE policy only (step 5+ adds AXES / FREE)
-    - level == 1 (L1, contig kernel):
-        - entity / CAStride contig: alias path (single slab, alias_ptr
-          = parent->ptr, stride implicit = bytes)
-        - CAStride family non-contig: scratch path (ca_copy_data
-          compose-fold gather into a malloc'd buffer)
-        - other sources: CA_ITER_ERR_NOT_CHEAP
-    - level == 2 (L2, strided kernel):
-        - entity / CAStride contig: alias path (single slab,
-          stride_bytes = bytes)
-        - CAStride family non-contig: alias_strided path — no scratch,
-          per-outer-prefix yield with native inner stride_bytes
-        - other sources: CA_ITER_ERR_NOT_CHEAP
-    - READ-only (flags == 0). WRITE = step 4, NO_MASK = step 7.
+  The engine behind the author surface declared in ca_kernel_iterator.h:
+  init_l1 / init_l2 / init_l2_paired, the next_slab family, sync_slab,
+  finish, close and ca_iter_ensure.
+
+  For each source the engine decides how to deliver its cells
+  (ca_iter_classify_source, then alias_mode): borrow the source's memory,
+  gather the cells into a scratch buffer, or walk the parents of a stack.
+  It hands the kernel one slab at a time, and on a WRITE walk sends the
+  cells the kernel changed back through the source.  READ and WRITE walks,
+  masks, CA_SLAB_WHOLE and CA_SLAB_AXES, CA_KERNEL_NO_MASK and
+  CA_KERNEL_FIBER_CONTIG are supported.  A source is refused as
+  unreadable (CA_ITER_ERR_NOT_CHEAP) only when it has no attach slot.
 
 ---------------------------------------------------------------------------- */
 
@@ -149,11 +144,14 @@ extern ca_operation_function_t ca_select_func;
 extern ca_operation_function_t ca_window_func;
 /* ca_mapping_func retired in R.3 (PROPOSAL_CAMAPPING_REMOVAL). */
 
-/* SRC_ATTACH 5 view (step 9).  Each defines its own attach that
-   materialises src->ptr via view-specific transform (cast / swap /
-   bit unpack / reduction).  kernel_iterator treats them uniformly:
-   ca_attach(src) → kernel sees src->ptr as contig → on WRITE,
-   ca_sync(src) lets the view's sync_data scatter back. */
+/* Operation tables the classifier compares a source's attach slot
+   against.  Every view below is delivered as CA_ITER_SRC_ATTACH: the
+   engine gathers its cells into a scratch buffer of its own through the
+   view's transfer (ki_gather_view = ca_xfer_all GET) and, on a WRITE
+   walk, sends back the cells the kernel changed (ki_scratch_push_changed
+   = ca_xfer_addrs, or ca_xfer_all PUT when every cell changed).  The
+   view's attach / sync slots are not called.  Cast / byte swap / bit
+   unpack / reduction views: */
 extern ca_operation_function_t ca_fake_func;
 extern ca_operation_function_t ca_byte_swap_func;
 extern ca_operation_function_t ca_bitfield_func;
@@ -161,42 +159,24 @@ extern ca_operation_function_t ca_bitarray_func;
 extern ca_operation_function_t ca_reduce_func;
 extern ca_operation_function_t ca_object_func;
 
-/* F-2 follow-up (2026-05-26): connect CATile / CARoll to kernel_iterator
-   via the SRC_ATTACH pattern. Per-cell modulo wrap does not fit the
-   descriptor framework's kind enum {STRIDE, INDEX, SHIFT}, so the
-   innermost-STRIDE L2 alias path is not used; but the view-specific
-   func_attach (embed-region gather) materialises src->ptr and func_sync
-   scatters back — structurally identical to SRC_ATTACH. Fills the gap
-   in the "deliver" principle (= these were previously rejected via
-   SRC_NONE). */
+/* CATile / CARoll: the per-cell modulo wrap has no STRIDE / INDEX /
+   SHIFT descriptor, so they are delivered as SRC_ATTACH (above). */
 extern ca_operation_function_t ca_tile_func;
 extern ca_operation_function_t ca_roll_func;
 
-/* PROPOSAL_CASTACK.md Phase 3 (2026-06-18): CAStack via SRC_ATTACH.
-   func_attach materialises src->ptr via per-parent ca_xfer_all GET
-   (= K * parent.bytes alloc, caller responsibility per MEMO §3.4);
-   func_sync scatters back via xfer_all PUT.  kernel sees a flat
-   contig slab over the stacked output of shape (K, *parent_shape). */
+/* CAStack / CAMeld: SRC_ATTACH (above).  A stack can also be walked
+   through its parents directly (CA_ITER_ALIAS_STACK / STACK_OUTER_K,
+   see init_l2). */
 extern ca_operation_function_t ca_stack_func;
 extern ca_operation_function_t ca_meld_func;
 
-/* M.6 (PROPOSAL_CAREMAP_INTERNAL.md §5.2): CARemap is internal-only
-   (no Ruby class constant) but participates in kernel_iterator as an
-   SRC_ATTACH source.  Per-element gather has no STRIDE structure to
-   preserve, so SRC_ATTACH (scratch materialise via ca_remap_func_attach)
-   is the natural acceptance path.  func_attach allocates a fresh
-   buffer and runs xfer_all(GET); kernel sees a flat contig slab.
-   On WRITE, ca_sync routes through xfer_all(PUT). */
+/* CARemap (internal, no Ruby class constant): a per-element gather with
+   no STRIDE structure, delivered as SRC_ATTACH (above). */
 extern ca_operation_function_t ca_remap_func;
 
-/* PROPOSAL_LAZY_ELEMENTWISE_VIEW Phase 4.5 P.4.5.1 (2026-06-07): lazy
-   element-wise view family.  CAMonOp (Phase 1) / CABinOp (Phase 2) /
-   CABinCmp + CAMonCmp (Phase 4) all expose a func_attach that pulls
-   the lazy tree's materialise into a fresh contig buffer; kernel sees
-   a flat slab.  Same SRC_ATTACH structural pattern as CAFake et al,
-   so a 4-line addition to the classify_source list opens all 22
-   mkkernel-generated reduction ops (sum / count / mean / variance /
-   argmin / ...) to lazy operands — `(a.lazy + b).sum` now works.   */
+/* Lazy element-wise views (CAMonOp / CABinOp / CABinCmp / CAMonCmp /
+   CATriOp): SRC_ATTACH (above); gathering evaluates the expression into
+   the scratch, so every generated reduction accepts a lazy operand. */
 extern ca_operation_function_t ca_monop_func;
 extern ca_operation_function_t ca_binop_func;
 extern ca_operation_function_t ca_bincmp_func;
@@ -253,8 +233,10 @@ ca_iter_register_source_kind (int obj_type, uint8_t kind)
   ca_iter_registered_source_kind[obj_type] = kind;
 }
 
-/* Classify the source by routing kind (proposal §1 strategy table).
-   Returns CA_ITER_SRC_NONE for sources not yet supported. */
+/* Classify the source by how its cells are delivered.  Returns
+   CA_ITER_SRC_NONE only for a NULL source or one with no attach slot;
+   every other view is delivered, as SRC_ATTACH if nothing more specific
+   applies. */
 static uint8_t
 ca_iter_classify_source (CArray *src)
 {
@@ -274,71 +256,53 @@ ca_iter_classify_source (CArray *src)
     if ( kind != CA_ITER_SRC_NONE ) return kind;
   }
 
-  /* Descriptor framework views (step 5.1: CSA + CAGrid; 5.2: + CASelect /
-     CAMapping / CAWindow / CAShift).  CAShift uses ca_window_func
-     for attach (Phase G typedef pattern) so it matches the CAWindow
-     check below. */
+  /* Descriptor views: CASelectAxis / CAGrid / CASelect / CAWindow.
+     CAShift shares ca_window_func's attach, so it matches the CAWindow
+     check. */
   void *attach = ca_func[src->obj_type].attach;
   if ( attach == ca_select_axis_func.attach ) return CA_ITER_SRC_DESCRIPTOR;
   if ( attach == ca_grid_func.attach        ) return CA_ITER_SRC_DESCRIPTOR;
   if ( attach == ca_select_func.attach      ) return CA_ITER_SRC_DESCRIPTOR;
   if ( attach == ca_window_func.attach      ) return CA_ITER_SRC_DESCRIPTOR;  /* + CAShift */
 
-  /* Step 9: SRC_ATTACH 5 view.  Each view-specific attach materialises
-     src->ptr via per-element transform; kernel sees a flat contig slab. */
+  /* The views below are SRC_ATTACH: gathered into scratch through their
+     own transfer (ki_gather_view) and, on WRITE, sent back the changed
+     cells (ki_scratch_push_changed).  Their attach / sync slots are not
+     called by the engine. */
   if ( attach == ca_fake_func.attach        ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_byte_swap_func.attach   ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_bitfield_func.attach    ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_bitarray_func.attach    ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_reduce_func.attach      ) return CA_ITER_SRC_ATTACH;
-  /* Step 11: CAObject — Ruby callback per-element bridge.  Same
-     SRC_ATTACH structural pattern (func_attach materialises via Ruby
-     copy_data, func_sync scatters back via Ruby sync_data, CA_FLAG_
-     READ_ONLY auto-rejects WRITE via ca_is_readonly).  Bench gate
-     n/a (Ruby callback overhead structurally dominant). */
+  /* CAObject: each transfer calls the Ruby callback.  A read-only
+     CAObject is refused for WRITE by the ca_is_readonly check. */
   if ( attach == ca_object_func.attach      ) return CA_ITER_SRC_ATTACH;
 
-  /* F-2 follow-up: CATile / CARoll via SRC_ATTACH (embed-region gather
-     materialises src->ptr; ca_sync scatters back per view-specific
-     semantics — CATile tile decomposition, CARoll cyclic permutation). */
   if ( attach == ca_tile_func.attach        ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_roll_func.attach        ) return CA_ITER_SRC_ATTACH;
 
-  /* Phase 3 (PROPOSAL_CASTACK.md): CAStack via SRC_ATTACH.  func_attach
-     materialises src->ptr via per-parent ca_xfer_all GET (= K * parent
-     bytes alloc, caller responsibility per MEMO §3.4); func_sync
-     scatters back via xfer_all PUT.  kernel sees a flat contig slab
-     over the stacked output.  Routine ndim mismatch is irrelevant
-     here (= attach delivers a self-owned buffer of shape (K, *parent
-     shape), kernel reads/writes that buffer). */
+  /* CAStack: SRC_ATTACH here; init_l2 may instead walk its parents
+     directly (CA_ITER_ALIAS_STACK / STACK_OUTER_K). */
   if ( attach == ca_stack_func.attach       ) return CA_ITER_SRC_ATTACH;
 
-  /* CAMeld — ragged concatenate along an existing axis.  func_attach
-     materialises via K per-parent xfer_all GET into a contig buffer at
-     seg_offset[k] * tail_bytes offsets; func_sync scatters back.  Same
-     SRC_ATTACH structural pattern as CAStack; reduce hot paths bypass
-     this via the per-parent decompose in lib/carray/meld_reduce.rb. */
+  /* CAMeld: reduce hot paths avoid the gather through the per-parent
+     decompose in lib/carray/meld_reduce.rb. */
   if ( attach == ca_meld_func.attach        ) return CA_ITER_SRC_ATTACH;
 
-  /* M.6: CARemap — per-element gather, internal-only.  Same SRC_ATTACH
-     structural pattern (func_attach materialises via xfer_all GET,
-     func_sync via xfer_all PUT). */
   if ( attach == ca_remap_func.attach       ) return CA_ITER_SRC_ATTACH;
 
-  /* Phase 4.5 P.4.5.1: lazy view family — CAMonOp / CABinOp / CABinCmp /
-     CAMonCmp.  func_attach pulls the lazy chain materialise (arena-pooled
-     scratches under the hood from Phase 3); kernel sees a flat contig
-     slab.  Read-only (= CA_FLAG_READ_ONLY) so WRITE auto-rejects at
-     the ca_is_readonly check.  Opens 22 mkkernel-generated reduction
-     ops to lazy operands.                                            */
+  /* Lazy views (CAMonOp / CABinOp / CABinCmp / CAMonCmp / CATriOp):
+     gathering evaluates the expression.  They are read-only, so WRITE is
+     refused by the ca_is_readonly check. */
   if ( attach == ca_monop_func.attach       ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_binop_func.attach       ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_bincmp_func.attach      ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_moncmp_func.attach      ) return CA_ITER_SRC_ATTACH;
   if ( attach == ca_triop_func.attach       ) return CA_ITER_SRC_ATTACH;
 
-  /* Anything else is a view class installed from outside that did not
-     register.  Attaching is the one thing every view can do, and it is
+  /* Anything else -- a view class installed from outside that did not
+     register, or an in-tree class with no case above (such as the mask
+     views CAMaskOfOperands and CAObjectMask).  Attaching is the one thing every view can do, and it is
      what a registration would declare, so the array is delivered that way
      rather than refused. */
   if ( attach != NULL ) return CA_ITER_SRC_ATTACH;
@@ -348,13 +312,13 @@ ca_iter_classify_source (CArray *src)
 
 /* F-2 (PROPOSAL_F2_KERNEL_ITERATOR_ALIAS rev6): route a source by
    running classify_source and, for descriptor-routed views, also calling
-   describe_axes to inspect the innermost axis kind.  Returns the refined
-   src_kind (= SRC_DESCRIPTOR_L2_ALIASABLE iff innermost axis is STRIDE,
-   else SRC_DESCRIPTOR).  out_descs / out_parent_dims / out_ndim are
-   populated for descriptor sources so the caller (init_l1 / init_l2)
-   does not have to re-call describe_axes.  For non-descriptor sources
-   (CASTRIDE / ATTACH / NONE) the out_* arguments are not touched and
-   classify_source's verdict is returned as-is.
+   describe_axes to inspect the innermost axis kind.  A descriptor view
+   comes back as SRC_DESCRIPTOR_L2_ALIASABLE (innermost axis STRIDE) or
+   SRC_DESCRIPTOR, and then out_descs / out_parent_dims / out_ndim are
+   filled so the caller does not re-call describe_axes.  A grid with holes
+   and a view whose parent lends no memory come back as SRC_ATTACH, and
+   the out_* arguments are not touched; nor are they for any other kind,
+   whose classify_source verdict is returned as-is.
 
    Cost analysis: classify_source is O(1) pointer compares.  For
    SRC_DESCRIPTOR candidates we add one describe_axes call (O(ndim) with
@@ -481,10 +445,10 @@ ca_iter_build_rowmajor_strides (ca_size_t       *strides,
 /* ---- PROPOSAL_FIBER_PER_SOURCE_PATH F.6.1 dispatch predicate -------- */
 
 /* Hybrid (rev2 Q2): coarse src_kind branch + view-specific func pointer
-   probe + fiber-axis effective stride check (Q3).
-   F.6.1 substrate: returns 0 (= disabled) for all sources.  F.6.2+
-   (CAFake / CAByteSwap / CAShift / CAWindow / etc.) progressively enable
-   specific source kinds with bench-driven justification.
+   probe + fiber-axis effective stride check (Q3).  Returns nonzero for
+   CAFake / CAByteSwap / a single-cast CAMonOp under SRC_ATTACH when the
+   fiber is contiguous in the parent, and for CAWindow / CAShift under
+   SRC_DESCRIPTOR; zero otherwise.
 
    The fiber_axis_stride argument is the effective byte stride of the
    fiber axis on the view (= what next_slab_axes would yield as
@@ -492,10 +456,10 @@ ca_iter_build_rowmajor_strides (ca_size_t       *strides,
    means the fiber is parent-memory contig, which is the precondition
    for X.1/X.4 per-region fused paths to deliver a 1-pass result.
 
-   Called from init_l2 SRC_ATTACH branch right before the whole-view
-   ca_xfer_all GET.  When returning 1, caller skips xfer_all GET and
-   sets alias_mode = CA_ITER_ALIAS_PER_FIBER_FUSED with fiber dispatch
-   state populated. */
+   Called from two places in init_l2: the CA_SLAB_AXES descriptor branch
+   and the SRC_ATTACH branch, each before it would materialise.  When it
+   returns nonzero the caller skips the materialise and sets alias_mode =
+   CA_ITER_ALIAS_PER_FIBER_FUSED with the fiber dispatch state filled. */
 static int
 ca_iter_should_per_fiber_fused (CArray   *src,
                                 int       src_kind,
@@ -871,8 +835,7 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
   st->chunk_size    = st->slab_n;
 
   if ( src_kind == CA_ITER_SRC_ATTACH ) {
-    /* === SRC_ATTACH path (step 9 + 2026-05-31 refactor): CAFake /
-           CAByteSwap / CABitfield / CABitarray / CAReduce =================
+    /* === SRC_ATTACH path (every view classified SRC_ATTACH) ===========
        View's xfer_all delivers materialised data through the unified
        dispatch surface.  Previously used `ca_attach(src) + src->ptr`
        (= view's attach slot) and `ca_sync(src)` for WRITE; now uses
@@ -900,10 +863,11 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
   }
 
   if ( src_kind == CA_ITER_SRC_DESCRIPTOR ) {
-    /* === descriptor path (step 5.1: CSA + CAGrid) ======================
-       Reuse P3 substrate: describe_axes → prepare → layout. For now
-       always materialise via ca_axis_dispatch_attach into scratch and
-       yield one contig slab (alias_mode = NONE). The view-transparency
+    /* === descriptor path (CASelectAxis / CAGrid / CASelect / CAWindow /
+       CAShift) ==========================================================
+       describe_axes → prepare → layout, then gather the view into
+       scratch with ca_axis_dispatch_gather and yield one contig slab
+       (alias_mode = NONE). The view-transparency
        principle (proposal §0): kernel sees a flat slab regardless of
        per-axis kind; INDEX / SHIFT mix is handled inside the engine. */
     ca_axis_desc_t raw_descs[CA_RANK_MAX];
@@ -923,20 +887,17 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
     }
     st->total_elements = src->elements;
 
-    /* Materialise via the engine.  ca_axis_dispatch_attach handles
-       parent attach + scratch alloc + gather (INDEX axes included);
-       we own the resulting buffer.  Descriptor views inherit from
-       CAView so parent is at the CAVIEW prefix slot. */
+    /* Materialise: attach the parent here, allocate the scratch, and
+       gather into it with ca_axis_dispatch_gather (INDEX axes included);
+       the iterator owns the buffer.  Descriptor views inherit from CAView
+       so parent is at the CAVIEW prefix slot. */
     CArray *parent = CAVIEW(src)->parent;
     ca_attach(parent);                 /* engine reads parent->ptr */
     st->root = parent;                 /* finish() detaches */
     st->scratch_cap = src->elements * src->bytes;
-    /* Engine ndim = descriptor ndim from describe_axes (not view.ndim).
-       Critical for CAMapping where view.ndim > 1 but the descriptor is
-       1-D INDEX gather.
-       bound_fill = CAWindow/CAShift fill value (Tier 2.B SHIFT-axis
-       OOB cell), NULL for non-window views (CSA / CAGrid / CASelect /
-       CAMapping don't have OOB semantics — engine sees no SHIFT axes). */
+    /* bound_fill = the CAWindow / CAShift fill value for an out-of-bounds
+       SHIFT cell; NULL for the other descriptor views, which have no
+       SHIFT axes. */
     const void *bound_fill = NULL;
     if ( ca_func[src->obj_type].attach == ca_window_func.attach ) {
       bound_fill = ((CAWindow *) src)->fill;
@@ -1020,8 +981,9 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
      A Face only layers a semantic identifier and a CALazyMarker only layers
      "leaf of a lazy chain"; storage is identical to the parent either way, so
      strip at the kernel-compute entry and descend.  Routing and alias
-     decisions belong to the parent.  Strip before validate_inputs —
-     classify_source rejects both as knows-no.
+     decisions belong to the parent.  Strip before validate_inputs: left
+     on, both would classify as SRC_ATTACH (they have attach slots) and be
+     materialised whole (see ca_iter_strip_storage_wrapper).
 
      The Face identifier is re-wrapped onto the result by the caller's lift
      hook (= primary operators / reductions / etc.).  The marker is not:
@@ -1050,13 +1012,16 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
   int8_t         raw_ndim = 0;
   uint8_t src_kind = ca_iter_route_source(src, raw_descs, raw_pdims, &raw_ndim);
 
-  /* Phase B capstone (T2): CA_SLAB_AXES + descriptor view (= SRC_DESCRIPTOR
-     and SRC_DESCRIPTOR_L2_ALIASABLE), accept when slab axes are all-STRIDE
-     kind and no outer SHIFT.  Other combinations:
-       - slab has INDEX/SHIFT kind → reject (Phase C T3 scope)
-       - outer has SHIFT axis      → reject (B.1.5 materialise downgrade scope)
-       - SRC_ATTACH                → reject (overlay views; no kind structure)
-     SRC_CASTRIDE still goes through the Phase A branch below. */
+  /* CA_SLAB_AXES + descriptor view (SRC_DESCRIPTOR and
+     SRC_DESCRIPTOR_L2_ALIASABLE).  The cases, in the order handled below:
+       - a single FIBER_CONTIG fiber on CAWindow / CAShift: per-fiber
+         ca_xfer_stride (CA_ITER_ALIAS_PER_FIBER_FUSED)
+       - slab has an INDEX or SHIFT axis: per-slab gather (PER_SLAB /
+         PER_SLAB_HOIST) or a whole-view gather; refused only for WRITE
+       - an outer axis is SHIFT: materialise the view, then walk the copy
+       - slab axes all STRIDE, no outer SHIFT: borrow the parent's memory
+     SRC_ATTACH under CA_SLAB_AXES is handled further down (including the
+     CAStack paths), and SRC_CASTRIDE by the branch after that. */
   if ( policy == CA_SLAB_AXES ) {
     if ( src_kind == CA_ITER_SRC_DESCRIPTOR
          || src_kind == CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE ) {
@@ -1351,8 +1316,8 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
          can't deliver OOB cells (= need fill_value), and the view-family
          surface prioritises delivering the cells over avoiding a copy, so
          we materialise the entire view into a row-major scratch
-         buffer via ca_axis_dispatch_attach (= same engine as the
-         existing SRC_DESCRIPTOR L2 NONE path), then walk it with
+         buffer with ca_axis_dispatch_gather (= same engine as the
+         SRC_DESCRIPTOR L2 NONE path), then walk it with
          Phase A-style row-major K-D strides.  Slab / outer partition
          applies to view-axes; the scratch IS the flat row-major view. */
       int outer_has_shift = 0;
@@ -1508,7 +1473,8 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
           st->slab_elements        *= raw_descs[k].count;
           sp++;
         } else {
-          /* Outer axis: STRIDE or INDEX (SHIFT was rejected above).
+          /* Outer axis: STRIDE or INDEX (an outer SHIFT was routed to the
+             materialise path above).
              Store axis index + view's outer dim/stride for descriptor
              walk in next_slab_axes.  We reuse outer_strides/outer_mask
              _strides as the OUTER walk metadata; outer-axis kind is
@@ -1581,11 +1547,12 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       return CA_ITER_OK;
     }
     if ( src_kind == CA_ITER_SRC_ATTACH ) {
-      /* Phase B.5: CA_SLAB_AXES + SRC_ATTACH (= CAFake / CAByteSwap /
-         CABitfield / CABitarray / CAReduce).  These overlay views
-         materialise via their own ca_attach (= no descriptor framework
-         path), so we let ca_attach(src) populate src->ptr in view
-         row-major layout and walk it with Phase A-style K-D strides.
+      /* CA_SLAB_AXES + SRC_ATTACH (every view classified SRC_ATTACH).
+         The cases below, in order: CAStack walked through its parents
+         (CA_ITER_ALIAS_STACK, STACK_OUTER_K), a single FIBER_CONTIG fiber
+         through ca_xfer_stride (PER_FIBER_FUSED), and otherwise the whole
+         view gathered into scratch with ki_gather_view and walked with
+         K-D strides in view row-major layout.
 
          The most common entry path here is wrap_readonly(int_src,
          CA_FLOAT64) → CAFake, enabling sum_ki etc. to accept any
@@ -1750,15 +1717,14 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
         return CA_ITER_OK;
       }
 
-      /* PROPOSAL_CASTACK_XFER_OPT_LAYERING P.2 Case A (2026-06-18):
-         CAStack source + slab_axes excludes axis 0 (= K-axis stays in
-         outer iter, e.g. view.mean(axis: 1), view.mean(axis: 2),
-         view.mean(axis: 1, 2)).  Each slab corresponds to a region
-         inside ONE parent selected by outer_idx[K_outer_pos].  Engine
-         pre-attaches K parents (+ K parent masks if mask present),
-         caches their ptrs, and next_slab_axes aliases parents[k]->ptr +
-         parent_off directly -- no scratch, no materialise, parent
-         entity case = eager-equivalent memory bandwidth.
+      /* CAStack source whose slab axes leave out the stack axis k_axis
+         (the stack axis stays in the outer iteration, e.g. a stack along
+         axis 0 reduced along axis 1).  Each slab is a region inside ONE
+         parent, selected by outer_idx[K_outer_pos].  The engine attaches
+         the K parents and caches their ptrs, copies the K parent masks
+         when the stack has a mask, and next_slab_axes points into
+         parents[k]->ptr + parent_off -- no gather of the data unless
+         FIBER_CONTIG needs a contiguous fiber.
 
          Layering: engine detects CAStack identity by function-pointer
          comparison and accesses parents[] / mask via ca_func[STACK]
@@ -1910,8 +1876,8 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       /* PROPOSAL_FIBER_PER_SOURCE_PATH F.6.1 hook: try per-fiber fused
          dispatch before whole-view materialise.  When predicate fires,
          skip scratch alloc + xfer_all GET (= per-fiber ca_xfer_stride
-         is called on demand in next_slab_axes).  Predicate is stubbed
-         in F.6.1 (returns 0); F.6.2+ enables specific source kinds. */
+         is called on demand in next_slab_axes).  The predicate decides
+         which sources take this path. */
       int per_fiber_fused = 0;
       if ( (flags & CA_KERNEL_FIBER_CONTIG) && naxes == 1
            && ca_fast_paths_enabled() ) {
@@ -2006,9 +1972,9 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     src_kind = CA_ITER_SRC_DESCRIPTOR;
   }
 
-  /* Step 9 + 2026-05-31 refactor: L2 dispatch over SRC_ATTACH sources
-     (CAFake / CAByteSwap / CABitfield / CABitarray / CAReduce / CAObject
-     / CATile / CARoll).  Same shape as L1 SRC_ATTACH: iterator-owns
+  /* L2 dispatch over SRC_ATTACH sources (every view classified
+     SRC_ATTACH, including descriptor views that route_source redirected).
+     Same shape as L1 SRC_ATTACH: iterator-owns
      scratch + xfer_all GET/PUT.  Yield as one 1-D strided slab. */
   if ( src_kind == CA_ITER_SRC_ATTACH ) {
     st->src      = src;
@@ -2136,12 +2102,10 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
   /* Sub-step 5.3: L2 dispatch over descriptor sources.  The view-family
      surface prioritises delivering the cells over avoiding a copy: always
      materialise into a
-     scratch buffer via ca_axis_dispatch_attach and yield a single
-     strided slab (stride = bytes).  CASelect/CAMapping always reach
-     here, CSA/CAGrid/CAWindow/CAShift when INDEX/SHIFT axes are
-     present.  F-2 (rev6) routes innermost-STRIDE descriptor cases to
-     the L2 alias path above; this block now handles remaining mixed
-     cases (innermost INDEX, outer SHIFT temporarily, etc.). */
+     scratch buffer with ca_axis_dispatch_gather and yield a single
+     strided slab (stride = bytes).  Innermost-STRIDE descriptor views
+     take the L2 alias path above; this block handles the rest (an
+     innermost INDEX or SHIFT axis, or an outer SHIFT axis). */
   if ( src_kind == CA_ITER_SRC_DESCRIPTOR ) {
     /* raw_descs / raw_pdims / raw_ndim were populated by route_source
        above so we skip the local describe_axes call.  Kept locals
@@ -2671,13 +2635,14 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
     return 1;
   }
 
-  /* PROPOSAL_CASTACK_XFER_OPT_LAYERING P.2 Case A (2026-06-18): CAStack
-     source + K-axis (k_axis) in outer iter.  Each slab aliases a region
-     inside parents[k]->ptr where k = outer_idx[K_outer_pos].  Parent
-     inner byte offset = Σ outer_idx[m] * stack_parent_strides[parent_ax]
-     over all outer axes except the K-axis itself.  Mask: parallel alias
-     into parents[k]->mask->ptr + mask_off.  Zero copy / zero scratch /
-     parent entity bandwidth.
+  /* CAStack source with the stack axis k_axis in the outer iteration.
+     Each slab is a region inside parents[k]->ptr where k =
+     outer_idx[K_outer_pos].  Parent inner byte offset = Σ outer_idx[m] *
+     stack_parent_strides[parent_ax] over all outer axes except the K-axis
+     itself.  Mask: a pointer into the copy of parent k's mask that init
+     took (stack_parent_mask_ptrs[k] + mask_off); a write through it
+     reaches nothing.  The data is yielded in place unless FIBER_CONTIG
+     needs a strided fiber gathered (ki_fiber_contig_data).
 
      K.3 (2026-06-20): parent_ax derivation generalised for arbitrary
      k_axis -- stack axis s != k_axis maps to parent axis s if
@@ -2719,15 +2684,14 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
   /* PROPOSAL_CASTACK_LOOP_INTERCHANGE Vector A rev2: CAStack direct
      per-parent ptr access path.  For each outer iter, compute the
      parent inner byte offset (= same across all K parents, uniform
-     shape), then K-fold direct memcpy gather from cached parent ptrs
-     into scratch.  No ca_xfer_stride dispatch; per-cell cost = pointer
-     arith + memcpy(bytes).  For f64 the memcpy(8) compiles to a single
-     mov, so the inner loop is tight.
+     shape), and yield the K cells of that fiber out of stack_tile_cache,
+     which is refilled TILE fibers at a time from the cached parent ptrs
+     (below).  No ca_xfer_stride dispatch.  The scratch_ptr init
+     allocates is not used by this path.
 
-     Note: scope-narrowed to slab_axes == [0] at init, so outer_axes are
-     stack axes 1..N-1 = parent axes 0..parent_ndim-1.  outer_idx[m]
-     maps directly to parent axis (m) (since the m-th outer axis is
-     stack axis m+1 = parent axis m). */
+     init engages this path only for slab_axes == [k_axis], so the outer
+     axes are the stack axes other than k_axis, which are the parent axes
+     in order: outer_idx[m] maps to parent axis m. */
   if ( st->alias_mode == CA_ITER_ALIAS_STACK ) {
     /* pilot/castack-axis0-loop-interchange: tile cache.  Outer iter
        walks parent storage in row-major order so parent_off increments
@@ -3143,9 +3107,9 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
   /* alias path: kernel wrote through alias_ptr into parent directly
      (case A semantics, PROPOSAL_T1_WRITE_SEMANTICS.md §(a)).  No
      scatter needed.  Applies to all CAStride alias and to
-     STRIDE-only descriptor alias (= descriptor L2 alias future
-     optimisation, not yet enabled — but if it lands, scratch_ptr
-     stays NULL and we no-op correctly). */
+     STRIDE-only descriptor alias (SRC_DESCRIPTOR_L2_ALIASABLE), whose
+     scratch_ptr is NULL too.  An alias walk over a view root is written
+     back once, by finish (ca_sync_detach on the root). */
   if ( st->scratch_ptr == NULL ) return;
 
   /* scratch path: scatter back the materialised buffer into the
@@ -3210,11 +3174,11 @@ ca_iter_state_finish (ca_iter_state *st)
   /* Lifecycle cleanup — orders matter slightly (free scratch before
      detaching parent so the kernel iterator's resources are released
      symmetrically with init):
-       - scratch_ptr: owned by iter (CAStride non-contig L1, or
-         descriptor materialise via ca_axis_dispatch_attach). xfree.
-       - root: descriptor parent attached at init (sub-step 5.1+) or
-         CAStride L2 compose-fold root attached at init (step 3).
-         ca_detach.
+       - scratch_ptr: owned by the iterator (every gather into scratch:
+         CAStride non-contig, descriptor, SRC_ATTACH, per-slab, stack).
+         ki_data_free.
+       - root: descriptor parent or CAStride compose-fold root attached
+         at init.  ca_detach, or ca_sync_detach on a WRITE walk.
        - else (alias paths): src was attached at init, detach. */
   if ( st->scratch_ptr ) {
     ki_data_free(st->scratch_ptr, st->scratch_cap);
@@ -3236,9 +3200,10 @@ ca_iter_state_finish (ca_iter_state *st)
     st->fiber_mask_scratch     = NULL;
     st->fiber_mask_scratch_cap = 0;
   }
-  /* PROPOSAL_CASTACK_LOOP_INTERCHANGE Vector A rev2 + P.2 Case A: detach
-     K parents (+ K parent masks if cached) and free the cached ptr
-     arrays.  Symmetric with init_l2 per-parent ca_attach loop. */
+  /* Detach the K parents init attached and free the cached ptr array
+     (symmetric with init_l2's per-parent ca_attach loop).  The parent
+     mask copies are freed separately below; they were never attached
+     for the walk. */
   if ( st->stack_parent_ptrs ) {
     CAStack *stack = (CAStack *) st->src;
     for ( int32_t kk = 0; kk < st->stack_n_parents; kk++ ) {
@@ -3374,7 +3339,8 @@ ca_iter_mark_walk_may_raise (ca_iter_state *st)
             && (st->scratch_ptr != NULL
                 || st->src_kind == CA_ITER_SRC_ATTACH) ) {
     /* writes back out of iterator-owned scratch, through the source's
-       xfer_all / sync_data slot.  A write into aliased memory needs no
+       transfer (ki_scratch_push_changed: ca_xfer_addrs / ca_xfer_all PUT)
+       or the descriptor scatter.  A write into aliased memory needs no
        push-back at all: sync_slab returns at once. */
     st->flags |= CA_ITER_FLAG_WALK_MAY_RAISE;
   }
@@ -3679,8 +3645,12 @@ typedef struct {
 } ca_iter_ensure_t;
 
 /* Finishes the walks in reverse order of their slots, as nested windows
-   close.  ca_iter_state_finish only detaches and frees, so it cannot
-   raise in turn. */
+   close.
+
+   CAREFUL: on a WRITE walk whose root is a view, ca_iter_state_finish
+   syncs the root (ca_sync_detach), and that sync goes through the view's
+   slots, which can raise.  Nothing here catches it, so a raise from one
+   finish leaves the states before it in the loop unfinished. */
 static VALUE
 ca_iter_ensure_close (VALUE arg)
 {

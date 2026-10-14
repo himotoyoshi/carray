@@ -83,8 +83,10 @@ typedef enum {
 #define CA_ITER_ALIAS_ATTACH   3     /* Not set by the engine.  A
                                         SRC_ATTACH walk runs with
                                         CA_ITER_ALIAS_NONE over an
-                                        iterator-owned scratch filled and
-                                        written back with ca_xfer_all.  */
+                                        iterator-owned scratch, filled with
+                                        ca_xfer_all and written back with
+                                        ki_scratch_push_changed (only the
+                                        changed cells).  */
 #define CA_ITER_ALIAS_PER_SLAB 4     /* Phase C T3 fallback: per-slab
                                         materialise via ca_axis_dispatch_gather
                                         with subset descriptor (= caller-built
@@ -135,18 +137,17 @@ typedef enum {
                                         front (= O(1) per entity parent),
                                         caches parent->ptr aliases +
                                         uniform parent-native byte
-                                        strides.  next_slab_axes does
-                                        K-fold direct memcpy gather from
-                                        parents[k]->ptr + parent_off
-                                        into a slab-sized scratch,
+                                        strides.  next_slab_axes yields
+                                        each fiber's K cells out of a
+                                        tile cache (K * tile * bytes,
+                                        tile 8..64 fibers) refilled from
+                                        parents[k]->ptr + parent_off,
                                         bypassing ca_xfer_stride
                                         entirely (= no per-call dispatch
                                         / cyclic_check / strided_walk
-                                        function-boundary overhead).
-                                        Peak buffer = K * bytes
-                                        (= slab footprint), not
+                                        function-boundary overhead), not
                                         K * parent.elements * bytes.
-                                        Scope-narrow to slab_axes == [0]:
+                                        Limited to slab_axes == [k_axis]:
                                         arbitrary slab shapes require
                                         per-cell index decode which
                                         loses the inner contig fast
@@ -214,18 +215,20 @@ typedef enum {
    The classifier recognises the core's own view classes by comparing
    their operation table against a list compiled into the engine.  A view
    class installed by a companion gem through ca_install_obj_type matches
-   nothing on that list; it is delivered as CA_ITER_SRC_ATTACH (the view's
-   own attach gathers it), and so is one that registers here, once, in the
-   class's Init:
+   nothing on that list; it is delivered as CA_ITER_SRC_ATTACH (gathered
+   through the view's own transfer), and so is one that registers here,
+   once, in the class's Init:
 
      ca_iter_register_source_kind(CA_OBJ_MY_VIEW, CA_ITER_SRC_ATTACH);
 
    Registering states the routing rather than changing it.
    CA_ITER_SRC_ATTACH is the only kind that may be registered.  It is the
-   one whose contract an external class can meet on its own: func_attach
-   materialises (or aliases) src->ptr and func_sync scatters back — the
-   CAFake contract, which every view already implements to be attachable
-   at all.  The other kinds are not open to registration: SRC_CASTRIDE
+   one whose contract an external class can meet on its own: the engine
+   reads the cells with ca_xfer_all GET and, on a WRITE walk, sends back
+   the changed cells with ca_xfer_addrs (or ca_xfer_all PUT when every
+   cell changed), so the view's transfer slots are all it needs -- the
+   slots every view already implements.  The view's attach / sync slots
+   are not called.  The other kinds are not open to registration: SRC_CASTRIDE
    asserts the struct *is* a CAStride (the engine reads its strides
    directly, and a class that really is one is already classified by its
    inherited operation table), and SRC_DESCRIPTOR requires a
@@ -478,11 +481,12 @@ int  ca_iter_can_alias (void *ap, int level);
        src->ptr, stride implicit = bytes)
      - CAStride family non-contig: scratch path (ca_copy_data
        compose-fold gather into a malloc'd buffer)
-     - descriptor views (CAGrid / CASelect / CAMapping / CAWindow /
-       CAShift / CASelectAxis): gathered into a scratch buffer
-     - SRC_ATTACH views (overlays, lazy views, CAObject, CAStack, ...):
-       iterator-owned scratch filled through ca_xfer_all
-     - sources the classifier does not recognise: CA_ITER_ERR_NOT_CHEAP
+     - descriptor views (CAGrid / CASelect / CAWindow / CAShift /
+       CASelectAxis): gathered into a scratch buffer
+     - SRC_ATTACH views (overlays, lazy views, CAObject, CAStack, ...,
+       and any other view with an attach slot): iterator-owned scratch
+       filled through ca_xfer_all
+     - a source with no attach slot: CA_ITER_ERR_NOT_CHEAP
 
    policy: CA_SLAB_WHOLE only (CA_SLAB_AXES and CA_SLAB_FREE return
            CA_ITER_ERR_POLICY).
@@ -503,8 +507,10 @@ int  ca_iter_state_init_l1 (ca_iter_state    *st,
 /* Initialise `st` for an **L2 (strided kernel)** walk of `src`.
 
    Source routing:
-     - entity / CAStride contig: alias_mode = CONTIG, single slab,
-       stride = bytes (kernel still receives the explicit stride arg)
+     - entity / CAStride contig: alias_mode = CONTIG.  Under
+       CA_SLAB_WHOLE an nd > 1 source is yielded one innermost row per
+       slab; stride = bytes (kernel still receives the explicit stride
+       arg)
      - CAStride non-contig: alias_mode = STRIDED, multi-slab walk over
        prefix axes, each yield carries native inner stride_bytes. No
        scratch.
@@ -512,8 +518,11 @@ int  ca_iter_state_init_l1 (ca_iter_state    *st,
        axis, otherwise gathered into scratch (per slab under
        CA_SLAB_AXES when a slab axis is an INDEX or SHIFT axis)
      - SRC_ATTACH views: iterator-owned scratch filled through
-       ca_xfer_all and written back the same way
-     - sources the classifier does not recognise: CA_ITER_ERR_NOT_CHEAP
+       ca_xfer_all, written back with ki_scratch_push_changed (only the
+       changed cells).  Under CA_SLAB_AXES a CAStack may instead be
+       walked through its parents, and a single FIBER_CONTIG fiber of a
+       cast / byte-swap view through ca_xfer_stride (PER_FIBER_FUSED)
+     - a source with no attach slot: CA_ITER_ERR_NOT_CHEAP
 
    policy: CA_SLAB_WHOLE or CA_SLAB_AXES (CA_SLAB_FREE returns
            CA_ITER_ERR_POLICY, as do out-of-range or duplicate axes, and
@@ -543,8 +552,9 @@ int  ca_iter_state_init_l2 (ca_iter_state    *st,
    and same n).  Step 6+: kernels use the CA_FOR_EACH_UNMASKED macro
    family (carray.h) to skip masked cells.
 
-   The mask is an input.  What it points at is a copy taken when the
-   walk began, so writing through it changes nothing -- not even under
+   The mask is an input.  What it points at is a copy -- taken when the
+   walk began, or, on the per-fiber fused path, gathered for each fiber
+   -- so writing through it changes nothing -- not even under
    CA_KERNEL_WRITE, where the value half of the same yield is often a
    live alias.  It also cannot express the thing an author would most
    want it for: an unmasked source yields NULL, so there is nowhere to
@@ -620,14 +630,22 @@ int  ca_iter_state_next_slab_axes (ca_iter_state *st,
      - !(flags & CA_KERNEL_WRITE): no-op (READ walk)
      - per-fiber gather (CA_KERNEL_FIBER_CONTIG on a strided fiber):
        the fiber is scattered back from its scratch first
-     - alias path (scratch_ptr == NULL): no-op — kernel wrote to
-       parent directly through alias_ptr
-     - scratch path, at L1 or L2: written back through the source —
-       ca_xfer_all for SRC_ATTACH, ca_sync_data for CAStride, the
-       descriptor scatter for descriptor views */
+     - CAStack walked through its parents: READ only, no-op
+     - per-fiber fused (CA_ITER_ALIAS_PER_FIBER_FUSED): the fiber is put
+       back through the view with ca_xfer_stride
+     - alias path (scratch_ptr == NULL): no-op — kernel wrote through
+       alias_ptr.  When the alias is into a view root's own buffer, that
+       buffer is written back once, by finish (ca_sync_detach)
+     - scratch path, at L1 or L2: the cells the kernel changed are sent
+       back through the source (ki_scratch_push_changed: ca_xfer_addrs,
+       or ca_xfer_all PUT when every cell changed) for SRC_ATTACH and
+       CAStride; the descriptor scatter for descriptor views */
 void ca_iter_state_sync_slab (ca_iter_state *st);
 
-/* Release any resources held by `st` and detach parent.  Idempotent:
+/* Release any resources held by `st` and detach parent.  On a WRITE
+   walk with a root, the root is synced before it is detached
+   (ca_sync_detach); a slab still handed out from scratch is dropped, not
+   written back (ca_iter_state_close writes it back first).  Idempotent:
    a second call is a no-op.  Also safe after a failed init, which holds
    nothing to release (the call is then not required). */
 void ca_iter_state_finish (ca_iter_state *st);
@@ -659,7 +677,8 @@ int  ca_iter_state_init_l2_paired (ca_iter_state    *st,
 
 /* Finish a walk as the block macros leave it: when the body left a write
    walk with `break`, the slab it was in is written back before the walk is
-   finished.  ca_iter_state_finish itself abandons such a slab. */
+   finished.  ca_iter_state_finish alone drops such a slab when it sits in
+   scratch (writes through an alias are already in place). */
 void ca_iter_state_close (ca_iter_state *st);
 
 /* Raise unless rc is CA_ITER_OK.  The block macros call this on the value
@@ -721,7 +740,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    - `break;` from inside the body exits the loop AND triggers finish
      correctly (= outer for's "increment" clause runs once on natural
      exit; `break` from the inner while breaks both).  In a write walk
-     finish writes back the slab the body was in.  `return` inside
+     the macros close with ca_iter_state_close, which writes back the
+     slab the body was in.  `return` inside
      the body LEAKS resources (scratch_ptr, parent attach) — drop to
      raw API if early return is needed.  A body that raises leaks the
      same way: the engine releases what it holds when the walk itself
