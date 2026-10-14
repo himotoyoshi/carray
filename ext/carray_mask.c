@@ -508,6 +508,116 @@ ca_multi_parent_mask_check (CArray *mask, CArray **parents,
   }
 }
 
+typedef struct {
+  CArray  *mask;
+  CArray **blanks;
+  CArray **saved;
+  CArray  *saved_parent;
+  int32_t  n;
+  int      finished;
+  VALUE  (*body)(VALUE);
+  VALUE    arg;
+} ca_mp_trial_t;
+
+static VALUE
+ca_mp_trial_body (VALUE p)
+{
+  ca_mp_trial_t *t = (ca_mp_trial_t *) p;
+  t->body(t->arg);
+  t->finished = 1;
+  return Qnil;
+}
+
+static void
+ca_mp_trial_free_blanks (ca_mp_trial_t *t)
+{
+  int32_t k;
+  for ( k = 0; k < t->n; k++ ) {
+    ca_free(t->blanks[k]);
+    t->blanks[k] = NULL;
+  }
+}
+
+static VALUE
+ca_mp_trial_restore (VALUE p)
+{
+  ca_mp_trial_t *t = (ca_mp_trial_t *) p;
+  CAMultiParent *mp = (CAMultiParent *) t->mask;
+  int32_t k;
+  for ( k = 0; k < t->n; k++ ) {
+    mp->parents[k] = t->saved[k];
+  }
+  CAVIEW(t->mask)->parent = t->saved_parent;
+  if ( ! t->finished ) {
+    ca_mp_trial_free_blanks(t);
+  }
+  return Qnil;
+}
+
+void
+ca_multi_parent_mask_refuse_first (CArray *mask, CArray **parents,
+                                   CArray **standins, int32_t n,
+                                   VALUE (*body)(VALUE), VALUE arg)
+{
+  CAMultiParent *mp = (CAMultiParent *) mask;
+  volatile VALUE h_blank = 0, h_saved = 0;
+  ca_mp_trial_t t;
+  int32_t k, refused = -1;
+  if ( standins == NULL ) {
+    return;
+  }
+  for ( k = 0; k < n; k++ ) {
+    if ( standins[k] != NULL && mp->parents[k] == standins[k]
+         && ca_multi_parent_mask_unmaskable(parents[k]) ) {
+      break;
+    }
+  }
+  if ( k == n ) {
+    return;
+  }
+  t.mask         = mask;
+  t.n            = n;
+  t.finished     = 0;
+  t.body         = body;
+  t.arg          = arg;
+  t.saved_parent = CAVIEW(mask)->parent;
+  t.blanks       = ALLOCV_N(CArray *, h_blank, n);
+  t.saved        = ALLOCV_N(CArray *, h_saved, n);
+  for ( k = 0; k < n; k++ ) {
+    t.blanks[k] = NULL;
+  }
+  for ( k = 0; k < n; k++ ) {
+    CArray *m = mp->parents[k];
+    t.saved[k]  = m;
+    t.blanks[k] = carray_new(CA_BOOLEAN, m->ndim, m->dim, 0, NULL);
+    MEMZERO(t.blanks[k]->ptr, boolean8_t, t.blanks[k]->elements);
+  }
+  for ( k = 0; k < n; k++ ) {
+    mp->parents[k] = t.blanks[k];
+  }
+  CAVIEW(mask)->parent = t.blanks[0];
+  rb_ensure(ca_mp_trial_body, (VALUE) &t, ca_mp_trial_restore, (VALUE) &t);
+  for ( k = 0; k < n && refused < 0; k++ ) {
+    CArray    *z = t.blanks[k];
+    ca_size_t  i;
+    if ( standins[k] == NULL || t.saved[k] != standins[k]
+         || ! ca_multi_parent_mask_unmaskable(parents[k]) ) {
+      continue;
+    }
+    for ( i = 0; i < z->elements && ! ((boolean8_t *) z->ptr)[i]; i++ ) ;
+    if ( i < z->elements ) {
+      refused = k;
+    }
+  }
+  ca_mp_trial_free_blanks(&t);
+  ALLOCV_END(h_blank);
+  ALLOCV_END(h_saved);
+  if ( refused >= 0 ) {
+    rb_raise(rb_eTypeError, "can not create mask array for the %s array",
+             ca_is_value_array(parents[refused]) ? "value" : "mask");
+  }
+}
+
 void
 ca_multi_parent_mask_settle (CArray *mask, CArray **parents,
                              CArray **standins, int32_t n)

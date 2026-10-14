@@ -551,10 +551,21 @@ void        ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
 
 /* After a write to a multi-parent view's mask: a true written into the
    stand-in of a value array or a mask array is cleared again and refused
-   with the TypeError a direct write would raise.  The parts of the write
-   that went to other parents stay written. */
+   with the TypeError a direct write would raise.  A write that runs
+   ca_multi_parent_mask_refuse_first before it never gets here with one. */
 void        ca_multi_parent_mask_check (CArray *mask, CArray **parents,
                                         CArray **standins, int32_t n);
+
+/* Before a write to a multi-parent view's mask: when a parent that can
+   never carry a mask (a value array, a mask array) is among the parents,
+   run the write `body(arg)` once against blank all-false masks in place of
+   every parent's mask and refuse it with that TypeError if it put a true
+   into such a parent's part.  A refused write then changes no parent.
+   Does nothing when no such parent is there. */
+void        ca_multi_parent_mask_refuse_first (CArray *mask, CArray **parents,
+                                               CArray **standins, int32_t n,
+                                               VALUE (*body)(VALUE),
+                                               VALUE arg);
 
 /* After a write inside an attach window, which went into the stand-ins
    the window was opened with: move what was written into a stand-in to a
