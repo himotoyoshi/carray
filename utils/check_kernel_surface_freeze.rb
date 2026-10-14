@@ -43,6 +43,8 @@ FROZEN_MACROS = %w[
   CA_FOR_EACH_FIBER_INOUT_MASKED
   CA_FOR_EACH_FIBER_PAIR
   CA_FOR_EACH_FIBER_PAIR_MASKED
+  CA_FOR_EACH_WHOLE
+  CA_FOR_EACH_WHOLE_MASKED
   CA_SLAB_REDUCE_T
   CA_SLAB_REDUCE_T_EX
   CA_SLAB_REDUCE_T_PLUS
@@ -76,6 +78,8 @@ FROZEN_MACROS = %w[
 # Raw-API entry points the macros expand to (also callable directly by
 # kernels that need explicit error handling — see doc §6.3).
 FROZEN_FUNCS = %w[
+  ca_iter_state_init_l1
+  ca_iter_state_next_slab
   ca_iter_state_init_l2
   ca_iter_state_init_l2_paired
   ca_iter_state_next_slab_axes
@@ -92,6 +96,7 @@ FROZEN_FUNCS = %w[
 # a raw-API kernel (`flags` arg, `policy` arg, rc compare).
 FROZEN_TOKENS = %w[
   CA_SLAB_AXES
+  CA_SLAB_WHOLE
   CA_KERNEL_WRITE
   CA_KERNEL_NO_MASK
   CA_ITER_OK

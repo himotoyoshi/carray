@@ -418,6 +418,103 @@ iw_route (VALUE klass, VALUE vsrc, VALUE vmode, VALUE vaxis, VALUE vwrite)
   return out;
 }
 
+/* ---- CA_FOR_EACH_WHOLE ----------------------------------------------- */
+
+/* The cells and mask flags the whole-array macro hands the kernel, as an
+   Array with nil where the flag is set.  masked selects the MASKED form;
+   the plain form reads every cell as a value. */
+static VALUE
+iw_whole_read (VALUE klass, VALUE vsrc, VALUE vmasked)
+{
+  CArray       *src;
+  ca_iter_state st;
+  char         *p;
+  boolean8_t   *m = NULL;
+  ca_size_t     n;
+  VALUE         out = rb_ary_new();
+
+  (void) klass;
+  TypedData_Get_Struct(vsrc, CArray, &carray_data_type, src);
+  if ( RTEST(vmasked) ) {
+    CA_FOR_EACH_WHOLE_MASKED(st, src, 0, p, n, m) {
+      for ( ca_size_t i = 0; i < n; i++ ) {
+        rb_ary_push(out, ( m && m[i] ) ? Qnil
+                                       : rb_float_new(((double *) p)[i]));
+      }
+    }
+  }
+  else {
+    CA_FOR_EACH_WHOLE(st, src, 0, p, n) {
+      for ( ca_size_t i = 0; i < n; i++ ) {
+        rb_ary_push(out, rb_float_new(((double *) p)[i]));
+      }
+    }
+  }
+  return out;
+}
+
+/* Writes 1000 + i into cell i, in row-major order. */
+static VALUE
+iw_whole_write (VALUE klass, VALUE vdst)
+{
+  CArray       *dst;
+  ca_iter_state st;
+  char         *p;
+  ca_size_t     n;
+
+  (void) klass;
+  TypedData_Get_Struct(vdst, CArray, &carray_data_type, dst);
+  CA_FOR_EACH_WHOLE(st, dst, CA_KERNEL_WRITE, p, n) {
+    for ( ca_size_t i = 0; i < n; i++ ) ((double *) p)[i] = 1000.0 + i;
+  }
+  return Qnil;
+}
+
+/* Writes -1 into the first k cells, then leaves the body with break. */
+static VALUE
+iw_whole_break (VALUE klass, VALUE vdst, VALUE vk)
+{
+  CArray       *dst;
+  ca_iter_state st;
+  char         *p;
+  ca_size_t     n, k = NUM2SIZET(vk);
+
+  (void) klass;
+  TypedData_Get_Struct(vdst, CArray, &carray_data_type, dst);
+  CA_FOR_EACH_WHOLE(st, dst, CA_KERNEL_WRITE, p, n) {
+    for ( ca_size_t i = 0; i < k && i < n; i++ ) ((double *) p)[i] = -1.0;
+    break;
+  }
+  return Qnil;
+}
+
+/* A body that raises after writing -1 into the first k cells, opened
+   inside ca_iter_ensure as the header says a raising body must be. */
+typedef struct { ca_iter_state st[1]; CArray *dst; ca_size_t k; } iw_whole_raise_t;
+
+static VALUE
+iw_whole_raise_body (VALUE arg)
+{
+  iw_whole_raise_t *c = (iw_whole_raise_t *) arg;
+  char      *p;
+  ca_size_t  n;
+  CA_FOR_EACH_WHOLE(c->st[0], c->dst, CA_KERNEL_WRITE, p, n) {
+    for ( ca_size_t i = 0; i < c->k && i < n; i++ ) ((double *) p)[i] = -1.0;
+    rb_raise(rb_eRuntimeError, "iw_whole_raise");
+  }
+  return Qnil;
+}
+
+static VALUE
+iw_whole_raise (VALUE klass, VALUE vdst, VALUE vk)
+{
+  iw_whole_raise_t c;
+  (void) klass;
+  TypedData_Get_Struct(vdst, CArray, &carray_data_type, c.dst);
+  c.k = NUM2SIZET(vk);
+  return ca_iter_ensure(1, c.st, iw_whole_raise_body, (VALUE) &c);
+}
+
 void
 Init_iter_write (void)
 {
@@ -434,4 +531,8 @@ Init_iter_write (void)
   rb_define_singleton_method(rb_cCArray, "iw_read_cells", iw_read_cells, 3);
   rb_define_singleton_method(rb_cCArray, "iw_write_cells", iw_write_cells, 3);
   rb_define_singleton_method(rb_cCArray, "iw_route", iw_route, 4);
+  rb_define_singleton_method(rb_cCArray, "iw_whole_read", iw_whole_read, 2);
+  rb_define_singleton_method(rb_cCArray, "iw_whole_write", iw_whole_write, 1);
+  rb_define_singleton_method(rb_cCArray, "iw_whole_break", iw_whole_break, 2);
+  rb_define_singleton_method(rb_cCArray, "iw_whole_raise", iw_whole_raise, 2);
 }

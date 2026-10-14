@@ -25,7 +25,8 @@ mechanically pins the frozen names.
 
 **Frozen** (never rename / re-arity / change semantics — additions only):
 
-- the author macros — `CA_FOR_EACH_SLAB` and the `_FIBER` family; the
+- the author macros — `CA_FOR_EACH_SLAB`, the `_FIBER` family and the
+  `_WHOLE` pair; the
   `CA_SLAB_REDUCE_T*` / `CA_SLAB_MAP_T` / `CA_SLAB_SCAN_T` / `CA_SLAB_SCAN_TA`
   suites; `CA_L2_FOR_EACH` and its UNMASKED variant; the `CA_FOR_EACH_UNMASKED`
   family;
@@ -57,9 +58,20 @@ macro variant, a new catalog macro). Changing a frozen name is a 3.x
 breaking change — update the doc contract and the guard in the same
 commit.
 
-## Fiber vs slab: the two grains
+## Whole, fiber, slab: the three grains
 
-The iterator delivers data at one of two granularities:
+The iterator delivers data at one of three granularities:
+
+- **`CA_FOR_EACH_WHOLE`** hands you the whole array as one contiguous
+  run, in row-major order: `p[i]` for `i` in `0...n`, and the body runs
+  once. It is the grain for a kernel that wants every cell and no axes —
+  a whole-array scan, a hash of the values, a copy into a library
+  buffer. Contiguity is kept by copying when it has to be: a source that
+  does not lend contiguous memory (a transpose, a strided block, a
+  selection, a converting view) is gathered first. A reduction that also
+  runs per axis is better written once with `CA_FOR_EACH_SLAB` over the
+  chosen axes, every axis for the whole array — which also reads a
+  strided source in place.
 
 - **`CA_FOR_EACH_SLAB`** hands you a contiguous *multi-dimensional*
   sub-block (a **slab**) per outer-axis position. You read it through the
@@ -103,6 +115,15 @@ The input-output slab walk (map kernels):
 CA_FOR_EACH_SLAB_INOUT(st_in, st_out, ca_in, ca_out,
                        axes, naxes,
                        p_in, p_out, m_in, m_out)
+```
+
+The whole-array pair — the whole array as one contig run:
+
+```c
+CA_FOR_EACH_WHOLE       (st, ca, flags, p, n);
+CA_FOR_EACH_WHOLE_MASKED(st, ca, flags, p, n, m);
+        /* ca_iter_state st; char *p; ca_size_t n; boolean8_t *m;
+           m is NULL when the source has no mask */
 ```
 
 The fiber family — contig 1-D delivery, axis pinned to a single value:
@@ -697,7 +718,7 @@ territory; the right knob is almost certainly a higher-level flag (set
 
 ## Block-form macros (one-screen kernels)
 
-The `CA_FOR_EACH_SLAB` and `CA_FOR_EACH_FIBER*` macros are wrappers around
+The `CA_FOR_EACH_SLAB`, `CA_FOR_EACH_FIBER*` and `CA_FOR_EACH_WHOLE*` macros are wrappers around
 the state-machine entry points; they handle `init` / `next` / `sync` /
 `finish` so the kernel body shrinks to its essential statement.
 
@@ -717,7 +738,8 @@ Constraints (the same across the family):
   source's transfer slots), but the body runs in the caller's frame,
   where the engine has no hold on it. A body that can raise — an
   object-lane body calling back into Ruby — runs through `ca_iter_ensure`
-  (below).
+  (below). In a write walk, the cells written before the raise stay where
+  the walk lends the array's memory and are lost where it gathered a copy.
 - The macros are not statement-equivalent — they expand to nested `for`
   constructs. Don't follow them with `else`.
 - INOUT macros require the same shape for input and output (`ndim` and

@@ -11,15 +11,16 @@
   (rake kernel_surface_check) is the mechanical pin.
 
     FROZEN (do NOT rename / re-arity / change semantics; additions only):
-      - the author macros: the CA_FOR_EACH_SLAB / _FIBER families
-        (including _FIBER_PAIR / _FIBER_PAIR_MASKED), the
+      - the author macros: the CA_FOR_EACH_SLAB / _FIBER / _WHOLE
+        families (including _FIBER_PAIR / _FIBER_PAIR_MASKED), the
         CA_SLAB_REDUCE_* / _MAP_* / _SCAN_* suites except the generator-
         only macros listed under INTERNAL, CA_L2_FOR_EACH /
         CA_L2_FOR_EACH_UNMASKED, and the mask helpers CA_*_UNMASKED,
         CA_COUNT_UNMASKED and CA_MASK_GET
       - the raw-API entry points the macros expand to: ca_iter_state_
-        init_l2 / init_l2_paired / next_slab_axes / sync_slab / finish /
-        close, ca_iter_check_init, ca_iter_check_same_shape
+        init_l1 / next_slab / init_l2 / init_l2_paired / next_slab_axes /
+        sync_slab / finish / close, ca_iter_check_init,
+        ca_iter_check_same_shape
       - the author entry points beside them: ca_iter_ensure (a body that
         can raise) and ca_iter_register_source_kind (an externally
         installed view class)
@@ -1127,6 +1128,66 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
          && ca_iter_state_next_slab_axes(&(st_b), &(p_b), &(m_b));            \
             ca_iter_state_sync_slab(&(st_a)),                                 \
             ca_iter_state_sync_slab(&(st_b)) )
+
+/* ---- whole-array block macros -------------------------------------------
+
+   Hand the kernel the whole array as one contiguous run of cells in
+   row-major order: `p` is the first cell and `n` is the number of cells
+   (src->elements).  The body runs once.
+
+     CA_FOR_EACH_WHOLE       (st, ca, flags, p, n)      data only
+     CA_FOR_EACH_WHOLE_MASKED(st, ca, flags, p, n, m)   + mask m[0..n-1],
+                                                        NULL when the
+                                                        source has none
+
+   Use them for a kernel that wants every cell in order and no axes: a
+   whole-array scan, a hash of the values, a copy into a library buffer.
+   A reduction that also runs per axis is better written once with
+   CA_FOR_EACH_SLAB over the chosen axes (every axis for the whole array).
+
+   Contiguity is the promise, and it is kept by copying when it has to be:
+   a contiguous array lends its memory, any other source is gathered into
+   the walk's scratch first (a transpose, a strided block, a selection, a
+   converting view).  A kernel that can take strides and wants to avoid
+   that copy uses CA_FOR_EACH_SLAB over every axis instead.
+
+   Same rules as CA_FOR_EACH_SLAB and the CA_FOR_EACH_FIBER family:
+     - `p` and the mask cursor are declared by the caller; `n` receives the
+       cell count.  `ca` may be evaluated more than once.
+     - Init failure raises (ca_iter_check_init); the body does not run.
+     - The form without MASKED hands out no mask cursor: masked cells are
+       read as values.  Pass CA_KERNEL_NO_MASK to refuse a masked source.
+       The mask cursor of the MASKED form is a copy; writing it reaches
+       nothing.
+     - With CA_KERNEL_WRITE the cells the kernel changed are written back
+       when the body ends, including by `break`.
+     - `return` from the body leaks what the walk holds.  So does a body
+       that raises: one that can raise -- one that calls back into Ruby --
+       opens the macro inside ca_iter_ensure, with the state in the
+       caller's frame.  A write that raises keeps the cells already
+       written where the walk lends the array's memory, and none of them
+       where it gathered a copy.
+     - Not statement-equivalent (nested `for`); no trailing `else`. */
+
+#define CA_FOR_EACH_WHOLE(st, ca, flags, p, n)                                \
+  for ( int __cfw_init = (ca_iter_check_init(                                 \
+                            ca_iter_state_init_l1(&(st), (ca), CA_SLAB_WHOLE, \
+                                                  NULL, 0, (flags))),         \
+                          1);                                                 \
+        __cfw_init;                                                           \
+        __cfw_init = 0, ca_iter_state_close(&(st)) )                          \
+    for ( ; ca_iter_state_next_slab(&(st), &(p), NULL, &(n));                 \
+            ca_iter_state_sync_slab(&(st)) )
+
+#define CA_FOR_EACH_WHOLE_MASKED(st, ca, flags, p, n, m)                      \
+  for ( int __cfwm_init = (ca_iter_check_init(                                \
+                             ca_iter_state_init_l1(&(st), (ca), CA_SLAB_WHOLE,\
+                                                   NULL, 0, (flags))),        \
+                           1);                                                \
+        __cfwm_init;                                                          \
+        __cfwm_init = 0, ca_iter_state_close(&(st)) )                         \
+    for ( ; ca_iter_state_next_slab(&(st), &(p), &(m), &(n));                 \
+            ca_iter_state_sync_slab(&(st)) )
 
 /* ---- Phase D: per-data_type reduction macro suite ----------------------- */
 

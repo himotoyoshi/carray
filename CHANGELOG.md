@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: C extensions: `CA_FOR_EACH_WHOLE(st, ca, flags, p, n)` and
+  `CA_FOR_EACH_WHOLE_MASKED(st, ca, flags, p, n, m)` hand a kernel the
+  whole array as one contiguous run in row-major order, gathering a copy
+  when the array does not lend contiguous memory. A body that can raise
+  opens them inside `ca_iter_ensure`, as with the other block macros.
+
 - Fix: C extensions: a kernel iterator write walk over a single slab
   axis (`CA_FOR_EACH_SLAB` with `CA_KERNEL_WRITE`) of a shifted view or
   one selected by an index array (`a.shift(...)`,

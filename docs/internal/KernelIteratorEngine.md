@@ -22,7 +22,7 @@ The four walks a kernel can ask for:
 
 | walk | entry | what the kernel receives |
 |---|---|---|
-| L1 whole | `ca_iter_state_init_l1(…, CA_SLAB_WHOLE, …)` + `next_slab` | the whole view, as one contiguous slab |
+| L1 whole | `ca_iter_state_init_l1(…, CA_SLAB_WHOLE, …)` + `next_slab` (`CA_FOR_EACH_WHOLE`) | the whole view, as one contiguous slab |
 | L2 whole | `ca_iter_state_init_l2(…, CA_SLAB_WHOLE, …)` + `next_slab_strided` | the view as 1-D strided runs in row-major order: one run per innermost row where the walk reads memory in place (§3.2, §3.3), the whole view as one run where it reads a scratch |
 | slab axes | `init_l2(…, CA_SLAB_AXES, axes, …)` + `next_slab_axes` (`CA_FOR_EACH_SLAB`) | one slab per index of the other axes, walked with `slab_strides` |
 | fiber | slab axes with one axis and `CA_KERNEL_FIBER_CONTIG` (`CA_FOR_EACH_FIBER`) | one contiguous fiber per index of the other axes |

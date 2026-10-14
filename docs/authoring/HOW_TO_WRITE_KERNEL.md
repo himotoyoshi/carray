@@ -56,6 +56,8 @@ keeps the author surface stable across engine refactors.
 | `CA_FOR_EACH_FIBER_INOUT` | per-axis fiber, data contig, INOUT in parallel, no mask cursor | `sort_copy` / `search_copy` / per-fiber map | ✓ Landed (§6.3) |
 | `CA_FOR_EACH_FIBER_MASKED` | per-axis fiber, **data contig** and **mask contig** — author writes `m[i]` directly | mask-aware per-fiber reduction / WRITE | ✓ Landed (§6.3) |
 | `CA_FOR_EACH_FIBER_INOUT_MASKED` | per-axis fiber, data contig, INOUT, mask contig | mask-aware per-fiber map | ✓ Landed (§6.3) |
+| `CA_FOR_EACH_WHOLE` | the whole array as one contig run, row-major, no mask cursor | a kernel that wants every cell and no axes (whole-array scan, hashing the values, handing the buffer to a library) | ✓ Landed (§6.3) |
+| `CA_FOR_EACH_WHOLE_MASKED` | the whole array as one contig run + contig mask | mask-aware whole-array kernel | ✓ Landed (§6.3) |
 
 **Note on contig guarantee**: All four `_FIBER` forms deliver contig
 buffers — data, mask (MASKED forms), and output (INOUT forms). Author
@@ -652,9 +654,10 @@ already marks them as UNDEF in the output).
 
 CArray 3.0 ships block macros that wrap the init / next / sync / finish
 lifecycle for the common kernel patterns, so you write the kernel body in
-a single block scope without manual plumbing. Two families of delivery
-macros — the slab forms (`CA_FOR_EACH_SLAB` / `_INOUT`, §6.1–6.2) and the
-contig-fiber forms (`CA_FOR_EACH_FIBER` family, §6.3) — plus the
+a single block scope without manual plumbing. Three families of delivery
+macros — the slab forms (`CA_FOR_EACH_SLAB` / `_INOUT`, §6.1–6.2), the
+contig-fiber forms (`CA_FOR_EACH_FIBER` family, §6.3) and the whole-array
+pair (`CA_FOR_EACH_WHOLE`, end of §6.3) — plus the
 one-expression `CA_SLAB_*` suite (§6.5), the mkkernel generator (§6.6),
 and the SIMD reduction license (§6.7).
 
@@ -753,6 +756,43 @@ Contract / constraints:
   equivalent (no trailing `else`).
 - Single-axis only. For multiple slab axes or K-D slab geometry, use
   `CA_FOR_EACH_SLAB` (§6.1).
+
+#### The whole array: `CA_FOR_EACH_WHOLE`
+
+| Macro | Signature | Delivers |
+|---|---|---|
+| `CA_FOR_EACH_WHOLE` | `(st, ca, flags, p, n)` | the whole array as contig data `p[0..n-1]`, row-major |
+| `CA_FOR_EACH_WHOLE_MASKED` | `(st, ca, flags, p, n, m)` | + contig mask `m` (NULL if no-mask source) |
+
+The body runs once, with `n` set to the number of cells. It is the grain
+for a kernel that wants every cell in order and no axes:
+
+```c
+ca_iter_state st;
+char       *p;
+ca_size_t   n;
+uint64_t    h = 1469598103934665603ULL;
+CA_FOR_EACH_WHOLE(st, ca, 0, p, n) {
+  for ( ca_size_t i = 0; i < n * ca->bytes; i++ ) {   /* FNV-1a over the cells */
+    h = (h ^ (unsigned char) p[i]) * 1099511628211ULL;
+  }
+}
+```
+
+- **Contiguity is kept by copying when it has to be.** A contiguous array
+  lends its memory; any other source (a transpose, a strided block, a
+  selection, a converting view) is gathered into the walk's scratch first.
+  A kernel that can take strides and wants to avoid the copy uses
+  `CA_FOR_EACH_SLAB` over every axis instead.
+- **A reduction that also runs per axis** is better written once with
+  `CA_FOR_EACH_SLAB` over the chosen axes (every axis for the whole array)
+  than as a whole walk plus a per-axis walk.
+- The flags, the mask cursor (a copy; writing it reaches nothing), `break`
+  and `return`, and a raising body (open the macro inside
+  `ca_iter_ensure`) follow the same rules as the FIBER forms. With
+  `CA_KERNEL_WRITE`, a write that raises keeps the cells already written
+  where the walk lends the array's memory, and none of them where it
+  gathered a copy.
 
 ### 6.4 When the macros are NOT appropriate
 
