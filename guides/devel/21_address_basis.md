@@ -347,9 +347,9 @@ macOS only, omitted elsewhere).
 
 `spec/spec_ai/test_address_basis_c.rb` drives the C entry from an extension
 compiled outside carray (`spec/spec_ai/ext_address_basis/`): a stencil over
-entities, folded views, gathered views, conversions and lazy expressions, a
-box write that leaves the cells outside the box alone, and a raising body
-whose write still lands.
+entities, folded views, gathered views, conversions, lazy expressions and a
+CAObject, a box write that leaves the cells outside the box alone, and a
+raising body whose write still lands.
 
 ## Related chapters
 
