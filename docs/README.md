@@ -94,7 +94,6 @@ Zero-copy exchange with other array libraries.
 |---|---|---|
 | [MemoryView](interop/MemoryView.md) | Guide | MemoryView interop — importing and exporting buffers (canonical) |
 | [MemoryViewFormat](interop/MemoryViewFormat.md) | Reference | Format-string contract (PEP 3118, strict at the top level) |
-| [InteropWithArrow](interop/InteropWithArrow.md) | Guide | Interoperating with Apache Arrow |
 
 ## Writing C extensions
 

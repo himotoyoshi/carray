@@ -327,5 +327,3 @@ shared buffer safe.
 - [`CAFace.md`](CAFace.md) — the Face substrate these three build on.
 - [`MemoryView.md`](../interop/MemoryView.md) — zero-copy interchange (relevant to
   `CAFixlenString`).
-- [`InteropWithArrow.md`](../interop/InteropWithArrow.md) — importing an Arrow
-  `String` / `LargeString` column into a `CAConstString`.
