@@ -115,6 +115,11 @@ task :attach_window_check do
   ruby "utils/check_attach_windows.rb" or exit($?.exitstatus)
 end
 
+desc "Check that every method named like __x__ is on utils/dunder_methods.txt"
+task :dunder_method_check => :build_ext do
+  ruby "-Iext", "-Ilib", "utils/check_dunder_methods.rb" or exit($?.exitstatus)
+end
+
 task :install do
   spec = eval File.read(GEMSPEC)
   version_h = `ruby ext/version.rb`.chomp
@@ -322,7 +327,8 @@ task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_parts_check
                   :view_setup_mask_check, :protect_parts_check,
                   :setup_before_alloc_check, :integer_store_check, :one_sided_cast_check,
                   :empty_walk_check,
-                  :build_ext, :build_mv_borrower, :build_mock_unattachable,
+                  :build_ext, :dunder_method_check,
+                  :build_mv_borrower, :build_mock_unattachable,
                   :build_xfer_smoke, :build_author_surface_smoke] do
   # macOS 13+ ships MallocZeroOnFree which zeros freed blocks -- masks any
   # ALLOC() user that relies on returned memory being zeroed.  Disable it so

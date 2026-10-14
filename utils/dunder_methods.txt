@@ -1,0 +1,178 @@
+# Methods carray defines with a name like `__x__`, checked by
+# utils/check_dunder_methods.rb (rake dunder_method_check).
+#
+# Ruby marks a method internal with private / protected, not with its name.
+# A name like this is kept only where private cannot hide the method, the
+# user has allowed it, and the name says what the method does, however long.
+# Do not add a line without the user's permission.
+#
+# A line is "Owner#name" (instance method) or "Owner.name" (singleton), then
+# "dev" when only a development build (CARRAY_DEV_BUILD) defines it.
+
+# --- development build: the attach family, the counters the specs read
+CABinCmp.__leaf_inplace_count__ dev
+CABinCmp.__materialise_count__ dev
+CABinCmp.__reset_leaf_inplace_counter__ dev
+CABinCmp.__reset_materialise_counter__ dev
+CABinCmp.__reset_scratch_counter__ dev
+CABinCmp.__scratch_count__ dev
+CABinOp.__materialise_count__ dev
+CABinOp.__reset_materialise_counter__ dev
+CABinOp.__reset_scratch_counter__ dev
+CABinOp.__scratch_count__ dev
+CAMonCmp.__leaf_inplace_count__ dev
+CAMonCmp.__materialise_count__ dev
+CAMonCmp.__reset_leaf_inplace_counter__ dev
+CAMonCmp.__reset_materialise_counter__ dev
+CAMonCmp.__reset_scratch_counter__ dev
+CAMonCmp.__scratch_count__ dev
+CAMonOp.__materialise_count__ dev
+CAMonOp.__reset_materialise_counter__ dev
+CAMonOp.__reset_scratch_counter__ dev
+CAMonOp.__scratch_count__ dev
+CATriOp.__materialise_count__ dev
+CATriOp.__reset_materialise_counter__ dev
+CATriOp.__reset_scratch_counter__ dev
+CATriOp.__scratch_count__ dev
+CArray#__attach__ dev
+CArray#__detach__ dev
+CArray#__sync__ dev
+CArray.__attached_views__ dev
+CArray.__iter_buffers__ dev
+CArray.__lazy_arena_acquire_count__ dev
+CArray.__lazy_arena_depth__ dev
+CArray.__lazy_arena_reset_counters__ dev
+CArray.__lazy_arena_reuse_count__ dev
+CArray.__lazy_arena_slot_capacities__ dev
+CArray.__lazy_arena_slot_in_use_count__ dev
+CArray.__lazy_arena_xmalloc_count__ dev
+
+# --- switches a development build sets from CARRAY_GENERAL_PATH (a release
+#     build defines them in lib/carray/runtime.rb)
+CArray.__fast_paths_enabled__
+CArray.__iter_by_transfer_only__
+
+# --- carray-jit reads these (the C body of each op, and its helpers)
+CArray.__kernel_body__
+CArray.__kernel_helpers__
+
+# --- CAFrame's CSV reader and writer: type inference, text to number, time text
+CArray.__csv_read_body_as_string_cells__
+CArray.__csv_read_body_as_const_string_columns__
+CArray.__const_string_infer_number_type_of_text__
+CArray.__const_string_read_text_as_number__
+CArray#__infer_number_type_of_text__
+CArray#__read_text_as_number__
+CAConstString#__infer_number_type_of_text__
+CAConstString#__read_text_as_number__
+CArray#__parse_time_text__
+CArray#__strptime_fields__
+CArray.__strptime_fits__
+CArray.__time_ticks_from_fields__
+CArray#__widen_keeping_shortest_decimal__
+
+# --- parts other classes call on CArray, which private cannot hide
+CArray.__present_cells_needed_per_result_cell__
+CArray.__fill_undefined_result_cells__
+CArray.__name_errors_after_method__
+CArray.__find_key_window_row_ranges__
+CArray.__segment_boundaries_from_lengths_or_offsets__
+CArray#__reduce_by_axis_groups__
+CArray#__scan_by_axis_groups__
+CAWindow#__boundary_rule_of_each_axis__
+
+# --- NOT YET SORTED.  Each of these is to be made private / protected with an
+#     ordinary name (or renamed and moved above with the user's permission).
+#     Remove a line when its method is done; never add one here.
+AxisGroup.__check_reduce_keywords__
+AxisGroup.__count_stand_in__
+AxisGroup.__finish_reduction__
+CABinCmp#__bincmp_right__
+CABinCmp#__eps__
+CABinCmp#__op_id__
+CABinCmp#__trapping__
+CABinCmp.__build__
+CABinOp#__binop_right__
+CABinOp#__op_id__
+CABinOp#__trapping__
+CABinOp.__build__
+CAConstString#__factorize_appearance__
+CAConstString.__build__
+CAGroupIterator#__accumulate_by_kernel__
+CAGroupIterator#__all_folded__
+CAGroupIterator#__any_folded__
+CAGroupIterator#__count_present__
+CAGroupIterator#__max_by_kernel__
+CAGroupIterator#__mean_by_kernel__
+CAGroupIterator#__min_by_kernel__
+CAGroupIterator#__prod_by_kernel__
+CAGroupIterator#__stddev_by_kernel__
+CAGroupIterator#__stddevp_by_kernel__
+CAGroupIterator#__sum_by_kernel__
+CAGroupIterator#__variance_by_kernel__
+CAGroupIterator#__variancep_by_kernel__
+CAGroupIterator.__build__
+CAMonCmp#__op_id__
+CAMonCmp#__trapping__
+CAMonCmp.__build__
+CAMonOp#__op_id__
+CAMonOp#__trapping__
+CAMonOp.__build__
+CATime.__wrap__
+CATimedelta.__wrap__
+CATriOp#__op_id__
+CATriOp#__trapping__
+CATriOp#__triop_op2__
+CATriOp#__triop_op3__
+CATriOp.__build__
+CArray#__bincount_count__
+CArray#__bincount_weighted__
+CArray#__blank_like__
+CArray#__categorical_scatter__
+CArray#__comparable_storage__
+CArray#__count_below__
+CArray#__create_mask__
+CArray#__difference__
+CArray#__each_fiber_key__
+CArray#__face_clip__
+CArray#__face_storage__
+CArray#__factorize_appearance__
+CArray#__fiber_scatter_moments__
+CArray#__fiber_scatter_prod__
+CArray#__fiber_scatter_wsum_wmean__
+CArray#__gap_fill__
+CArray#__gap_fill_linear__
+CArray#__hold__
+CArray#__hold_axis__
+CArray#__interpolable__
+CArray#__intersection__
+CArray#__is_in__
+CArray#__is_mode__
+CArray#__linear_fiber__
+CArray#__linear_fill_along__
+CArray#__locate_addr__
+CArray#__mask_duplicates__
+CArray#__mode_axis__
+CArray#__nunique__
+CArray#__orderable_storage__
+CArray#__reconcile_operand__
+CArray#__reduceat_all_any__
+CArray#__reduceat_argminmax__
+CArray#__reduceat_moments__
+CArray#__reduceat_percentile__
+CArray#__reduceat_prod__
+CArray#__reduceat_quantile__
+CArray#__reduceat_variance__
+CArray#__reduceat_wsum_wmean__
+CArray#__strip_mask_const__
+CArray#__union__
+CArray#__unique_flat__
+CArray#__unmask_const__
+CArray#__value_counts_flat__
+CArray#__wmean_object__
+CArray#__wsum_object__
+CArray.__alloc_uninit__
+CArray.__cast_string__
+CArray.__empty__
+CArray.__install_castruct_methods__
+CArray.__register_axis_group_classes__
