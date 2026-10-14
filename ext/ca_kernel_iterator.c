@@ -1051,7 +1051,8 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
        - a single FIBER_CONTIG fiber on CAWindow / CAShift: per-fiber
          ca_xfer_stride (CA_ITER_ALIAS_PER_FIBER_FUSED)
        - slab has an INDEX or SHIFT axis: per-slab gather (PER_SLAB /
-         PER_SLAB_HOIST) or a whole-view gather; refused only for WRITE
+         PER_SLAB_HOIST) or a whole-view gather; a write walk takes the
+         transfer walk (SRC_ATTACH below)
        - an outer axis is SHIFT: materialise the view, then walk the copy
        - slab axes all STRIDE, no outer SHIFT: borrow the parent's memory
      SRC_ATTACH under CA_SLAB_AXES is handled further down (including the
@@ -1191,9 +1192,12 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
                        && ! ( flags & CA_KERNEL_WRITE )
                        && ca_fast_paths_enabled();
       if ( slab_has_non_stride && ! whole_view ) {
-        /* C.1 scope: READ-only.  WRITE = future sub-step (C.1c). */
+        /* The per-slab gather below is read-only.  A write walk takes the
+           transfer walk instead: the view is gathered whole and the
+           changed cells go back through its own transfer. */
         if ( flags & CA_KERNEL_WRITE ) {
-          return CA_ITER_ERR_FLAGS;
+          src_kind = CA_ITER_SRC_ATTACH;
+          goto slab_axes_by_transfer;
         }
 
         st->src      = src;
@@ -1580,6 +1584,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       }
       return CA_ITER_OK;
     }
+  slab_axes_by_transfer:
     if ( src_kind == CA_ITER_SRC_ATTACH ) {
       /* CA_SLAB_AXES + SRC_ATTACH (every view classified SRC_ATTACH).
          The cases below, in order: CAStack walked through its parents

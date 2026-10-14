@@ -267,7 +267,7 @@ class TestIterWriteBack < Test::Unit::TestCase
     assert_equal 2, CArray.iw_init_rc(base, 9, WRITE), "axis out of range"
     assert_equal 2, CArray.iw_init_rc(base, -1, WRITE), "negative axis"
     assert_equal 2, CArray.iw_init_rc(base[base.gt(0)], 1, WRITE), "1-D view, axis 1"
-    assert_equal 3, CArray.iw_init_rc(base.shift(1, 0), 0, WRITE), "shift + WRITE"
+    assert_equal 0, CArray.iw_init_rc(base.shift(1, 0), 0, WRITE), "shift + WRITE"
     assert_equal 0, CArray.iw_init_rc(base.shift(1, 0), 0, 0), "shift READ is fine"
   end
 
@@ -284,7 +284,6 @@ class TestIterWriteBack < Test::Unit::TestCase
       "axis past the end" => [b, 9],
       "negative axis"     => [b, -1],
       "axis 1 of a 1-D view" => [b[b.gt(0)], 1],
-      "shift as a WRITE destination" => [b.shift(1, 0), 0],
       "read-only destination" => [b.lazy + 1, 0],
     }.each do |what, (view, axis)|
       e = assert_raise(RuntimeError, what) do
@@ -310,7 +309,7 @@ class TestIterWriteBack < Test::Unit::TestCase
       require "iter_write"
       b = CArray.float64(3, 4).seq!(1)
       begin
-        CArray.iw_slab_fill_poisoned(b.shift(1, 0), 0, -1.0)
+        CArray.iw_slab_fill_poisoned(b, 9, -1.0)
       rescue RuntimeError
         exit 0
       end

@@ -105,7 +105,8 @@ typedef enum {
                                         outer-pinned). scratch_ptr reused
                                         across outer iters (D1.1 (B): max slab
                                         size, refilled in next_slab_axes).
-                                        READ-only in C.1 (WRITE = future).  */
+                                        Read walks only; a write walk takes
+                                        the transfer walk instead.  */
 #define CA_ITER_ALIAS_PER_FIBER_FUSED 6 /* PROPOSAL_FIBER_PER_SOURCE_PATH
                                           F.6.1: per-fiber fused xfer
                                           dispatch.  Engine skips
