@@ -514,6 +514,76 @@ iw_route (VALUE klass, VALUE vsrc, VALUE vmode, VALUE vaxis, VALUE vwrite)
   return out;
 }
 
+/* The layout fields of the state a walk opens (mode and axis as in
+   iw_route), so that a refactoring of init can be checked to leave every
+   field as it was.  Pointers are reported only as present or absent. */
+static VALUE
+iw_state (VALUE klass, VALUE vsrc, VALUE vmode, VALUE vaxis, VALUE vwrite)
+{
+  CArray       *src;
+  int           mode  = NUM2INT(vmode);
+  int8_t        axis  = (int8_t) NUM2INT(vaxis);
+  uint32_t      flags = RTEST(vwrite) ? CA_KERNEL_WRITE : 0;
+  ca_iter_state st;
+  VALUE         out = rb_hash_new();
+  VALUE         a;
+  int8_t        k;
+
+  (void) klass;
+  TypedData_Get_Struct(vsrc, CArray, &carray_data_type, src);
+  ca_iter_check_init(iw_open(&st, src, mode, axis, flags));
+#define IW_SET(name, v) rb_hash_aset(out, ID2SYM(rb_intern(name)), (v))
+  IW_SET("src_kind",      INT2NUM(st.src_kind));
+  IW_SET("alias_mode",    INT2NUM(st.alias_mode));
+  IW_SET("level",         INT2NUM(st.level));
+  IW_SET("ndim",          INT2NUM(st.ndim));
+  IW_SET("naxes",         INT2NUM(st.naxes));
+  IW_SET("bytes",         SIZET2NUM(st.bytes));
+  IW_SET("desc_ndim",     INT2NUM(st.desc_ndim));
+  IW_SET("slab_elements", SIZET2NUM(st.slab_elements));
+  IW_SET("slab_n",        SIZET2NUM(st.slab_n));
+  IW_SET("total_slabs",   SIZET2NUM(st.total_slabs));
+  IW_SET("chunk_size",    SIZET2NUM(st.chunk_size));
+  IW_SET("composed_base", SIZET2NUM(st.composed_base));
+  IW_SET("scratch_cap",   SIZET2NUM(st.scratch_cap));
+  IW_SET("fiber_axis",    INT2NUM(st.fiber_axis));
+  IW_SET("stack_k_outer_pos", INT2NUM(st.stack_k_outer_pos));
+  IW_SET("root",          st.root ? Qtrue : Qfalse);
+  IW_SET("scratch",       st.scratch_ptr ? Qtrue : Qfalse);
+  IW_SET("alias_ptr",     st.alias_ptr ? Qtrue : Qfalse);
+  IW_SET("alias_mask",    st.alias_mask ? Qtrue : Qfalse);
+  IW_SET("outer_idx",     st.outer_idx ? Qtrue : Qfalse);
+  IW_SET("stack_parent_mask_ptrs", st.stack_parent_mask_ptrs ? Qtrue : Qfalse);
+  a = rb_ary_new();
+  for ( k = 0; k < st.slab_ndim; k++ ) {
+    rb_ary_push(a, rb_ary_new_from_args(4, INT2NUM(st.slab_axes_buf[k]),
+                SIZET2NUM(st.slab_dims[k]), SIZET2NUM(st.slab_strides[k]),
+                SIZET2NUM(st.slab_mask_strides[k])));
+  }
+  IW_SET("slab", a);
+  a = rb_ary_new();
+  for ( k = 0; k < st.outer_ndim; k++ ) {
+    rb_ary_push(a, rb_ary_new_from_args(4, INT2NUM(st.outer_axes[k]),
+                SIZET2NUM(st.outer_dims[k]), SIZET2NUM(st.outer_strides[k]),
+                SIZET2NUM(st.outer_mask_strides[k])));
+  }
+  IW_SET("outer", a);
+  a = rb_ary_new();
+  for ( k = 0; k < st.desc_ndim; k++ ) {
+    rb_ary_push(a, rb_ary_new_from_args(3, INT2NUM(st.descs[k].kind),
+                SIZET2NUM(st.pstrides[k]), SIZET2NUM(st.parent_axis_dims[k])));
+  }
+  IW_SET("descs", a);
+  a = rb_ary_new();
+  if ( st.alias_mode == CA_ITER_ALIAS_PER_FIBER_FUSED ) {
+    for ( k = 0; k < st.ndim; k++ ) rb_ary_push(a, SIZET2NUM(st.fiber_native_strides[k]));
+  }
+  IW_SET("fiber_native_strides", a);
+#undef IW_SET
+  ca_iter_state_close(&st);
+  return out;
+}
+
 /* ---- CA_FOR_EACH_WHOLE ----------------------------------------------- */
 
 /* The cells and mask flags the whole-array macro hands the kernel, as an
@@ -673,6 +743,7 @@ Init_iter_write (void)
   rb_define_singleton_method(rb_cCArray, "iw_read_cells", iw_read_cells, 3);
   rb_define_singleton_method(rb_cCArray, "iw_write_cells", iw_write_cells, 3);
   rb_define_singleton_method(rb_cCArray, "iw_route", iw_route, 4);
+  rb_define_singleton_method(rb_cCArray, "iw_state", iw_state, 4);
   rb_define_singleton_method(rb_cCArray, "iw_raise_cells", iw_raise_cells, 4);
   rb_define_singleton_method(rb_cCArray, "iw_whole_read", iw_whole_read, 2);
   rb_define_singleton_method(rb_cCArray, "iw_whole_write", iw_whole_write, 1);
