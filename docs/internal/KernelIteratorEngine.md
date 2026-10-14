@@ -53,13 +53,15 @@ A walk is decided in three layers, each with its own choices:
 |---|---|---|
 | **data** — where the slabs are cut from | the source's own memory (`CONTIG`), the root's memory through composed strides (`STRIDED`), a scratch the view was gathered into (`NONE`), or a way of its own (`PER_SLAB`, `PER_FIBER_FUSED`, `STACK`, …) | init, recorded as `alias_mode` |
 | **fiber** — how a slab reaches the kernel | as it lies, or gathered into a contiguous run (`CA_KERNEL_FIBER_CONTIG` with a strided fiber) | init (flags and axis) and `next_slab_axes` |
-| **write-back** — how written cells reach the array | nothing to do (the kernel wrote into the array), changed cells sent back through the view, the axis dispatch scatter into the parent, or a per-fiber transfer | `sync_slab`, keyed on `alias_mode` and then `src_kind` |
+| **write-back** — how written cells reach the array | nothing to do (the kernel wrote into the array), changed cells sent back through the view, or a per-fiber transfer | `sync_slab`, keyed on `alias_mode` and then `src_kind` |
 
 **The route is fixed at init.** `alias_mode` and `src_kind` are assigned only in `init_l1` / `init_l2`; no later call changes them. What varies per slab is the position, never the way.
 
-**The layers stack.** A fiber gathered into a contiguous run sits on top of whatever the data layer is: on a transfer walk the fiber is gathered out of the walk's scratch, and on a write it is scattered back into the scratch before the changed cells go to the source. Reading and writing can also use different machinery on the same walk: a descriptor slab is gathered by the descriptor engine and written back by `ca_axis_dispatch_scatter`.
+**The layers stack.** A fiber gathered into a contiguous run sits on top of whatever the data layer is: on a transfer walk the fiber is gathered out of the walk's scratch, and on a write it is scattered back into the scratch before the changed cells go to the source. Reading and writing take different machinery for the same view: a read of a descriptor slab is gathered by the descriptor engine, and a write over the same view takes the transfer walk.
 
-Most of the engine's length is the init branches that assemble these combinations (§3). Most of its past faults were a combination that kept one promise of §6 differently from the others (§7).
+Most of the engine's length is the init code that assembles these combinations (§3). Most of its past faults were a combination that kept one promise of §6 differently from the others (§7).
+
+**How an L2 walk is opened.** `init_l2` checks the request (the policy, the slab axes) and classifies the source, then `ki_choose_l2_route` picks one of ten routes (`ki_l2_route`) and only decides: it attaches and allocates nothing, so a refusal leaves nothing to close. `ki_open_l2` builds the state for the route in one place: the part only that route needs (an attach, a scratch, the descriptors, the stack's parents), then the per-axis layout every route shares (`ki_lay_out_slabs`: the slab and outer axes, the number of slabs, the outer cursor), then the mask cursor. A route differs from another only in the per-axis strides it hands the layout (`ki_axis_layout`) and in its own part.
 
 ---
 
@@ -246,10 +248,11 @@ Found by reading the engine against the route table; left as they are.
 
 A route added for speed:
 
-1. tests `ca_fast_paths_enabled()`, so `CARRAY_GENERAL_PATH=1` and `2` take the general route and the transfer walk instead;
-2. keeps the promises of §6 by calling the parts where they exist, and says in a comment which of the written-out ones it keeps and how;
-3. has rows in `test_iter_delivery_matrix.rb` that take it (check with `iw_route`);
-4. has a measured reason: how much slower the source is on the route it would otherwise take.
+1. is a value of `ki_l2_route`, chosen in `ki_choose_l2_route` (which decides and does nothing else) and built in `ki_open_l2` by its own case plus the shared layout;
+2. tests `ca_fast_paths_enabled()`, so `CARRAY_GENERAL_PATH=1` and `2` take the general route and the transfer walk instead;
+3. keeps the promises of §6 by calling the parts where they exist, and says in a comment which of the written-out ones it keeps and how;
+4. has rows in `test_iter_delivery_matrix.rb` that take it (check with `iw_route`; `iw_state` reports every layout field of the opened state, for checking that a change to init leaves them as they were);
+5. has a measured reason: how much slower the source is on the route it would otherwise take.
 
 To retake the route table of §4, run `iw_route` over the sources listed there for every walk, axis and direction.
 
