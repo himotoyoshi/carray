@@ -6,7 +6,7 @@
 #
 # The matrix is parents x views x masked/unmasked x four ways of walking
 # (L1 whole, one slab axis, one contiguous fiber, two slab axes: the given
-# one and the last), read and write.  The whole walk's cells are compared
+# one and the last), read, write of every cell and write of some cells.  The whole walk's cells are compared
 # joined.  The expected answers are built without the iterator: the read
 # from the view's copy, the write by storing the same values through the
 # same view of an unmasked copy of the root.
@@ -76,6 +76,49 @@ class TestIterDeliveryMatrix < Test::Unit::TestCase
             flags = r.has_mask? ? r.mask.to_a : nil
 
             CArray.iw_write_cells(v, mode, ax)
+
+            label = "#{vn} of #{pn} masked=#{masked}: #{name} axis #{ax}"
+            assert_equal ref.to_a, r.value.to_a, label
+            assert_equal flags, (r.has_mask? ? r.mask.to_a : nil), "#{label} mask"
+            cases += 1
+          end
+        end
+      end
+    end
+    assert_operator cases, :>=, 1000
+  end
+
+  # A kernel that writes some cells only: the cells it wrote land as a
+  # store of those cells through the view lands, and the cells it left
+  # alone are unchanged -- on a conversion that does not bring every
+  # value back and on a view that shows a root cell twice as well.  The
+  # cells written are those whose row-major address in the view is a
+  # multiple of 3 (the two copies of a repeated row are 20 apart, so at
+  # most one of them is written).
+  def test_a_partial_write_changes_only_the_cells_written
+    cases = 0
+    [false, true].each do |masked|
+      PARENTS.each do |pn, (_, _, parent)|
+        VIEWS.each do |vn, view|
+          probe = build(pn, view, masked) or next
+          walks(probe[1]).each do |mode, ax, name|
+            r, v  = build(pn, view, masked)
+            order = slab_addresses(v.shape, mode, ax)
+            which = order.flatten.map { |a| a % 3 == 0 }
+            ref   = r.value.copy
+            ref_v = view.call(parent.call(ref)).reshape(v.elements)
+            pos = 0
+            order.each_with_index do |s, k|
+              s.each_with_index do |a, i|
+                if which[pos]
+                  ref_v[a] = mode == 0 ? 1000.0 + pos : 1000.0 * (k + 1) + i
+                end
+                pos += 1
+              end
+            end
+            flags = r.has_mask? ? r.mask.to_a : nil
+
+            CArray.iw_write_some_cells(v, mode, ax, which)
 
             label = "#{vn} of #{pn} masked=#{masked}: #{name} axis #{ax}"
             assert_equal ref.to_a, r.value.to_a, label

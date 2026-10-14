@@ -481,6 +481,45 @@ iw_write_cells (VALUE klass, VALUE vdst, VALUE vmode, VALUE vaxis)
   return Qnil;
 }
 
+/* As iw_write_cells, but writes only the cells `which` marks: `which` is
+   an Array of booleans, one per cell in the order the walk yields them.
+   The cells it leaves alone must come back as the kernel received them. */
+static VALUE
+iw_write_some_cells (VALUE klass, VALUE vdst, VALUE vmode, VALUE vaxis,
+                     VALUE which)
+{
+  CArray       *dst;
+  int           mode = NUM2INT(vmode);
+  int8_t        axis = (int8_t) NUM2INT(vaxis);
+  ca_iter_state st;
+  char         *p;
+  boolean8_t   *m;
+  ca_size_t     n, s, ms;
+  ca_size_t     slab = 0;
+  ca_size_t     done = 0;
+
+  (void) klass;
+  Check_Type(which, T_ARRAY);
+  TypedData_Get_Struct(vdst, CArray, &carray_data_type, dst);
+
+  ca_iter_check_init(iw_open(&st, dst, mode, axis, CA_KERNEL_WRITE));
+  while ( iw_next(&st, mode, &p, &m, &n, &s, &ms) ) {
+    slab++;
+    for ( ca_size_t i = 0; i < n; i++ ) {
+      ca_size_t doff, moff;
+      double v = ( mode == 0 ) ? (double) (1000 + done + i)
+                              : (double) (1000 * slab + i);
+      if ( ! RTEST(rb_ary_entry(which, (long) (done + i))) ) continue;
+      iw_cell(&st, mode, i, s, ms, &doff, &moff);
+      *(double *)(p + doff) = v;
+    }
+    done += n;
+    ca_iter_state_sync_slab(&st);
+  }
+  ca_iter_state_close(&st);
+  return Qnil;
+}
+
 /* The route a walk takes, read from the state after its first slab:
    src_kind, alias_mode, whether it attached a root, whether it gathered a
    whole-view scratch, and whether the first fiber was gathered into the
@@ -742,6 +781,7 @@ Init_iter_write (void)
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill_poisoned", iw_slab_fill_poisoned, 3);
   rb_define_singleton_method(rb_cCArray, "iw_read_cells", iw_read_cells, 3);
   rb_define_singleton_method(rb_cCArray, "iw_write_cells", iw_write_cells, 3);
+  rb_define_singleton_method(rb_cCArray, "iw_write_some_cells", iw_write_some_cells, 4);
   rb_define_singleton_method(rb_cCArray, "iw_route", iw_route, 4);
   rb_define_singleton_method(rb_cCArray, "iw_state", iw_state, 4);
   rb_define_singleton_method(rb_cCArray, "iw_raise_cells", iw_raise_cells, 4);

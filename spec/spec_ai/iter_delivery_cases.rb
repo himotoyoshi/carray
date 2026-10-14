@@ -9,7 +9,8 @@ module IterDeliveryCases
   MODES = { 0 => "L1 whole", 2 => "slab axis", 3 => "fiber",
             4 => "two slab axes" }
 
-  # name => [root shape, root type, parent built on the root (rank 3)]
+  # name => [root shape, root type, parent built on the root (rank 3),
+  #          and optionally a value added to every cell of the root]
   PARENTS = {
     "entity"     => [[3, 4, 5], :float64, ->(r) { r }],
     "transpose"  => [[5, 4, 3], :float64, ->(r) { r.transpose }],
@@ -19,6 +20,10 @@ module IterDeliveryCases
     "grid"       => [[4, 5, 6], :float64,
                      ->(r) { r[CA_INT64([0, 2, 3]), CA_INT64([1, 0, 4, 2]), 0..4] }],
     "fake"       => [[3, 4, 5], :int32,   ->(r) { r.fake(:float64) }],
+    # A conversion that does not bring every value back: an int64 above
+    # 2**53 read as float64 is rounded, so a cell sent back that the
+    # kernel did not write would change.
+    "lossy fake" => [[3, 4, 5], :int64,   ->(r) { r.fake(:float64) }, 2**53 + 1],
     "swap_bytes" => [[3, 4, 5], :float64, ->(r) { r.swap_bytes.swap_bytes }],
     "stack"      => [[3, 4, 5], :float64,
                      ->(r) { CArray.stack((0..2).map { |i| r[i, nil, nil] }) }],
@@ -42,6 +47,9 @@ module IterDeliveryCases
     "window"      => ->(p) { p.window(0..1, 1..3, 2..4) },
     "shift"       => ->(p) { p.shift(1, 0, -1) },
     "roll"        => ->(p) { p.roll(1, 1, 0) },
+    # Shows root row 0 twice: what the kernel writes into one copy must
+    # not be overwritten by the copy it left alone.
+    "repeated row" => ->(p) { p[CA_INT64([0, 0, 2]), nil, nil] },
   }
 
   # Read only: a tile repeats cells, a lazy expression has no cells to
@@ -61,8 +69,9 @@ module IterDeliveryCases
 
   # [root, view], or nil when the view does not apply to this parent.
   def build (parent_name, view, masked)
-    shape, type, parent = PARENTS[parent_name]
+    shape, type, parent, offset = PARENTS[parent_name]
     r = root(shape, type, masked)
+    r.add!(offset) if offset
     [r, view.call(parent.call(r))]
   rescue ArgumentError, IndexError, TypeError, RangeError
     nil
