@@ -14,7 +14,7 @@ This page is an introduction. The full reference, including the export matrix an
 
 ## Probing: `memory_view_available?`
 
-A cheap predicate. Returns `true` if the object exposes a MemoryView that CArray can read.
+A cheap predicate. Returns `true` if the object is a MemoryView producer. It does not promise that CArray can read the view: a producer can still refuse it, or offer a format CArray does not read, and the import then raises.
 
 ```ruby
 ca = CArray.float64(3, 4).seq

@@ -79,19 +79,21 @@ bmv2 = BulkMemoryView.wrap(ca)   # zero-copy alias
 
 ### `CArray.memory_view_available?(obj) → Boolean`
 
-Cheap probe: returns `true` if `obj` exposes a MemoryView that
-CArray can consume. Does not acquire the view; safe to call in
-hot paths.
+Cheap probe: returns `true` if `obj` is a MemoryView producer — Ruby's
+`rb_memory_view_available_p`.  Does not acquire the view; safe to call
+in hot paths.  It does not say CArray can read the view: a producer
+can still refuse it, or offer a format CArray does not read, and
+`from_memory_view` / `wrap_memory_view` then raise.
 
 ### `CArray.memory_view_reject_reason(obj) → String | nil`
 
-Diagnostic. Returns a one-line explanation of why
-`wrap_memory_view(obj)` would reject, or `nil` if it would
-succeed (or if `obj` is not a MemoryView producer at all).
-Use this when a wrap call raises and you want a precise reason —
-the exception itself carries only `"object does not support
-MemoryView"` because Ruby's MemoryView core swallows producer
-exceptions.
+Diagnostic for CArray as a producer.  For a CArray, returns a one-line
+explanation of why it cannot export itself (so why another library's
+consumer, or `wrap_memory_view(ca)`, would be refused), or `nil` if it
+can.  For any other object it returns `nil`.  Use this when a wrap
+call raises and you want a precise reason — the exception itself
+carries only `"object does not support MemoryView"` because Ruby's
+MemoryView core swallows producer exceptions.
 
 ```ruby
 ca = CArray.int32(3, 4).seq
@@ -101,7 +103,7 @@ CArray.memory_view_reject_reason(ca[ca > 5])
 #     Export arr.copy for a snapshot."
 ```
 
-### `CArray.from_memory_view(obj, data_type: nil) → CArray`
+### `CArray.from_memory_view(obj, data_type: nil, mask: nil) → CArray`
 
 **Copy** import. Acquires a MemoryView, allocates an independent
 contiguous CArray, copies (or gathers) the data, and releases the
@@ -109,7 +111,16 @@ view. The result owns its buffer; mutations on either side are
 isolated.
 
 - Accepts strided sources (gathered into row-major order).
-- Accepts typeless producers when `data_type:` is given.
+- Accepts typeless producers when `data_type:` is given.  Their bytes
+  are read as one 1-D run, so a typeless producer whose own shape and
+  strides are not row-major contiguous is refused.
+- `mask:` takes a second producer for the mask: one byte per element
+  (`?`, `B` / `C`, `b` / `c`), row-major contiguous, of the data's
+  shape.  Any non-zero byte is masked.
+- A boolean (`?`) producer's bytes other than 0 and 1 are read as true.
+- The result is a plain `CArray` whatever the receiver; a receiver
+  other than `CArray` or a `CAWrap` (a Face class, `CScalar`) raises
+  `TypeError`.
 
 ```ruby
 tr = Numo::Int32.new(3, 4).seq.transpose   # strided
@@ -119,7 +130,7 @@ ca = CArray.from_memory_view(tr)            # OK, gather to contiguous
 raw = CArray.from_memory_view(mmap_view, data_type: :float64)
 ```
 
-### `CArray.wrap_memory_view(obj, data_type: nil) → CAWrap | CAStride`
+### `CArray.wrap_memory_view(obj, data_type: nil, mask: nil) → CAWrap | CAStride`
 
 **Zero-copy** import. Returns a view that points directly at the
 foreign buffer. The view is held alive until the wrap is GC'd;
@@ -129,7 +140,23 @@ mutations on either side are immediately visible.
 - Strided source (negative strides, transposed, column-major, …)
   → `CAStride` (see §6).
 - Typeless source → 1D wrap with the given `data_type:`; chain
-  `.reshape` for shape.
+  `.reshape` for shape.  A strided typeless source is refused.
+- `mask:` borrows a second producer as the mask, under the rules of
+  `from_memory_view`, plus: the data must be row-major contiguous, the
+  mask must not share bytes with the data, and its bytes must be 0 or
+  1 (a wrap cannot normalise them; `from_memory_view` can).  A store
+  writes the mask cell of each element it stores, so a read-only mask
+  makes the whole array read-only.
+- A boolean (`?`) producer must hold 0 or 1 in every byte.
+
+What is checked against the producer's buffer: for a contiguous view,
+that its shape fits in `byte_size`; for a strided one, that
+`byte_size` covers the element count.  A strided view's `byte_size` is
+by convention the element count times `item_size` (CArray, NumPy and
+Arrow all export it so), which does not bound where the strides reach,
+so the strides themselves are trusted.  A negative shape, a shape too
+large to count, and a missing `strides` array (read as row-major) are
+handled for every source.
 
 ```ruby
 na = Numo::DFloat.new(3, 4).seq
@@ -153,8 +180,10 @@ CArray::UInt8.from_memory_view(obj)
 ```
 
 This is a thin wrapper for `CArray.{from,wrap}_memory_view(obj,
-data_type: <data_type>)` — useful when you want the data_type obvious at the
-call site, or when bridging typeless producers.
+data_type: <data_type>)` and takes `mask:` as they do — useful when
+you want the data_type obvious at the call site, or when bridging
+typeless producers.  A typed producer keeps its shape (and must agree
+with the class's type); a typeless one is read as 1-D.
 
 ---
 

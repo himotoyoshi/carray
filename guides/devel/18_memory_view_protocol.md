@@ -26,7 +26,7 @@ Three class methods import a foreign MemoryView producer:
   over the foreign buffer for a row-major contiguous source, or a `CAStride` for a
   strided one.
 
-A typeless producer (`format == NULL`) is accepted with an explicit `type:` or via
+A typeless producer (`format == NULL`) is accepted with an explicit `data_type:` or via
 `CArray::Float64.from_memory_view(obj)` — the importer supplies the element type
 the producer didn't declare.
 

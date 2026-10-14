@@ -77,13 +77,13 @@ to the canonical forms above.
 | `b`, `c`             | 1           | int8        |
 | `B`, `C`             | 1           | uint8       |
 | `h`, `s`, `s!`       | 2           | int16       |
-| `H`, `S`, `S!`       | 2           | uint16      |
-| `i`, `i!`, `l`, `l!` | 4           | int32       |
-| `I`, `I!`, `L`, `L!` | 4           | uint32      |
-| `q`, `q!`, `l`, `l!` | 8           | int64       |
-| `Q`, `Q!`, `L`, `L!` | 8           | uint64      |
-| `f`                  | 4           | float32     |
-| `d`                  | 8           | float64     |
+| `H`, `S`, `S!`, `v`, `n` | 2       | uint16      |
+| `i`, `i!`, `l`, `l!`, `j` | 4      | int32       |
+| `I`, `I!`, `L`, `L!`, `J`, `V`, `N` | 4 | uint32 |
+| `q`, `q!`, `l`, `l!`, `j` | 8      | int64       |
+| `Q`, `Q!`, `L`, `L!`, `J` | 8      | uint64      |
+| `f`, `e`, `g`        | 4           | float32     |
+| `d`, `E`, `G`        | 8           | float64     |
 | `Zf`                 | 8           | complex64   |
 | `ff`                 | 8           | complex64   |
 | `Zd`                 | 16          | complex128  |
@@ -95,9 +95,13 @@ Synonyms cover the conventions used by:
 - red-arrow's MV producer (same as Ruby pack-template)
 - numpy / Python struct (`l`/`L` at LP64 native widths, item_size 8)
 
-Stripped before dispatch: alignment `|`, host-matching byte-order
-markers (`<`/`>`/`=` when they match the host).  Cross-endian
-sources are rejected.
+Byte order is read in both vocabularies: as a prefix (`<` little,
+`>` and `!` big, `=` and `@` the machine's) and as Ruby's suffix on a
+single type (`i<`, `s!>`).  `_` is read as `!`.  `e` / `E` / `v` / `V`
+are little-endian by their letter and `g` / `G` / `n` / `N` big-endian.
+CArray stores the machine's byte order, so a format whose order is the
+other one is rejected; a one-byte type (`c` `C` `b` `B` `?`) has no
+order and is accepted with any.  The alignment `|` is skipped.
 
 ---
 

@@ -36,6 +36,50 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `CArray.wrap_memory_view` and `from_memory_view` check a
+  producer's shape against the bytes it reports.  A shape larger than
+  the buffer was read (and, for a writable wrap, written) past its end;
+  it now raises `ArgumentError`, as do a negative shape, one too large
+  to count, and a typeless producer whose own layout is strided.  A
+  producer that omits `strides` is read as row-major instead of
+  crashing.  A strided view's strides are still trusted: its
+  `byte_size` is by convention the element count, which does not bound
+  them.
+
+- Fix: masking a cell of an array that `wrap_memory_view` returned for
+  a strided producer no longer corrupts memory.
+
+- Fix: an import that raises releases the producer's views at once;
+  a negative or overflowing shape left them taken.
+
+- Change: a boolean MemoryView holds 0 or 1 in every byte.
+  `from_memory_view` reads any other byte as true (it was kept, so
+  `count(true)` and `to_type` disagreed with `to_a`); `wrap_memory_view`
+  refuses a boolean buffer or a `mask:` that holds one.
+
+- Change: `wrap_memory_view(obj, mask: m)` is read-only when the mask
+  buffer is, since a store writes the mask cell of each element it
+  stores; it refuses a mask that shares bytes with the data.
+
+- Change: `CArray.wrap_writable` asks a MemoryView producer for a
+  writable view, and `wrap_readonly` / `wrap_writable` read a typeless
+  producer as the data type they are given (it was refused).
+
+- Change: the MemoryView format reader takes Ruby's vocabulary for
+  byte order: a suffix (`i<`, `s!>`), `_` for `!`, `j` / `J`, and
+  `e` `E` `v` `V` `g` `G` `n` `N` in the machine's order (they were
+  all refused).  The prefixes `!` and `@` are read too, and a one-byte
+  type takes any byte order.  A `mask:` format is read whole (`C3` was
+  taken as `C`).
+
+- Change: `from_memory_view` raises `TypeError` on a receiver it cannot
+  return, such as a Face class or `CScalar` (it returned a plain
+  `CArray`).  `CArray::Int32.from_memory_view` /
+  `wrap_memory_view` take `mask:`.
+
+- Change: `CArray.memory_view_reject_reason` returns `nil` for an
+  object that is not a CArray (it said "not a CArray").
+
 - Change: `window(..., bounds: "strict")` raises `IndexError` when it is
   made if a range reaches outside the array, and `bounds: "ruby"` when a
   range reaches past the end or before the first cell counted from the end.
