@@ -139,6 +139,7 @@ class CArray
   # per-piece dim sizes summed along each tile axis (= block-matrix
   # consistency required across rows / columns).
   def self.__ragged_paste (list, tdim, axis, data_type, name)
+    shared_attrs = attrs_shared_by(list)
     list = CArray.promote_list(list, data_type: data_type)
     # promote_list has already enforced homogeneity (= common data_type, and
     # for Face elements: same Face class + portable + state-compatible).  So,
@@ -223,6 +224,7 @@ class CArray
       obj.paste(idx, item)
     end
     obj = obj.face_lift(face_parent) if face_parent
+    obj.set_attrs(shared_attrs) unless shared_attrs.empty?
     obj
   end
   private_class_method :__ragged_paste

@@ -36,6 +36,22 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: a view joining several arrays (`CArray.stack`, `CArray.meld`,
+  `CArray.montage`) no longer shows the first array's attributes
+  (`attr`, `attrs`) as its own. It shows the keys every joined array
+  shows with the same value; a key they disagree on or that some lack
+  is not shown.
+
+- Change: `CArray.concatenate`, `CArray.mosaic` and `CArray.tabulate`
+  give the result the attribute keys every piece shows with the same
+  value, where they gave it none. `CAFrame.concatenate` keeps a column's
+  attributes the same way.
+
+- Change: a lazy type conversion, such as the view
+  `CArray.wrap_readonly(a, CA_FLOAT64)` returns for an `a` of another
+  type, shows `a`'s attributes, as `to_type` does. Lazy arithmetic still
+  shows none.
+
 - Change: `CArray::TableMethods` (`column_names=`, `column`, `row`,
   `rows`, `select` on a 2-D array) is removed. Show the array as a table
   with `CArray#to_frame` instead: `a.to_frame("x", "y")` gives a CAFrame

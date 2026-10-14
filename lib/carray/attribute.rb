@@ -31,11 +31,19 @@
 #    The walk stops at a lazy operation view (CAMonOp / CABinOp /
 #    CATriOp / CAMonCmp / CABinCmp): its cells are computed, not the
 #    parent's cells, so the parent's attributes do not describe them.
-#    `a.lazy` itself (CALazyMarker) is a view of `a` and walks through.
+#    `a.lazy` itself (CALazyMarker) is a view of `a` and walks through,
+#    and so does a lazy type conversion (the cast lane `promote_list`
+#    and `wrap_readonly` build), for the reason `to_type` carries them.
+#    A view of several arrays (CAStack / CAMeld, so `stack`, `meld` and
+#    `montage`) shows, below its own @attr, the keys every one of its
+#    arrays shows with the same value; a key they disagree on, or one
+#    some of them lack, is not shown.
 #
 #  Copies: `copy` and `to_type` give the new array the attributes the
-#  source shows, as its own Hash.  Arithmetic and reductions do not
-#  carry them -- the result is a different quantity.
+#  source shows, as its own Hash; `concatenate`, `mosaic` and `tabulate`
+#  give it the keys every piece shows with the same value, as the views
+#  do.  Arithmetic and reductions do not carry them -- the result is a
+#  different quantity.
 
 class CArray
 
@@ -148,6 +156,11 @@ class CArray
         yield(h) if h
       end
       return nil if attr_computing_view?(ca)
+      if ca.is_a?(CAStack) || ca.is_a?(CAMeld)
+        shared = CArray.__send__(:attrs_shared_by, ca.parents)
+        yield(shared) unless shared.empty?
+        return nil
+      end
       parent = ca.respond_to?(:parent) ? ca.parent : nil
       return nil if parent.nil? || parent.equal?(ca)
       ca = parent
@@ -155,8 +168,17 @@ class CArray
     nil
   end
 
+  # The attributes every array in `list` shows with the same value.
+  def self.attrs_shared_by (list)
+    first, *rest = list.map(&:attrs)
+    return {} if first.nil?
+    first.select { |k, v| rest.all? { |h| h.key?(k) && h[k] == v } }
+  end
+  private_class_method :attrs_shared_by
+
   def attr_computing_view? (ca)
-    ca.is_a?(CAMonOp) || ca.is_a?(CABinOp) || ca.is_a?(CATriOp) ||
+    return ca.__op_id__ < CAMonOp::CAST_BASE if ca.is_a?(CAMonOp)
+    ca.is_a?(CABinOp) || ca.is_a?(CATriOp) ||
       ca.is_a?(CAMonCmp) || ca.is_a?(CABinCmp)
   end
 

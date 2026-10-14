@@ -82,4 +82,54 @@ class TestAttributeInherit < Test::Unit::TestCase
     assert_raise(TypeError) { @b.set_attrs([[:units, "m/s"]]) }
   end
 
+  def test_lazy_type_conversion_walks_through
+    i = CA_INT32([1, 2])
+    i.set_attr(:units, "m/s")
+    assert_equal "m/s", CArray.wrap_readonly(i, CA_FLOAT64).attr(:units)
+  end
+
+  def test_joined_arrays_show_the_keys_they_agree_on
+    x = CA_FLOAT64([1, 2]).tap { |c| c.set_attrs(units: "m/s", src: "x") }
+    y = CA_FLOAT64([3, 4]).tap { |c| c.set_attrs(units: "m/s", src: "y") }
+    shared = { "units" => "m/s" }
+    assert_equal shared, CArray.stack([x, y]).attrs
+    assert_equal shared, CArray.meld([x, y]).attrs
+    assert_equal shared, CArray.montage([x, y], [2]).attrs
+    assert_equal shared, CArray.concatenate([x, y]).attrs
+    assert_equal shared, CArray.meld([x, y]).copy.attrs
+  end
+
+  def test_joined_arrays_drop_a_key_they_disagree_on_or_lack
+    x = CA_FLOAT64([1, 2]).tap { |c| c.set_attr(:units, "m/s") }
+    y = CA_FLOAT64([3, 4]).tap { |c| c.set_attr(:units, "K") }
+    z = CA_FLOAT64([5, 6])
+    assert_equal({}, CArray.stack([x, y]).attrs)
+    assert_equal({}, CArray.meld([x, z]).attrs)
+    assert_equal({}, CArray.concatenate([x, y]).attrs)
+    assert_equal({}, CArray.concatenate([x, z]).attrs)
+  end
+
+  def test_joined_arrays_of_different_types_agree
+    x = CA_FLOAT64([1, 2]).tap { |c| c.set_attr(:units, "m/s") }
+    i = CA_INT32([3, 4]).tap { |c| c.set_attr(:units, "m/s") }
+    assert_equal({ "units" => "m/s" }, CArray.stack([x, i]).attrs)
+    assert_equal({ "units" => "m/s" }, CArray.concatenate([x, i]).attrs)
+  end
+
+  def test_a_joined_view_keeps_its_own_keys_first
+    x = CA_FLOAT64([1, 2]).tap { |c| c.set_attr(:units, "m/s") }
+    y = CA_FLOAT64([3, 4]).tap { |c| c.set_attr(:units, "m/s") }
+    m = CArray.meld([x, y])
+    m.set_attr(:units, "K")
+    assert_equal "K", m.attr(:units)
+    assert_equal "m/s", x.attr(:units)
+  end
+
+  def test_frame_meld_and_concatenate_agree
+    f = CAFrame.new("t" => CA_FLOAT64([1, 2]).tap { |c| c.set_attr(:units, "K") })
+    g = CAFrame.new("t" => CA_FLOAT64([3]).tap { |c| c.set_attr(:units, "K") })
+    assert_equal({ "units" => "K" }, CAFrame.meld(f, g)["t"].attrs)
+    assert_equal({ "units" => "K" }, CAFrame.concatenate(f, g)["t"].attrs)
+  end
+
 end
