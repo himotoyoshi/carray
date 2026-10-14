@@ -385,6 +385,39 @@ iw_write_cells (VALUE klass, VALUE vdst, VALUE vmode, VALUE vaxis)
   return Qnil;
 }
 
+/* The route a walk takes, read from the state after its first slab:
+   src_kind, alias_mode, whether it attached a root, whether it gathered a
+   whole-view scratch, and whether the first fiber was gathered into the
+   fiber scratch.  mode as in iw_read_cells; write selects CA_KERNEL_WRITE. */
+static VALUE
+iw_route (VALUE klass, VALUE vsrc, VALUE vmode, VALUE vaxis, VALUE vwrite)
+{
+  CArray       *src;
+  int           mode  = NUM2INT(vmode);
+  int8_t        axis  = (int8_t) NUM2INT(vaxis);
+  uint32_t      flags = RTEST(vwrite) ? CA_KERNEL_WRITE : 0;
+  ca_iter_state st;
+  char         *p;
+  boolean8_t   *m;
+  ca_size_t     n, s, ms;
+  VALUE         out = rb_hash_new();
+  int           got;
+
+  (void) klass;
+  TypedData_Get_Struct(vsrc, CArray, &carray_data_type, src);
+
+  ca_iter_check_init(iw_open(&st, src, mode, axis, flags));
+  got = iw_next(&st, mode, &p, &m, &n, &s, &ms);
+  rb_hash_aset(out, ID2SYM(rb_intern("src_kind")),   INT2NUM(st.src_kind));
+  rb_hash_aset(out, ID2SYM(rb_intern("alias_mode")), INT2NUM(st.alias_mode));
+  rb_hash_aset(out, ID2SYM(rb_intern("root")),       st.root ? Qtrue : Qfalse);
+  rb_hash_aset(out, ID2SYM(rb_intern("scratch")),    st.scratch_ptr ? Qtrue : Qfalse);
+  rb_hash_aset(out, ID2SYM(rb_intern("fiber_scratch")),
+               ( got && st.fiber_data_scratch && p == st.fiber_data_scratch ) ? Qtrue : Qfalse);
+  ca_iter_state_close(&st);
+  return out;
+}
+
 void
 Init_iter_write (void)
 {
@@ -400,4 +433,5 @@ Init_iter_write (void)
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill_poisoned", iw_slab_fill_poisoned, 3);
   rb_define_singleton_method(rb_cCArray, "iw_read_cells", iw_read_cells, 3);
   rb_define_singleton_method(rb_cCArray, "iw_write_cells", iw_write_cells, 3);
+  rb_define_singleton_method(rb_cCArray, "iw_route", iw_route, 4);
 }
