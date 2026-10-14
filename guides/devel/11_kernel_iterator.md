@@ -153,14 +153,13 @@ needed). The INOUT and PAIR macros require their two arrays to have the
 same shape (`ndim` and every `dim[k]`) and raise `ArgumentError` before
 opening either walk when they do not.
 
-L2 inner-loop helpers — fast-path contig within a strided callback:
+L2 inner-loop helper — fast-path contig within a strided callback:
 
 ```c
-CA_L2_FOR_EACH         (T, ptr, n, stride, p, body);
-CA_L2_FOR_EACH_UNMASKED(T, ptr, mask, n, stride, p, body);
+CA_L2_FOR_EACH(T, ptr, n, stride, p, body);
 ```
 
-These wrap an L2 callback signature `(ptr, n, stride_bytes)` with a
+It wraps an L2 callback signature `(ptr, n, stride_bytes)` with a
 `stride == sizeof(T)` fast-path branch. When the runtime stride matches
 the element size, `body` runs against a `T *p` that the compiler can
 autovectorise; otherwise `p` is recomputed per iteration.
@@ -466,15 +465,6 @@ CA_SLAB_REDUCE_T(T, st, p, m, acc, INIT, REDUCE);
                        if (v == target) acc += 1      (count_equal) */
 ```
 
-Convenience aliases for the four common load types:
-
-```c
-CA_SLAB_REDUCE_F64(st, p, m, acc, INIT, REDUCE);   /* T = double  */
-CA_SLAB_REDUCE_F32(st, p, m, acc, INIT, REDUCE);   /* T = float   */
-CA_SLAB_REDUCE_I32(st, p, m, acc, INIT, REDUCE);   /* T = int32_t */
-CA_SLAB_REDUCE_I64(st, p, m, acc, INIT, REDUCE);   /* T = int64_t */
-```
-
 The "EX" form exposes a `masked_cnt` lvalue that the macro increments on
 every skipped cell — needed when a kernel's mask policy depends on the
 count of masked cells (e.g. variance's `min_count` policy):
@@ -485,17 +475,18 @@ CA_SLAB_REDUCE_T_EX(T, st, p, m, acc, INIT, REDUCE, masked_cnt);
 
 ### SIMD-licensed reductions
 
-Each base reducer has a kind-specific variant that licenses the
-compiler to reassociate the accumulator (= ε-close, not bit-exact):
+A sum has a variant that licenses the compiler to reassociate the
+accumulator (= ε-close, not bit-exact):
 
 ```c
-CA_SLAB_REDUCE_T_PLUS(T, st, p, m, acc, INIT, REDUCE);  /* #pragma omp simd reduction(+:acc) */
-CA_SLAB_REDUCE_T_MIN (T, st, p, m, acc, INIT, REDUCE);  /* reduction(min:acc) */
-CA_SLAB_REDUCE_T_MAX (T, st, p, m, acc, INIT, REDUCE);  /* reduction(max:acc) */
-CA_SLAB_REDUCE_T_STAR(T, st, p, m, acc, INIT, REDUCE);  /* reduction(*:acc) */
+CA_SLAB_REDUCE_T_PLUS_EX(T, st, p, m, acc, INIT, REDUCE, masked_cnt);
+        /* #pragma omp simd reduction(+:acc) */
 ```
 
-The `_EX` variants are again the masked-count-exposing forms. There is a
+Pass a throwaway `ca_size_t` for `masked_cnt` when the count is not
+needed. The min / max / product counterparts (`_MIN_EX` / `_MAX_EX` /
+`_STAR_EX`) are emitted by the kernel generator for kernels that do not
+take its 8-way form, and are not part of the author surface. There is a
 `CA_SLAB_REDUCE_T_VAR_EX` stub for future multi-accumulator output-buffered
 work; currently it forwards to PLUS_EX (clang recognises sumsq as a
 derived reduction).
@@ -526,7 +517,6 @@ CA_SLAB_MAP_T(T_IN, T_OUT, st_in, p_in, st_out, p_out, MAP_EXPR);
         /* MAP_EXPR: statement binding `r` (T_OUT lvalue) given `v` (T_IN).
            e.g.  r = sqrt(v)
                  r = (T_OUT)(v * v + 1) */
-CA_SLAB_MAP_F64(st_in, p_in, st_out, p_out, MAP_EXPR);   /* T_IN = T_OUT = double */
 ```
 
 Both states must share slab geometry. The macro hoists the inner contig
@@ -612,19 +602,16 @@ then rejects a masked source with `CA_ITER_ERR_MASK_NOT_ALLOWED`. The
 `_FIBER` forms without MASKED in the name hand out no mask cursor, so
 without `CA_KERNEL_NO_MASK` they read masked cells as values.
 
-### Mask helper macros
+### Mask helper macro
 
 For kernels that read the mask directly:
 
 ```c
-#define CA_MASK_GET(mask, i)            /* 0 if mask == NULL, else mask[i] */
-#define CA_FOR_EACH_UNMASKED(p, mask, n, body)            /* skip masked cells */
-#define CA_FOR_EACH_INDEX_UNMASKED(p, mask, n, i, body)   /* + iteration index */
-#define CA_COUNT_UNMASKED(mask, n)      /* GCC statement-expr, returns cnt */
+#define CA_FOR_EACH_UNMASKED(p, mask, n, body)   /* skip masked cells */
 ```
 
-These are used by all the slab body macros internally; reach for them in
-hand-written kernels when the body-macro suite doesn't fit.
+`mask` may be `NULL` (every cell runs `body`). Reach for it in hand-written kernels when the body-macro suite
+doesn't fit.
 
 ## The WRITE path in detail
 

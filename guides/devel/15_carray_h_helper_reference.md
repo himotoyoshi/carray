@@ -431,8 +431,7 @@ build on the primitives above:
 - **Kernel iterator** ([ch. 11](11_kernel_iterator.md)) —
   `CA_FOR_EACH_FIBER` / `CA_FOR_EACH_SLAB` / `CA_SLAB_REDUCE_T_*` /
   `CA_SLAB_MAP_T` / `CA_SLAB_SCAN_T` / `CA_L2_FOR_EACH`.
-- **Mask helpers** ([ch. 11](11_kernel_iterator.md)) — `CA_FOR_EACH_UNMASKED`
-  / `CA_FOR_EACH_INDEX_UNMASKED` / `CA_COUNT_UNMASKED` / `CA_MASK_GET`.
+- **Mask helper** ([ch. 11](11_kernel_iterator.md)) — `CA_FOR_EACH_UNMASKED`.
 - **Validation macros** — `CA_CHECK_DATA_TYPE` / `CA_CHECK_RANK` /
   `CA_CHECK_DIM` / `CA_CHECK_BYTES` / `CA_CHECK_INDEX`.
 - **Kernel flags** (frozen author tokens) — `CA_KERNEL_WRITE` /

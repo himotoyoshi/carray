@@ -2175,20 +2175,22 @@ module MkKernel
     else
       if k[:array_arg]
         wc = (k[:array_arg][:data_type] == :promote) ? "double" : si[:c]
-        io.puts "      CA_SLAB_REDUCE_ARRAY_T(#{si[:c]}, #{wc}, st, p, m, st_w, p_w, #{acc_var}, #{acc_init}, #{reduce_stmt});"
+        io.puts "      ca_size_t __sra_throwaway_mc = 0;"
+        io.puts "      CA_SLAB_REDUCE_ARRAY_T_EX(#{si[:c]}, #{wc}, st, p, m, st_w, p_w, #{acc_var}, #{acc_init}, #{reduce_stmt}, __sra_throwaway_mc);"
+        io.puts "      (void) __sra_throwaway_mc;"
       else
         suffix = MkKernel.reduce_macro_suffix(k, src)
-        # Non-mask_policy path: emit a throwaway masked_cnt for the 8-way
-        # macros (which always take one).  Falls through to the legacy
-        # non-EX macro when the 8-way path is not eligible (:object src).
-        if MkKernel.reduce_8way_eligible?(k, src, suffix)
+        # Non-mask_policy path: the slab macros always take a masked_cnt,
+        # so hand them a throwaway.  The generic form (suffix "", the
+        # :object lane) has a wrapper that hides it.
+        if suffix == ""
+          io.puts "      CA_SLAB_REDUCE_T(#{si[:c]}, st, p, m, #{acc_var}, #{acc_init}, #{reduce_stmt});"
+        else
           io.puts "      ca_size_t __sr_throwaway_mc = 0;"
           emit_reduce_slab_call(io, k, src, si, oi, suffix, acc_var, acc_init,
                                 reduce_stmt, "__sr_throwaway_mc",
                                 indent: "      ")
           io.puts "      (void) __sr_throwaway_mc;"
-        else
-          io.puts "      CA_SLAB_REDUCE_T#{suffix}(#{si[:c]}, st, p, m, #{acc_var}, #{acc_init}, #{reduce_stmt});"
         end
       end
       finish_emit = view_flat \

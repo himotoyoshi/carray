@@ -36,6 +36,24 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: C extensions: fifteen kernel iterator macros that only
+  shortened another one are removed. Write what they stood for:
+  `CA_SLAB_REDUCE_F64` / `_F32` / `_I32` / `_I64` are
+  `CA_SLAB_REDUCE_T` with `double` / `float` / `int32_t` / `int64_t`.
+  `CA_SLAB_REDUCE_T_PLUS` is `CA_SLAB_REDUCE_T_PLUS_EX`, and
+  `CA_SLAB_REDUCE_ARRAY_T` / `_ARRAY_T_PLUS` are
+  `CA_SLAB_REDUCE_ARRAY_T_EX` / `_ARRAY_T_PLUS_EX`, each given a
+  throwaway `ca_size_t` for the masked count. `CA_SLAB_REDUCE_T_MIN` /
+  `_T_MAX` / `_T_STAR` are `CA_SLAB_REDUCE_T` with the min, max or
+  product written in the reduce expression (the loop is not given the
+  SIMD reduction pragma they asked for). `CA_SLAB_MAP_F64` is
+  `CA_SLAB_MAP_T(double, double, ...)`. For `CA_L2_FOR_EACH_UNMASKED`,
+  `CA_FOR_EACH_INDEX_UNMASKED`, `CA_COUNT_UNMASKED` and `CA_MASK_GET`,
+  test the mask in the body of `CA_L2_FOR_EACH` or
+  `CA_FOR_EACH_UNMASKED`, or read it directly. `CA_SLAB_REDUCE_T_MIN_EX`
+  / `_MAX_EX` / `_STAR_EX` stay in the header for the kernel generator
+  but are no longer part of the author surface.
+
 - Change: C extensions: `ca_iter_state_next_slab_strided` is removed,
   and `ca_iter_state_init_l2` takes `CA_SLAB_AXES` only (`CA_SLAB_WHOLE`
   returns `CA_ITER_ERR_POLICY`). The walk it gave, one strided run per
