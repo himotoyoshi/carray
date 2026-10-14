@@ -358,8 +358,14 @@ class CAFrame
     # attribute +name+ of column j (an empty field gives none). Returns the
     # record's fields either way.
     def header(name = nil)
-      fields = @tok.read(@io)
+      # A named header of a file with at most one column may be an empty
+      # line: that is how to_csv writes a column without the attribute, so
+      # the line is the header's, as an empty line is a row in the data.
+      blank_is_row = !name.nil? && !@names.nil? && @names.size <= 1
+      fields = @tok.read(@io, blank_is_row: blank_is_row)
       if fields.nil?
+        # A file with no columns has nothing to give a named header.
+        return [] if !name.nil? && @names&.empty?
         # An input with no record at all is a table with no columns: that is
         # what to_csv writes for a frame without columns or index.  Once lines
         # have been skipped to reach the header, a missing header is an error.

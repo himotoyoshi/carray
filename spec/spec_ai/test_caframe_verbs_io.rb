@@ -277,6 +277,19 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
     assert_equal [1.5, 2.0], back["temp"].to_a
   end
 
+  def test_attrs_round_trip_one_column_without_the_attribute
+    df = CAFrame.new("x" => CA_INT32([7, 8, 9]))
+    back = CAFrame.from_csv(StringIO.new(df.to_csv(attrs: [:units, :long])),
+                            attrs: [:units, :long])
+    assert_equal ["7", "8", "9"], back["x"].to_a
+    assert_equal({}, back["x"].attrs)
+  end
+
+  def test_attrs_round_trip_a_frame_without_columns
+    back = CAFrame.from_csv(StringIO.new(CAFrame.new.to_csv(attrs: [:units])), attrs: [:units])
+    assert_equal [0, []], [back.nrow, back.column_names]
+  end
+
   def test_to_csv_attrs_of_the_index
     df = CAFrame.new({ "v" => CA_INT32([1, 2]).tap { |c| c.set_attr(:units, "m") } },
                      index: CA_INT32([10, 20]).tap { |c| c.set_attr(:units, "s") },
