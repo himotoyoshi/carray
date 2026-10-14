@@ -62,6 +62,10 @@ class CAFrame
   #             select too. A Hash selects by its keys and names the columns
   #             with its values: { 2 => "code", "c7" => "area" }; types: and
   #             missing: then use the new names
+  #   attrs:    attribute keys for the lines right below the header, one
+  #             key per line: field j of a line becomes that attribute of
+  #             column j (an empty field gives none). The data then starts
+  #             below them. What to_csv(attrs:) writes, it reads back
   #
   #   CAFrame.from_csv("obs.csv", header: 2)            # a title above
   #   CAFrame.from_csv("obs.csv", header: 0, data: 3)   # units on lines 1-2
@@ -69,6 +73,7 @@ class CAFrame
   #   CAFrame.from_csv("raw.csv", column_names: %w[date temp rh])
   #   CAFrame.from_csv("wide.csv", columns: %w[date temp])
   #   CAFrame.from_csv("raw.csv", header: false, columns: { 0 => "date", 3 => "temp" })
+  #   CAFrame.from_csv("obs.csv", attrs: [:units])      # units on line 1
   #
   # A block, given the reader, reads in any other order with +skip+ /
   # +header+ / +header(name)+ / +column_names+ / +columns+ / +data+ (see
@@ -104,10 +109,10 @@ class CAFrame
   # independent frame.
   def self.from_csv(source, types: nil, on_error: :mask, missing: nil,
                     header: nil, data: nil, column_names: nil, columns: nil,
-                    sep: ",", quote: '"', strip: false,
+                    attrs: nil, sep: ",", quote: '"', strip: false,
                     encoding: "bom|utf-8", parser: nil, &block)
     layout = { header: header, data: data, column_names: column_names,
-               columns: columns }.compact
+               columns: columns, attrs: attrs }.compact
     if block && !layout.empty?
       raise ArgumentError, "from_csv: give #{layout.keys.map { |k| "#{k}:" }.join(', ')} " \
                            "or a reading block, not both"
@@ -215,7 +220,27 @@ class CAFrame
     end
   end
 
-  private_class_method :split_missing, :missing_tokens, :mask_missing_tokens
+  # The attribute keys an +attrs:+ argument names, as Strings: an Array of
+  # Symbols or Strings, none twice.
+  def self.csv_attr_keys(attrs, verb)
+    unless attrs.is_a?(Array)
+      raise TypeError, "#{verb}: attrs: takes an Array of attribute keys " \
+                       "(got #{attrs.inspect})"
+    end
+    keys = attrs.map do |key|
+      unless key.is_a?(Symbol) || key.is_a?(String)
+        raise TypeError, "#{verb}: attrs: an attribute key is a Symbol or String " \
+                         "(got #{key.inspect})"
+      end
+      key.to_s
+    end
+    dup = keys.tally.find { |_, n| n > 1 }
+    raise ArgumentError, "#{verb}: attrs: names #{dup.first.inspect} twice" if dup
+    keys
+  end
+
+  private_class_method :split_missing, :missing_tokens, :mask_missing_tokens,
+                       :csv_attr_keys
 
   # Drive the reading-control DSL over one open IO and hand back
   # [names, rows, column_attrs]. Shared by the path and the IO source, so the
@@ -292,13 +317,26 @@ class CAFrame
   #
   #   df.to_csv("out.csv", missing: "-999")
   #   df.to_csv("out.csv", missing: { default: "-999", "comment" => "" })
+  #
+  # +attrs:+ writes, below the name row, one line per attribute key given,
+  # in that order: field j is +attr(key)+ of column j (the index's for the
+  # index column). A column without the attribute gets an empty field, an
+  # empty String a quoted "", and a number its +to_s+.
+  # +from_csv(attrs:)+ with the same keys reads them back, as Strings.
+  #
+  #   df.to_csv("out.csv", attrs: [:units, :long_name])
   def to_csv(path = nil, sep: ",", quote: '"', header: true, index: true,
-             encoding: nil, missing: nil)
+             encoding: nil, missing: nil, attrs: [])
     default, per_column = CAFrame.send(:split_missing, missing, "to_csv")
     [default, *per_column.values].each do |text|
       next if text.nil? || text.is_a?(String)
       raise ArgumentError, "to_csv: missing: is the String written for a masked " \
                            "cell (got #{text.inspect})"
+    end
+    attr_keys = CAFrame.send(:csv_attr_keys, attrs, "to_csv")
+    if !header && !attr_keys.empty?
+      raise ArgumentError, "to_csv: attrs: writes lines below the name row, " \
+                           "so it needs header: true"
     end
     nd = @columns.find { |_, c| c.ndim != 1 }
     if nd
@@ -319,13 +357,19 @@ class CAFrame
 
     names     = []
     formatted = []
+    written   = []
     if index && @index
       names     << @axis_name
       formatted << format_csv_column(@index)
+      written   << @index
     end
     @columns.each do |name, col|
       names     << name
       formatted << format_csv_column(col)
+      written   << col
+    end
+    attr_rows = attr_keys.map do |key|
+      written.each_with_index.map { |col, j| csv_attr_text(col, key, names[j]) }
     end
     unknown = per_column.keys - names
     raise KeyError, "to_csv: missing: names no column #{unknown.first.inspect}" unless unknown.empty?
@@ -342,7 +386,7 @@ class CAFrame
     end
 
     out = begin
-      csv_text(names, formatted, header, sep, quote)
+      csv_text(names, attr_rows, formatted, header, sep, quote)
     rescue Encoding::CompatibilityError
       nil
     end
@@ -351,10 +395,15 @@ class CAFrame
     # UTF-8 text pays nothing for the check.
     unless out && out.encoding == Encoding::UTF_8 && out.valid_encoding?
       names = names.each_with_index.map { |t, j| csv_text_in_utf8(t, "the name of column #{j}") }
+      attr_rows = attr_rows.each_with_index.map do |row, k|
+        row.each_with_index.map do |t, j|
+          csv_text_in_utf8(t, "attribute #{attr_keys[k].inspect} of #{names[j].inspect}")
+        end
+      end
       formatted = formatted.each_with_index.map do |fcol, j|
         fcol.each_with_index.map { |t, i| csv_text_in_utf8(t, "row #{i} of #{names[j].inspect}") }
       end
-      out = csv_text(names, formatted, header, sep, quote)
+      out = csv_text(names, attr_rows, formatted, header, sep, quote)
     end
 
     if encoding
@@ -579,15 +628,31 @@ class CAFrame
     end
   end
 
-  private def csv_text(names, formatted, header, sep, quote)
+  private def csv_text(names, attr_rows, formatted, header, sep, quote)
     out = +""
     if header
       out << names.map { |t| quote_csv_field(t, sep, quote) }.join(sep) << "\n"
+    end
+    attr_rows.each do |row|
+      out << row.map { |t| quote_csv_field(t, sep, quote) }.join(sep) << "\n"
     end
     @nrow.times do |i|
       out << formatted.map { |fcol| quote_csv_field(fcol[i], sep, quote) }.join(sep) << "\n"
     end
     out
+  end
+
+  # The field +to_csv(attrs:)+ writes for attribute +key+ of +col+: nil for
+  # none (the empty field), the String itself, or a scalar's to_s.
+  private def csv_attr_text(col, key, name)
+    value = col.attr(key)
+    case value
+    when nil, String then value
+    when Array, Hash
+      raise ArgumentError, "to_csv: attribute #{key.inspect} of #{name.inspect} is " \
+                           "#{value.class}, which a CSV field cannot hold"
+    else value.to_s
+    end
   end
 
   # The text of a cell as UTF-8, the encoding the CSV is built in: text in

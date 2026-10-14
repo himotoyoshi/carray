@@ -121,11 +121,14 @@ CAFrame.from_csv("obs.csv", header: 0, data: 3)          # units on lines 1-2
 CAFrame.from_csv("big.csv", data: 1..100)                # the first 100 data lines
 CAFrame.from_csv("raw.csv", column_names: %w[date temp rh])   # no header line
 CAFrame.from_csv("raw.csv", header: false)               # names c0, c1, ...
+CAFrame.from_csv("obs.csv", attrs: [:units])             # units on line 1, as attributes
 ```
 
 `header:` is the line of the column names (default 0), or `false` for none. `data:` is the first line of the data (default the line after the header), or a Range of lines (`4..`, `...101`). A record that starts within `data:` is read whole, even when a quoted field carries it past the last line. A malformed-record error names the line from 1, as an editor numbers it, so the line `e.lineno` is index `e.lineno - 1`.
 
 `column_names:` names the columns. Given alone, the file is taken to have no header line; given with `header:`, it replaces the names on that line. There have to be as many names as the file has columns -- those of the header line, or else of the first record -- or it raises `ArgumentError`.
+
+`attrs:` reads the lines right below the header as column attributes, one attribute key per line in the order given: field j of the line becomes that attribute of column j, so after `attrs: [:units]` the call `df["temp"].attr(:units)` answers the field under `temp`. An empty field gives the column no such attribute, and a quoted `""` gives it the empty string. The values are Strings. The data starts below these lines; `data:` may still name a later line. `attrs:` needs a header line. It reads what `to_csv(attrs:)` writes; a file whose attribute lines sit elsewhere is read with a reading block (below) and `r.header(:units)`.
 
 `columns:` reads only some of the columns, in the order given: names of the header or of `column_names:` (with no header, the names `c0`, `c1`, ...), or indexes from 0 (Integers and Ranges, `0..2`, `3..`). The fields of the others are passed over without being made into Strings, so a few columns of a wide file take little more time and memory than a narrow file would. `types:` and `missing:` then name the columns selected.
 
@@ -172,11 +175,21 @@ CAFrame.from_csv("obs.csv",
 df.to_csv("out.csv")       # write a CSV file, returns self
 csv = df.to_csv            # no path -> return the CSV String
 df.to_csv(sep: ";", header: false, index: false)
+df.to_csv("out.csv", attrs: [:units, :long_name])   # attribute lines below the names
 ```
 
 `to_csv` is the text form of the same flat table `to_ca` needs: every column must be **1-D** (an N-D column has no flat CSV cell and raises — export it per column, or use `to_records` + JSON for the structured shape). Unlike `to_ca` it does **not** promote to a common data type — each column is formatted to text on its own, so numbers, strings, and time / categorical columns sit side by side.
 
 The index (if any) is written as the first column under `axis_name` unless `index: false`. A **masked cell (UNDEF) becomes an empty field**, which `from_csv` reads back as UNDEF (parse-mask) — so mask round-trips. A genuine empty string is written quoted (`""`) to stay distinct from missing. Fields containing the separator, a quote, or a newline are quoted with internal quotes doubled (RFC 4180). Options `sep` / `quote` mirror `from_csv`; `header` / `index` default to true.
+
+`attrs:` writes, below the name row, one line per attribute key given, in that order. Field j of a line is that attribute of column j, and of the index for the index column. A column without the attribute gets an empty field, an empty String is written `""`, and a number is written as its `to_s`; an Array or Hash value raises, since a field cannot hold it. `from_csv` with the same `attrs:` reads the lines back as attributes, as Strings: an attribute `10` comes back as `"10"`. It needs `header: true`, as the lines are told apart from the data only by their place below the names.
+
+```
+temp,rh
+K,%
+"temperature, air",""
+1.5,50.0
+```
 
 A float32 value is written as the shortest decimal that reads back as the same float32 (`0.1`, not `0.10000000149011612`, the double it widens to), and so is each part of a cmplx64 one; reading the file with `types:` of `:float32` gives the values back bit for bit.
 

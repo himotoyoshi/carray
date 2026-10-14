@@ -263,6 +263,40 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
     end
   end
 
+  def test_attrs_round_trip_through_csv
+    t = CA_FLOAT64([1.5, 2.0]).tap { |c| c.set_attrs(units: "K", long_name: "air, 2 m", height: 10) }
+    r = CA_FLOAT64([50, 60]).tap { |c| c.set_attrs(units: "%", long_name: "") }
+    df = CAFrame.new("temp" => t, "rh" => r, "note" => CA_OBJECT(["a", "b"]))
+    csv = df.to_csv(attrs: [:units, :long_name, :height])
+    assert_equal "temp,rh,note\nK,%,\n\"air, 2 m\",\"\",\n10,,\n", csv.lines.first(4).join
+    back = CAFrame.from_csv(StringIO.new(csv), attrs: [:units, :long_name, :height],
+                            types: { "temp" => :float64 })
+    assert_equal({ "units" => "K", "long_name" => "air, 2 m", "height" => "10" }, back["temp"].attrs)
+    assert_equal({ "units" => "%", "long_name" => "" }, back["rh"].attrs)
+    assert_equal({}, back["note"].attrs)
+    assert_equal [1.5, 2.0], back["temp"].to_a
+  end
+
+  def test_to_csv_attrs_of_the_index
+    df = CAFrame.new({ "v" => CA_INT32([1, 2]).tap { |c| c.set_attr(:units, "m") } },
+                     index: CA_INT32([10, 20]).tap { |c| c.set_attr(:units, "s") },
+                     axis_name: "t")
+    assert_equal "t,v\ns,m\n", df.to_csv(attrs: [:units]).lines.first(2).join
+  end
+
+  def test_attrs_arguments_are_checked
+    df = CAFrame.new("x" => CA_FLOAT64([1]).tap { |c| c.set_attr(:a, [1, 2]) })
+    assert_raise(TypeError) { df.to_csv(attrs: :units) }
+    assert_raise(TypeError) { df.to_csv(attrs: [1]) }
+    assert_raise(ArgumentError) { df.to_csv(attrs: [:units, "units"]) }
+    assert_raise(ArgumentError) { df.to_csv(header: false, attrs: [:units]) }
+    assert_raise(ArgumentError) { df.to_csv(attrs: [:a]) }
+    csv = "x\nm\n1\n"
+    assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(csv), header: false, attrs: [:u]) }
+    assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(csv), attrs: [:u], data: 1) }
+    assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(csv), attrs: [:u]) { |r| r.data } }
+  end
+
   def test_dsl_generated_names_when_headerless
     with_csv("1,2,3\n4,5,6\n") do |path|
       df = CAFrame.from_csv(path) { |r| r.data }

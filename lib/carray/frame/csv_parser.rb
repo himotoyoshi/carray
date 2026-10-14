@@ -526,22 +526,29 @@ class CAFrame
     # or to none (false) when column_names: is given; data: is the first line
     # of the data or a Range of lines, by default from the line after the
     # header. A record that starts within data: is read whole.
-    def layout(header: nil, data: nil, column_names: nil, columns: nil)
+    def layout(header: nil, data: nil, column_names: nil, columns: nil, attrs: nil)
       header = column_names ? false : 0 if header.nil?
       unless header == false || (header.is_a?(Integer) && header >= 0)
         raise ArgumentError, "from_csv: header: takes the index of a line, from 0, " \
                              "or false (got #{header.inspect})"
       end
+      attr_keys = attrs.nil? ? [] : CAFrame.send(:csv_attr_keys, attrs, "from_csv")
+      if !header && !attr_keys.empty?
+        raise ArgumentError, "from_csv: attrs: reads the lines below the header, " \
+                             "so it needs a header line"
+      end
       first, last = CSVReader.data_lines(data)
       if header
         skip(header - @tok.lineno) if header > @tok.lineno
         self.header
+        attr_keys.each { |key| self.header(key.to_sym) }
       end
       column_names(*column_names) if column_names
       self.columns(*(columns.is_a?(Array) ? columns : [columns])) if columns
       first ||= @tok.lineno
       if first < @tok.lineno
-        raise ArgumentError, "from_csv: data: #{first} does not come after header: #{header}"
+        raise ArgumentError, "from_csv: data: #{first} does not come after header: #{header}" +
+                             (attr_keys.empty? ? "" : " and the #{attr_keys.size} attrs: lines")
       end
       skip(first - @tok.lineno)
       read_data(last && last + 1)

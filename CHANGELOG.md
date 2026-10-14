@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: `CAFrame#to_csv(attrs: [:units, ...])` writes, below the name row,
+  one line per attribute key, holding each column's value of that
+  attribute; `CAFrame.from_csv(attrs: [:units, ...])` reads those lines
+  back as column attributes (as Strings). A file with the attribute
+  lines elsewhere is read with a reading block and `r.header(:units)`.
+
 - Change: C extensions: `ca_iter_state_next_slab_strided` is removed,
   and `ca_iter_state_init_l2` takes `CA_SLAB_AXES` only (`CA_SLAB_WHOLE`
   returns `CA_ITER_ERR_POLICY`). The walk it gave, one strided run per
