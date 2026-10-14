@@ -1926,12 +1926,9 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
     }
   }
   else if ( rb_memory_view_available_p(obj) ) {     /* MemoryView producer */
-    obj = rb_funcall(rb_cCArray, rb_intern("wrap_memory_view"), 1, obj);
+    obj = ca_mv_wrap(obj, Qnil, rb_cCAWrap, -1,
+                     NIL_P(rtype) ? -1 : rb_ca_guess_type(rtype), 1);
     TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
-    if ( ca_is_readonly(ca) ) {
-      rb_raise(rb_eRuntimeError,
-               "MemoryView source is read-only; can't wrap as writable");
-    }
     if ( NIL_P(rtype) ) {
       data_type = ca->data_type;
     }
@@ -2050,7 +2047,8 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
     }
   }
   else if ( rb_memory_view_available_p(obj) ) {     /* MemoryView producer */
-    obj = rb_funcall(rb_cCArray, rb_intern("wrap_memory_view"), 1, obj);
+    obj = ca_mv_wrap(obj, Qnil, rb_cCAWrap, -1,
+                     NIL_P(rtype) ? -1 : rb_ca_guess_type(rtype), 0);
     TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
     if ( NIL_P(rtype) ) {
       data_type = ca->data_type;

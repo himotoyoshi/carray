@@ -31,6 +31,7 @@
 #include "ca_obj_face.h"   /* ca_strip_face for Face producers */
 #include "carray_internal.h"
 #include "ruby/memory_view.h"
+#include <ctype.h>
 #include <string.h>
 
 /* private_data is not used: ca_mv_get is alias-only and ca_mv_release
@@ -277,33 +278,80 @@ ca_mv_ca_exportable (CArray *ca, VALUE obj)
 }
 
 /* Reverse mapping for the importer (Postel consumer; see
-   docs/interop/MemoryViewFormat.md for the contract):
-   - Strip a leading byte-order prefix ('<', '>', '=') if it matches host
-     endian; reject if it disagrees.
-   - Strip the alignment modifier '|'.
-   - Reject endian-bearing primary specifiers ('e','g','E','G','n','v',
-     'N','V'); cross-endian sources are not accepted.
-   - Dispatch on the (stripped_format, item_size) tuple.
-   - Canonical: '?' for bool, 'Zf' / 'Zd' for complex64/128 (PEP 3118).
+   docs/interop/MemoryViewFormat.md for the contract).  Both vocabularies
+   are read: Ruby's (byte order as a suffix, "i<", "s!>"; '_' for '!';
+   'e' 'E' 'g' 'G' 'n' 'N' 'v' 'V' carrying their own order; 'j' 'J' for
+   intptr) and PEP 3118's (order as a prefix '<' '>' '!' '=' '@'; 'b' 'B'
+   'h' 'H' '?'; 'Zf' 'Zd').  The alignment modifier '|' is skipped.
+   - CArray stores host order, so an order that disagrees with the host
+     is refused.  A one-byte type has no order, so any is accepted.
+   - Dispatch on the (type, item_size) tuple.
    - Synonyms accepted but not emitted: 'C'/1 maps to UINT8 (so other
      producers' bool buffers are received as UINT8); 'ff' / 'dd' map to
      complex64/128 (producers that split complex into two floats). */
+
+/* Byte order named in a format: 0 none, 1 little, 2 big. */
+#define CA_MV_ORDER_NONE   0
+#define CA_MV_ORDER_LITTLE 1
+#define CA_MV_ORDER_BIG    2
+
+static int
+ca_mv_order_merge (int a, int b)
+{
+  if ( a == CA_MV_ORDER_NONE ) return b;
+  if ( b == CA_MV_ORDER_NONE ) return a;
+  return ( a == b ) ? a : -1;
+}
+
 static int8_t
 ca_mv_data_type_from_format (const char *format, ssize_t item_size)
 {
+  const int host = (ca_endian == CA_LITTLE_ENDIAN) ? CA_MV_ORDER_LITTLE
+                                                   : CA_MV_ORDER_BIG;
   const char *fmt = format ? format : "";
-  /* Strip alignment and host-matching byte-order prefix. */
+  char buf[16];
+  size_t len;
+  int order = CA_MV_ORDER_NONE;
+  int one_byte;
+
   if (*fmt == '|') fmt++;
-  if (*fmt == '<' || *fmt == '>' || *fmt == '=') {
-    /* The carray runtime stores data in host-endian; cross-endian
-       sources are rejected. */
-    int host_is_le = (ca_endian == CA_LITTLE_ENDIAN);
-    int wants_le   = (*fmt == '<') || (*fmt == '=' && host_is_le);
-    int wants_be   = (*fmt == '>') || (*fmt == '=' && !host_is_le);
-    if ((wants_le && !host_is_le) || (wants_be && host_is_le)) return -1;
-    fmt++;
+  switch (*fmt) {
+  case '<':                     order = CA_MV_ORDER_LITTLE; fmt++; break;
+  case '>': case '!':           order = CA_MV_ORDER_BIG;    fmt++; break;
+  case '=': case '@':           order = host;               fmt++; break;
   }
-  if (*fmt == '\0') return -1;
+  len = strlen(fmt);
+  if ( len == 0 || len >= sizeof(buf) ) return -1;
+  memcpy(buf, fmt, len + 1);
+
+  /* Ruby's suffix form on a single type: "i<", "s!>", "q_<". */
+  if ( len >= 2 && len <= 3 && isalpha((unsigned char) buf[0]) &&
+       ( buf[len - 1] == '<' || buf[len - 1] == '>' ) ) {
+    order = ca_mv_order_merge(order, buf[len - 1] == '<' ? CA_MV_ORDER_LITTLE
+                                                         : CA_MV_ORDER_BIG);
+    if ( order < 0 ) return -1;
+    buf[--len] = '\0';
+  }
+  /* '_' is Ruby's spelling of the native-size modifier '!'. */
+  if ( len == 2 && buf[1] == '_' ) {
+    buf[1] = '!';
+  }
+  /* Types that carry their own byte order. */
+  if ( len == 1 ) {
+    int own = CA_MV_ORDER_NONE;
+    switch (buf[0]) {
+    case 'e': case 'E': case 'v': case 'V': own = CA_MV_ORDER_LITTLE; break;
+    case 'g': case 'G': case 'n': case 'N': own = CA_MV_ORDER_BIG;    break;
+    }
+    order = ca_mv_order_merge(order, own);
+    if ( order < 0 ) return -1;
+  }
+
+  one_byte = ( len == 1 && strchr("cCbB?", buf[0]) != NULL );
+  if ( order != CA_MV_ORDER_NONE && order != host && ! one_byte ) {
+    return -1;
+  }
+  fmt = buf;
 
   /* single-byte formats */
   if (strcmp(fmt, "c")  == 0 && item_size == 1) return CA_INT8;
@@ -316,24 +364,32 @@ ca_mv_data_type_from_format (const char *format, ssize_t item_size)
   if ((strcmp(fmt, "s")  == 0 || strcmp(fmt, "s!") == 0 ||
        strcmp(fmt, "h")  == 0) && item_size == 2) return CA_INT16;
   if ((strcmp(fmt, "S")  == 0 || strcmp(fmt, "S!") == 0 ||
-       strcmp(fmt, "H")  == 0) && item_size == 2) return CA_UINT16;
+       strcmp(fmt, "H")  == 0 || strcmp(fmt, "v")  == 0 ||
+       strcmp(fmt, "n")  == 0) && item_size == 2) return CA_UINT16;
 
   /* 32-bit */
   if ((strcmp(fmt, "l")  == 0 || strcmp(fmt, "i")  == 0 ||
-       strcmp(fmt, "i!") == 0 || strcmp(fmt, "l!") == 0) && item_size == 4) return CA_INT32;
+       strcmp(fmt, "i!") == 0 || strcmp(fmt, "l!") == 0 ||
+       strcmp(fmt, "j")  == 0) && item_size == 4) return CA_INT32;
   if ((strcmp(fmt, "L")  == 0 || strcmp(fmt, "I")  == 0 ||
-       strcmp(fmt, "I!") == 0 || strcmp(fmt, "L!") == 0) && item_size == 4) return CA_UINT32;
+       strcmp(fmt, "I!") == 0 || strcmp(fmt, "L!") == 0 ||
+       strcmp(fmt, "J")  == 0 || strcmp(fmt, "V")  == 0 ||
+       strcmp(fmt, "N")  == 0) && item_size == 4) return CA_UINT32;
 
   /* 64-bit.  `l`/`L` at item_size 8 accepted as LP64 native long
      (numpy default for `np.array([1,2,3]).dtype == int64`). */
   if ((strcmp(fmt, "q")  == 0 || strcmp(fmt, "q!") == 0 ||
-       strcmp(fmt, "l!") == 0 || strcmp(fmt, "l")  == 0) && item_size == 8) return CA_INT64;
+       strcmp(fmt, "l!") == 0 || strcmp(fmt, "l")  == 0 ||
+       strcmp(fmt, "j")  == 0) && item_size == 8) return CA_INT64;
   if ((strcmp(fmt, "Q")  == 0 || strcmp(fmt, "Q!") == 0 ||
-       strcmp(fmt, "L!") == 0 || strcmp(fmt, "L")  == 0) && item_size == 8) return CA_UINT64;
+       strcmp(fmt, "L!") == 0 || strcmp(fmt, "L")  == 0 ||
+       strcmp(fmt, "J")  == 0) && item_size == 8) return CA_UINT64;
 
-  /* floats: no endian-bearing variants accepted */
-  if (strcmp(fmt, "f")  == 0 && item_size == 4) return CA_FLOAT32;
-  if (strcmp(fmt, "d")  == 0 && item_size == 8) return CA_FLOAT64;
+  /* floats */
+  if ((strcmp(fmt, "f")  == 0 || strcmp(fmt, "e")  == 0 ||
+       strcmp(fmt, "g")  == 0) && item_size == 4) return CA_FLOAT32;
+  if ((strcmp(fmt, "d")  == 0 || strcmp(fmt, "E")  == 0 ||
+       strcmp(fmt, "G")  == 0) && item_size == 8) return CA_FLOAT64;
 
   /* complex: PEP 3118 'Zf' / 'Zd' canonical. */
   if (strcmp(fmt, "Zf") == 0 && item_size == 8)  return CA_CMPLX64;
@@ -831,9 +887,25 @@ ca_mv_release (VALUE obj, rb_memory_view_t *view)
    a TypedData holder (also stored as an ivar) releases the view in its
    dfree callback when the CAWrap is collected. */
 
+/* One borrowed view and the geometry read from it.  The geometry is
+   copied out and normalised once (a 0-d view as one element, omitted
+   shape or strides filled in as row-major), so nothing below reads the
+   producer's shape or strides arrays again.
+
+   The holder is a Ruby object from before the view is taken, so a raise
+   at any later point loses nothing: the importers release it at once
+   (rb_protect / rb_ensure), and the holder's dfree releases it in any
+   case.  `lo` / `hi` bound the bytes the elements reach, relative to
+   view.data. */
 typedef struct {
   rb_memory_view_t view;
   bool valid;
+  int8_t ndim;
+  ca_size_t dim[CA_RANK_MAX];
+  ssize_t strides[CA_RANK_MAX];
+  ca_size_t elements;
+  bool contiguous;
+  ssize_t lo, hi;
 } ca_mv_imported_holder_t;
 
 static void
@@ -841,8 +913,8 @@ ca_mv_imported_holder_free (void *p)
 {
   ca_mv_imported_holder_t *h = (ca_mv_imported_holder_t *) p;
   if (h->valid) {
-    rb_memory_view_release(&h->view);
     h->valid = false;
+    rb_memory_view_release(&h->view);
   }
   xfree(h);
 }
@@ -864,149 +936,310 @@ static const rb_data_type_t ca_mv_imported_holder_data_type = {
   .flags = RUBY_TYPED_FREE_IMMEDIATELY
 };
 
-/* Acquire a MemoryView from src and validate/derive data_type, ndim
-   and shape.  Tries STRIDES first; falls back to SIMPLE so that
-   producers that advertise only contiguous still work.  On any
-   failure, releases the view (if acquired) and raises ArgumentError;
-   on success, the view is left active and the caller owns the
-   responsibility to release it.
-
-   `explicit_data_type` is the caller-supplied target data_type (>= 0) or -1
-   if the caller has no preference.  Behaviour:
-     - explicit_data_type < 0, format != NULL: derive data_type from format.
-     - explicit_data_type < 0, format == NULL: reject (typeless source
-       without consumer-supplied type cannot be interpreted).
-     - explicit_data_type >= 0, format != NULL: must match the format's
-       data_type; mismatch -> reject.
-     - explicit_data_type >= 0, format == NULL: use explicit_data_type; the
-       byte buffer is reinterpreted as that data_type.  ndim is forced
-       to 1 (multi-dim from a typeless source is ambiguous; user
-       chains .reshape).
-*/
-/* Row-major contiguity test that tolerates a NULL shape array.  ndim-0
-   scalars and SIMPLE-form producers (which omit the shape array for a
-   contiguous 1-D buffer, e.g. red-arrow's primitive arrays) are
-   contiguous by construction; rb_memory_view_is_row_major_contiguous
-   dereferences view->shape, so it must not be reached with shape NULL. */
-static bool
-ca_mv_view_is_contiguous (const rb_memory_view_t *view)
+static VALUE
+ca_mv_holder_new (ca_mv_imported_holder_t **out)
 {
-  if (view->ndim == 0 || view->shape == NULL) {
-    return true;
-  }
-  return rb_memory_view_is_row_major_contiguous(view);
+  /* Zero-filled: valid is false and the view's item_desc.components is
+     NULL, which release frees unconditionally (red-arrow 24.0.0 leaves
+     that field unwritten, apache/arrow#45187). */
+  return TypedData_Make_Struct(rb_cObject, ca_mv_imported_holder_t,
+                               &ca_mv_imported_holder_data_type, *out);
 }
 
 static void
-ca_mv_acquire_and_validate (VALUE src, rb_memory_view_t *view,
-                            int8_t explicit_data_type,
-                            int8_t *out_data_type, int8_t *out_ndim,
-                            ca_size_t *out_dim)
+ca_mv_holder_release (ca_mv_imported_holder_t *h)
 {
-  int8_t data_type;
-  int i;
+  if (h != NULL && h->valid) {
+    h->valid = false;
+    rb_memory_view_release(&h->view);
+  }
+}
 
-  /* Defensive zero-init: rb_memory_view_release() unconditionally
-     xfree()s view->item_desc.components, but not every producer writes
-     that field.  red-arrow 24.0.0 leaves it uninitialized, so a view
-     acquired from it frees stack garbage on release (abort).  Zeroing
-     here makes the field NULL.  Consumer side of apache/arrow#45187
-     (fixed in Arrow 25.0.0); harmless once producers initialize it. */
-  memset(view, 0, sizeof(*view));
+/* Take a view from src: STRIDES first, SIMPLE for producers that offer
+   only a contiguous buffer.  `writable` asks the producer for a writable
+   view; a producer that refuses that but gives a read-only one is a
+   read-only source. */
+static void
+ca_mv_holder_acquire (ca_mv_imported_holder_t *h, VALUE src, int writable,
+                      const char *who)
+{
+  int extra = writable ? RUBY_MEMORY_VIEW_WRITABLE : 0;
+  memset(&h->view, 0, sizeof(h->view));
+  if ( ! rb_memory_view_get(src, &h->view, RUBY_MEMORY_VIEW_STRIDES | extra) ) {
+    memset(&h->view, 0, sizeof(h->view));
+    if ( ! rb_memory_view_get(src, &h->view, RUBY_MEMORY_VIEW_SIMPLE | extra) ) {
+      if ( writable ) {
+        memset(&h->view, 0, sizeof(h->view));
+        if ( rb_memory_view_get(src, &h->view, RUBY_MEMORY_VIEW_STRIDES) ||
+             rb_memory_view_get(src, &h->view, RUBY_MEMORY_VIEW_SIMPLE) ) {
+          h->valid = true;
+          rb_raise(rb_eRuntimeError,
+                   "MemoryView source is read-only; can't wrap as writable");
+        }
+      }
+      rb_raise(rb_eArgError, "%sobject does not support MemoryView", who);
+    }
+  }
+  h->valid = true;
+  if ( writable && h->view.readonly ) {
+    rb_raise(rb_eRuntimeError,
+             "MemoryView source is read-only; can't wrap as writable");
+  }
+}
 
-  if (! rb_memory_view_get(src, view, RUBY_MEMORY_VIEW_STRIDES)) {
-    if (! rb_memory_view_get(src, view, RUBY_MEMORY_VIEW_SIMPLE)) {
+/* Read the view's geometry for elements of `item_size` bytes, and check
+   it against the buffer.  The buffer is [data, data + byte_size).  For a
+   strided view byte_size is the element count times item_size (the
+   convention CArray's own producer, NumPy and Arrow follow), which does
+   not bound where the strides reach, so only that count is checked; for
+   a contiguous view the shape is checked against the bytes. */
+static void
+ca_mv_holder_read_geometry (ca_mv_imported_holder_t *h, ssize_t item_size,
+                            const char *who)
+{
+  const rb_memory_view_t *v = &h->view;
+  ssize_t expect, need;
+  int8_t k;
+
+  if ( v->ndim < 0 || v->ndim > CA_RANK_MAX ) {
+    rb_raise(rb_eArgError, "%sMemoryView ndim (%ld) exceeds CArray CA_RANK_MAX (%d)",
+             who, (long) v->ndim, CA_RANK_MAX);
+  }
+  if ( v->ndim == 0 ) {
+    h->ndim = 1;
+    h->dim[0] = 1;
+  }
+  else if ( v->shape == NULL ) {
+    /* Only 1-D is readable without a shape: length = byte_size / item_size. */
+    if ( v->ndim > 1 ) {
       rb_raise(rb_eArgError,
-               "object does not support MemoryView");
+               "%sMemoryView reports ndim %ld but provides no shape array",
+               who, (long) v->ndim);
+    }
+    h->ndim = 1;
+    h->dim[0] = (ca_size_t) (item_size > 0 ? v->byte_size / item_size : 0);
+  }
+  else {
+    h->ndim = (int8_t) v->ndim;
+    for (k = 0; k < h->ndim; k++) {
+      if ( v->shape[k] < 0 ) {
+        rb_raise(rb_eArgError, "%sMemoryView shape[%d] is negative (%ld)",
+                 who, (int) k, (long) v->shape[k]);
+      }
+      h->dim[k] = (ca_size_t) v->shape[k];
+    }
+  }
+  h->elements = ca_shape_elements(h->ndim, h->dim, (ca_size_t) item_size);
+
+  if ( v->ndim >= 1 && v->shape != NULL && v->strides != NULL ) {
+    for (k = 0; k < h->ndim; k++) {
+      h->strides[k] = v->strides[k];
+    }
+  }
+  else {
+    expect = item_size;
+    for (k = h->ndim - 1; k >= 0; k--) {
+      h->strides[k] = expect;
+      expect *= (ssize_t) h->dim[k];
     }
   }
 
-  if (view->format == NULL) {
-    /* Typeless producer (e.g. mmap-view, IO#read-style byte blob).
-       Consumer must supply the target data_type. */
-    if (explicit_data_type < 0) {
-      ssize_t got = view->byte_size;
-      rb_memory_view_release(view);
+  h->contiguous = true;
+  expect = item_size;
+  for (k = h->ndim - 1; k >= 0; k--) {
+    if ( h->dim[k] > 1 && h->strides[k] != expect ) {
+      h->contiguous = false;
+    }
+    expect *= (ssize_t) h->dim[k];
+  }
+
+  h->lo = h->hi = 0;
+  if ( h->elements > 0 ) {
+    h->hi = item_size;
+    for (k = 0; k < h->ndim; k++) {
+      ssize_t reach;
+      if ( __builtin_mul_overflow((ssize_t) h->dim[k] - 1, h->strides[k], &reach) ||
+           ( reach < 0 ? __builtin_add_overflow(h->lo, reach, &h->lo)
+                       : __builtin_add_overflow(h->hi, reach, &h->hi) ) ) {
+        rb_raise(rb_eArgError, "%sMemoryView strides reach too far", who);
+      }
+    }
+  }
+
+  need = (ssize_t) h->elements * item_size;
+  if ( v->byte_size < need ) {
+    rb_raise(rb_eArgError,
+             "%sMemoryView reports %ld bytes, but its shape needs %ld",
+             who, (long) v->byte_size, (long) need);
+  }
+}
+
+/* Take the data side's view and resolve its data_type.
+   `explicit_data_type` (the data_type: keyword) must agree with a typed
+   producer's format and names the type of a typeless one.
+   `typeless_data_type` names the type only when the producer is typeless
+   (wrap_readonly / wrap_writable, which adapt a typed producer
+   afterwards).  A typeless producer's bytes are read as one 1-D run, so
+   one whose own geometry is strided is refused. */
+static int8_t
+ca_mv_holder_take_data (ca_mv_imported_holder_t *h, VALUE src,
+                        int8_t explicit_data_type, int8_t typeless_data_type,
+                        int writable)
+{
+  rb_memory_view_t *v = &h->view;
+  int8_t data_type;
+
+  ca_mv_holder_acquire(h, src, writable, "");
+
+  if ( v->format == NULL ) {
+    ssize_t target;
+    data_type = ( explicit_data_type >= 0 ) ? explicit_data_type : typeless_data_type;
+    if ( data_type < 0 ) {
       rb_raise(rb_eArgError,
                "typeless MemoryView (format=NULL, %ld bytes); "
                "specify the target data_type via data_type: kwarg or use a "
                "concrete CArray::<Dtype> factory class",
-               (long) got);
+               (long) v->byte_size);
     }
-    if (ca_mv_format_for(explicit_data_type) == NULL) {
-      rb_memory_view_release(view);
+    if ( ca_mv_format_for(data_type) == NULL ) {
       rb_raise(rb_eArgError,
                "target data_type is not representable via MemoryView");
     }
-    ssize_t target_item_size = (ssize_t) ca_sizeof[explicit_data_type];
-    if (view->byte_size % target_item_size != 0) {
-      ssize_t bs = view->byte_size;
-      rb_memory_view_release(view);
+    ca_mv_holder_read_geometry(h, v->item_size > 0 ? v->item_size : 1, "");
+    if ( ! h->contiguous ) {
+      rb_raise(rb_eArgError,
+               "typeless MemoryView is strided; its bytes cannot be read as "
+               "one run of %s", ca_type_name[data_type]);
+    }
+    target = (ssize_t) ca_sizeof[data_type];
+    if ( v->byte_size % target != 0 ) {
       rb_raise(rb_eArgError,
                "byte_size %ld is not a multiple of target item_size %ld",
-               (long) bs, (long) target_item_size);
+               (long) v->byte_size, (long) target);
     }
-    data_type = explicit_data_type;
-    *out_ndim = 1;
-    out_dim[0] = (ca_size_t) (view->byte_size / target_item_size);
-    *out_data_type = data_type;
-    return;
+    h->ndim       = 1;
+    h->dim[0]     = (ca_size_t) (v->byte_size / target);
+    h->strides[0] = target;
+    h->elements   = h->dim[0];
+    h->contiguous = true;
+    h->lo = 0;
+    h->hi = v->byte_size;
+    return data_type;
   }
 
-  /* Typed producer: derive data_type from format. */
-  data_type = ca_mv_data_type_from_format(view->format, view->item_size);
-  if (data_type < 0) {
-    char fmt_buf[64];
-    snprintf(fmt_buf, sizeof(fmt_buf), "%s", view->format);
-    rb_memory_view_release(view);
-    rb_raise(rb_eArgError,
-             "unsupported MemoryView format: %s (item_size=%ld)",
-             fmt_buf, (long) view->item_size);
+  data_type = ca_mv_data_type_from_format(v->format, v->item_size);
+  if ( data_type < 0 ) {
+    rb_raise(rb_eArgError, "unsupported MemoryView format: %s (item_size=%ld)",
+             v->format, (long) v->item_size);
   }
-
-  /* If the caller specified a data_type too, it must match. */
-  if (explicit_data_type >= 0 && explicit_data_type != data_type) {
-    rb_memory_view_release(view);
+  if ( explicit_data_type >= 0 && explicit_data_type != data_type ) {
     rb_raise(rb_eArgError,
              "explicit data_type does not match producer format "
-             "(producer: %s, requested data_type %d)",
-             view->format, (int) explicit_data_type);
+             "(producer: %s, requested data_type %s)",
+             v->format, ca_type_name[explicit_data_type]);
   }
+  ca_mv_holder_read_geometry(h, v->item_size, "");
+  return data_type;
+}
 
-  if (view->ndim == 0) {
-    *out_ndim = 1;
-    out_dim[0] = 1;
+/* Take the mask's view: one byte per element (bool / uint8 / int8),
+   contiguous, of the data side's shape. */
+static void
+ca_mv_holder_take_mask (ca_mv_imported_holder_t *m, VALUE src,
+                        const ca_mv_imported_holder_t *d)
+{
+  rb_memory_view_t *v = &m->view;
+  int8_t k;
+
+  ca_mv_holder_acquire(m, src, 0, "mask: ");
+  if ( v->format != NULL ) {
+    int8_t dt = ca_mv_data_type_from_format(v->format, v->item_size);
+    if ( dt != CA_BOOLEAN && dt != CA_UINT8 && dt != CA_INT8 ) {
+      rb_raise(rb_eArgError, "mask: format must be bool/uint8/int8 (got %s)",
+               v->format);
+    }
   }
-  else if (view->ndim > CA_RANK_MAX) {
-    long got = (long) view->ndim;
-    rb_memory_view_release(view);
+  if ( v->item_size != 1 ) {
+    rb_raise(rb_eArgError, "mask: item_size must be 1 (got %ld)",
+             (long) v->item_size);
+  }
+  ca_mv_holder_read_geometry(m, 1, "mask: ");
+  if ( m->ndim != d->ndim ) {
+    rb_raise(rb_eArgError, "mask: ndim (%d) does not match data ndim (%d)",
+             (int) m->ndim, (int) d->ndim);
+  }
+  for (k = 0; k < d->ndim; k++) {
+    if ( m->dim[k] != d->dim[k] ) {
+      rb_raise(rb_eArgError, "mask: shape[%d] (%ld) does not match data shape (%ld)",
+               (int) k, (long) m->dim[k], (long) d->dim[k]);
+    }
+  }
+  if ( ! m->contiguous ) {
     rb_raise(rb_eArgError,
-             "MemoryView ndim (%ld) exceeds CArray CA_RANK_MAX (%d)",
-             got, CA_RANK_MAX);
+             "mask: strided masks are not supported in this release; "
+             "pass a row-major contiguous mask buffer");
   }
-  else if (view->shape == NULL) {
-    /* SIMPLE form: a typed producer may advertise a format but omit the
-       shape array for a contiguous 1-D buffer (red-arrow's primitive
-       arrays do this).  Only 1-D is interpretable without a shape --
-       length = byte_size / item_size.  A missing shape at ndim > 1 is
-       unrecoverable. */
-    if (view->ndim > 1) {
-      long got = (long) view->ndim;
-      rb_memory_view_release(view);
-      rb_raise(rb_eArgError,
-               "MemoryView reports ndim %ld but provides no shape array",
-               got);
+}
+
+/* Walk the elements of a view in row-major order, calling `fn` with each
+   element's address.  Returns false as soon as fn does. */
+static bool
+ca_mv_holder_each (const ca_mv_imported_holder_t *h,
+                   bool (*fn)(const char *elem, void *arg), void *arg)
+{
+  ca_size_t idx[CA_RANK_MAX];
+  ca_size_t n;
+  int8_t k;
+  const char *base = (const char *) h->view.data;
+
+  for (k = 0; k < h->ndim; k++) idx[k] = 0;
+  for (n = 0; n < h->elements; n++) {
+    ssize_t off = 0;
+    for (k = 0; k < h->ndim; k++) {
+      off += (ssize_t) idx[k] * h->strides[k];
     }
-    *out_ndim = 1;
-    out_dim[0] = (ca_size_t) (view->item_size ? view->byte_size / view->item_size : 0);
-  }
-  else {
-    *out_ndim = (int8_t) view->ndim;
-    for (i = 0; i < *out_ndim; i++) {
-      out_dim[i] = (ca_size_t) view->shape[i];
+    if ( ! fn(base + off, arg) ) {
+      return false;
+    }
+    for (k = h->ndim - 1; k >= 0; k--) {
+      if ( ++idx[k] < h->dim[k] ) break;
+      idx[k] = 0;
     }
   }
-  *out_data_type = data_type;
+  return true;
+}
+
+static bool
+ca_mv_byte_is_bit (const char *elem, void *arg)
+{
+  (void) arg;
+  return *(const uint8_t *) elem <= 1;
+}
+
+typedef struct {
+  char  *dst;
+  size_t item_size;
+} ca_mv_gather_t;
+
+static bool
+ca_mv_gather_one (const char *elem, void *arg)
+{
+  ca_mv_gather_t *g = (ca_mv_gather_t *) arg;
+  memcpy(g->dst, elem, g->item_size);
+  g->dst += g->item_size;
+  return true;
+}
+
+/* A boolean CArray holds 0 or 1 in each byte.  A copy can normalise other
+   bytes; a wrap shares them, so it refuses a buffer that holds any. */
+static void
+ca_mv_check_bits (const ca_mv_imported_holder_t *h, const char *who)
+{
+  if ( ! ca_mv_holder_each(h, ca_mv_byte_is_bit, NULL) ) {
+    rb_raise(rb_eArgError,
+             "%sboolean MemoryView holds bytes other than 0 and 1; "
+             "a wrap cannot normalise them (CArray.from_memory_view can)", who);
+  }
 }
 
 /* Extract the optional data_type: and mask: keywords from argv.
@@ -1039,478 +1272,288 @@ ca_mv_extract_type_and_mask_kwargs (int argc, VALUE *argv,
   return data_type;
 }
 
-/* ca_mv_acquire_and_validate as an rb_protect body. */
 typedef struct {
-  VALUE             src;
-  rb_memory_view_t *view;
-  int8_t            explicit_data_type;
-  int8_t           *data_type;
-  int8_t           *ndim;
-  ca_size_t        *dim;
-} ca_mv_acquire_args_t;
+  VALUE  obj, mask_obj, target_class;
+  int8_t explicit_data_type, typeless_data_type;
+  int    writable;
+  ca_mv_imported_holder_t *data, *mask;
+  VALUE  data_holder_obj, mask_holder_obj;
+} ca_mv_import_args_t;
 
+/* The body of wrap_memory_view.  Runs under rb_protect; the caller
+   releases both views if it raises. */
 static VALUE
-ca_mv_acquire_body (VALUE arg)
+ca_mv_wrap_body (VALUE arg)
 {
-  ca_mv_acquire_args_t *a = (ca_mv_acquire_args_t *) arg;
-  ca_mv_acquire_and_validate(a->src, a->view, a->explicit_data_type,
-                             a->data_type, a->ndim, a->dim);
-  return Qnil;
-}
+  ca_mv_import_args_t *a = (ca_mv_import_args_t *) arg;
+  ca_mv_imported_holder_t *d = a->data, *m = a->mask;
+  rb_memory_view_t *v = &d->view;
+  ca_size_t bytes;
+  int8_t data_type;
+  volatile VALUE wrap;
+  CArray *ca;
 
-/* Acquire and validate a mask MemoryView against the data side's shape.
-   Returns an allocated holder (caller owns; release via the imported
-   holder TypedData dfree path) with view active on success.
+  data_type = ca_mv_holder_take_data(d, a->obj, a->explicit_data_type,
+                                     a->typeless_data_type, a->writable);
+  bytes = ca_mv_carray_bytes_for(data_type, v->item_size);
 
-   On validation failure: releases the mask view, frees the mask holder,
-   AND ALSO releases the supplied `data_view_to_release_on_fail` + frees
-   the supplied `data_holder_to_free_on_fail` before raising.  This
-   avoids leaking the caller's already-acquired data side when mask
-   validation aborts.  Pass NULL for the data cleanup args if not
-   applicable (e.g. mask validated for a stack-allocated data view in
-   the copy path). */
-typedef struct {
-  VALUE             src;
-  rb_memory_view_t *view;
-  bool              got;
-} ca_mv_mask_get_t;
-
-/* A producer's get can raise (a CArray producer builds its format through
-   Ruby), so it runs under rb_protect for the caller to clean up. */
-static VALUE
-ca_mv_mask_get_body (VALUE arg)
-{
-  ca_mv_mask_get_t *g = (ca_mv_mask_get_t *) arg;
-  g->got = rb_memory_view_get(g->src, g->view, RUBY_MEMORY_VIEW_STRIDES) ||
-           rb_memory_view_get(g->src, g->view, RUBY_MEMORY_VIEW_SIMPLE);
-  return Qnil;
-}
-
-static ca_mv_imported_holder_t *
-ca_mv_acquire_mask_view (VALUE mask_src, int8_t data_ndim,
-                         const ca_size_t *data_dim,
-                         ca_mv_imported_holder_t *data_holder_to_free_on_fail,
-                         rb_memory_view_t *data_view_to_release_on_fail)
-{
-  ca_mv_imported_holder_t *holder;
-  rb_memory_view_t *mv;
-  int i;
-
-# define MV_MASK_CLEANUP() do {                                            \
-    if (holder) {                                                          \
-      if (holder->valid) { rb_memory_view_release(&holder->view); }        \
-      xfree(holder);                                                       \
-    }                                                                      \
-    if (data_view_to_release_on_fail) {                                    \
-      rb_memory_view_release(data_view_to_release_on_fail);                \
-    }                                                                      \
-    if (data_holder_to_free_on_fail) {                                     \
-      data_holder_to_free_on_fail->valid = false;                          \
-      xfree(data_holder_to_free_on_fail);                                  \
-    }                                                                      \
-  } while (0)
-# define MV_MASK_CLEANUP_AND_RAISE(msg, ...) do {                          \
-    MV_MASK_CLEANUP();                                                     \
-    rb_raise(rb_eArgError, msg, ##__VA_ARGS__);                            \
-  } while (0)
-
-  holder = ALLOC(ca_mv_imported_holder_t);
-  holder->valid = false;
-
-  /* Zero-init before get: same apache/arrow#45187 defense as the data
-     path (release frees view->item_desc.components unconditionally). */
-  memset(&holder->view, 0, sizeof(holder->view));
-
-  {
-    ca_mv_mask_get_t g;
-    int tag = 0;
-    g.src = mask_src;  g.view = &holder->view;  g.got = false;
-    /* protect: MV_MASK_CLEANUP also releases the data side's view */
-    rb_protect(ca_mv_mask_get_body, (VALUE) &g, &tag);
-    if (tag) {
-      MV_MASK_CLEANUP();
-      rb_jump_tag(tag);
-    }
-    if (! g.got) {
-      MV_MASK_CLEANUP_AND_RAISE("mask: object does not support MemoryView");
-    }
+  /* A strided producer comes back as a CAStride, so a caller who asked
+     for a class would get something that is not it. */
+  if ( a->target_class != rb_cCAWrap && ! d->contiguous ) {
+    rb_raise(rb_eArgError,
+             "%s was requested, but this producer is strided, so the result "
+             "would be a CAStride; pass a row-major contiguous producer, or "
+             "use CArray.from_memory_view for a copy",
+             rb_class2name(a->target_class));
   }
-  holder->valid = true;
-  mv = &holder->view;
 
-  if (mv->format != NULL) {
-    char c = mv->format[0];
-    /* skip a leading byte-order/native prefix '<>=!@' */
-    if (c == '<' || c == '>' || c == '=' || c == '!' || c == '@') {
-      c = mv->format[1];
+  if ( m != NULL ) {
+    ca_mv_holder_take_mask(m, a->mask_obj, d);
+    if ( ! d->contiguous ) {
+      rb_raise(rb_eArgError,
+               "mask: combining mask: with a strided data source is not "
+               "supported in this release; pass a row-major contiguous "
+               "data source");
     }
-    /* One byte per element, under either vocabulary: PEP 3118 spells the
-       integer widths 'b' / 'B', Ruby's MemoryView spells them 'c' / 'C'.
-       '?' is PEP's boolean, which Ruby has no spelling for. */
-    if (c != '?' && c != 'B' && c != 'b' && c != 'C' && c != 'c') {
-      char fmt_buf[64];
-      snprintf(fmt_buf, sizeof(fmt_buf), "%s", mv->format);
-      MV_MASK_CLEANUP_AND_RAISE("mask: format must be bool/uint8/int8 (got %s)",
-                                fmt_buf);
-    }
-  }
-  if (mv->item_size != 1) {
-    ssize_t got = mv->item_size;
-    MV_MASK_CLEANUP_AND_RAISE("mask: item_size must be 1 (got %ld)",
-                              (long) got);
-  }
-  if (mv->ndim != data_ndim) {
-    int got = (int) mv->ndim;
-    MV_MASK_CLEANUP_AND_RAISE("mask: ndim (%d) does not match data ndim (%d)",
-                              got, (int) data_ndim);
-  }
-  if (mv->shape == NULL) {
-    /* SIMPLE-form mask (contiguous 1-D, shape omitted).  item_size is 1
-       (checked above), so byte_size is the element count. */
-    ca_size_t mlen = (ca_size_t) mv->byte_size;
-    if (data_ndim != 1 || mlen != data_dim[0]) {
-      long ms = (long) mlen, ds = (long) (data_ndim == 1 ? data_dim[0] : -1);
-      MV_MASK_CLEANUP_AND_RAISE(
-          "mask: length (%ld) does not match data shape (%ld)", ms, ds);
-    }
-  }
-  else {
-    for (i = 0; i < data_ndim; i++) {
-      if ((ca_size_t) mv->shape[i] != data_dim[i]) {
-        long ms = (long) mv->shape[i], ds = (long) data_dim[i];
-        MV_MASK_CLEANUP_AND_RAISE(
-            "mask: shape[%d] (%ld) does not match data shape (%ld)",
-            i, ms, ds);
+    /* A mask that shares bytes with the values would take every write
+       to a value as a write to the mask. */
+    if ( d->elements > 0 ) {
+      const char *dlo = (const char *) v->data + d->lo;
+      const char *dhi = (const char *) v->data + d->hi;
+      const char *mlo = (const char *) m->view.data;
+      const char *mhi = mlo + m->elements;
+      if ( mlo < dhi && dlo < mhi ) {
+        rb_raise(rb_eArgError, "mask: the mask buffer overlaps the data buffer");
       }
     }
+    ca_mv_check_bits(m, "mask: ");
   }
-  if (! ca_mv_view_is_contiguous(mv)) {
-    MV_MASK_CLEANUP_AND_RAISE(
-        "mask: strided masks are not supported in this release; "
-        "pass a row-major contiguous mask buffer");
+  if ( data_type == CA_BOOLEAN ) {
+    ca_mv_check_bits(d, "");
   }
 
-# undef MV_MASK_CLEANUP_AND_RAISE
-# undef MV_MASK_CLEANUP
-  return holder;
+  if ( ! d->contiguous ) {
+    /* The foreign bytes the elements reach, [data + lo, data + hi), as a
+       byte array, with the user's CAStride over it.  The parent covers
+       every byte a stride can land on, so a mask made for the view (one
+       mask byte per parent byte) has a place for every element whatever
+       the strides are. */
+    ca_size_t span = (ca_size_t) (d->hi - d->lo);
+    ca_size_t strides_arr[CA_RANK_MAX];
+    volatile VALUE inner_wrap;
+    CArray *iw;
+    int8_t k;
+
+    inner_wrap = rb_ca_wrap_new(CA_UINT8, 1, &span, 1, NULL,
+                                (char *) v->data + d->lo);
+    rb_ivar_set(inner_wrap, rb_intern("memory_view_source"), a->obj);
+    rb_ivar_set(inner_wrap, rb_intern("memory_view_holder"), a->data_holder_obj);
+    if ( v->readonly && ca_mv_extract(inner_wrap, &iw) ) {
+      ca_set_flag(iw, CA_FLAG_READ_ONLY);
+    }
+    for (k = 0; k < d->ndim; k++) {
+      strides_arr[k] = (ca_size_t) d->strides[k];
+    }
+    wrap = rb_ca_stride_new(inner_wrap, data_type, bytes, d->ndim, d->dim,
+                            strides_arr, (ca_size_t) -d->lo);
+    if ( v->readonly && ca_mv_extract(wrap, &ca) ) {
+      ca_set_flag(ca, CA_FLAG_READ_ONLY);
+    }
+    return wrap;
+  }
+
+  /* Same struct rb_ca_wrap_new would build, wrapped in the class the
+     receiver asked for. */
+  wrap = ca_wrap_struct_as(ca_wrap_new(data_type, d->ndim, d->dim, bytes,
+                                       NULL, (char *) v->data),
+                           a->target_class);
+  rb_ivar_set(wrap, rb_intern("memory_view_source"), a->obj);
+  rb_ivar_set(wrap, rb_intern("memory_view_holder"), a->data_holder_obj);
+  ca_mv_extract(wrap, &ca);
+  if ( v->readonly ) {
+    ca_set_flag(ca, CA_FLAG_READ_ONLY);
+  }
+
+  /* Borrowed mask: a CAWrap over the mask bytes, anchored on the same
+     wrap so its lifetime is the data side's.  A store writes the mask
+     cell of every element it stores, so a read-only mask makes the whole
+     array read-only. */
+  if ( m != NULL ) {
+    CArray *mask_ca = (CArray *) ca_wrap_new(CA_BOOLEAN, d->ndim, d->dim, 1,
+                                             NULL, (char *) m->view.data);
+    ca_set_flag(mask_ca, CA_FLAG_MASK_ARRAY);
+    if ( m->view.readonly ) {
+      ca_set_flag(mask_ca, CA_FLAG_READ_ONLY);
+      ca_set_flag(ca, CA_FLAG_READ_ONLY);
+    }
+    ca->mask = mask_ca;
+    rb_ivar_set(wrap, rb_intern("mask_memory_view_source"), a->mask_obj);
+    rb_ivar_set(wrap, rb_intern("mask_memory_view_holder"), a->mask_holder_obj);
+  }
+  return wrap;
 }
 
-/* Copy a strided MemoryView into a contiguous row-major destination buffer.
-   Walks indices in row-major order and reads from view->data using
-   view->strides at each step.  Assumes view->ndim >= 1, view->strides
-   non-NULL, dst sized to hold elements * item_size. */
 static void
-ca_mv_copy_strided_to_contiguous (char *dst, const rb_memory_view_t *view,
-                                  ca_size_t elements)
+ca_mv_import_args_init (ca_mv_import_args_t *a, VALUE obj, VALUE mask_obj)
 {
-  int8_t ndim = (int8_t) view->ndim;
-  ssize_t item_size = view->item_size;
-  ca_size_t idx[CA_RANK_MAX];
-  ca_size_t n;
-  int8_t k;
-
-  for (k = 0; k < ndim; k++) idx[k] = 0;
-
-  for (n = 0; n < elements; n++) {
-    ssize_t src_off = 0;
-    for (k = 0; k < ndim; k++) {
-      src_off += (ssize_t) idx[k] * view->strides[k];
-    }
-    memcpy(dst, (const char *) view->data + src_off, (size_t) item_size);
-    dst += item_size;
-    /* increment row-major: last dim varies fastest */
-    for (k = ndim - 1; k >= 0; k--) {
-      idx[k]++;
-      if (idx[k] < (ca_size_t) view->shape[k]) break;
-      idx[k] = 0;
-    }
+  a->obj = obj;
+  a->mask_obj = mask_obj;
+  a->data_holder_obj = ca_mv_holder_new(&a->data);
+  a->mask = NULL;
+  a->mask_holder_obj = Qnil;
+  if ( ! NIL_P(mask_obj) ) {
+    a->mask_holder_obj = ca_mv_holder_new(&a->mask);
   }
 }
 
-/* CArray.wrap_memory_view(obj, data_type: nil) -- zero-copy CAWrap.
-   Rejects non-row-major-contiguous sources with a helpful pointer to
-   from_memory_view; the contiguous-only contract keeps the boundary
-   between Numo/CArray internal invariants clean (see the design note
-   on strided wrap rejection).
+/* Wrap obj's MemoryView without copying.  `explicit_data_type` and
+   `typeless_data_type` are as for ca_mv_holder_take_data; `writable`
+   asks the producer for a writable view (wrap_writable).  Every view
+   taken is released before a raise leaves. */
+VALUE
+ca_mv_wrap (VALUE obj, VALUE mask_obj, VALUE target_class,
+            int8_t explicit_data_type, int8_t typeless_data_type, int writable)
+{
+  ca_mv_import_args_t a;
+  volatile VALUE result;
+  int tag = 0;
+
+  ca_mv_import_args_init(&a, obj, mask_obj);
+  a.target_class = target_class;
+  a.explicit_data_type = explicit_data_type;
+  a.typeless_data_type = typeless_data_type;
+  a.writable = writable;
+  /* protect: the views are released at once rather than when the holders are collected */
+  result = rb_protect(ca_mv_wrap_body, (VALUE) &a, &tag);
+  if ( tag ) {
+    ca_mv_holder_release(a.mask);
+    ca_mv_holder_release(a.data);
+    rb_jump_tag(tag);
+  }
+  RB_GC_GUARD(a.data_holder_obj);
+  RB_GC_GUARD(a.mask_holder_obj);
+  return result;
+}
+
+/* CArray.wrap_memory_view(obj, data_type: nil, mask: nil) -- zero-copy.
+   A row-major contiguous producer comes back as a CAWrap; a strided one
+   as a CAStride over the foreign bytes, its strides (negative ones
+   included) kept.
 
    When the producer is typeless (format=NULL), `data_type:` must be
    supplied; the byte buffer is reinterpreted as that data_type, ndim=1.
 
    The receiver picks the class of the result.  Called on CArray itself
-   it builds a CAWrap, as it always has; called on a subclass of CAWrap
-   it builds that subclass, so a gem bridging a foreign buffer can name
-   where the array came from without writing a C extension of its own.
-   The class marks the provenance of this object only -- a view derived
-   from it is a CABlock or a CAStride like any other. */
+   it builds a CAWrap; called on a subclass of CAWrap it builds that
+   subclass, so a gem bridging a foreign buffer can name where the array
+   came from without writing a C extension of its own.  The class marks
+   the provenance of this object only -- a view derived from it is a
+   CABlock or a CAStride like any other. */
 static VALUE
 rb_ca_s_wrap_memory_view (int argc, VALUE *argv, VALUE klass)
 {
-  ca_mv_imported_holder_t *holder;
-  ca_mv_imported_holder_t *mask_holder = NULL;
-  rb_memory_view_t *v;
-  int8_t data_type, ndim;
-  ca_size_t dim[CA_RANK_MAX];
-  VALUE wrap, holder_obj, obj, mask_obj, target_class;
+  VALUE obj, mask_obj, target_class;
   int8_t explicit_data_type =
     ca_mv_extract_type_and_mask_kwargs(argc, argv,
                                         (VALUE *) &obj, (VALUE *) &mask_obj);
 
-  /* Resolve the class before anything is acquired, so this rejection
-     needs no cleanup.  CArray means CAWrap; any other receiver has to
-     be a CAWrap the caller can actually be handed. */
   target_class = ( klass == rb_cCArray ) ? rb_cCAWrap : klass;
   if ( ! RTEST(rb_class_inherited_p(target_class, rb_cCAWrap)) ) {
     rb_raise(rb_eTypeError,
              "wrap_memory_view builds a CAWrap; %s is not a subclass of it",
              rb_class2name(target_class));
   }
-
-  holder = ALLOC(ca_mv_imported_holder_t);
-  holder->valid = false;
-
-  /* Acquisition raises on a producer it cannot take (and releases the
-     view itself first); the holder is not a Ruby object yet, so it is
-     freed here. */
-  {
-    ca_mv_acquire_args_t a;
-    a.src = obj;  a.view = &holder->view;
-    a.explicit_data_type = explicit_data_type;
-    a.data_type = &data_type;  a.ndim = &ndim;  a.dim = dim;
-    ca_fill_or_xfree(holder, ca_mv_acquire_body, (VALUE) &a);
-  }
-  holder->valid = true;
-  v = &holder->view;
-
-  /* Whether the producer is strided is only knowable once the view is
-     acquired, and a strided one is returned as a CAStride wrapping an
-     inner CAWrap -- so a caller who asked for a class would get back
-     something that is not it.  Refuse instead, and release first: this
-     runs before the mask is acquired, so the holder is all there is to
-     free. */
-  if ( target_class != rb_cCAWrap &&
-       v->ndim >= 1 && v->format != NULL && ! ca_mv_view_is_contiguous(v) ) {
-    rb_memory_view_release(v);
-    holder->valid = false;
-    xfree(holder);
-    rb_raise(rb_eArgError,
-             "%s was requested, but this producer is strided, so the result "
-             "would be a CAStride; pass a row-major contiguous producer, or "
-             "use CArray.from_memory_view for a copy",
-             rb_class2name(target_class));
-  }
-
-  /* mask: paired buffer.  Acquire + validate now (before building the
-     wrap).  On failure the helper releases both the mask view AND the
-     already-acquired data view + holder, then raises. */
-  if (! NIL_P(mask_obj)) {
-    mask_holder = ca_mv_acquire_mask_view(mask_obj, ndim, dim,
-                                           holder, &holder->view);
-    /* Strided data side combined with mask: is not supported in this
-       release.  Catch this AFTER mask acquisition so the cleanup path can release
-       both views uniformly. */
-    if (v->ndim >= 1 && v->format != NULL &&
-        ! ca_mv_view_is_contiguous(v)) {
-      rb_memory_view_release(&mask_holder->view);
-      mask_holder->valid = false;
-      xfree(mask_holder);
-      rb_memory_view_release(v);
-      holder->valid = false;
-      xfree(holder);
-      rb_raise(rb_eArgError,
-               "mask: combining mask: with a strided data source is not "
-               "supported in this release; pass a row-major contiguous "
-               "data source");
-    }
-  }
-
-  /* Strided producer: build a CAStride on top of an inner CAWrap that
-     anchors the foreign memory.  The inner CAWrap holds the MemoryView
-     lifecycle (memory_view_source + memory_view_holder ivars); the
-     outer CAStride is what the user sees, with full strides
-     (including negative) preserved. */
-  if (v->ndim >= 1 && v->format != NULL &&
-      ! ca_mv_view_is_contiguous(v)) {
-    ca_size_t inner_dim[1] = { 1 };
-    volatile VALUE inner_wrap;
-    ca_size_t strides_arr[CA_RANK_MAX];
-    int i;
-
-    inner_wrap = rb_ca_wrap_new(data_type, 1, inner_dim,
-                                ca_mv_carray_bytes_for(data_type, v->item_size),
-                                NULL, (char *) v->data);
-    rb_ivar_set(inner_wrap, rb_intern("memory_view_source"), obj);
-    holder_obj = TypedData_Wrap_Struct(rb_cObject,
-                                       &ca_mv_imported_holder_data_type,
-                                       holder);
-    rb_ivar_set(inner_wrap, rb_intern("memory_view_holder"), holder_obj);
-    if (v->readonly) {
-      CArray *iw;
-      if (ca_mv_extract(inner_wrap, &iw)) {
-        ca_set_flag(iw, CA_FLAG_READ_ONLY);
-      }
-    }
-    for (i = 0; i < ndim; i++) {
-      strides_arr[i] = (ca_size_t) v->strides[i];
-    }
-    {
-      VALUE result =
-        rb_ca_stride_new(inner_wrap, data_type,
-                         ca_mv_carray_bytes_for(data_type, v->item_size),
-                         ndim, dim, strides_arr, /* base_offset */ 0);
-      if (v->readonly) {
-        CArray *rs;
-        if (ca_mv_extract(result, &rs)) {
-          ca_set_flag(rs, CA_FLAG_READ_ONLY);
-        }
-      }
-      return result;
-    }
-  }
-
-  /* Same struct rb_ca_wrap_new would build, wrapped in the class the
-     receiver asked for.  Everything downstream -- the holder and source
-     ivars, the read-only flag, the borrowed mask -- is untouched, which
-     is the point: those are what a gem building its own wrap by hand
-     has to give up. */
-  wrap = ca_wrap_struct_as(
-           ca_wrap_new(data_type, ndim, dim,
-                       ca_mv_carray_bytes_for(data_type, v->item_size),
-                       NULL, (char *) v->data),
-           target_class);
-
-  rb_ivar_set(wrap, rb_intern("memory_view_source"), obj);
-  holder_obj = TypedData_Wrap_Struct(rb_cObject,
-                                     &ca_mv_imported_holder_data_type,
-                                     holder);
-  rb_ivar_set(wrap, rb_intern("memory_view_holder"), holder_obj);
-
-  if (v->readonly) {
-    CArray *ca;
-    if (ca_mv_extract(wrap, &ca)) {
-      ca_set_flag(ca, CA_FLAG_READ_ONLY);
-    }
-  }
-
-  /* Attach borrowed mask: build a CAWrap over the mask buffer and assign
-     it to wrap->mask.  Anchor the mask MV's source + holder on the same
-     wrap object so the lifecycle is co-terminal with the data side.
-     When `wrap` is collected: free_ca_wrap recurses into ca->mask (frees
-     the mask wrap struct, leaves its borrowed ptr alone); the holder
-     ivars become unreachable and are GC'd separately, each holder.dfree
-     calling rb_memory_view_release. */
-  if (mask_holder != NULL) {
-    CArray *data_ca, *mask_ca;
-    rb_memory_view_t *mv = &mask_holder->view;
-    VALUE mask_holder_obj;
-    if (! ca_mv_extract(wrap, &data_ca)) {
-      rb_memory_view_release(mv);
-      mask_holder->valid = false;
-      xfree(mask_holder);
-      rb_raise(rb_eRuntimeError,
-               "internal: rb_ca_wrap_new did not return a CArray");
-    }
-    mask_ca = (CArray *) ca_wrap_new(CA_BOOLEAN, ndim, dim, 1, NULL,
-                                      (char *) mv->data);
-    ca_set_flag(mask_ca, CA_FLAG_MASK_ARRAY);
-    if (mv->readonly) {
-      ca_set_flag(mask_ca, CA_FLAG_READ_ONLY);
-    }
-    data_ca->mask = mask_ca;
-
-    rb_ivar_set(wrap, rb_intern("mask_memory_view_source"), mask_obj);
-    mask_holder_obj = TypedData_Wrap_Struct(rb_cObject,
-                                             &ca_mv_imported_holder_data_type,
-                                             mask_holder);
-    rb_ivar_set(wrap, rb_intern("mask_memory_view_holder"), mask_holder_obj);
-  }
-
-  return wrap;
+  return ca_mv_wrap(obj, mask_obj, target_class, explicit_data_type, -1, 0);
 }
 
-/* CArray.from_memory_view(obj, data_type: nil) -- copy into an independent CArray.
-   Accepts strided typed sources (gather copy) and typeless sources
-   (must be 1D contiguous; bytes reinterpreted as `data_type:`). */
+/* The body of from_memory_view.  Runs under rb_ensure, which releases
+   both views however it leaves. */
+static VALUE
+ca_mv_from_body (VALUE arg)
+{
+  ca_mv_import_args_t *a = (ca_mv_import_args_t *) arg;
+  ca_mv_imported_holder_t *d = a->data, *m = a->mask;
+  rb_memory_view_t *v = &d->view;
+  int8_t data_type;
+  volatile VALUE result;
+  CArray *ca;
+  ca_size_t i;
+
+  data_type = ca_mv_holder_take_data(d, a->obj, a->explicit_data_type, -1, 0);
+  if ( m != NULL ) {
+    ca_mv_holder_take_mask(m, a->mask_obj, d);
+  }
+
+  result = rb_carray_new(data_type, d->ndim, d->dim,
+                         ca_mv_carray_bytes_for(data_type, v->item_size), NULL);
+  ca_mv_extract(result, &ca);
+
+  if ( d->contiguous ) {
+    memcpy(ca->ptr, v->data, (size_t) ca_length(ca));
+  }
+  else {
+    ca_mv_gather_t g;
+    g.dst = ca->ptr;
+    g.item_size = (size_t) v->item_size;
+    ca_mv_holder_each(d, ca_mv_gather_one, &g);
+  }
+  /* A boolean holds 0 or 1; any other byte reads as true. */
+  if ( data_type == CA_BOOLEAN ) {
+    uint8_t *p = (uint8_t *) ca->ptr;
+    for (i = 0; i < ca->elements; i++) {
+      p[i] = ( p[i] != 0 );
+    }
+  }
+
+  /* Mask bytes: any non-zero byte means masked. */
+  if ( m != NULL ) {
+    const uint8_t *src = (const uint8_t *) m->view.data;
+    boolean8_t *dst;
+    ca_create_mask(ca);
+    dst = (boolean8_t *) ca->mask->ptr;
+    for (i = 0; i < ca->elements; i++) {
+      dst[i] = ( src[i] != 0 ) ? 1 : 0;
+    }
+  }
+  return result;
+}
+
+static VALUE
+ca_mv_from_release (VALUE arg)
+{
+  ca_mv_import_args_t *a = (ca_mv_import_args_t *) arg;
+  ca_mv_holder_release(a->mask);
+  ca_mv_holder_release(a->data);
+  return Qnil;
+}
+
+/* CArray.from_memory_view(obj, data_type: nil, mask: nil) -- copy into an
+   independent CArray.  Accepts strided typed sources (gather copy) and
+   typeless sources (bytes reinterpreted as `data_type:`).  The result is
+   a plain CArray whatever the receiver: a copy no longer borrows anything
+   for a class to name.  A receiver that is not CArray or a CAWrap could
+   not be returned, so it is refused. */
 static VALUE
 rb_ca_s_from_memory_view (int argc, VALUE *argv, VALUE klass)
 {
-  rb_memory_view_t view;
-  ca_mv_imported_holder_t *mask_holder = NULL;
-  int8_t data_type, ndim;
-  ca_size_t dim[CA_RANK_MAX];
-  VALUE result, obj, mask_obj;
-  CArray *ca;
-  bool contig;
+  ca_mv_import_args_t a;
+  VALUE obj, mask_obj;
+  volatile VALUE result;
   int8_t explicit_data_type =
     ca_mv_extract_type_and_mask_kwargs(argc, argv,
                                         (VALUE *) &obj, (VALUE *) &mask_obj);
 
-  ca_mv_acquire_and_validate(obj, &view, explicit_data_type,
-                             &data_type, &ndim, dim);
-
-  /* mask: acquire + validate now so failures clean up the data view too. */
-  if (! NIL_P(mask_obj)) {
-    mask_holder = ca_mv_acquire_mask_view(mask_obj, ndim, dim,
-                                           NULL, &view);
+  if ( klass != rb_cCArray &&
+       ! RTEST(rb_class_inherited_p(klass, rb_cCAWrap)) ) {
+    rb_raise(rb_eTypeError,
+             "from_memory_view builds a CArray; %s cannot be returned from it",
+             rb_class2name(klass));
   }
-
-  result = rb_carray_new(data_type, ndim, dim,
-                         ca_mv_carray_bytes_for(data_type, view.item_size),
-                         NULL);
-  if (! ca_mv_extract(result, &ca)) {
-    rb_memory_view_release(&view);
-    rb_raise(rb_eRuntimeError, "internal: rb_carray_new did not return a CArray");
-  }
-
-  /* Typeless producers (format == NULL) and SIMPLE-form producers (shape
-     omitted) are 1-D contiguous by construction; ca_mv_view_is_contiguous
-     handles the NULL shape that would crash the raw contiguity helper. */
-  contig = (view.format == NULL) || ca_mv_view_is_contiguous(&view);
-
-  if (contig) {
-    size_t total_bytes = (size_t) ca_length(ca);
-    /* For typeless producers byte_size and total_bytes are equal by
-       construction; for typed producers we already validated alignment. */
-    if (view.byte_size < (ssize_t) total_bytes) {
-      rb_memory_view_release(&view);
-      if (mask_holder) {
-        rb_memory_view_release(&mask_holder->view);
-        mask_holder->valid = false;
-        xfree(mask_holder);
-      }
-      rb_raise(rb_eRuntimeError,
-               "internal: byte_size mismatch (carray=%lu, view=%ld)",
-               (unsigned long) total_bytes, (long) view.byte_size);
-    }
-    memcpy(ca->ptr, view.data, total_bytes);
-  }
-  else {
-    /* Strided typed source: walk indices in row-major order and gather. */
-    ca_mv_copy_strided_to_contiguous(ca->ptr, &view, ca->elements);
-  }
-
-  rb_memory_view_release(&view);
-
-  /* mask: materialise the canonical CA_BOOLEAN mask slot via ca_create_mask,
-     then memcpy bytes from the (validated row-major contig 1-byte/elem) mask
-     buffer.  Source format ? / B / b all use byte values where any non-zero
-     means masked; that semantic matches CArray's mask convention directly
-     when we coerce non-zero to 1.  */
-  if (mask_holder) {
-    rb_memory_view_t *mv = &mask_holder->view;
-    size_t n = (size_t) ca->elements;
-    size_t i;
-    const uint8_t *src = (const uint8_t *) mv->data;
-    boolean8_t *dst;
-    ca_create_mask(ca);
-    dst = (boolean8_t *) ca->mask->ptr;
-    for (i = 0; i < n; i++) {
-      dst[i] = (src[i] != 0) ? 1 : 0;
-    }
-    rb_memory_view_release(mv);
-    mask_holder->valid = false;
-    xfree(mask_holder);
-  }
-
+  ca_mv_import_args_init(&a, obj, mask_obj);
+  a.explicit_data_type = explicit_data_type;
+  result = rb_ensure(ca_mv_from_body, (VALUE) &a, ca_mv_from_release, (VALUE) &a);
+  RB_GC_GUARD(a.data_holder_obj);
+  RB_GC_GUARD(a.mask_holder_obj);
   return result;
 }
 
@@ -1533,7 +1576,7 @@ rb_ca_s_memory_view_reject_reason (VALUE klass, VALUE obj)
   CArray *ca;
   ca_mv_reject_t rej;
   if (! ca_mv_extract(obj, &ca)) {
-    return rb_str_new_cstr("not a CArray");
+    return Qnil;
   }
   if (! ca_mv_ca_exportable(ca, obj)) {
     if (ca->data_type == CA_FIXLEN && RTEST(rb_ca_has_data_class(obj))) {

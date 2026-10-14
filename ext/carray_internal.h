@@ -621,4 +621,14 @@ ca_percentile_linear (double lo, double hi, double r, ca_size_t k, ca_size_t n)
    readers, which check the mask first and decode after (carray_cast.c). */
 VALUE rb_ca_ptr2obj_storage (VALUE self, void *ptr);
 
+/* Wrap a MemoryView producer without copying (carray_memory_view.c).
+   explicit_data_type must agree with a typed producer's format and names
+   a typeless one's type; typeless_data_type names only a typeless one's
+   (-1: none).  writable asks the producer for a writable view and raises
+   when the source is read-only.  wrap_readonly / wrap_writable take
+   their operand through this. */
+VALUE ca_mv_wrap (VALUE obj, VALUE mask_obj, VALUE target_class,
+                  int8_t explicit_data_type, int8_t typeless_data_type,
+                  int writable);
+
 #endif /* CARRAY_INTERNAL_H */

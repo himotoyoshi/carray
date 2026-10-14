@@ -188,15 +188,22 @@ class TestFormatParser < Test::Unit::TestCase
   end
 
   # ============================================================
-  # §3.1 explicit-endian primary specifiers are rejected in v1.0
+  # §3.1 explicit-endian primary specifiers
   # ============================================================
 
-  def test_endian_bearing_specifiers_rejected
-    %w[e g E G n v N V].each do |spec|
-      [1, 2, 4, 8].each do |sz|
-        assert_nil(parse(spec, sz),
-                   "explicit-endian specifier #{spec.inspect} must reject")
-      end
+  # Types that carry their own byte order: read when it is the host's,
+  # refused otherwise (CArray stores host order).
+  def test_endian_bearing_specifiers_follow_the_host
+    le = { "e" => [4, :float32], "E" => [8, :float64],
+           "v" => [2, :uint16],  "V" => [4, :uint32] }
+    be = { "g" => [4, :float32], "G" => [8, :float64],
+           "n" => [2, :uint16],  "N" => [4, :uint32] }
+    host, other = (CArray.endian == CA_LITTLE_ENDIAN) ? [le, be] : [be, le]
+    host.each do |spec, (sz, type)|
+      assert_equal type, parse(spec, sz), "#{spec.inspect} in host order"
+    end
+    other.each do |spec, (sz, _)|
+      assert_nil parse(spec, sz), "#{spec.inspect} in the other order must reject"
     end
   end
 

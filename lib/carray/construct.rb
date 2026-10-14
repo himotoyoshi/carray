@@ -314,32 +314,36 @@ class CArray
       CArray.new(self::DataType, shape)
     end
 
-    # @overload from_memory_view(obj)
+    # @overload from_memory_view(obj, mask: nil)
     #   Returns a fresh CArray interpreted as this typed subclass's
     #   `data_type`, imported by copy from a MemoryView producer.
     #   Forwards to
-    #   `CArray.from_memory_view(obj, data_type: self::DataType)`; the
-    #   result is always 1-D (chain `.reshape` for higher rank).
+    #   `CArray.from_memory_view(obj, data_type: self::DataType)`.  A
+    #   typed producer keeps its shape and must agree with the type; a
+    #   typeless one is read as 1-D (chain `.reshape` for higher rank).
     #   @param obj [Object] MemoryView producer.
+    #   @param mask [Object, nil] MemoryView producer of the mask.
     #   @return [CArray]
-    def from_memory_view (obj)
-      CArray.from_memory_view(obj, data_type: self::DataType)
+    def from_memory_view (obj, mask: nil)
+      CArray.from_memory_view(obj, data_type: self::DataType, mask: mask)
     end
 
-    # @overload wrap_memory_view(obj)
+    # @overload wrap_memory_view(obj, mask: nil)
     #   Returns a zero-copy CAWrap over `obj`'s MemoryView interpreted
     #   as this typed subclass's `data_type`. Forwards to
-    #   `CArray.wrap_memory_view(obj, data_type: self::DataType)`; the
-    #   result is always 1-D (chain `.reshape` for higher rank).
+    #   `CArray.wrap_memory_view(obj, data_type: self::DataType)`.  A
+    #   typed producer keeps its shape and must agree with the type; a
+    #   typeless one is read as 1-D (chain `.reshape` for higher rank).
     #
     #   Here the receiver names the element type, not the class of the
     #   result: the call forwards with `CArray` as the receiver, so a
     #   `CAWrap` comes back. Choosing the class is the other reading of
     #   the receiver, and it lives on `CArray.wrap_memory_view` itself.
     #   @param obj [Object] MemoryView producer.
+    #   @param mask [Object, nil] MemoryView producer of the mask.
     #   @return [CAWrap]
-    def wrap_memory_view (obj)
-      CArray.wrap_memory_view(obj, data_type: self::DataType)
+    def wrap_memory_view (obj, mask: nil)
+      CArray.wrap_memory_view(obj, data_type: self::DataType, mask: mask)
     end
 
   end
