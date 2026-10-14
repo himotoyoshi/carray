@@ -832,13 +832,9 @@ class TestT1KernelIterator < Test::Unit::TestCase
     assert_equal CArray::T1_ITER_OK, rc
   end
 
-  def test_step6_mask_macro_count_unmasked
-    # Smoke-test the CA_COUNT_UNMASKED macro via a C extension shim
-    # isn't worth wiring up; we instead pin the equivalent Ruby
-    # observation (= the same kernel-author skip logic) by checking
-    # that the smoke's mask_bytes contains the expected number of
-    # 1-bits (= masked count) so a kernel using CA_FOR_EACH_UNMASKED
-    # would skip them.
+  def test_step6_mask_bytes_count
+    # The smoke's mask_bytes carries one 1-byte per masked cell, so a
+    # kernel using CA_FOR_EACH_UNMASKED skips exactly those.
     a = CArray.float64(10).seq
     a.mask = CA_BOOLEAN([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
     r = CArray.t1_smoke_with_mask(a)

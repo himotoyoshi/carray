@@ -39,6 +39,56 @@ iw_fiber_fill (VALUE klass, VALUE vdst, VALUE vaxis, VALUE vval)
   return Qnil;
 }
 
+/* Writes `val` into the first cell of every fiber along `axis` and leaves
+   the rest of each fiber as the kernel received it, so a test can see
+   whether the cells the kernel did not write come back unchanged. */
+static VALUE
+iw_fiber_fill_first (VALUE klass, VALUE vdst, VALUE vaxis, VALUE vval)
+{
+  CArray       *dst;
+  double        v    = NUM2DBL(vval);
+  int           axis = NUM2INT(vaxis);
+  ca_iter_state st;
+  char         *p;
+  ca_size_t     n;
+
+  (void) klass;
+  TypedData_Get_Struct(vdst, CArray, &carray_data_type, dst);
+
+  CA_FOR_EACH_FIBER(st, dst, axis,
+                    CA_KERNEL_WRITE | CA_KERNEL_NO_MASK, p, n) {
+    if ( n > 0 ) ((double *) p)[0] = v;
+  }
+  return Qnil;
+}
+
+/* Writes `val` into the first `count` cells of a whole-array (L1) write
+   walk and leaves the others as the kernel received them. */
+static VALUE
+iw_whole_fill_prefix (VALUE klass, VALUE vdst, VALUE vcount, VALUE vval)
+{
+  CArray       *dst;
+  double        v     = NUM2DBL(vval);
+  ca_size_t     count = NUM2SIZET(vcount);
+  ca_iter_state st;
+  char         *p;
+  boolean8_t   *m;
+  ca_size_t     n, done = 0;
+
+  (void) klass;
+  TypedData_Get_Struct(vdst, CArray, &carray_data_type, dst);
+  ca_iter_check_init(ca_iter_state_init_l1(&st, dst, CA_SLAB_WHOLE, NULL, 0,
+                                           CA_KERNEL_WRITE));
+  while ( ca_iter_state_next_slab(&st, &p, &m, &n) ) {
+    for ( ca_size_t i = 0; i < n && done < count; i++, done++ ) {
+      ((double *) p)[i] = v;
+    }
+    ca_iter_state_sync_slab(&st);
+  }
+  ca_iter_state_finish(&st);
+  return Qnil;
+}
+
 /* CA_SLAB_AXES without FIBER_CONTIG: the slab is walked with strides. */
 static VALUE
 iw_slab_fill (VALUE klass, VALUE vdst, VALUE vaxis, VALUE vval)
@@ -608,6 +658,8 @@ void
 Init_iter_write (void)
 {
   rb_define_singleton_method(rb_cCArray, "iw_fiber_fill", iw_fiber_fill, 3);
+  rb_define_singleton_method(rb_cCArray, "iw_fiber_fill_first", iw_fiber_fill_first, 3);
+  rb_define_singleton_method(rb_cCArray, "iw_whole_fill_prefix", iw_whole_fill_prefix, 3);
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill", iw_slab_fill, 3);
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill_mask", iw_slab_fill_mask, 3);
   rb_define_singleton_method(rb_cCArray, "iw_init_rc", iw_init_rc, 3);

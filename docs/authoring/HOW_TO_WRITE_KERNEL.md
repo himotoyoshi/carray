@@ -922,17 +922,8 @@ walkthrough. You supply:
     - max:  `if (v > acc) acc = v`
     - mean: `(acc += v, cnt++)`  (caller declares `cnt`)
 
-Convenience aliases for the four standard numeric data_types:
-
-| Macro                | Forwards to                          |
-|----------------------|--------------------------------------|
-| `CA_SLAB_REDUCE_F64` | `CA_SLAB_REDUCE_T(double, ...)`      |
-| `CA_SLAB_REDUCE_F32` | `CA_SLAB_REDUCE_T(float, ...)`       |
-| `CA_SLAB_REDUCE_I32` | `CA_SLAB_REDUCE_T(int32_t, ...)`     |
-| `CA_SLAB_REDUCE_I64` | `CA_SLAB_REDUCE_T(int64_t, ...)`     |
-
-Use `CA_SLAB_REDUCE_T` directly for non-standard element types
-(`boolean8_t`, `int8_t`, `uint16_t`, complex, …).
+`T_LOAD` is any element C type: `double`, `float`, `int32_t`,
+`int64_t`, `boolean8_t`, `uint16_t`, complex, …
 
 Mask semantics: when `m != NULL`, masked cells are skipped (REDUCE is
 not invoked). When `m == NULL`, every cell contributes.
@@ -943,11 +934,11 @@ Sibling reductions reuse the same surface — only the init and REDUCE
 expression change:
 
 ```c
-/* sum  */ CA_SLAB_REDUCE_F64(st, p, m, acc, 0.0,        acc += v);
-/* mean */ CA_SLAB_REDUCE_F64(st, p, m, acc, 0.0,        (acc += v, cnt++));
-/* min  */ CA_SLAB_REDUCE_F64(st, p, m, acc,  INFINITY,  if (v < acc) acc = v);
-/* max  */ CA_SLAB_REDUCE_F64(st, p, m, acc, -INFINITY,  if (v > acc) acc = v);
-/* prod */ CA_SLAB_REDUCE_F64(st, p, m, acc, 1.0,        acc *= v);
+/* sum  */ CA_SLAB_REDUCE_T(double, st, p, m, acc, 0.0,        acc += v);
+/* mean */ CA_SLAB_REDUCE_T(double, st, p, m, acc, 0.0,        (acc += v, cnt++));
+/* min  */ CA_SLAB_REDUCE_T(double, st, p, m, acc,  INFINITY,  if (v < acc) acc = v);
+/* max  */ CA_SLAB_REDUCE_T(double, st, p, m, acc, -INFINITY,  if (v > acc) acc = v);
+/* prod */ CA_SLAB_REDUCE_T(double, st, p, m, acc, 1.0,        acc *= v);
 /* var  */ /* needs second-moment accumulator; same shape */
 ```
 
@@ -987,8 +978,6 @@ You supply:
     - sqrt: `r = sqrt(v)`
     - square: `r = v * v`
     - cast + clamp: `r = (T_OUT) (v < 0 ? 0 : (v > MAX ? MAX : v))`
-
-Convenience alias `CA_SLAB_MAP_F64` = `CA_SLAB_MAP_T(double, double, ...)`.
 
 Mask handling is **not** done by `CA_SLAB_MAP_T` itself. If the input
 is masked, MAP_EXPR is still evaluated for every cell; the caller is
@@ -1056,7 +1045,7 @@ fiber/slab walk):
 
 | DSL form | emits per data type | underlying surface |
 |---|---|---|
-| `MkKernel.reduce` | a reduction helper + dispatcher | `CA_SLAB_REDUCE_T` (or the SIMD-licensed `_PLUS/_MIN/_MAX/_STAR_EX` variants when `reduction_kind:` is set; `CA_SLAB_REDUCE_ARRAY_T*` for `array_arg` weighted reductions) |
+| `MkKernel.reduce` | a reduction helper + dispatcher | `CA_SLAB_REDUCE_T` (or the SIMD-licensed `_PLUS/_MIN/_MAX/_STAR_EX` variants when `reduction_kind:` is set; `CA_SLAB_REDUCE_ARRAY_T_EX` / `_PLUS_EX` for `array_arg` weighted reductions) |
 | `MkKernel.scan` | a prefix-scan helper | `CA_SLAB_SCAN_T` / `CA_SLAB_SCAN_TA` |
 | `MkKernel.sort` | a per-fiber position kernel (argsort / partition / rank) | `CA_FOR_EACH_FIBER` + a hand-rolled stable sort / quickselect |
 | `MkKernel.search` | a per-slab search (author-written C body) | `CA_FOR_EACH_SLAB` walk |
@@ -1809,7 +1798,7 @@ The complete FROZEN set (mirrored by the banner in
 | Category | Frozen names |
 |---|---|
 | **Block macros** | `CA_FOR_EACH_SLAB`, `CA_FOR_EACH_SLAB_INOUT`, `CA_FOR_EACH_FIBER`, `CA_FOR_EACH_FIBER_MASKED`, `CA_FOR_EACH_FIBER_INOUT`, `CA_FOR_EACH_FIBER_INOUT_MASKED` |
-| **Body macros** | `CA_SLAB_REDUCE_T` (+ `_EX` / `_PLUS_EX` / `_MIN_EX` / `_MAX_EX` / `_STAR_EX` and the `_PLUS` / `_MIN` / `_MAX` / `_STAR` wrappers), `CA_SLAB_REDUCE_F64` / `_F32` / `_I32` / `_I64`, `CA_SLAB_REDUCE_ARRAY_T` (+ `_EX` / `_PLUS` / `_PLUS_EX`), `CA_SLAB_MAP_T`, `CA_SLAB_MAP_F64`, `CA_SLAB_SCAN_T`, `CA_SLAB_SCAN_TA`, `CA_FOR_EACH_UNMASKED`, `CA_FOR_EACH_INDEX_UNMASKED`, `CA_COUNT_UNMASKED`, `CA_MASK_GET`, `CA_L2_FOR_EACH`, `CA_L2_FOR_EACH_UNMASKED` |
+| **Body macros** | `CA_SLAB_REDUCE_T` (+ `_EX` / `_PLUS_EX`), `CA_SLAB_REDUCE_ARRAY_T_EX` (+ `_PLUS_EX`), `CA_SLAB_MAP_T`, `CA_SLAB_SCAN_T`, `CA_SLAB_SCAN_TA`, `CA_FOR_EACH_UNMASKED`, `CA_L2_FOR_EACH` |
 | **Raw-API entry points** | `ca_iter_state_init_l2`, `ca_iter_state_next_slab_axes`, `ca_iter_state_sync_slab`, `ca_iter_state_finish` |
 | **Enum / status tokens** | `CA_SLAB_AXES`, `CA_KERNEL_WRITE`, `CA_KERNEL_NO_MASK`, `CA_ITER_OK`, `CA_ITER_ERR_*` |
 | **Slab-delivery representation** (`ca_iter_state` fields a kernel reads) | `slab_ndim`, `slab_dims[]`, `slab_strides[]`, `slab_mask_strides[]`, `slab_elements`, `outer_ndim`, `outer_axes[]`, `outer_dims[]` |

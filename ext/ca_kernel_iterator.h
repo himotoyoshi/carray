@@ -14,9 +14,8 @@
       - the author macros: the CA_FOR_EACH_SLAB / _FIBER / _WHOLE
         families (including _FIBER_PAIR / _FIBER_PAIR_MASKED), the
         CA_SLAB_REDUCE_* / _MAP_* / _SCAN_* suites except the generator-
-        only macros listed under INTERNAL, CA_L2_FOR_EACH /
-        CA_L2_FOR_EACH_UNMASKED, and the mask helpers CA_*_UNMASKED,
-        CA_COUNT_UNMASKED and CA_MASK_GET
+        only macros listed under INTERNAL, CA_L2_FOR_EACH, and the mask
+        helper CA_FOR_EACH_UNMASKED
       - the raw-API entry points the macros expand to: ca_iter_state_
         init_l1 / next_slab / init_l2 / init_l2_paired / next_slab_axes /
         sync_slab / finish / close, ca_iter_check_init,
@@ -39,8 +38,9 @@
       - the macros only the kernel generator (ext/mkkernel.rb) emits:
         CA_SLAB_REDUCE_SUM8_EX / MIN8_EX / MAX8_EX / STAR8_EX (8-way
         accumulator split; they take EXPR(x) rather than exposing v and
-        idx), CA_SLAB_SCAN_T_GATED, and CA_SLAB_REDUCE_T_VAR_EX (no
-        caller)
+        idx), CA_SLAB_REDUCE_T_MIN_EX / _MAX_EX / _STAR_EX (what it emits
+        when a :min / :max / :prod kernel does not take the 8-way form),
+        CA_SLAB_SCAN_T_GATED, and CA_SLAB_REDUCE_T_VAR_EX (no caller)
       - alias_mode / src_kind routing (CA_ITER_ALIAS_* / CA_ITER_SRC_* /
         CA_KERNEL_FIBER_CONTIG / CA_SLAB_FREE / CA_SLAB_WHOLE)
       - every ca_iter_state field NOT marked frozen (scratch / stack /
@@ -777,8 +777,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    all cells as unmasked), or a `boolean8_t *` of length n where
    non-zero entries indicate masked (= "skip this cell").
 
-   PROPOSAL_T1_KERNEL_ITERATOR.md §2.4.  GCC statement-expression for
-   CA_COUNT_UNMASKED is GCC/Clang only (MSVC not in scope).
+   PROPOSAL_T1_KERNEL_ITERATOR.md §2.4.
    --------------------------------------------------------------------- */
 
 #define CA_FOR_EACH_UNMASKED(p, mask, n, body) do { \
@@ -790,31 +789,9 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     } \
 } while (0)
 
-#define CA_FOR_EACH_INDEX_UNMASKED(p, mask, n, i, body) do { \
-    if (mask) { \
-        for (ca_size_t i = 0; i < (n); i++) if (!(mask)[i]) { body } \
-    } else { \
-        for (ca_size_t i = 0; i < (n); i++) { body } \
-    } \
-} while (0)
-
-#define CA_COUNT_UNMASKED(mask, n) ({ \
-    ca_size_t _ca_cnt = 0; \
-    ca_size_t _ca_n   = (n); \
-    if (mask) { \
-        for (ca_size_t _ca_i = 0; _ca_i < _ca_n; _ca_i++) \
-            if (!(mask)[_ca_i]) _ca_cnt++; \
-    } else { \
-        _ca_cnt = _ca_n; \
-    } \
-    _ca_cnt; \
-})
-
-#define CA_MASK_GET(mask, i) ((mask) ? (mask)[i] : 0)
-
 /* ---- L2 inner-loop macros (step 8+) -----------------------------------
-   `CA_L2_FOR_EACH(T, ptr, n, stride, p, body)` and its unmasked sibling
-   wrap the strided callback signature `(ptr, n, stride_bytes)` with a
+   `CA_L2_FOR_EACH(T, ptr, n, stride, p, body)` wraps the strided
+   callback signature `(ptr, n, stride_bytes)` with a
    `stride == sizeof(T)` fast-path branch.  When the runtime stride
    matches the element size, `body` runs against a `T *p` that the
    compiler can autovectorise; when it doesn't, `p` is recomputed per
@@ -825,7 +802,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    prove contig on the kernel-side loop.  When the iterator hands a
    contig scratch (= descriptor materialise path, stride == bytes), the
    universal-dispatch cost (step 5.5 §10.4.5) shows up as an 18-22%
-   SIMD inhibition on the kernel.  These macros let kernel authors recover
+   SIMD inhibition on the kernel.  This macro lets kernel authors recover
    the contig autovectorisation without giving up the L2 surface.
 
    This is the standard pattern for L2 kernels: write the body once,
@@ -855,39 +832,6 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
         for (ca_size_t _l2_i = 0; _l2_i < _l2_n; _l2_i++) { \
             T *p = (T *)(_l2_b + _l2_i * _l2_s); \
             body \
-        } \
-    } \
-} while (0)
-
-#define CA_L2_FOR_EACH_UNMASKED(T, ptr, mask, n, stride, p, body) do { \
-    ca_size_t   _l2_n = (n); \
-    ca_size_t   _l2_s = (stride); \
-    char       *_l2_b = (char *)(ptr); \
-    boolean8_t *_l2_m = (mask); \
-    if (_l2_s == sizeof(T)) { \
-        T *p = (T *)_l2_b; \
-        if (_l2_m) { \
-            for (ca_size_t _l2_i = 0; _l2_i < _l2_n; _l2_i++) { \
-                if (!_l2_m[_l2_i]) { body } \
-                p++; \
-            } \
-        } else { \
-            for (ca_size_t _l2_i = 0; _l2_i < _l2_n; _l2_i++) { \
-                body \
-                p++; \
-            } \
-        } \
-    } else { \
-        if (_l2_m) { \
-            for (ca_size_t _l2_i = 0; _l2_i < _l2_n; _l2_i++) { \
-                T *p = (T *)(_l2_b + _l2_i * _l2_s); \
-                if (!_l2_m[_l2_i]) { body } \
-            } \
-        } else { \
-            for (ca_size_t _l2_i = 0; _l2_i < _l2_n; _l2_i++) { \
-                T *p = (T *)(_l2_b + _l2_i * _l2_s); \
-                body \
-            } \
         } \
     } \
 } while (0)
@@ -1204,10 +1148,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
      - p:          slab data pointer (char *).
      - m:          slab mask pointer (boolean8_t *, may be NULL).
 
-   Convenience aliases (defined below): CA_SLAB_REDUCE_F64, _F32, _I32,
-   _I64.  Use those when the load type is one of the standard four
-   numerics; use CA_SLAB_REDUCE_T directly for less common types
-   (boolean8_t, int8_t, uint16_t, ...).
+   T is the load type: double, float, int32_t, int64_t, or any other
+   element type (boolean8_t, int8_t, uint16_t, ...).
 
    Mask semantics: when m != NULL, masked cells are skipped (REDUCE is
    not invoked).  When m == NULL, every cell contributes.
@@ -2158,32 +2100,6 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     (void) idx;                                                              \
   } while (0)
 
-/* No-mask wrappers (hide masked_cnt) — parallel to CA_SLAB_REDUCE_T. */
-#define CA_SLAB_REDUCE_T_PLUS(T, st, p, m, acc, INIT, REDUCE) do {            \
-    ca_size_t __sr_throwaway_mc = 0;                                         \
-    CA_SLAB_REDUCE_T_PLUS_EX(T, st, p, m, acc, INIT, REDUCE,                 \
-                             __sr_throwaway_mc);                             \
-    (void) __sr_throwaway_mc;                                                \
-  } while (0)
-#define CA_SLAB_REDUCE_T_MIN(T, st, p, m, acc, INIT, REDUCE) do {             \
-    ca_size_t __sr_throwaway_mc = 0;                                         \
-    CA_SLAB_REDUCE_T_MIN_EX(T, st, p, m, acc, INIT, REDUCE,                  \
-                            __sr_throwaway_mc);                              \
-    (void) __sr_throwaway_mc;                                                \
-  } while (0)
-#define CA_SLAB_REDUCE_T_MAX(T, st, p, m, acc, INIT, REDUCE) do {             \
-    ca_size_t __sr_throwaway_mc = 0;                                         \
-    CA_SLAB_REDUCE_T_MAX_EX(T, st, p, m, acc, INIT, REDUCE,                  \
-                            __sr_throwaway_mc);                              \
-    (void) __sr_throwaway_mc;                                                \
-  } while (0)
-#define CA_SLAB_REDUCE_T_STAR(T, st, p, m, acc, INIT, REDUCE) do {            \
-    ca_size_t __sr_throwaway_mc = 0;                                         \
-    CA_SLAB_REDUCE_T_STAR_EX(T, st, p, m, acc, INIT, REDUCE,                 \
-                             __sr_throwaway_mc);                             \
-    (void) __sr_throwaway_mc;                                                \
-  } while (0)
-
 /* Multi-acc variant (two accumulators).  No kernel uses it: variance /
  * stddev are computed in two passes (Σx for the mean, then Σ(x-mean)^2),
  * each a single-accumulator reduction through SUM8_EX / PLUS_EX.
@@ -2340,13 +2256,6 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     (void) idx;                                                              \
   } while (0)
 
-#define CA_SLAB_REDUCE_ARRAY_T(T, T_W, st, p, m, st_w, p_w, acc, INIT, REDUCE) do { \
-    ca_size_t __sra_throwaway_mc = 0;                                         \
-    CA_SLAB_REDUCE_ARRAY_T_EX(T, T_W, st, p, m, st_w, p_w, acc, INIT, REDUCE, \
-                              __sra_throwaway_mc);                            \
-    (void) __sra_throwaway_mc;                                                \
-  } while (0)
-
 /* CA_SLAB_REDUCE_ARRAY_T_PLUS_EX (SL.1.4b):
  *   Parallel-array PLUS variant of CA_SLAB_REDUCE_ARRAY_T_EX.
  *   no-mask + both-contig inner loop carries `#pragma omp simd
@@ -2468,23 +2377,6 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     (void) idx;                                                              \
   } while (0)
 
-#define CA_SLAB_REDUCE_ARRAY_T_PLUS(T, T_W, st, p, m, st_w, p_w, acc,        \
-                                     INIT, REDUCE) do {                      \
-    ca_size_t __sra_throwaway_mc = 0;                                         \
-    CA_SLAB_REDUCE_ARRAY_T_PLUS_EX(T, T_W, st, p, m, st_w, p_w, acc, INIT,   \
-                                    REDUCE, __sra_throwaway_mc);              \
-    (void) __sra_throwaway_mc;                                                \
-  } while (0)
-
-#define CA_SLAB_REDUCE_F64(st, p, m, acc, INIT, REDUCE)                       \
-        CA_SLAB_REDUCE_T(double,  st, p, m, acc, INIT, REDUCE)
-#define CA_SLAB_REDUCE_F32(st, p, m, acc, INIT, REDUCE)                       \
-        CA_SLAB_REDUCE_T(float,   st, p, m, acc, INIT, REDUCE)
-#define CA_SLAB_REDUCE_I32(st, p, m, acc, INIT, REDUCE)                       \
-        CA_SLAB_REDUCE_T(int32_t, st, p, m, acc, INIT, REDUCE)
-#define CA_SLAB_REDUCE_I64(st, p, m, acc, INIT, REDUCE)                       \
-        CA_SLAB_REDUCE_T(int64_t, st, p, m, acc, INIT, REDUCE)
-
 /* CA_SLAB_MAP_T(T_IN, T_OUT, ...): generic per-cell transform from
    input slab to output slab, walking both in lockstep.  T_IN is the
    input element load type, T_OUT is the output element store type.
@@ -2506,9 +2398,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    shape-equal CArrays.  Mask handling is **not** done by this macro —
    if your input is masked, see §8 Mask handling in
    docs/authoring/HOW_TO_WRITE_KERNEL.md.  Caller is responsible for invoking
-   ca_iter_state_sync_slab on the output state after each slab.
-
-   Convenience aliases below: CA_SLAB_MAP_F64 (T_IN = T_OUT = double). */
+   ca_iter_state_sync_slab on the output state after each slab. */
 #define CA_SLAB_MAP_T(T_IN, T_OUT, st_in, p_in, st_out, p_out, MAP_EXPR) do { \
     int8_t    __mK       = (st_in).slab_ndim;                                \
     int8_t    __mOuterK  = __mK - 1;                                         \
@@ -2552,9 +2442,6 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       }                                                                      \
     }                                                                        \
   } while (0)
-
-#define CA_SLAB_MAP_F64(st_in, p_in, st_out, p_out, MAP_EXPR)                 \
-        CA_SLAB_MAP_T(double, double, st_in, p_in, st_out, p_out, MAP_EXPR)
 
 /* CA_SLAB_SCAN_T(T_LOAD, T_OUT, ...): cumulative / prefix-scan walk
    that combines a reduction (running accumulator) with a map (per-cell

@@ -36,6 +36,36 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: C extensions: a whole-array kernel iterator write walk
+  (`ca_iter_state_init_l1` with `CA_KERNEL_WRITE`) over a view that
+  shows a cell of its array twice, such as `a[CA_INT64([0, 0, 2]), nil]`,
+  keeps what the kernel wrote into one copy; the copy it left alone
+  used to overwrite it.
+
+- Fix: C extensions: a kernel iterator write walk along the last axis
+  (`CA_FOR_EACH_FIBER` with `CA_KERNEL_WRITE`) of a type-converting
+  view, such as `a.fake(:float64)` over an int64 array, leaves the cells
+  the kernel did not write as they were. They were written back through
+  the conversion, so an int64 above 2**53 came back rounded.
+
+- Change: C extensions: fifteen kernel iterator macros that only
+  shortened another one are removed. Write what they stood for:
+  `CA_SLAB_REDUCE_F64` / `_F32` / `_I32` / `_I64` are
+  `CA_SLAB_REDUCE_T` with `double` / `float` / `int32_t` / `int64_t`.
+  `CA_SLAB_REDUCE_T_PLUS` is `CA_SLAB_REDUCE_T_PLUS_EX`, and
+  `CA_SLAB_REDUCE_ARRAY_T` / `_ARRAY_T_PLUS` are
+  `CA_SLAB_REDUCE_ARRAY_T_EX` / `_ARRAY_T_PLUS_EX`, each given a
+  throwaway `ca_size_t` for the masked count. `CA_SLAB_REDUCE_T_MIN` /
+  `_T_MAX` / `_T_STAR` are `CA_SLAB_REDUCE_T` with the min, max or
+  product written in the reduce expression (the loop is not given the
+  SIMD reduction pragma they asked for). `CA_SLAB_MAP_F64` is
+  `CA_SLAB_MAP_T(double, double, ...)`. For `CA_L2_FOR_EACH_UNMASKED`,
+  `CA_FOR_EACH_INDEX_UNMASKED`, `CA_COUNT_UNMASKED` and `CA_MASK_GET`,
+  test the mask in the body of `CA_L2_FOR_EACH` or
+  `CA_FOR_EACH_UNMASKED`, or read it directly. `CA_SLAB_REDUCE_T_MIN_EX`
+  / `_MAX_EX` / `_STAR_EX` stay in the header for the kernel generator
+  but are no longer part of the author surface.
+
 - Change: an attribute value is stored as a frozen copy, nested Arrays
   and Hashes included, and `set_attr` / `set_attrs` raise `FrozenError`
   on a frozen array. Change an attribute by setting it again: changing

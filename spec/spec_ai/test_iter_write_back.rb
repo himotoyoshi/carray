@@ -303,6 +303,27 @@ class TestIterWriteBack < Test::Unit::TestCase
     assert_equal 0, CArray.iw_init_rc(base.shift(1, 0), 0, 0), "shift READ is fine"
   end
 
+  # A write sends back only the cells the kernel changed.  Two views where
+  # sending the whole slab back is wrong: a grid that shows a root row
+  # twice (the copy the kernel did not write would overwrite the one it
+  # did) and a conversion that does not bring every value back (an int64
+  # above 2**53 seen as float64).
+  def test_a_whole_write_over_a_repeated_row_keeps_the_written_copy
+    r = CArray.float64(3, 4).seq!
+    CArray.iw_whole_fill_prefix(r[CA_INT64([0, 0, 2]), nil], 4, -1.0)
+    assert_equal [[-1.0] * 4, [4.0, 5.0, 6.0, 7.0], [8.0, 9.0, 10.0, 11.0]], r.to_a
+    r = CArray.float64(3, 4).seq!
+    CArray.iw_whole_fill_prefix(r[CA_INT64([0, 0]), CA_INT64([2, 2])], 1, -1.0)
+    assert_equal [[0.0, 1.0, -1.0, 3.0], [4.0, 5.0, 6.0, 7.0], [8.0, 9.0, 10.0, 11.0]], r.to_a
+  end
+
+  def test_a_fiber_write_over_a_lossy_conversion_keeps_the_unwritten_cells
+    big = 2**53 + 1
+    r = CArray.int64(3, 4) { big }
+    CArray.iw_fiber_fill_first(r.fake(:float64), 1, -1.0)
+    assert_equal [[-1, big, big, big]] * 3, r.to_a
+  end
+
   # init_l2 walks named axes only.  The whole array is init_l1's walk, and
   # one strided run per innermost row is CA_SLAB_AXES with the last axis.
   def test_init_l2_refuses_the_whole_array_policy

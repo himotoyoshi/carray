@@ -507,7 +507,6 @@ ca_iter_should_per_fiber_fused (CArray   *src,
                                 uint32_t  flags)
 {
   (void) fiber_axis;
-  (void) flags;
 
   /* F.6.2: CAFake / CAByteSwap (transform-fused, X.4 per-region).
      Enable when fiber-axis effective stride == view cell bytes
@@ -527,7 +526,12 @@ ca_iter_should_per_fiber_fused (CArray   *src,
      materialise path (= arena-pooled scratches from Phase 3) is
      structurally different from the X.4 inner-contig fast path.  */
   void *attach = ca_func[src->obj_type].attach;
-  if ( src_kind == CA_ITER_SRC_ATTACH ) {
+  /* A conversion view is read-only on this path.  Its put-back sends the
+     whole fiber, and a cell the kernel did not write does not come back
+     unchanged through a conversion that loses information (an int64
+     above 2^53 seen as float64), so a write takes the transfer walk,
+     which sends back only the changed cells (promise 3). */
+  if ( src_kind == CA_ITER_SRC_ATTACH && !(flags & CA_KERNEL_WRITE) ) {
     if ( attach == ca_fake_func.attach
          || attach == ca_byte_swap_func.attach
          || ca_monop_view_is_single_cast(src) ) {
@@ -732,6 +736,38 @@ ca_iter_check_init (int rc)
   return rc;   /* not reached */
 }
 
+/* Attaches a CAStack's parents and keeps their buffers.  stack_n_parents
+   counts the parents attached so far, so an attach that raises leaves
+   finish with exactly those to detach (promise 4). */
+static void
+ki_attach_stack_parents (ca_iter_state *st, CAStack *stack)
+{
+  st->stack_n_parents = 0;
+  st->stack_parent_ptrs =
+      (char **) xmalloc(stack->n_parents * sizeof(char *));
+  for ( int32_t kk = 0; kk < stack->n_parents; kk++ ) {
+    ca_attach(stack->parents[kk]);   /* window: finish detaches the counted parents */
+    st->stack_parent_ptrs[kk] = (char *) stack->parents[kk]->ptr;
+    st->stack_n_parents = kk + 1;
+  }
+}
+
+/* Promise 2: the mask cursor a walk hands out is the walk's own copy of
+   the source's mask, taken when the walk opens -- one flag per cell, in
+   the view's row-major order -- never the live mask, so a write through
+   it reaches nothing.  A source without a mask leaves alias_mask NULL.
+   finish frees the copy. */
+static void
+ki_take_mask_copy (ca_iter_state *st, CArray *src)
+{
+  if ( ! ca_has_mask(src) ) return;
+  st->scratch_mask = (boolean8_t *) xmalloc(src->elements > 0 ? src->elements : 1);
+  if ( src->elements > 0 ) {
+    ca_xfer_all(src->mask, (char *) st->scratch_mask, CA_XFER_GET);
+  }
+  st->alias_mask = st->scratch_mask;
+}
+
 /* Whole-view scratch.  The view is gathered into the walk's scratch,
    by the view's own transfer (by_copy = 0) or by ca_copy_data (by_copy =
    1, the CAStride compose-fold).  A WRITE walk sends back only the cells
@@ -854,14 +890,7 @@ ki_open_by_transfer (ca_iter_state *st, CArray *src, uint32_t flags)
   st->chunk_size          = st->slab_n;
   st->outer_idx           = NULL;
 
-  if ( ca_has_mask(src) ) {
-    ca_size_t mcap = src->elements > 0 ? src->elements : 1;
-    st->scratch_mask = (boolean8_t *) xmalloc(mcap);
-    if ( src->elements > 0 ) {
-      ca_xfer_all(src->mask, (char *) st->scratch_mask, CA_XFER_GET);
-    }
-    st->alias_mask = st->scratch_mask;
-  }
+  ki_take_mask_copy(st, src);
 }
 
 static int
@@ -914,6 +943,16 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
                                           &route_ndim);
   if ( src_kind == CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE ) {
     src_kind = CA_ITER_SRC_DESCRIPTOR;
+  }
+  /* A write over a descriptor view takes the transfer walk, as an L2
+     write over an INDEX or SHIFT slab axis does.  Gathering with the
+     descriptor engine would leave nothing to send back but the whole
+     view, and a view that shows a root cell twice (a grid with a
+     repeated index) would then let the copy the kernel did not write
+     overwrite the one it did (promise 3: only the changed cells go
+     back). */
+  if ( src_kind == CA_ITER_SRC_DESCRIPTOR && (flags & CA_KERNEL_WRITE) ) {
+    src_kind = CA_ITER_SRC_ATTACH;
   }
 
   st->src      = src;
@@ -983,18 +1022,7 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
     st->alias_mode = CA_ITER_ALIAS_NONE;
     st->alias_ptr  = st->scratch_ptr;
 
-    /* Step 6: gather mask via ca_copy_data on src->mask (works for
-       all descriptor views — mask propagates through their
-       func_copy_data via the descriptor framework's own mask
-       handling). */
-    if ( ca_has_mask(src) ) {
-      ca_size_t mcap = src->elements > 0 ? src->elements : 1;
-      st->scratch_mask = (boolean8_t *) xmalloc(mcap);
-      if ( src->elements > 0 ) {
-        ca_copy_data(src->mask, (char *) st->scratch_mask);
-      }
-      st->alias_mask = st->scratch_mask;
-    }
+    ki_take_mask_copy(st, src);
     return CA_ITER_OK;
   }
 
@@ -1014,21 +1042,7 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
     st->alias_ptr  = st->scratch_ptr;
   }
 
-  /* Step 6: gather mask into scratch_mask if source carries one.
-     We always gather into a contig boolean8_t buffer for uniformity
-     across alias / scratch / descriptor paths — the kernel sees a
-     simple `boolean8_t *` aligned with the value slab.  Future
-     optimisation: alias mask directly for CAStride contig.  Mask is
-     informational; kernel uses CA_FOR_EACH_UNMASKED macros to skip
-     masked cells. */
-  if ( ca_has_mask(src) ) {
-    ca_size_t mcap = src->elements > 0 ? src->elements : 1;
-    st->scratch_mask = (boolean8_t *) xmalloc(mcap);
-    if ( src->elements > 0 ) {
-      ca_copy_data(src->mask, (char *) st->scratch_mask);
-    }
-    st->alias_mask = st->scratch_mask;
-  }
+  ki_take_mask_copy(st, src);
   return CA_ITER_OK;
 }
 
@@ -1412,17 +1426,9 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
                      ? CA_ITER_ALIAS_PER_SLAB_HOIST
                      : CA_ITER_ALIAS_PER_SLAB;
 
-      /* Mask: gather whole view mask once into scratch_mask (= same
-         strategy as B.1.5).  Per-slab mask offset is computed via
-         outer_idx × outer_mask_strides in next_slab_axes. */
-      if ( ca_has_mask(src) ) {
-        ca_size_t mcap = src->elements > 0 ? src->elements : 1;
-        st->scratch_mask = (boolean8_t *) xmalloc(mcap);
-        if ( src->elements > 0 ) {
-          ca_copy_data(src->mask, (char *) st->scratch_mask);
-        }
-        st->alias_mask = st->scratch_mask;
-      }
+      /* The per-slab mask offset is outer_idx × outer_mask_strides, in
+         next_slab_axes. */
+      ki_take_mask_copy(st, src);
 
       return CA_ITER_OK;
     }
@@ -1441,6 +1447,13 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
         outer_has_shift = 1;
         break;
       }
+    }
+
+    /* The whole-view gather below is read-only too: a write sends back
+       only the changed cells, which the transfer walk does. */
+    if ( outer_has_shift && (flags & CA_KERNEL_WRITE) ) {
+      src_kind = CA_ITER_SRC_ATTACH;
+      goto slab_axes_by_transfer;
     }
 
     if ( outer_has_shift || whole_view ) {
@@ -1527,14 +1540,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
         st->outer_idx = NULL;
       }
 
-      if ( ca_has_mask(src) ) {
-        ca_size_t mcap = src->elements > 0 ? src->elements : 1;
-        st->scratch_mask = (boolean8_t *) xmalloc(mcap);
-        if ( src->elements > 0 ) {
-          ca_copy_data(src->mask, (char *) st->scratch_mask);
-        }
-        st->alias_mask = st->scratch_mask;
-      }
+      ki_take_mask_copy(st, src);
       return CA_ITER_OK;
     }
 
@@ -1650,15 +1656,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     st->alias_mode = CA_ITER_ALIAS_STRIDED;
     st->alias_ptr  = (char *) parent->ptr;
 
-    /* Mask gather (= view row-major boolean8_t). */
-    if ( ca_has_mask(src) ) {
-      ca_size_t mcap = src->elements > 0 ? src->elements : 1;
-      st->scratch_mask = (boolean8_t *) xmalloc(mcap);
-      if ( src->elements > 0 ) {
-        ca_copy_data(src->mask, (char *) st->scratch_mask);
-      }
-      st->alias_mask = st->scratch_mask;
-    }
+    ki_take_mask_copy(st, src);
     return CA_ITER_OK;
   }
 slab_axes_by_transfer:
@@ -1802,16 +1800,7 @@ slab_axes_by_transfer:
          guarantees uniform shape (MEMO §3.2) so one set of parent
          native byte strides covers all K (= parents[0]->dim is
          canonical). */
-      /* stack_n_parents counts the parents attached so far: an attach
-         that raises leaves finish with exactly those to detach. */
-      st->stack_n_parents = 0;
-      st->stack_parent_ptrs =
-          (char **) xmalloc(stack->n_parents * sizeof(char *));
-      for ( int32_t kk = 0; kk < stack->n_parents; kk++ ) {
-        ca_attach(stack->parents[kk]);   /* window: finish detaches the counted parents */
-        st->stack_parent_ptrs[kk] = (char *) stack->parents[kk]->ptr;
-        st->stack_n_parents = kk + 1;
-      }
+      ki_attach_stack_parents(st, stack);
       {
         ca_size_t s = src->bytes;
         for ( int8_t kk = parent_ndim - 1; kk >= 0; kk-- ) {
@@ -1967,16 +1956,7 @@ slab_axes_by_transfer:
 
       /* Attach K parents + cache ptr aliases.  Symmetric with rev3
          Case B; for entity parents attach is O(1). */
-      /* stack_n_parents counts the parents attached so far: an attach
-         that raises leaves finish with exactly those to detach. */
-      st->stack_n_parents = 0;
-      st->stack_parent_ptrs =
-          (char **) xmalloc(stack->n_parents * sizeof(char *));
-      for ( int32_t kk = 0; kk < stack->n_parents; kk++ ) {
-        ca_attach(stack->parents[kk]);   /* window: finish detaches the counted parents */
-        st->stack_parent_ptrs[kk] = (char *) stack->parents[kk]->ptr;
-        st->stack_n_parents = kk + 1;
-      }
+      ki_attach_stack_parents(st, stack);
 
       /* If CAStack carries mask (= horizontal propagation already
          applied at create_mask), copy the K parent masks as they are
@@ -2092,20 +2072,12 @@ slab_axes_by_transfer:
       st->outer_idx = NULL;
     }
 
-    if ( ca_has_mask(src) ) {
-      if ( per_fiber_fused ) {
-        /* F.6.1 rev2 §3.3: mask travels with data per-fiber.  Mask
-           buffer is delivered through fiber_mask_scratch by
-           next_slab_axes; no whole-view materialise. */
-        st->alias_mask = NULL;
-      } else {
-        ca_size_t mcap = src->elements > 0 ? src->elements : 1;
-        st->scratch_mask = (boolean8_t *) xmalloc(mcap);
-        if ( src->elements > 0 ) {
-          ca_copy_data(src->mask, (char *) st->scratch_mask);
-        }
-        st->alias_mask = st->scratch_mask;
-      }
+    if ( per_fiber_fused ) {
+      /* The mask travels with the data, fiber by fiber, through
+         fiber_mask_scratch in next_slab_axes. */
+      st->alias_mask = NULL;
+    } else {
+      ki_take_mask_copy(st, src);
     }
     return CA_ITER_OK;
   }
@@ -2252,17 +2224,9 @@ slab_axes_by_transfer:
     st->alias_ptr  = (char *) src->ptr;
   }
 
-  /* Mask: gather to scratch_mask in view row-major order (= same as
-     L1 path).  The mask layout matches view->dim row-major, which is
-     what slab_mask_strides / outer_mask_strides walk. */
-  if ( ca_has_mask(src) ) {
-    ca_size_t mcap = src->elements > 0 ? src->elements : 1;
-    st->scratch_mask = (boolean8_t *) xmalloc(mcap);
-    if ( src->elements > 0 ) {
-      ca_copy_data(src->mask, (char *) st->scratch_mask);
-    }
-    st->alias_mask = st->scratch_mask;
-  }
+  /* The copy is in view row-major order, which is what
+     slab_mask_strides / outer_mask_strides walk. */
+  ki_take_mask_copy(st, src);
   return CA_ITER_OK;
 }
 
@@ -2902,23 +2866,8 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
        it fires for any source whose fiber is not innermost-contig -- so
        for SRC_ATTACH this has just written the fiber back into the
        whole-view scratch, and the push-back below carries it to the
-       source.  For the alias paths scratch_ptr is NULL and the switch
-       below early-returns. */
-  }
-
-  /* SRC_ATTACH path: the kernel wrote into the iterator's whole-view
-     scratch.  The changed cells go back through the view's own transfer,
-     which converts, packs or scatters them as the view requires.
-
-     This has to stay below the two per-fiber blocks: consulting
-     src_kind first would push back the whole-view buffer while the
-     fiber the author actually wrote sat unscattered in
-     fiber_data_scratch, and would push back a NULL one for
-     PER_FIBER_FUSED, which owns no whole-view buffer at all. */
-  if ( st->src_kind == CA_ITER_SRC_ATTACH ) {
-    ki_scratch_push_changed(st);
-    st->write_dirty = 0;
-    return;
+       source.  For the alias paths scratch_ptr is NULL and the push-back
+       below is skipped. */
   }
 
   /* alias path: kernel wrote through alias_ptr into parent directly
@@ -2929,45 +2878,25 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
      back once, by finish (ca_sync_detach on the root). */
   if ( st->scratch_ptr == NULL ) return;
 
-  /* scratch path: scatter back the materialised buffer into the
-     source view.  src_kind chooses the engine: */
-  switch ( st->src_kind ) {
-    case CA_ITER_SRC_CASTRIDE:
-      /* Two producers of CAStride + scratch: L1 non-contig, and the L2
-         non-entity-root path (init_l2's use_view_scratch).  Both gathered
-         with ca_copy_data into a view row-major buffer; the changed
-         cells go back through the view's own transfer, which asks the
-         root for the region it owns. */
-      ki_scratch_push_changed(st);
-      break;
+  /* scratch path: the kernel wrote into a whole-view scratch, and the
+     changed cells go back through the view's own transfer, which
+     converts, packs or scatters them as the view requires (promise 3).
+     Every write walk that reads a scratch gathered it with
+     ki_gather_view, which keeps the copy the comparison needs: the
+     transfer walk (SRC_ATTACH) and the CAStride paths that read a
+     gathered copy.  The descriptor engine's own gathers serve reads
+     only; a write over a descriptor view is sent to the transfer walk
+     at init.
 
-    case CA_ITER_SRC_DESCRIPTOR: {
-      /* Sub-step 5.4: descriptor framework scatter back.
-         ca_axis_dispatch_scatter is the P3-landed engine entry that
-         handles per-axis kind (STRIDE / INDEX / SHIFT) gather direction
-         in reverse — INDEX duplicates yield last-write-wins (R5 spec),
-         SHIFT OOB cells in CAWindow FILL policy are skipped (no parent
-         destination), CAShift WRAP/REFLECT bounds map back to interior
-         and are written normally.  Iteration order is engine-defined;
-         user kernels must not rely on it.
-
-         scatter wants the pre-merge raw descriptors (the engine re-runs
-         _prepare internally with whatever we give it).  init cached
-         the post-merge axes in st->descs for the slab offset math; we
-         re-call describe_axes here for the scatter
-         call rather than caching a second copy in the state struct. */
-      ca_axis_desc_t raw_descs[CA_RANK_MAX];
-      ca_size_t      raw_pdims[CA_RANK_MAX];
-      int8_t         raw_ndim = 0;
-      ca_iter_describe_axes(st->src, raw_descs, raw_pdims, &raw_ndim);
-      ca_axis_dispatch_scatter(st->root /* parent */,
-                               raw_pdims,
-                               raw_descs, raw_ndim,
-                               st->bytes, st->total_elements,
-                               st->scratch_ptr);
-      break;
-    }
+     This has to stay below the two per-fiber blocks: pushing back first
+     would send the whole-view buffer while the fiber the author actually
+     wrote sat unscattered in fiber_data_scratch. */
+  if ( st->src_kind != CA_ITER_SRC_ATTACH
+       && st->src_kind != CA_ITER_SRC_CASTRIDE ) {
+    rb_bug("kernel iterator: a write walk over a scratch with nothing to "
+           "compare it against (src_kind %d)", (int) st->src_kind);
   }
+  ki_scratch_push_changed(st);
   st->write_dirty = 0;
 }
 

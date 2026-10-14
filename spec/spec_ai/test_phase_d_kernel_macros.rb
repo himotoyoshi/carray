@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 #
-# Phase D POC — CA_SLAB_REDUCE_F64 macro suite tests.
+# Phase D POC — CA_SLAB_REDUCE_T macro suite tests.
 #
 # Pins:
 #   - sum_ki / mean_ki / min_ki / max_ki parity against CArray#sum etc.
