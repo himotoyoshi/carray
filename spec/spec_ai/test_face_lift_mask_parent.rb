@@ -33,9 +33,16 @@ class TestFaceLiftMaskParent < Test::Unit::TestCase
     assert_equal want, got
   end
 
+  # The first walk of a process loads and sets up code paths it has not run
+  # yet; under GC.stress that takes seconds.  Walking once without the
+  # stress first keeps the stressed walk to the views it is about: they are
+  # still made inside the stressed block, so their intermediate Face is
+  # still collected there.
+
   def test_each_slab_over_masked_face_view
     a = masked_time
     want = a.copy.reshape(4, 5).count_masked(axis: 1).to_a
+    a.reshape(4, 5)[nil, :>].each { |row| row.copy.count_masked }
     got = []
     under_gc_stress do
       a.reshape(4, 5)[nil, :>].each { |row| got << row.copy.count_masked }
@@ -45,14 +52,18 @@ class TestFaceLiftMaskParent < Test::Unit::TestCase
 
   def test_unmasked_then_masked_slab_walk
     vals = Array.new(20) { |i| "2024-01-#{(i % 9 + 1).to_s.rjust(2, '0')}" }
+    sources = [false, true].map do |masked|
+      src = CArray.time(vals, unit: :D)
+      if masked
+        src = src.copy
+        src[1] = UNDEF
+        src[6] = UNDEF
+      end
+      [masked, src]
+    end
+    sources.each { |_, src| src.reshape(4, 5)[nil, :>].each { |p| p.copy } }
     under_gc_stress do
-      [false, true].each do |masked|
-        src = CArray.time(vals, unit: :D)
-        if masked
-          src = src.copy
-          src[1] = UNDEF
-          src[6] = UNDEF
-        end
+      sources.each do |masked, src|
         pieces = []
         src.reshape(4, 5)[nil, :>].each { |p| pieces << p.copy }
         assert_equal (masked ? [1, 1, 0, 0] : [0, 0, 0, 0]),

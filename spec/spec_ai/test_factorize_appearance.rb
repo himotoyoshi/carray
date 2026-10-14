@@ -83,9 +83,16 @@ class TestFactorizeAppearance < Test::Unit::TestCase
 
   def test_narrowing_uint16_to_uint32_boundary
     # k = 70000 crosses the uint16 (<=65535) -> uint32 storage boundary.
-    a = CArray.int32(70000) { |i| i % 70000 }
-    assert_equal CA_UINT32, a.categorize.codes.data_type
-    assert_categorize_matches(a, "k=70000 uint32")
+    # The values are 0...70000 twice over, so the expected labels and codes
+    # are known without the reference: labels in appearance order are
+    # 0...70000 and each cell's code is its value.  (The reference compares
+    # every label against every cell, k * n = 10 billion comparisons here.)
+    a = CArray.int32(140000) { |i| i % 70000 }
+    cat = a.categorize
+    assert_equal CA_UINT32, cat.codes.data_type
+    assert_equal (0...70000).to_a, cat.labels, "k=70000 uint32: labels (appearance order)"
+    assert_equal a.to_a, cat.codes.to_a, "k=70000 uint32: codes"
+    assert_equal 0, cat.codes.count_masked, "k=70000 uint32: no masked code"
   end
 
   def test_single_group
