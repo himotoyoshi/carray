@@ -81,6 +81,23 @@ CArray#__reduce_by_axis_groups__
 CArray#__scan_by_axis_groups__
 CAWindow#__boundary_rule_of_each_axis__
 
+# --- per-category and per-segment kernels (private): kept under their
+#     current names (the user's decision: the long names read worse)
+CArray#__bincount_count__
+CArray#__bincount_weighted__
+CArray#__categorical_scatter__
+CArray#__fiber_scatter_moments__
+CArray#__fiber_scatter_prod__
+CArray#__fiber_scatter_wsum_wmean__
+CArray#__reduceat_all_any__
+CArray#__reduceat_argminmax__
+CArray#__reduceat_moments__
+CArray#__reduceat_percentile__
+CArray#__reduceat_prod__
+CArray#__reduceat_quantile__
+CArray#__reduceat_variance__
+CArray#__reduceat_wsum_wmean__
+
 # --- NOT YET SORTED.  Each of these is to be made private / protected with an
 #     ordinary name (or renamed and moved above with the user's permission).
 #     Remove a line when its method is done; never add one here.
@@ -125,10 +142,7 @@ CATriOp#__trapping__
 CATriOp#__triop_op2__
 CATriOp#__triop_op3__
 CATriOp.__build__
-CArray#__bincount_count__
-CArray#__bincount_weighted__
 CArray#__blank_like__
-CArray#__categorical_scatter__
 CArray#__comparable_storage__
 CArray#__count_below__
 CArray#__create_mask__
@@ -137,9 +151,6 @@ CArray#__each_fiber_key__
 CArray#__face_clip__
 CArray#__face_storage__
 CArray#__factorize_appearance__
-CArray#__fiber_scatter_moments__
-CArray#__fiber_scatter_prod__
-CArray#__fiber_scatter_wsum_wmean__
 CArray#__gap_fill__
 CArray#__gap_fill_linear__
 CArray#__hold__
@@ -156,14 +167,6 @@ CArray#__mode_axis__
 CArray#__nunique__
 CArray#__orderable_storage__
 CArray#__reconcile_operand__
-CArray#__reduceat_all_any__
-CArray#__reduceat_argminmax__
-CArray#__reduceat_moments__
-CArray#__reduceat_percentile__
-CArray#__reduceat_prod__
-CArray#__reduceat_quantile__
-CArray#__reduceat_variance__
-CArray#__reduceat_wsum_wmean__
 CArray#__strip_mask_const__
 CArray#__union__
 CArray#__unique_flat__
