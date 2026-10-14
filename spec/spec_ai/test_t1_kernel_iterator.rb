@@ -31,6 +31,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
   ALIAS_CONTIG  = CArray::T1_ITER_ALIAS_CONTIG
   ALIAS_NONE    = CArray::T1_ITER_ALIAS_NONE
   ALIAS_STRIDED = CArray::T1_ITER_ALIAS_STRIDED
+  ALIAS_PER_SLAB = CArray::T1_ITER_ALIAS_PER_SLAB
   ERR_READONLY  = CArray::T1_ITER_ERR_READONLY
   ERR_MASK      = CArray::T1_ITER_ERR_MASK
 
@@ -421,7 +422,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
     r = CArray.t1_smoke_strided(v)
     assert_equal OK,         r[:rc]
     assert_equal v.elements, r[:total_elems]
-    assert_equal ALIAS_NONE, r[:alias_mode]
+    assert_equal ALIAS_PER_SLAB, r[:alias_mode] unless CArray.__iter_by_transfer_only__   # gathered one row at a time
     assert_equal v.to_ca.dump_binary, r[:data]
   end
 
@@ -434,7 +435,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
     r = CArray.t1_smoke_strided(v)
     assert_equal OK,         r[:rc]
     assert_equal v.elements, r[:total_elems]
-    assert_equal ALIAS_NONE, r[:alias_mode]
+    assert_equal ALIAS_PER_SLAB, r[:alias_mode] unless CArray.__iter_by_transfer_only__   # gathered one row at a time
     assert_equal v.to_ca.dump_binary, r[:data]
   end
 
@@ -537,7 +538,7 @@ class TestT1KernelIterator < Test::Unit::TestCase
     r = CArray.t1_smoke_strided(v)
     assert_equal OK,         r[:rc]
     assert_equal v.elements, r[:total_elems]
-    assert_equal ALIAS_NONE, r[:alias_mode]
+    assert_equal ALIAS_PER_SLAB, r[:alias_mode] unless CArray.__iter_by_transfer_only__   # gathered one row at a time
     assert_equal v.to_ca.dump_binary, r[:data]
   end
 

@@ -37,6 +37,7 @@ class TestF2InnermostStride < Test::Unit::TestCase
   OK            = CArray::T1_ITER_OK
   ALIAS_NONE    = CArray::T1_ITER_ALIAS_NONE
   ALIAS_STRIDED = CArray::T1_ITER_ALIAS_STRIDED
+  ALIAS_PER_SLAB = CArray::T1_ITER_ALIAS_PER_SLAB
 
   # These tests assert the route the iterator picks, which
   # CARRAY_GENERAL_PATH=2 replaces with the transfer walk.
@@ -75,13 +76,13 @@ class TestF2InnermostStride < Test::Unit::TestCase
   end
 
   def test_cawindow_innermost_shift_outer_interior_falls_back
-    # Innermost axis is SHIFT (= boundary crossing): not eligible → fall
-    # back to SRC_DESCRIPTOR materialise.
+    # Innermost axis is SHIFT (= boundary crossing): not eligible, the
+    # rows are gathered one at a time.
     a = CArray.float64(5, 5).seq
     v = a.window(1..3, -1..3, fill_value: -1.0)
     r = CArray.t1_smoke_strided(v)
     assert_equal OK,         r[:rc]
-    assert_equal ALIAS_NONE, r[:alias_mode]
+    assert_equal ALIAS_PER_SLAB, r[:alias_mode] unless CArray.__iter_by_transfer_only__   # gathered one row at a time
     assert_equal v.to_ca.dump_binary, r[:data]
   end
 
@@ -143,15 +144,15 @@ class TestF2InnermostStride < Test::Unit::TestCase
   end
 
   def test_csa_indirect_axis_innermost_falls_back
-    # a[nil, nil, mask]: axis 2 (= innermost) INDEX → not eligible,
-    # materialise.
+    # a[nil, nil, mask]: axis 2 (= innermost) INDEX → not eligible, the
+    # rows are gathered one at a time.
     a = CArray.float64(3, 4, 5).seq
     m = CA_BOOLEAN([true, false, true, true, false])
     v = a[nil, nil, m]
     assert_equal [3, 4, 3], v.dim.to_a
     r = CArray.t1_smoke_strided(v)
     assert_equal OK,         r[:rc]
-    assert_equal ALIAS_NONE, r[:alias_mode]
+    assert_equal ALIAS_PER_SLAB, r[:alias_mode] unless CArray.__iter_by_transfer_only__   # gathered one row at a time
     assert_equal v.to_ca.dump_binary, r[:data]
   end
 
@@ -193,7 +194,7 @@ class TestF2InnermostStride < Test::Unit::TestCase
     assert_equal [4, 4], v.dim.to_a
     r = CArray.t1_smoke_strided(v)
     assert_equal OK,         r[:rc]
-    assert_equal ALIAS_NONE, r[:alias_mode]
+    assert_equal ALIAS_PER_SLAB, r[:alias_mode] unless CArray.__iter_by_transfer_only__   # gathered one row at a time
     assert_equal v.to_ca.dump_binary, r[:data]
   end
 

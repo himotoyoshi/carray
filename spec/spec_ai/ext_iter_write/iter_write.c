@@ -119,9 +119,8 @@ iw_read_poke_mask (VALUE klass, VALUE vsrc, VALUE vaxis)
   return mask_seen ? Qtrue : Qfalse;
 }
 
-/* The mask an L2 CA_SLAB_WHOLE walk hands out through
-   ca_iter_state_next_slab_strided, flattened in walk order; nil when no
-   mask cursor is given. */
+/* The mask an L2 walk along the last axis hands out, flattened in walk
+   order (row-major); nil when no mask cursor is given. */
 static VALUE
 iw_strided_mask (VALUE klass, VALUE vsrc)
 {
@@ -129,17 +128,18 @@ iw_strided_mask (VALUE klass, VALUE vsrc)
   ca_iter_state st;
   char         *p;
   boolean8_t   *m;
-  ca_size_t     n, s;
   VALUE         out = rb_ary_new();
   int           seen = 0;
+  int8_t        ax;
 
   (void) klass;
   TypedData_Get_Struct(vsrc, CArray, &carray_data_type, src);
-  ca_iter_check_init(ca_iter_state_init_l2(&st, src, CA_SLAB_WHOLE,
-                                           NULL, 0, 0));
-  while ( ca_iter_state_next_slab_strided(&st, &p, &m, &n, &s) ) {
-    for ( ca_size_t i = 0; i < n; i++ ) {
-      rb_ary_push(out, m ? INT2FIX(m[i]) : Qnil);
+  ax = (int8_t) (src->ndim - 1);
+  ca_iter_check_init(ca_iter_state_init_l2(&st, src, CA_SLAB_AXES,
+                                           &ax, 1, 0));
+  while ( ca_iter_state_next_slab_axes(&st, &p, &m) ) {
+    for ( ca_size_t i = 0; i < st.slab_dims[0]; i++ ) {
+      rb_ary_push(out, m ? INT2FIX(m[i * st.slab_mask_strides[0]]) : Qnil);
       if ( m ) seen = 1;
     }
   }
@@ -212,6 +212,23 @@ iw_init_rc (VALUE klass, VALUE vdst, VALUE vaxis, VALUE vflags)
   return INT2NUM(rc);
 }
 
+/* Return code of init_l2 asked for the whole array (CA_SLAB_WHOLE), which
+   only init_l1 walks. */
+static VALUE
+iw_l2_whole_rc (VALUE klass, VALUE vsrc)
+{
+  CArray       *src;
+  ca_iter_state st;
+  int           rc;
+
+  (void) klass;
+  TypedData_Get_Struct(vsrc, CArray, &carray_data_type, src);
+  memset(&st, 0, sizeof(st));
+  rc = ca_iter_state_init_l2(&st, src, CA_SLAB_WHOLE, NULL, 0, 0);
+  if ( rc == CA_ITER_OK ) ca_iter_state_finish(&st);
+  return INT2NUM(rc);
+}
+
 /* Return code of init_l1 / init_l2 handed a NULL source. */
 static VALUE
 iw_null_src_rc (VALUE klass, VALUE vlevel, VALUE vflags)
@@ -265,13 +282,10 @@ iw_slab_fill_poisoned (VALUE klass, VALUE vdst, VALUE vaxis, VALUE vval)
    kernel can ask for it:
 
      0  L1 whole        (init_l1 + next_slab)
-     1  L2 whole        (init_l2 + next_slab_strided)
      2  one slab axis   (CA_SLAB_AXES, strided slab)
      3  one fiber       (CA_SLAB_AXES + FIBER_CONTIG, contiguous)
      4  two slab axes   (CA_SLAB_AXES over `axis` and the last axis)
 
-   A whole walk may still yield its cells as several slabs (an L2 walk over
-   a strided source yields one row at a time); they come in row-major order.
    iw_read_cells returns the slabs in the order they were yielded, each an
    Array of the cell values with nil where the yielded mask is set.  The
    source is float64 or object.
@@ -288,15 +302,15 @@ iw_open (ca_iter_state *st, CArray *ca, int mode, int8_t axis, uint32_t flags)
   switch ( mode ) {
     case 0:
       return ca_iter_state_init_l1(st, ca, CA_SLAB_WHOLE, NULL, 0, flags);
-    case 1:
-      return ca_iter_state_init_l2(st, ca, CA_SLAB_WHOLE, NULL, 0, flags);
     case 2:
       return ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, ax, 1, flags);
     case 4:
       return ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, ax, 2, flags);
-    default:
+    case 3:
       return ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, ax, 1,
                                    flags | CA_KERNEL_FIBER_CONTIG);
+    default:
+      rb_raise(rb_eArgError, "unknown walk mode %d", mode);
   }
 }
 
@@ -311,10 +325,6 @@ iw_next (ca_iter_state *st, int mode, char **p, boolean8_t **m,
     case 0:
       if ( ! ca_iter_state_next_slab(st, p, m, n) ) return 0;
       *s = st->bytes; *ms = 1;
-      return 1;
-    case 1:
-      if ( ! ca_iter_state_next_slab_strided(st, p, m, n, s) ) return 0;
-      *ms = 1;
       return 1;
     case 2:
       if ( ! ca_iter_state_next_slab_axes(st, p, m) ) return 0;
@@ -409,7 +419,7 @@ iw_write_cells (VALUE klass, VALUE vdst, VALUE vmode, VALUE vaxis)
     slab++;
     for ( ca_size_t i = 0; i < n; i++ ) {
       ca_size_t doff, moff;
-      double v = ( mode < 2 ) ? (double) (1000 + done + i)
+      double v = ( mode == 0 ) ? (double) (1000 + done + i)
                               : (double) (1000 * slab + i);
       iw_cell(&st, mode, i, s, ms, &doff, &moff);
       *(double *)(p + doff) = v;
@@ -602,6 +612,7 @@ Init_iter_write (void)
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill_mask", iw_slab_fill_mask, 3);
   rb_define_singleton_method(rb_cCArray, "iw_init_rc", iw_init_rc, 3);
   rb_define_singleton_method(rb_cCArray, "iw_null_src_rc", iw_null_src_rc, 2);
+  rb_define_singleton_method(rb_cCArray, "iw_l2_whole_rc", iw_l2_whole_rc, 1);
   rb_define_singleton_method(rb_cCArray, "iw_read_poke_mask", iw_read_poke_mask, 2);
   rb_define_singleton_method(rb_cCArray, "iw_strided_mask", iw_strided_mask, 1);
   rb_define_singleton_method(rb_cCArray, "iw_inout_copy", iw_inout_copy, 3);

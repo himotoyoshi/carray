@@ -772,7 +772,7 @@ ki_scratch_push_changed (ca_iter_state *st)
   ca_size_t  view_bytes = (ca_size_t) src->elements * bytes;
   char      *now        = st->scratch_ptr;
   char      *was        = st->scratch_ptr + view_bytes;
-  int        whole      = ! ( st->policy == CA_SLAB_AXES && st->level == 2 );
+  int        whole      = ( st->level == 1 );   /* L1 is the whole array */
   ca_size_t  n          = whole ? src->elements : st->slab_elements;
   ca_size_t  idx[CA_RANK_MAX];
   ca_size_t *addrs;
@@ -1074,6 +1074,10 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
 
   int rc = ca_iter_validate_inputs(st, src, policy, flags);
   if ( rc != CA_ITER_OK ) return rc;
+  /* L2 walks a slab of named axes.  The whole-array walk is L1
+     (init_l1 with CA_SLAB_WHOLE); one strided run per innermost row is
+     CA_SLAB_AXES with the last axis. */
+  if ( policy != CA_SLAB_AXES ) return CA_ITER_ERR_POLICY;
 
   /* F-2 (rev6): route_source returns the refined src_kind and (for
      descriptor sources) populates raw_descs / raw_pdims / raw_ndim so we
@@ -1096,177 +1100,56 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
        - slab axes all STRIDE, no outer SHIFT: borrow the parent's memory
      SRC_ATTACH under CA_SLAB_AXES is handled further down (including the
      CAStack paths), and SRC_CASTRIDE by the branch after that. */
-  if ( policy == CA_SLAB_AXES ) {
-    if ( src_kind == CA_ITER_SRC_DESCRIPTOR
-         || src_kind == CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE ) {
-      /* Validate axes early (range / duplicate). */
-      if ( axes == NULL || naxes <= 0 || naxes > src->ndim ) {
-        return CA_ITER_ERR_POLICY;
-      }
-      int8_t in_slab[CA_RANK_MAX];
-      int8_t k;
-      for ( k = 0; k < CA_RANK_MAX; k++ ) in_slab[k] = 0;
-      for ( k = 0; k < naxes; k++ ) {
-        int8_t ax = axes[k];
-        if ( ax < 0 || ax >= src->ndim ) return CA_ITER_ERR_POLICY;
-        if ( in_slab[ax] )               return CA_ITER_ERR_POLICY;
-        in_slab[ax] = 1;
-      }
+  if ( src_kind == CA_ITER_SRC_DESCRIPTOR
+       || src_kind == CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE ) {
+    /* Validate axes early (range / duplicate). */
+    if ( axes == NULL || naxes <= 0 || naxes > src->ndim ) {
+      return CA_ITER_ERR_POLICY;
+    }
+    int8_t in_slab[CA_RANK_MAX];
+    int8_t k;
+    for ( k = 0; k < CA_RANK_MAX; k++ ) in_slab[k] = 0;
+    for ( k = 0; k < naxes; k++ ) {
+      int8_t ax = axes[k];
+      if ( ax < 0 || ax >= src->ndim ) return CA_ITER_ERR_POLICY;
+      if ( in_slab[ax] )               return CA_ITER_ERR_POLICY;
+      in_slab[ax] = 1;
+    }
 
-      /* Shortcut PER_FIBER_FUSED (CAWindow / CAShift).
-         Layer       all three, per fiber: each fiber is fetched with the
-                     view's ca_xfer_stride (which fills out-of-bounds
-                     cells itself) and put back the same way.
-         Speeds up   a fiber walk of a CAWindow / CAShift whose innermost
-                     axis is SHIFT.
-         Why         none measured: about 8% slower than the descriptor
-                     route on a sort of a 2000x2000 shift view.
-         Enters      CA_KERNEL_FIBER_CONTIG, one slab axis, the view's
-                     own rank, and ca_iter_should_per_fiber_fused.  An
-                     outer-only SHIFT arrives as L2_ALIASABLE and never
-                     reaches this hook.
-         Promises    1 (the fiber scratch is contiguous), 2 (the mask is
-                     fetched into the fiber mask scratch), 3 (ca_xfer_stride
-                     PUT), 4 (CA_ITER_FLAG_WALK_MAY_RAISE).
-         Switch      ca_fast_paths_enabled(): off, the descriptor route.
-         Checked by  the fiber rows of the "shift" view in the delivery
-                     matrix. */
-      if ( (flags & CA_KERNEL_FIBER_CONTIG) && naxes == 1
-           && raw_ndim == src->ndim && ca_fast_paths_enabled() ) {
-        int8_t    fiber_ax = axes[0];
-        ca_size_t row_byte_strides[CA_RANK_MAX];
-        {
-          ca_size_t b = src->bytes;
-          for ( int8_t kk = src->ndim - 1; kk >= 0; kk-- ) {
-            row_byte_strides[kk] = b;
-            b *= src->dim[kk];
-          }
-        }
-        if ( ca_iter_should_per_fiber_fused(src, src_kind, fiber_ax,
-                                            row_byte_strides[fiber_ax],
-                                            flags) ) {
-          st->src      = src;
-          st->src_kind = src_kind;
-          st->level    = 2;
-          st->policy   = policy;
-          st->ndim     = src->ndim;
-          st->flags    = flags;
-          st->bytes    = src->bytes;
-          st->naxes    = naxes;
-
-          st->alias_mode = CA_ITER_ALIAS_PER_FIBER_FUSED;
-          st->alias_ptr  = NULL;
-          st->fiber_axis = fiber_ax;
-          for ( int8_t kk = 0; kk < src->ndim; kk++ ) {
-            st->fiber_native_strides[kk] = row_byte_strides[kk];
-          }
-
-          /* Row-major element strides for mask (= identity element
-             index strides over src->dim). */
-          ca_size_t row_elem_strides[CA_RANK_MAX];
-          {
-            ca_size_t e = 1;
-            for ( int8_t kk = src->ndim - 1; kk >= 0; kk-- ) {
-              row_elem_strides[kk] = e;
-              e *= src->dim[kk];
-            }
-          }
-
-          int8_t sp = 0, op = 0;
-          st->slab_elements = 1;
-          for ( int8_t kk = 0; kk < src->ndim; kk++ ) {
-            if ( in_slab[kk] ) {
-              st->slab_axes_buf[sp]     = kk;
-              st->slab_dims[sp]         = src->dim[kk];
-              st->slab_strides[sp]      = row_byte_strides[kk];
-              st->slab_mask_strides[sp] = row_elem_strides[kk];
-              st->slab_elements        *= src->dim[kk];
-              sp++;
-            } else {
-              st->outer_axes[op]         = kk;
-              st->outer_dims[op]         = src->dim[kk];
-              st->outer_strides[op]      = row_byte_strides[kk];
-              st->outer_mask_strides[op] = row_elem_strides[kk];
-              op++;
-            }
-          }
-          st->slab_ndim  = sp;
-          st->outer_ndim = op;
-          st->desc_ndim  = 0;
-
-          ca_size_t total = 1;
-          for ( int8_t m = 0; m < st->outer_ndim; m++ ) total *= st->outer_dims[m];
-          st->total_slabs   = total;
-          st->slab_n        = st->slab_elements;
-          st->slabs_emitted = 0;
-          st->chunk_size    = st->slab_n;
-
-          if ( st->outer_ndim > 0 ) {
-            CA_ASSUME(st->outer_ndim <= CA_RANK_MAX);   /* bound alloc over rank */
-            st->outer_idx = ALLOC_N(ca_size_t, st->outer_ndim);
-            for ( int8_t m = 0; m < st->outer_ndim; m++ ) st->outer_idx[m] = 0;
-          } else {
-            st->outer_idx = NULL;
-          }
-
-          /* Mask: per-fiber gather via next_slab_axes; no whole-view
-             materialise (rev2 §3.3, (data,mask) pair travels together). */
-          st->alias_mask = NULL;
-          return CA_ITER_OK;
+    /* Shortcut PER_FIBER_FUSED (CAWindow / CAShift).
+       Layer       all three, per fiber: each fiber is fetched with the
+                   view's ca_xfer_stride (which fills out-of-bounds
+                   cells itself) and put back the same way.
+       Speeds up   a fiber walk of a CAWindow / CAShift whose innermost
+                   axis is SHIFT.
+       Why         none measured: about 8% slower than the descriptor
+                   route on a sort of a 2000x2000 shift view.
+       Enters      CA_KERNEL_FIBER_CONTIG, one slab axis, the view's
+                   own rank, and ca_iter_should_per_fiber_fused.  An
+                   outer-only SHIFT arrives as L2_ALIASABLE and never
+                   reaches this hook.
+       Promises    1 (the fiber scratch is contiguous), 2 (the mask is
+                   fetched into the fiber mask scratch), 3 (ca_xfer_stride
+                   PUT), 4 (CA_ITER_FLAG_WALK_MAY_RAISE).
+       Switch      ca_fast_paths_enabled(): off, the descriptor route.
+       Checked by  the fiber rows of the "shift" view in the delivery
+                   matrix. */
+    if ( (flags & CA_KERNEL_FIBER_CONTIG) && naxes == 1
+         && raw_ndim == src->ndim && ca_fast_paths_enabled() ) {
+      int8_t    fiber_ax = axes[0];
+      ca_size_t row_byte_strides[CA_RANK_MAX];
+      {
+        ca_size_t b = src->bytes;
+        for ( int8_t kk = src->ndim - 1; kk >= 0; kk-- ) {
+          row_byte_strides[kk] = b;
+          b *= src->dim[kk];
         }
       }
-
-      /* Slab axis has an INDEX or SHIFT kind → per-slab materialise path.
-         The rank check guards a descriptor whose rank differs from the
-         view's (it would not expose the axis partition slab_axes names).
-         Every describe_axes in the engine reports the view's rank, so the
-         check does not fire today; it stays as the contract's guard. */
-      if ( raw_ndim != src->ndim ) {
-        return CA_ITER_ERR_POLICY;
-      }
-      int slab_has_non_stride = 0;
-      int slab_has_index      = 0;
-      for ( k = 0; k < src->ndim; k++ ) {
-        if ( in_slab[k] && raw_descs[k].kind != CA_AXIS_KIND_STRIDE ) {
-          slab_has_non_stride = 1;
-          if ( raw_descs[k].kind == CA_AXIS_KIND_INDEX ) {
-            slab_has_index = 1;
-          }
-        }
-      }
-      /* A slab with a SHIFT axis that leaves out the innermost view axis
-         would be gathered one strided cell at a time, once per slab.  Read
-         walks take the whole-view path below instead: the view is gathered
-         once, row by row, and the slabs are walked in the copy.
-
-         Shortcut SHIFT_WHOLE_VIEW.
-         Layer       data; the fiber layer (ki_fiber_contig_*) sits on top.
-         Speeds up   read walks of a CAWindow / CAShift whose slab has a
-                     SHIFT axis and not the innermost axis.
-         Why         about 1.5x on a median along axis 0 of a 2000x2000
-                     shift view.
-         Enters      a non-stride slab axis, no INDEX slab axis, the
-                     innermost axis outside the slab, a read walk.
-         Promises    2 and 6 (the mask is gathered into scratch_mask, and
-                     only when the view has one).
-         Switch      ca_fast_paths_enabled(): off, the per-slab gather.
-         Checked by  the slab-axis rows of the "shift" and "window" views
-                     in the delivery matrix. */
-      int whole_view = slab_has_non_stride && ! slab_has_index
-                       && ! in_slab[src->ndim - 1]
-                       && ! ( flags & CA_KERNEL_WRITE )
-                       && ca_fast_paths_enabled();
-      if ( slab_has_non_stride && ! whole_view ) {
-        /* The per-slab gather below is read-only.  A write walk takes the
-           transfer walk instead: the view is gathered whole and the
-           changed cells go back through its own transfer. */
-        if ( flags & CA_KERNEL_WRITE ) {
-          src_kind = CA_ITER_SRC_ATTACH;
-          goto slab_axes_by_transfer;
-        }
-
+      if ( ca_iter_should_per_fiber_fused(src, src_kind, fiber_ax,
+                                          row_byte_strides[fiber_ax],
+                                          flags) ) {
         st->src      = src;
-        st->src_kind = CA_ITER_SRC_DESCRIPTOR;
+        st->src_kind = src_kind;
         st->level    = 2;
         st->policy   = policy;
         st->ndim     = src->ndim;
@@ -1274,240 +1157,45 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
         st->bytes    = src->bytes;
         st->naxes    = naxes;
 
-        CArray *parent = CAVIEW(src)->parent;
-        ca_attach(parent);
-        st->root = parent;
-
-        /* Persist raw_descs / pdims / pstrides for per-slab subset
-           construction (PER_SLAB fallback) or for the hoisted manual
-           gather (PER_SLAB_HOIST specialised path).  desc_ndim =
-           src->ndim so has_descs branch in next_slab_axes can read
-           st->descs (though T3 path takes its own branch before that
-           check). */
-        memcpy(st->descs, raw_descs, src->ndim * sizeof(ca_axis_desc_t));
-        memcpy(st->parent_axis_dims, raw_pdims, src->ndim * sizeof(ca_size_t));
-        {
-          ca_size_t s = src->bytes;
-          for ( k = src->ndim - 1; k >= 0; k-- ) {
-            st->pstrides[k] = s;
-            s *= raw_pdims[k];
-          }
+        st->alias_mode = CA_ITER_ALIAS_PER_FIBER_FUSED;
+        st->alias_ptr  = NULL;
+        st->fiber_axis = fiber_ax;
+        for ( int8_t kk = 0; kk < src->ndim; kk++ ) {
+          st->fiber_native_strides[kk] = row_byte_strides[kk];
         }
-        st->desc_ndim = src->ndim;
 
-        /* View-row-major element strides (= mask scratch layout, since
-           mask is gathered whole-view once at init). */
+        /* Row-major element strides for mask (= identity element
+           index strides over src->dim). */
         ca_size_t row_elem_strides[CA_RANK_MAX];
         {
           ca_size_t e = 1;
-          for ( k = src->ndim - 1; k >= 0; k-- ) {
-            row_elem_strides[k] = e;
-            e *= src->dim[k];
-          }
-        }
-
-        /* Row-major byte strides over SLAB axes only (= scratch_ptr
-           layout, since scratch_ptr is sized slab_elements × bytes
-           and refilled per outer iter as a contig row-major slab). */
-        ca_size_t slab_data_strides[CA_RANK_MAX];
-        {
-          ca_size_t b = src->bytes;
-          ca_size_t e_slab = 1;
-          for ( k = src->ndim - 1; k >= 0; k-- ) {
-            if ( in_slab[k] ) {
-              slab_data_strides[k] = b;
-              b      *= raw_descs[k].count;
-              e_slab *= raw_descs[k].count;
-            } else {
-              slab_data_strides[k] = 0;  /* unused for outer axes */
-            }
-          }
-          st->slab_elements = e_slab;
-        }
-
-        int8_t sp = 0, op = 0;
-        for ( k = 0; k < src->ndim; k++ ) {
-          if ( in_slab[k] ) {
-            st->slab_axes_buf[sp]      = k;
-            st->slab_dims[sp]          = raw_descs[k].count;
-            st->slab_strides[sp]       = slab_data_strides[k];
-            /* Slab mask stride is view-row-major elem stride along
-               this view axis (mask scratch is whole-view layout). */
-            st->slab_mask_strides[sp]  = row_elem_strides[k];
-            sp++;
-          } else {
-            st->outer_axes[op]         = k;
-            st->outer_dims[op]         = raw_descs[k].count;
-            /* T3 path: outer data offset is always 0 (scratch refilled
-               per slab, ptr = scratch_ptr). */
-            st->outer_strides[op]      = 0;
-            /* Outer mask offset uses view-row-major elem stride into
-               whole-view mask scratch. */
-            st->outer_mask_strides[op] = row_elem_strides[k];
-            op++;
-          }
-        }
-        st->slab_ndim     = sp;
-        st->outer_ndim    = op;
-        st->composed_base = 0;  /* unused for T3 fallback */
-
-        ca_size_t total = 1;
-        for ( int8_t m = 0; m < st->outer_ndim; m++ ) total *= st->outer_dims[m];
-        st->total_slabs   = total;
-        st->slab_n        = st->slab_elements;
-        st->slabs_emitted = 0;
-        st->chunk_size    = st->slab_n;
-
-        if ( st->outer_ndim > 0 ) {
-          CA_ASSUME(st->outer_ndim <= CA_RANK_MAX);   /* bound alloc over rank */
-          st->outer_idx = ALLOC_N(ca_size_t, st->outer_ndim);
-          for ( int8_t m = 0; m < st->outer_ndim; m++ ) st->outer_idx[m] = 0;
-        } else {
-          st->outer_idx = NULL;
-        }
-
-        /* Alloc per-slab data scratch (D1.1 (B): one max-slab buffer
-           refilled per outer iter, instead of per-iter alloc/free or
-           full-view materialise). */
-        ca_size_t slab_bytes = st->slab_elements * src->bytes;
-        st->scratch_cap = slab_bytes > 0 ? slab_bytes : 1;
-        st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
-        st->alias_ptr   = st->scratch_ptr;  /* refilled per slab in next_slab_axes */
-
-        /* Shortcut PER_SLAB_HOIST.
-           Layer       data; the fiber layer sits on top.
-           Speeds up   per-slab gathers whose innermost slab axis is STRIDE
-                       and with no SHIFT axis in the view: the outer and
-                       non-innermost slab offsets are hoisted and the inner
-                       run is copied with memcpy.
-           Why         no difference measured on a row-selected 2-D read.
-           Enters      at least one slab axis, the innermost slab axis
-                       STRIDE, no SHIFT axis.
-           Promises    2 and 6 (the mask is gathered into scratch_mask, and
-                       only when the view has one).
-           Switch      ca_fast_paths_enabled(): off, the PER_SLAB gather.
-           Checked by  the two-slab-axes rows of the grid parent in the
-                       delivery matrix. */
-        int specialised_eligible = (sp > 0) && ca_fast_paths_enabled();
-        if ( specialised_eligible ) {
-          int8_t inner_view_ax = st->slab_axes_buf[sp - 1];
-          if ( raw_descs[inner_view_ax].kind != CA_AXIS_KIND_STRIDE ) {
-            specialised_eligible = 0;
-          }
-        }
-        if ( specialised_eligible ) {
-          /* Any SHIFT axis (slab or outer) → fallback to engine for
-             clean bound_fill semantics in C.1b scope. */
-          for ( k = 0; k < src->ndim; k++ ) {
-            if ( raw_descs[k].kind == CA_AXIS_KIND_SHIFT ) {
-              specialised_eligible = 0;
-              break;
-            }
-          }
-        }
-        st->alias_mode = specialised_eligible
-                       ? CA_ITER_ALIAS_PER_SLAB_HOIST
-                       : CA_ITER_ALIAS_PER_SLAB;
-
-        /* Mask: gather whole view mask once into scratch_mask (= same
-           strategy as B.1.5).  Per-slab mask offset is computed via
-           outer_idx × outer_mask_strides in next_slab_axes. */
-        if ( ca_has_mask(src) ) {
-          ca_size_t mcap = src->elements > 0 ? src->elements : 1;
-          st->scratch_mask = (boolean8_t *) xmalloc(mcap);
-          if ( src->elements > 0 ) {
-            ca_copy_data(src->mask, (char *) st->scratch_mask);
-          }
-          st->alias_mask = st->scratch_mask;
-        }
-
-        return CA_ITER_OK;
-      }
-      /* slab is all-STRIDE: fall through to B.1.5 / Phase B paths. */
-      /* Phase B.1.5: outer SHIFT axis → materialise downgrade.  Alias
-         can't deliver OOB cells (= need fill_value), and the view-family
-         surface prioritises delivering the cells over avoiding a copy, so
-         we materialise the entire view into a row-major scratch
-         buffer with ca_axis_dispatch_gather (= same engine as the
-         SRC_DESCRIPTOR L2 NONE path), then walk it with
-         Phase A-style row-major K-D strides.  Slab / outer partition
-         applies to view-axes; the scratch IS the flat row-major view. */
-      int outer_has_shift = 0;
-      for ( k = 0; k < src->ndim; k++ ) {
-        if ( !in_slab[k] && raw_descs[k].kind == CA_AXIS_KIND_SHIFT ) {
-          outer_has_shift = 1;
-          break;
-        }
-      }
-
-      if ( outer_has_shift || whole_view ) {
-        st->src      = src;
-        st->src_kind = CA_ITER_SRC_DESCRIPTOR;
-        st->level    = 2;
-        st->policy   = policy;
-        st->ndim     = src->ndim;
-        st->flags    = flags;
-        st->bytes    = src->bytes;
-        st->naxes    = naxes;
-
-        CArray *parent = CAVIEW(src)->parent;
-        ca_attach(parent);
-        st->root = parent;
-
-        ca_axis_desc_t local_descs[CA_RANK_MAX];
-        memcpy(local_descs, raw_descs, src->ndim * sizeof(ca_axis_desc_t));
-        const void *bound_fill = NULL;
-        if ( ca_func[src->obj_type].attach == ca_window_func.attach ) {
-          bound_fill = ((CAWindow *) src)->fill;
-        }
-        st->scratch_cap = src->elements * src->bytes;
-        st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
-        ca_axis_dispatch_gather(parent, raw_pdims, local_descs, src->ndim,
-                                src->bytes, src->elements, bound_fill,
-                                st->scratch_ptr);
-        /* sync_slab scatters the whole scratch back by this count. */
-        st->total_elements = src->elements;
-        st->alias_mode = CA_ITER_ALIAS_NONE;
-        st->alias_ptr  = st->scratch_ptr;
-
-        /* Row-major byte / element strides on the scratch (= view layout). */
-        ca_size_t row_byte_strides[CA_RANK_MAX];
-        ca_size_t row_elem_strides[CA_RANK_MAX];
-        {
-          ca_size_t b = src->bytes, e = 1;
-          for ( k = src->ndim - 1; k >= 0; k-- ) {
-            row_byte_strides[k] = b;
-            row_elem_strides[k] = e;
-            b *= src->dim[k];
-            e *= src->dim[k];
+          for ( int8_t kk = src->ndim - 1; kk >= 0; kk-- ) {
+            row_elem_strides[kk] = e;
+            e *= src->dim[kk];
           }
         }
 
         int8_t sp = 0, op = 0;
         st->slab_elements = 1;
-        for ( k = 0; k < src->ndim; k++ ) {
-          if ( in_slab[k] ) {
-            st->slab_axes_buf[sp]      = k;
-            st->slab_dims[sp]          = src->dim[k];
-            st->slab_strides[sp]       = row_byte_strides[k];
-            st->slab_mask_strides[sp]  = row_elem_strides[k];
-            st->slab_elements         *= src->dim[k];
+        for ( int8_t kk = 0; kk < src->ndim; kk++ ) {
+          if ( in_slab[kk] ) {
+            st->slab_axes_buf[sp]     = kk;
+            st->slab_dims[sp]         = src->dim[kk];
+            st->slab_strides[sp]      = row_byte_strides[kk];
+            st->slab_mask_strides[sp] = row_elem_strides[kk];
+            st->slab_elements        *= src->dim[kk];
             sp++;
           } else {
-            st->outer_axes[op]         = k;
-            st->outer_dims[op]         = src->dim[k];
-            st->outer_strides[op]      = row_byte_strides[k];
-            st->outer_mask_strides[op] = row_elem_strides[k];
+            st->outer_axes[op]         = kk;
+            st->outer_dims[op]         = src->dim[kk];
+            st->outer_strides[op]      = row_byte_strides[kk];
+            st->outer_mask_strides[op] = row_elem_strides[kk];
             op++;
           }
         }
-        st->slab_ndim     = sp;
-        st->outer_ndim    = op;
-        st->composed_base = 0;
-        /* desc_ndim = 0: next_slab_axes treats outer like Phase A
-           (no INDEX lookup), correct because scratch is row-major
-           contig (= STRIDE everywhere). */
-        st->desc_ndim = 0;
+        st->slab_ndim  = sp;
+        st->outer_ndim = op;
+        st->desc_ndim  = 0;
 
         ca_size_t total = 1;
         for ( int8_t m = 0; m < st->outer_ndim; m++ ) total *= st->outer_dims[m];
@@ -1524,19 +1212,64 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
           st->outer_idx = NULL;
         }
 
-        if ( ca_has_mask(src) ) {
-          ca_size_t mcap = src->elements > 0 ? src->elements : 1;
-          st->scratch_mask = (boolean8_t *) xmalloc(mcap);
-          if ( src->elements > 0 ) {
-            ca_copy_data(src->mask, (char *) st->scratch_mask);
-          }
-          st->alias_mask = st->scratch_mask;
-        }
+        /* Mask: per-fiber gather via next_slab_axes; no whole-view
+           materialise (rev2 §3.3, (data,mask) pair travels together). */
+        st->alias_mask = NULL;
         return CA_ITER_OK;
+      }
+    }
+
+    /* Slab axis has an INDEX or SHIFT kind → per-slab materialise path.
+       The rank check guards a descriptor whose rank differs from the
+       view's (it would not expose the axis partition slab_axes names).
+       Every describe_axes in the engine reports the view's rank, so the
+       check does not fire today; it stays as the contract's guard. */
+    if ( raw_ndim != src->ndim ) {
+      return CA_ITER_ERR_POLICY;
+    }
+    int slab_has_non_stride = 0;
+    int slab_has_index      = 0;
+    for ( k = 0; k < src->ndim; k++ ) {
+      if ( in_slab[k] && raw_descs[k].kind != CA_AXIS_KIND_STRIDE ) {
+        slab_has_non_stride = 1;
+        if ( raw_descs[k].kind == CA_AXIS_KIND_INDEX ) {
+          slab_has_index = 1;
+        }
+      }
+    }
+    /* A slab with a SHIFT axis that leaves out the innermost view axis
+       would be gathered one strided cell at a time, once per slab.  Read
+       walks take the whole-view path below instead: the view is gathered
+       once, row by row, and the slabs are walked in the copy.
+
+       Shortcut SHIFT_WHOLE_VIEW.
+       Layer       data; the fiber layer (ki_fiber_contig_*) sits on top.
+       Speeds up   read walks of a CAWindow / CAShift whose slab has a
+                   SHIFT axis and not the innermost axis.
+       Why         about 1.5x on a median along axis 0 of a 2000x2000
+                   shift view.
+       Enters      a non-stride slab axis, no INDEX slab axis, the
+                   innermost axis outside the slab, a read walk.
+       Promises    2 and 6 (the mask is gathered into scratch_mask, and
+                   only when the view has one).
+       Switch      ca_fast_paths_enabled(): off, the per-slab gather.
+       Checked by  the slab-axis rows of the "shift" and "window" views
+                   in the delivery matrix. */
+    int whole_view = slab_has_non_stride && ! slab_has_index
+                     && ! in_slab[src->ndim - 1]
+                     && ! ( flags & CA_KERNEL_WRITE )
+                     && ca_fast_paths_enabled();
+    if ( slab_has_non_stride && ! whole_view ) {
+      /* The per-slab gather below is read-only.  A write walk takes the
+         transfer walk instead: the view is gathered whole and the
+         changed cells go back through its own transfer. */
+      if ( flags & CA_KERNEL_WRITE ) {
+        src_kind = CA_ITER_SRC_ATTACH;
+        goto slab_axes_by_transfer;
       }
 
       st->src      = src;
-      st->src_kind = CA_ITER_SRC_DESCRIPTOR;  /* Phase B alias path */
+      st->src_kind = CA_ITER_SRC_DESCRIPTOR;
       st->level    = 2;
       st->policy   = policy;
       st->ndim     = src->ndim;
@@ -1544,87 +1277,82 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       st->bytes    = src->bytes;
       st->naxes    = naxes;
 
-      /* Parent row-major byte strides for offset computation. */
-      ca_size_t pstrides[CA_RANK_MAX];
+      CArray *parent = CAVIEW(src)->parent;
+      ca_attach(parent);
+      st->root = parent;
+
+      /* Persist raw_descs / pdims / pstrides for per-slab subset
+         construction (PER_SLAB fallback) or for the hoisted manual
+         gather (PER_SLAB_HOIST specialised path).  desc_ndim =
+         src->ndim so has_descs branch in next_slab_axes can read
+         st->descs (though T3 path takes its own branch before that
+         check). */
+      memcpy(st->descs, raw_descs, src->ndim * sizeof(ca_axis_desc_t));
+      memcpy(st->parent_axis_dims, raw_pdims, src->ndim * sizeof(ca_size_t));
       {
         ca_size_t s = src->bytes;
         for ( k = src->ndim - 1; k >= 0; k-- ) {
-          pstrides[k] = s;
+          st->pstrides[k] = s;
           s *= raw_pdims[k];
         }
       }
-      /* View row-major element strides (= mask scratch layout). */
+      st->desc_ndim = src->ndim;
+
+      /* View-row-major element strides (= mask scratch layout, since
+         mask is gathered whole-view once at init). */
       ca_size_t row_elem_strides[CA_RANK_MAX];
       {
-        ca_size_t s = 1;
+        ca_size_t e = 1;
         for ( k = src->ndim - 1; k >= 0; k-- ) {
-          row_elem_strides[k] = s;
-          s *= src->dim[k];
+          row_elem_strides[k] = e;
+          e *= src->dim[k];
         }
       }
 
-      /* Partition + populate slab / outer metadata.  Slab axes contribute
-         to a constant slab_base (since they're all STRIDE: start +
-         step*idx, where the base is start*pstride summed).  Outer axes
-         drive per-slab offset via direct (start + step*idx)*pstride or
-         indices[idx]*pstride (= no classify_prefix engine, since outer
-         axes here are not a prefix of raw_descs[] — they're a
-         complement of slab_axes). */
-      int8_t    sp = 0, op = 0;
-      ca_size_t slab_base = 0;
-      st->slab_elements = 1;
+      /* Row-major byte strides over SLAB axes only (= scratch_ptr
+         layout, since scratch_ptr is sized slab_elements × bytes
+         and refilled per outer iter as a contig row-major slab). */
+      ca_size_t slab_data_strides[CA_RANK_MAX];
+      {
+        ca_size_t b = src->bytes;
+        ca_size_t e_slab = 1;
+        for ( k = src->ndim - 1; k >= 0; k-- ) {
+          if ( in_slab[k] ) {
+            slab_data_strides[k] = b;
+            b      *= raw_descs[k].count;
+            e_slab *= raw_descs[k].count;
+          } else {
+            slab_data_strides[k] = 0;  /* unused for outer axes */
+          }
+        }
+        st->slab_elements = e_slab;
+      }
+
+      int8_t sp = 0, op = 0;
       for ( k = 0; k < src->ndim; k++ ) {
         if ( in_slab[k] ) {
-          /* STRIDE-kind slab axis: start*pstride goes to slab_base,
-             step*pstride is the per-cell byte stride. */
-          slab_base += raw_descs[k].start * pstrides[k];
-          st->slab_axes_buf[sp]     = k;
-          st->slab_dims[sp]         = raw_descs[k].count;
-          st->slab_strides[sp]      = raw_descs[k].step * pstrides[k];
-          st->slab_mask_strides[sp] = row_elem_strides[k];
-          st->slab_elements        *= raw_descs[k].count;
+          st->slab_axes_buf[sp]      = k;
+          st->slab_dims[sp]          = raw_descs[k].count;
+          st->slab_strides[sp]       = slab_data_strides[k];
+          /* Slab mask stride is view-row-major elem stride along
+             this view axis (mask scratch is whole-view layout). */
+          st->slab_mask_strides[sp]  = row_elem_strides[k];
           sp++;
         } else {
-          /* Outer axis: STRIDE or INDEX (an outer SHIFT was routed to the
-             materialise path above).
-             Store axis index + view's outer dim/stride for descriptor
-             walk in next_slab_axes.  We reuse outer_strides/outer_mask
-             _strides as the OUTER walk metadata; outer-axis kind is
-             carried implicitly via raw_descs[outer_axes[m]] in the
-             state struct's descs[] field (populated below). */
           st->outer_axes[op]         = k;
           st->outer_dims[op]         = raw_descs[k].count;
-          /* For STRIDE: per-axis stride = step * pstride; INDEX axes
-             use indices[] from raw_descs and need a 0 stride here
-             (next_slab_axes branches on descs[].kind to compute the
-             real offset).  We persist the full raw_descs in st->descs
-             so the next_slab_axes implementation can dispatch. */
-          if ( raw_descs[k].kind == CA_AXIS_KIND_STRIDE ) {
-            st->outer_strides[op] = raw_descs[k].step * pstrides[k];
-            /* Bake in start*pstride into slab_base for STRIDE outer too
-               so per-cell offset is purely step*idx. */
-            slab_base += raw_descs[k].start * pstrides[k];
-          } else {
-            /* INDEX kind: outer_strides[m] = pstrides[k] (element-unit
-               from indices[]).  We DON'T pre-bake into slab_base for
-               INDEX axes; per-iter offset = indices[idx[m]] * pstrides[k]
-               is computed in next_slab_axes. */
-            st->outer_strides[op] = pstrides[k];
-          }
+          /* T3 path: outer data offset is always 0 (scratch refilled
+             per slab, ptr = scratch_ptr). */
+          st->outer_strides[op]      = 0;
+          /* Outer mask offset uses view-row-major elem stride into
+             whole-view mask scratch. */
           st->outer_mask_strides[op] = row_elem_strides[k];
           op++;
         }
       }
       st->slab_ndim     = sp;
       st->outer_ndim    = op;
-      st->composed_base = slab_base;
-
-      /* Persist raw_descs / pstrides in state so next_slab_axes can
-         distinguish STRIDE vs INDEX outer per axis. */
-      memcpy(st->descs, raw_descs, src->ndim * sizeof(ca_axis_desc_t));
-      memcpy(st->parent_axis_dims, raw_pdims, src->ndim * sizeof(ca_size_t));
-      memcpy(st->pstrides, pstrides, src->ndim * sizeof(ca_size_t));
-      st->desc_ndim = src->ndim;
+      st->composed_base = 0;  /* unused for T3 fallback */
 
       ca_size_t total = 1;
       for ( int8_t m = 0; m < st->outer_ndim; m++ ) total *= st->outer_dims[m];
@@ -1634,20 +1362,59 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       st->chunk_size    = st->slab_n;
 
       if ( st->outer_ndim > 0 ) {
+        CA_ASSUME(st->outer_ndim <= CA_RANK_MAX);   /* bound alloc over rank */
         st->outer_idx = ALLOC_N(ca_size_t, st->outer_ndim);
         for ( int8_t m = 0; m < st->outer_ndim; m++ ) st->outer_idx[m] = 0;
       } else {
         st->outer_idx = NULL;
       }
 
-      /* Attach parent for alias path. */
-      CArray *parent = CAVIEW(src)->parent;
-      ca_attach(parent);
-      st->root       = parent;
-      st->alias_mode = CA_ITER_ALIAS_STRIDED;
-      st->alias_ptr  = (char *) parent->ptr;
+      /* Alloc per-slab data scratch (D1.1 (B): one max-slab buffer
+         refilled per outer iter, instead of per-iter alloc/free or
+         full-view materialise). */
+      ca_size_t slab_bytes = st->slab_elements * src->bytes;
+      st->scratch_cap = slab_bytes > 0 ? slab_bytes : 1;
+      st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
+      st->alias_ptr   = st->scratch_ptr;  /* refilled per slab in next_slab_axes */
 
-      /* Mask gather (= view row-major boolean8_t). */
+      /* Shortcut PER_SLAB_HOIST.
+         Layer       data; the fiber layer sits on top.
+         Speeds up   per-slab gathers whose innermost slab axis is STRIDE
+                     and with no SHIFT axis in the view: the outer and
+                     non-innermost slab offsets are hoisted and the inner
+                     run is copied with memcpy.
+         Why         no difference measured on a row-selected 2-D read.
+         Enters      at least one slab axis, the innermost slab axis
+                     STRIDE, no SHIFT axis.
+         Promises    2 and 6 (the mask is gathered into scratch_mask, and
+                     only when the view has one).
+         Switch      ca_fast_paths_enabled(): off, the PER_SLAB gather.
+         Checked by  the two-slab-axes rows of the grid parent in the
+                     delivery matrix. */
+      int specialised_eligible = (sp > 0) && ca_fast_paths_enabled();
+      if ( specialised_eligible ) {
+        int8_t inner_view_ax = st->slab_axes_buf[sp - 1];
+        if ( raw_descs[inner_view_ax].kind != CA_AXIS_KIND_STRIDE ) {
+          specialised_eligible = 0;
+        }
+      }
+      if ( specialised_eligible ) {
+        /* Any SHIFT axis (slab or outer) → fallback to engine for
+           clean bound_fill semantics in C.1b scope. */
+        for ( k = 0; k < src->ndim; k++ ) {
+          if ( raw_descs[k].kind == CA_AXIS_KIND_SHIFT ) {
+            specialised_eligible = 0;
+            break;
+          }
+        }
+      }
+      st->alias_mode = specialised_eligible
+                     ? CA_ITER_ALIAS_PER_SLAB_HOIST
+                     : CA_ITER_ALIAS_PER_SLAB;
+
+      /* Mask: gather whole view mask once into scratch_mask (= same
+         strategy as B.1.5).  Per-slab mask offset is computed via
+         outer_idx × outer_mask_strides in next_slab_axes. */
       if ( ca_has_mask(src) ) {
         ca_size_t mcap = src->elements > 0 ? src->elements : 1;
         st->scratch_mask = (boolean8_t *) xmalloc(mcap);
@@ -1656,36 +1423,29 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
         }
         st->alias_mask = st->scratch_mask;
       }
+
       return CA_ITER_OK;
     }
-  slab_axes_by_transfer:
-    if ( src_kind == CA_ITER_SRC_ATTACH ) {
-      /* CA_SLAB_AXES + SRC_ATTACH (every view classified SRC_ATTACH).
-         The cases below, in order: CAStack walked through its parents
-         (CA_ITER_ALIAS_STACK, STACK_OUTER_K), a single FIBER_CONTIG fiber
-         through ca_xfer_stride (PER_FIBER_FUSED), and otherwise the whole
-         view gathered into scratch with ki_gather_view and walked with
-         K-D strides in view row-major layout.
-
-         The most common entry path here is wrap_readonly(int_src,
-         CA_FLOAT64) → CAFake, enabling sum_ki etc. to accept any
-         numeric data_type source via auto-cast (= D2.2 confirmed in
-         rev2 sparring). */
-      if ( axes == NULL || naxes <= 0 || naxes > src->ndim ) {
-        return CA_ITER_ERR_POLICY;
+    /* slab is all-STRIDE: fall through to B.1.5 / Phase B paths. */
+    /* Phase B.1.5: outer SHIFT axis → materialise downgrade.  Alias
+       can't deliver OOB cells (= need fill_value), and the view-family
+       surface prioritises delivering the cells over avoiding a copy, so
+       we materialise the entire view into a row-major scratch
+       buffer with ca_axis_dispatch_gather (= same engine as the
+       SRC_DESCRIPTOR L2 NONE path), then walk it with
+       Phase A-style row-major K-D strides.  Slab / outer partition
+       applies to view-axes; the scratch IS the flat row-major view. */
+    int outer_has_shift = 0;
+    for ( k = 0; k < src->ndim; k++ ) {
+      if ( !in_slab[k] && raw_descs[k].kind == CA_AXIS_KIND_SHIFT ) {
+        outer_has_shift = 1;
+        break;
       }
-      int8_t in_slab[CA_RANK_MAX];
-      int8_t k;
-      for ( k = 0; k < CA_RANK_MAX; k++ ) in_slab[k] = 0;
-      for ( k = 0; k < naxes; k++ ) {
-        int8_t ax = axes[k];
-        if ( ax < 0 || ax >= src->ndim ) return CA_ITER_ERR_POLICY;
-        if ( in_slab[ax] )               return CA_ITER_ERR_POLICY;
-        in_slab[ax] = 1;
-      }
+    }
 
+    if ( outer_has_shift || whole_view ) {
       st->src      = src;
-      st->src_kind = CA_ITER_SRC_ATTACH;
+      st->src_kind = CA_ITER_SRC_DESCRIPTOR;
       st->level    = 2;
       st->policy   = policy;
       st->ndim     = src->ndim;
@@ -1693,9 +1453,27 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       st->bytes    = src->bytes;
       st->naxes    = naxes;
 
-      /* Row-major byte / element strides on the attached view buffer.
-         Computed first so the F.6.1 predicate can inspect fiber-axis
-         effective stride before deciding whether to materialise. */
+      CArray *parent = CAVIEW(src)->parent;
+      ca_attach(parent);
+      st->root = parent;
+
+      ca_axis_desc_t local_descs[CA_RANK_MAX];
+      memcpy(local_descs, raw_descs, src->ndim * sizeof(ca_axis_desc_t));
+      const void *bound_fill = NULL;
+      if ( ca_func[src->obj_type].attach == ca_window_func.attach ) {
+        bound_fill = ((CAWindow *) src)->fill;
+      }
+      st->scratch_cap = src->elements * src->bytes;
+      st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
+      ca_axis_dispatch_gather(parent, raw_pdims, local_descs, src->ndim,
+                              src->bytes, src->elements, bound_fill,
+                              st->scratch_ptr);
+      /* sync_slab scatters the whole scratch back by this count. */
+      st->total_elements = src->elements;
+      st->alias_mode = CA_ITER_ALIAS_NONE;
+      st->alias_ptr  = st->scratch_ptr;
+
+      /* Row-major byte / element strides on the scratch (= view layout). */
       ca_size_t row_byte_strides[CA_RANK_MAX];
       ca_size_t row_elem_strides[CA_RANK_MAX];
       {
@@ -1706,350 +1484,6 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
           b *= src->dim[k];
           e *= src->dim[k];
         }
-      }
-
-      /* PROPOSAL_CASTACK_LOOP_INTERCHANGE Vector A rev4 (direct per-
-         parent ptr access path + tile cache).  Engages when:
-           - source.attach is ca_stack_func.attach (= CAStack identity)
-           - no mask (= horizontal mask propagation per-slab gather is
-             out of scope; falls back to SRC_ATTACH whole-view path)
-           - naxes == 1 && axes[0] == k_axis (= K-axis-only slab, the
-             demand-driving case = reduce along the stacked axis like
-             view.mean(axis: k_axis))
-         init attaches K parents up front (O(1) per entity parent),
-         caches parent->ptr aliases + uniform parent-native byte strides,
-         allocates a slab-sized scratch (= K * bytes) plus a tile cache
-         sized to fit the L1d budget.  next_slab_axes refills TILE fibers
-         per K contig parent reads (rev4 2026-06-19) and serves the next
-         TILE-1 calls from the L1d-resident cache, beating SRC_ATTACH
-         across all measured sizes.  No size-threshold gate: rev3's gate
-         was a perf trade-off justification that the tile cache erased.
-
-         K.3 (PROPOSAL_CASTACK_K_AXIS, 2026-06-20): engage predicate
-         generalised from `axes[0] == 0` to `axes[0] == k_axis`.  The
-         tile cache mechanism + outer_idx -> parent axis mapping are
-         already k_axis-agnostic: outer_idx[m] maps to parent axis m
-         regardless of k_axis position (= for k_axis = 0 outer is stack
-         axes 1..N-1 = parent axes 0..N-2; for k_axis > 0 outer is stack
-         axes [0..k_axis-1, k_axis+1..N-1] = parent axes [0..k_axis-1,
-         k_axis..N-2]; either way outer_idx[m] = parent axis m). */
-      /* Shortcut STACK.
-         Layer       data and fiber: the slab is cut contiguous from the K
-                     parents through a tile cache.
-         Speeds up   read walks of an unmasked CAStack whose one slab axis
-                     is the stack axis.
-         Why         about 2x on a mean along the stack axis of 4 parents
-                     of 500x2000.
-         Enters      a CAStack, no mask, a read walk, one slab axis that is
-                     k_axis.
-         Promises    1 (the slab is contiguous), 6 (no mask exists to touch).
-         Switch      ca_fast_paths_enabled(): off, the transfer walk.
-         Checked by  the slab-axis and fiber rows of the stack parent along
-                     axis 0 in the delivery matrix. */
-      if ( ca_func[src->obj_type].attach == ca_stack_func.attach
-           && !ca_has_mask(src)
-           && !(flags & CA_KERNEL_WRITE)
-           && naxes == 1 && axes[0] == ((CAStack *) src)->k_axis
-           && ca_fast_paths_enabled() ) {
-        CAStack *stack = (CAStack *) src;
-        int8_t   parent_ndim = src->ndim - 1;
-        int8_t   sp = 0, op = 0;
-
-        st->slab_elements = 1;
-        for ( k = 0; k < src->ndim; k++ ) {
-          if ( in_slab[k] ) {
-            st->slab_axes_buf[sp]      = k;
-            st->slab_dims[sp]          = src->dim[k];
-            st->slab_elements         *= src->dim[k];
-            sp++;
-          } else {
-            st->outer_axes[op]         = k;
-            st->outer_dims[op]         = src->dim[k];
-            st->outer_strides[op]      = row_byte_strides[k];     /* unused on STACK path */
-            st->outer_mask_strides[op] = row_elem_strides[k];     /* unused on STACK path */
-            op++;
-          }
-        }
-        st->slab_ndim     = sp;
-        st->outer_ndim    = op;
-        st->composed_base = 0;
-        st->desc_ndim     = 0;
-        /* slab_strides on STACK path: slab_axes == [0], scratch is
-           packed contig over K elements (= K * bytes), so single-axis
-           slab walk uses bytes stride. */
-        st->slab_strides[0]      = src->bytes;
-        st->slab_mask_strides[0] = 1;   /* harmless on no-mask path */
-
-        ca_size_t total = 1;
-        for ( int8_t m = 0; m < st->outer_ndim; m++ ) total *= st->outer_dims[m];
-        st->total_slabs   = total;
-        st->slab_n        = st->slab_elements;
-        st->slabs_emitted = 0;
-        st->chunk_size    = st->slab_n;
-
-        if ( st->outer_ndim > 0 ) {
-          CA_ASSUME(st->outer_ndim <= CA_RANK_MAX);   /* bound alloc over rank */
-          st->outer_idx = ALLOC_N(ca_size_t, st->outer_ndim);
-          for ( int8_t m = 0; m < st->outer_ndim; m++ ) st->outer_idx[m] = 0;
-        } else {
-          st->outer_idx = NULL;
-        }
-
-        /* Attach K parents and cache their ptr aliases.  CAStack
-           guarantees uniform shape (MEMO §3.2) so one set of parent
-           native byte strides covers all K (= parents[0]->dim is
-           canonical). */
-        /* stack_n_parents counts the parents attached so far: an attach
-           that raises leaves finish with exactly those to detach. */
-        st->stack_n_parents = 0;
-        st->stack_parent_ptrs =
-            (char **) xmalloc(stack->n_parents * sizeof(char *));
-        for ( int32_t kk = 0; kk < stack->n_parents; kk++ ) {
-          ca_attach(stack->parents[kk]);   /* window: finish detaches the counted parents */
-          st->stack_parent_ptrs[kk] = (char *) stack->parents[kk]->ptr;
-          st->stack_n_parents = kk + 1;
-        }
-        {
-          ca_size_t s = src->bytes;
-          for ( int8_t kk = parent_ndim - 1; kk >= 0; kk-- ) {
-            st->stack_parent_strides[kk] = s;
-            s *= stack->parents[0]->dim[kk];
-          }
-        }
-
-        /* Slab-sized scratch (= K * bytes for slab_axes == [0]). */
-        st->scratch_cap = (ca_size_t) st->slab_elements * src->bytes;
-        st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
-
-        /* Tile cache (pilot/castack-axis0-loop-interchange): refill TILE
-           fibers per K parent reads, serve next TILE-1 fibers from L1d.
-           TILE budget = ~32 KB (half of M2 L1d).  Empirically tested
-           values; clamped to [8, 64] to keep the refill loop tight. */
-        {
-          ca_size_t K = (ca_size_t) stack->n_parents;
-          ca_size_t bytes = (ca_size_t) src->bytes;
-          ca_size_t tile = K > 0 ? (32 * 1024) / (K * bytes) : 0;
-          if ( tile < 8 )  tile = 8;
-          if ( tile > 64 ) tile = 64;
-          st->stack_tile_cap   = tile;
-          st->stack_tile_pos   = 0;
-          st->stack_tile_have  = 0;     /* force refill on first call */
-          st->stack_tile_cache = (char *) ki_data_alloc(src->data_type, K * tile * bytes);
-        }
-
-        st->alias_mode  = CA_ITER_ALIAS_STACK;
-        st->alias_ptr   = NULL;   /* no whole-view buffer */
-        st->alias_mask  = NULL;
-        return CA_ITER_OK;
-      }
-
-      /* CAStack source whose slab axes leave out the stack axis k_axis
-         (the stack axis stays in the outer iteration, e.g. a stack along
-         axis 0 reduced along axis 1).  Each slab is a region inside ONE
-         parent, selected by outer_idx[K_outer_pos].  The engine attaches
-         the K parents and caches their ptrs, copies the K parent masks
-         when the stack has a mask, and next_slab_axes points into
-         parents[k]->ptr + parent_off -- no gather of the data unless
-         FIBER_CONTIG needs a contiguous fiber.
-
-         Layering: engine detects CAStack identity by function-pointer
-         comparison and accesses parents[] / mask via ca_func[STACK]
-         operation table where possible.  CAStack downcast occurs only
-         for the n_parents / parents[] read in init_l2 (= same scope as
-         rev3 STACK; AC3 forbids parents[] walk in next_slab_axes only).
-         Q1 disposition: option (i) minimal-diff inline in SLAB_AXES
-         branch -- evaluated as smallest diff with acceptable layering
-         (proposal §3.1). */
-      /* STACK_OUTER_K: K-axis stays in outer iter (slab carved out of
-         one parent at a time).  K.3 (2026-06-20): engage predicate +
-         stack-axis -> parent-axis mapping generalised for arbitrary
-         k_axis.  stack axis s maps to parent axis (s if s < k_axis else
-         s - 1); only the K stack axis (s == k_axis) has no parent
-         counterpart. */
-      /* Shortcut STACK_OUTER_K.
-         Layer       data; the fiber layer sits on top.
-         Speeds up   read walks of a CAStack whose stack axis is an outer
-                     axis: each slab is cut from the one parent the outer
-                     index picks, without gathering the stack.
-         Why         about 11x on a mean along axis 1 of 4 parents of
-                     500x2000.
-         Enters      a CAStack, a read walk, the stack axis outside the slab.
-         Promises    2 (the parents' masks are copied), 6 (masks are read
-                     only when a parent has one), 8 (alias_ptr stays NULL,
-                     so no slab is lent as a window).
-         Switch      ca_fast_paths_enabled(): off, the transfer walk.
-         Checked by  the slab-axis, fiber and two-slab-axes rows of the
-                     stack parent along axes 1 and 2 in the delivery matrix. */
-      if ( ca_func[src->obj_type].attach == ca_stack_func.attach
-           && !(flags & CA_KERNEL_WRITE)
-           && naxes >= 1 && !in_slab[((CAStack *) src)->k_axis]
-           && ca_fast_paths_enabled() ) {
-        CAStack *stack = (CAStack *) src;
-        int8_t   k_axis = stack->k_axis;
-        int8_t   parent_ndim = src->ndim - 1;
-        int8_t   sp = 0, op = 0;
-
-        st->slab_elements = 1;
-        for ( k = 0; k < src->ndim; k++ ) {
-          if ( in_slab[k] ) {
-            st->slab_axes_buf[sp]      = k;
-            st->slab_dims[sp]          = src->dim[k];
-            st->slab_elements         *= src->dim[k];
-            /* slab_strides[sp] = parent native byte stride at parent
-               axis (k if k < k_axis else k - 1).  k == k_axis cannot
-               appear here -- the engage predicate above excludes it. */
-            sp++;
-          } else {
-            st->outer_axes[op]         = k;
-            st->outer_dims[op]         = src->dim[k];
-            st->outer_strides[op]      = row_byte_strides[k];
-            st->outer_mask_strides[op] = row_elem_strides[k];
-            op++;
-          }
-        }
-        st->slab_ndim     = sp;
-        st->outer_ndim    = op;
-        st->composed_base = 0;
-        st->desc_ndim     = 0;
-
-        /* Locate the K-axis (= stack axis k_axis) within outer_axes. */
-        st->stack_k_outer_pos = -1;
-        for ( int8_t m = 0; m < st->outer_ndim; m++ ) {
-          if ( st->outer_axes[m] == k_axis ) {
-            st->stack_k_outer_pos = m;
-            break;
-          }
-        }
-
-        /* Uniform parent native byte strides + parent element strides
-           for mask (= MEMO §3.2 uniform shape across parents,
-           parents[0]->dim is canonical).  Mask strides cached so
-           next_slab_axes can compute mask_off without downcasting
-           (= AC3 layering goal). */
-        {
-          ca_size_t sb = src->bytes;
-          ca_size_t se = 1;
-          for ( int8_t kk = parent_ndim - 1; kk >= 0; kk-- ) {
-            st->stack_parent_strides[kk]      = sb;
-            st->stack_parent_mask_strides[kk] = se;
-            sb *= stack->parents[0]->dim[kk];
-            se *= stack->parents[0]->dim[kk];
-          }
-        }
-
-        /* Fill slab_strides + slab_mask_strides for slab axes (all of
-           which are parent inner axes since K is in outer).  stack ax
-           -> parent ax: s if s < k_axis else s - 1. */
-        for ( int8_t s_i = 0; s_i < st->slab_ndim; s_i++ ) {
-          int8_t  stack_ax  = st->slab_axes_buf[s_i];
-          int8_t  parent_ax = (stack_ax < k_axis) ? stack_ax : (stack_ax - 1);
-          st->slab_strides[s_i]      = st->stack_parent_strides[parent_ax];
-          st->slab_mask_strides[s_i] = st->stack_parent_mask_strides[parent_ax];
-        }
-
-        ca_size_t total = 1;
-        for ( int8_t m = 0; m < st->outer_ndim; m++ ) total *= st->outer_dims[m];
-        st->total_slabs   = total;
-        st->slab_n        = st->slab_elements;
-        st->slabs_emitted = 0;
-        st->chunk_size    = st->slab_n;
-
-        if ( st->outer_ndim > 0 ) {
-          CA_ASSUME(st->outer_ndim <= CA_RANK_MAX);   /* bound alloc over rank */
-          st->outer_idx = ALLOC_N(ca_size_t, st->outer_ndim);
-          for ( int8_t m = 0; m < st->outer_ndim; m++ ) st->outer_idx[m] = 0;
-        } else {
-          st->outer_idx = NULL;
-        }
-
-        /* Attach K parents + cache ptr aliases.  Symmetric with rev3
-           Case B; for entity parents attach is O(1). */
-        /* stack_n_parents counts the parents attached so far: an attach
-           that raises leaves finish with exactly those to detach. */
-        st->stack_n_parents = 0;
-        st->stack_parent_ptrs =
-            (char **) xmalloc(stack->n_parents * sizeof(char *));
-        for ( int32_t kk = 0; kk < stack->n_parents; kk++ ) {
-          ca_attach(stack->parents[kk]);   /* window: finish detaches the counted parents */
-          st->stack_parent_ptrs[kk] = (char *) stack->parents[kk]->ptr;
-          st->stack_n_parents = kk + 1;
-        }
-
-        /* If CAStack carries mask (= horizontal propagation already
-           applied at create_mask), copy the K parent masks as they are
-           at the start of the walk; next_slab_axes points into the copy
-           of parent k at mask_off.  A copy, as on every other path: the
-           cursor is the walk's own, and a write to it reaches nothing. */
-        if ( ca_has_mask(src) ) {
-          /* The stack's mask may still read stand-ins for parents that
-             have gained a mask since; read through to those. */
-          ca_multi_parent_mask_refresh(src->mask, stack->parents,
-                                       stack->mask_standins,
-                                       stack->n_parents, 0);
-          /* Zero-filled: a slot is set once its copy is made, and finish
-             frees the copies whose slot is set. */
-          st->stack_parent_mask_ptrs =
-              (boolean8_t **) xmalloc(stack->n_parents * sizeof(boolean8_t *));
-          memset(st->stack_parent_mask_ptrs, 0,
-                 stack->n_parents * sizeof(boolean8_t *));
-          for ( int32_t kk = 0; kk < stack->n_parents; kk++ ) {
-            CArray    *pm = ((CAStack *) src->mask)->parents[kk];
-            ca_size_t  n  = pm->elements;
-            boolean8_t *copy = (boolean8_t *) xmalloc(n > 0 ? n : 1);
-            st->stack_parent_mask_ptrs[kk] = copy;
-            ca_attach(pm);   /* window: only a memcpy before the detach */
-            memcpy(copy, pm->ptr, n);
-            ca_detach(pm);
-          }
-        } else {
-          st->stack_parent_mask_ptrs = NULL;
-        }
-
-        st->scratch_ptr = NULL;   /* no scratch: aliasing parent->ptr */
-        st->scratch_cap = 0;
-        st->alias_mode  = CA_ITER_ALIAS_STACK_OUTER_K;
-        st->alias_ptr   = NULL;
-        st->alias_mask  = NULL;
-        return CA_ITER_OK;
-      }
-
-      /* Shortcut PER_FIBER_FUSED (conversion views).
-         Layer       all three, per fiber: each fiber is fetched with the
-                     view's ca_xfer_stride into the fiber scratch, without
-                     gathering the whole view, and put back the same way.
-         Speeds up   a fiber walk of a fake or byte-swap view, or of a lazy
-                     monop that only casts, along its innermost axis.
-         Why         no difference measured on a sort along the last axis
-                     of a 2000x2000 fake view.
-         Enters      CA_KERNEL_FIBER_CONTIG, one slab axis, and
-                     ca_iter_should_per_fiber_fused.
-         Promises    1, 2, 3 and 4, as the CAWindow / CAShift hook above.
-         Switch      ca_fast_paths_enabled(): off, the transfer walk.
-         Checked by  the fiber rows of the fake parent in the delivery
-                     matrix. */
-      int per_fiber_fused = 0;
-      if ( (flags & CA_KERNEL_FIBER_CONTIG) && naxes == 1
-           && ca_fast_paths_enabled() ) {
-        int8_t    fiber_ax        = axes[0];
-        ca_size_t fiber_ax_stride = row_byte_strides[fiber_ax];
-        if ( ca_iter_should_per_fiber_fused(src, src_kind, fiber_ax,
-                                            fiber_ax_stride, flags) ) {
-          per_fiber_fused = 1;
-          st->alias_mode = CA_ITER_ALIAS_PER_FIBER_FUSED;
-          st->alias_ptr  = NULL;      /* no whole-view buffer */
-          st->fiber_axis = fiber_ax;
-          for ( int8_t kk = 0; kk < src->ndim; kk++ ) {
-            st->fiber_native_strides[kk] = row_byte_strides[kk];
-          }
-        }
-      }
-
-      if ( !per_fiber_fused ) {
-        /* 2026-05-31 refactor: iter-owns scratch via ca_xfer_all (was
-           ca_attach(src) + alias src->ptr). */
-        ki_gather_view(st, src, flags, 0);
-        st->alias_mode = CA_ITER_ALIAS_NONE;
-        st->alias_ptr  = st->scratch_ptr;
       }
 
       int8_t sp = 0, op = 0;
@@ -2073,7 +1507,10 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       st->slab_ndim     = sp;
       st->outer_ndim    = op;
       st->composed_base = 0;
-      st->desc_ndim     = 0;  /* row-major STRIDE everywhere */
+      /* desc_ndim = 0: next_slab_axes treats outer like Phase A
+         (no INDEX lookup), correct because scratch is row-major
+         contig (= STRIDE everywhere). */
+      st->desc_ndim = 0;
 
       ca_size_t total = 1;
       for ( int8_t m = 0; m < st->outer_ndim; m++ ) total *= st->outer_dims[m];
@@ -2083,6 +1520,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       st->chunk_size    = st->slab_n;
 
       if ( st->outer_ndim > 0 ) {
+        CA_ASSUME(st->outer_ndim <= CA_RANK_MAX);   /* bound alloc over rank */
         st->outer_idx = ALLOC_N(ca_size_t, st->outer_ndim);
         for ( int8_t m = 0; m < st->outer_ndim; m++ ) st->outer_idx[m] = 0;
       } else {
@@ -2090,157 +1528,18 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       }
 
       if ( ca_has_mask(src) ) {
-        if ( per_fiber_fused ) {
-          /* F.6.1 rev2 §3.3: mask travels with data per-fiber.  Mask
-             buffer is delivered through fiber_mask_scratch by
-             next_slab_axes; no whole-view materialise. */
-          st->alias_mask = NULL;
-        } else {
-          ca_size_t mcap = src->elements > 0 ? src->elements : 1;
-          st->scratch_mask = (boolean8_t *) xmalloc(mcap);
-          if ( src->elements > 0 ) {
-            ca_copy_data(src->mask, (char *) st->scratch_mask);
-          }
-          st->alias_mask = st->scratch_mask;
+        ca_size_t mcap = src->elements > 0 ? src->elements : 1;
+        st->scratch_mask = (boolean8_t *) xmalloc(mcap);
+        if ( src->elements > 0 ) {
+          ca_copy_data(src->mask, (char *) st->scratch_mask);
         }
+        st->alias_mask = st->scratch_mask;
       }
       return CA_ITER_OK;
     }
-    if ( src_kind != CA_ITER_SRC_CASTRIDE ) {
-      /* Any other unclassified kind. */
-      return CA_ITER_ERR_POLICY;
-    }
-  }
-
-  /* F-2 minimal scope: SHIFT outer axes need OOB fill-slab support which
-     is not yet implemented; downgrade to materialise (= existing
-     SRC_DESCRIPTOR path) when present.  Future work: allocate a 1-slab
-     fill scratch and yield it on OOB iterations (see rev6 §3.5 deferred). */
-  if ( src_kind == CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE
-       && ca_axis_dispatch_outer_has_shift(raw_descs, raw_ndim) ) {
-    src_kind = CA_ITER_SRC_DESCRIPTOR;
-  }
-
-  /* L2 WHOLE over SRC_ATTACH sources (including descriptor views that
-     route_source redirected): the transfer walk, yielded as one 1-D
-     slab. */
-  if ( src_kind == CA_ITER_SRC_ATTACH ) {
-    st->src      = src;
-    st->src_kind = CA_ITER_SRC_ATTACH;
-    st->level    = 2;
-    st->policy   = policy;
-    st->ndim     = 1;            /* logical 1-D L2 layout */
-    st->flags    = flags;
-    st->bytes    = src->bytes;
-    st->naxes    = naxes;
-    ki_open_by_transfer(st, src, flags);
-    return CA_ITER_OK;
-  }
-
-  /* F-2 (rev6, PROPOSAL_F2_KERNEL_ITERATOR_ALIAS): descriptor L2 alias
-     path.  Eligibility (route_source verdict): innermost descriptor axis
-     is STRIDE kind, no outer SHIFT axis (downgraded above when present).
-     Setup: ca_attach(parent), alias_ptr = parent->ptr, no scratch alloc.
-     Each outer-prefix iteration yields a strided slab
-       slab_ptr    = parent->ptr + inner_byte_start + outer_prefix_offset
-       slab_n      = descs[ndim-1].count
-       slab_stride = descs[ndim-1].step * pstrides[ndim-1]
-     where outer_prefix_offset is computed via ca_axis_dispatch_prefix_offset
-     on the pre-classified prefix[].  next_slab_strided branches on
-     src_kind to dispatch to this offset formula. */
-  if ( src_kind == CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE ) {
-    int8_t  nd = raw_ndim;
-    int8_t  k;
 
     st->src      = src;
-    st->src_kind = CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE;
-    st->level    = 2;
-    st->policy   = policy;
-    st->ndim     = nd;
-    st->flags    = flags;
-    st->bytes    = src->bytes;
-    st->naxes    = naxes;
-
-    /* Persist descs / parent_axis_dims in state; build parent row-major
-       pstrides so prefix_offset / inner offset share the same byte space. */
-    memcpy(st->descs, raw_descs, nd * sizeof(ca_axis_desc_t));
-    memcpy(st->parent_axis_dims, raw_pdims, nd * sizeof(ca_size_t));
-    st->desc_ndim = nd;
-    {
-      ca_size_t s = src->bytes;
-      for ( k = nd - 1; k >= 0; k-- ) {
-        st->pstrides[k] = s;
-        s *= raw_pdims[k];
-      }
-    }
-
-    /* Inner slab parameters from innermost STRIDE descriptor axis. */
-    ca_size_t inner_start  = raw_descs[nd - 1].start * st->pstrides[nd - 1];
-    ca_size_t inner_stride = raw_descs[nd - 1].step  * st->pstrides[nd - 1];
-    ca_size_t inner_n      = raw_descs[nd - 1].count;
-
-    /* Outer prefix classify (skipped for 1-D source since no outer). */
-    if ( nd > 1 ) {
-      ca_axis_dispatch_classify_prefix(st->descs, st->pstrides, nd - 1, st->prefix);
-    }
-
-    /* Total slabs = Π descs[0..nd-2].count (= src->elements / inner_n). */
-    ca_size_t outer_total = 1;
-    for ( k = 0; k < nd - 1; k++ ) outer_total *= raw_descs[k].count;
-    st->total_slabs    = outer_total;
-    st->slab_n         = inner_n;
-    st->slabs_emitted  = 0;
-    st->chunk_size     = inner_n;
-    st->total_elements = src->elements;
-
-    /* composed_base holds inner_byte_start; composed_strides[nd-1] holds
-       inner stride so next_slab_strided's existing inner_st extraction
-       (= composed_strides[nd-1]) works without per-iter recomputation.
-       Outer slots of composed_strides are unused by the descriptor
-       branch in next_slab_strided (= prefix[] drives the offset). */
-    st->composed_base            = inner_start;
-    st->composed_strides[nd - 1] = inner_stride;
-
-    if ( nd > 1 ) {
-      CA_ASSUME(nd <= CA_RANK_MAX);   /* with nd > 1: nd-1 in [1, CA_RANK_MAX-1] */
-      st->outer_idx = ALLOC_N(ca_size_t, nd - 1);
-      for ( k = 0; k < nd - 1; k++ ) st->outer_idx[k] = 0;
-    } else {
-      st->outer_idx = NULL;
-    }
-
-    CArray *parent = CAVIEW(src)->parent;
-    ca_attach(parent);
-    st->root       = parent;
-    st->alias_mode = CA_ITER_ALIAS_STRIDED;
-    st->alias_ptr  = (char *) parent->ptr;
-
-    /* Mask: gather into scratch_mask (same as SRC_DESCRIPTOR path).
-       Data alias + mask materialise is per rev6 §4.4 deferred to F-4.c. */
-    if ( ca_has_mask(src) ) {
-      ca_size_t mcap = src->elements > 0 ? src->elements : 1;
-      st->scratch_mask = (boolean8_t *) xmalloc(mcap);
-      if ( src->elements > 0 ) {
-        ca_copy_data(src->mask, (char *) st->scratch_mask);
-      }
-      st->alias_mask = st->scratch_mask;
-    }
-    return CA_ITER_OK;
-  }
-
-  /* Sub-step 5.3: L2 dispatch over descriptor sources.  The view-family
-     surface prioritises delivering the cells over avoiding a copy: always
-     materialise into a
-     scratch buffer with ca_axis_dispatch_gather and yield a single
-     strided slab (stride = bytes).  Innermost-STRIDE descriptor views
-     take the L2 alias path above; this block handles the rest (an
-     innermost INDEX or SHIFT axis, or an outer SHIFT axis). */
-  if ( src_kind == CA_ITER_SRC_DESCRIPTOR ) {
-    /* raw_descs / raw_pdims / raw_ndim were populated by route_source
-       above so we skip the local describe_axes call.  Kept locals
-       named raw_* to match the original code. */
-    st->src      = src;
-    st->src_kind = CA_ITER_SRC_DESCRIPTOR;
+    st->src_kind = CA_ITER_SRC_DESCRIPTOR;  /* Phase B alias path */
     st->level    = 2;
     st->policy   = policy;
     st->ndim     = src->ndim;
@@ -2248,56 +1547,110 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     st->bytes    = src->bytes;
     st->naxes    = naxes;
 
-    memcpy(st->parent_axis_dims, raw_pdims, raw_ndim * sizeof(ca_size_t));
-    ca_axis_dispatch_prepare(st->parent_axis_dims, raw_descs, raw_ndim,
-                             st->bytes, st->descs, st->pstrides,
-                             st->mdim, &st->desc_ndim);
-    ca_axis_dispatch_layout(st->descs, st->pstrides, st->mdim,
-                            st->desc_ndim, st->bytes,
-                            &st->slab_start, &st->slab_bytes_desc,
-                            &st->slab_base);
-    if ( st->slab_start > 0 ) {
-      ca_axis_dispatch_classify_prefix(st->descs, st->pstrides,
-                                       st->slab_start, st->prefix);
+    /* Parent row-major byte strides for offset computation. */
+    ca_size_t pstrides[CA_RANK_MAX];
+    {
+      ca_size_t s = src->bytes;
+      for ( k = src->ndim - 1; k >= 0; k-- ) {
+        pstrides[k] = s;
+        s *= raw_pdims[k];
+      }
     }
-    st->total_elements = src->elements;
+    /* View row-major element strides (= mask scratch layout). */
+    ca_size_t row_elem_strides[CA_RANK_MAX];
+    {
+      ca_size_t s = 1;
+      for ( k = src->ndim - 1; k >= 0; k-- ) {
+        row_elem_strides[k] = s;
+        s *= src->dim[k];
+      }
+    }
 
-    /* Materialise via the engine into a scratch buffer (contig
-       layout = single strided run, stride = bytes). */
+    /* Partition + populate slab / outer metadata.  Slab axes contribute
+       to a constant slab_base (since they're all STRIDE: start +
+       step*idx, where the base is start*pstride summed).  Outer axes
+       drive per-slab offset via direct (start + step*idx)*pstride or
+       indices[idx]*pstride (= no classify_prefix engine, since outer
+       axes here are not a prefix of raw_descs[] — they're a
+       complement of slab_axes). */
+    int8_t    sp = 0, op = 0;
+    ca_size_t slab_base = 0;
+    st->slab_elements = 1;
+    for ( k = 0; k < src->ndim; k++ ) {
+      if ( in_slab[k] ) {
+        /* STRIDE-kind slab axis: start*pstride goes to slab_base,
+           step*pstride is the per-cell byte stride. */
+        slab_base += raw_descs[k].start * pstrides[k];
+        st->slab_axes_buf[sp]     = k;
+        st->slab_dims[sp]         = raw_descs[k].count;
+        st->slab_strides[sp]      = raw_descs[k].step * pstrides[k];
+        st->slab_mask_strides[sp] = row_elem_strides[k];
+        st->slab_elements        *= raw_descs[k].count;
+        sp++;
+      } else {
+        /* Outer axis: STRIDE or INDEX (an outer SHIFT was routed to the
+           materialise path above).
+           Store axis index + view's outer dim/stride for descriptor
+           walk in next_slab_axes.  We reuse outer_strides/outer_mask
+           _strides as the OUTER walk metadata; outer-axis kind is
+           carried implicitly via raw_descs[outer_axes[m]] in the
+           state struct's descs[] field (populated below). */
+        st->outer_axes[op]         = k;
+        st->outer_dims[op]         = raw_descs[k].count;
+        /* For STRIDE: per-axis stride = step * pstride; INDEX axes
+           use indices[] from raw_descs and need a 0 stride here
+           (next_slab_axes branches on descs[].kind to compute the
+           real offset).  We persist the full raw_descs in st->descs
+           so the next_slab_axes implementation can dispatch. */
+        if ( raw_descs[k].kind == CA_AXIS_KIND_STRIDE ) {
+          st->outer_strides[op] = raw_descs[k].step * pstrides[k];
+          /* Bake in start*pstride into slab_base for STRIDE outer too
+             so per-cell offset is purely step*idx. */
+          slab_base += raw_descs[k].start * pstrides[k];
+        } else {
+          /* INDEX kind: outer_strides[m] = pstrides[k] (element-unit
+             from indices[]).  We DON'T pre-bake into slab_base for
+             INDEX axes; per-iter offset = indices[idx[m]] * pstrides[k]
+             is computed in next_slab_axes. */
+          st->outer_strides[op] = pstrides[k];
+        }
+        st->outer_mask_strides[op] = row_elem_strides[k];
+        op++;
+      }
+    }
+    st->slab_ndim     = sp;
+    st->outer_ndim    = op;
+    st->composed_base = slab_base;
+
+    /* Persist raw_descs / pstrides in state so next_slab_axes can
+       distinguish STRIDE vs INDEX outer per axis. */
+    memcpy(st->descs, raw_descs, src->ndim * sizeof(ca_axis_desc_t));
+    memcpy(st->parent_axis_dims, raw_pdims, src->ndim * sizeof(ca_size_t));
+    memcpy(st->pstrides, pstrides, src->ndim * sizeof(ca_size_t));
+    st->desc_ndim = src->ndim;
+
+    ca_size_t total = 1;
+    for ( int8_t m = 0; m < st->outer_ndim; m++ ) total *= st->outer_dims[m];
+    st->total_slabs   = total;
+    st->slab_n        = st->slab_elements;
+    st->slabs_emitted = 0;
+    st->chunk_size    = st->slab_n;
+
+    if ( st->outer_ndim > 0 ) {
+      st->outer_idx = ALLOC_N(ca_size_t, st->outer_ndim);
+      for ( int8_t m = 0; m < st->outer_ndim; m++ ) st->outer_idx[m] = 0;
+    } else {
+      st->outer_idx = NULL;
+    }
+
+    /* Attach parent for alias path. */
     CArray *parent = CAVIEW(src)->parent;
     ca_attach(parent);
-    st->root        = parent;
-    st->scratch_cap = src->elements * src->bytes;
-    const void *bound_fill = NULL;
-    if ( ca_func[src->obj_type].attach == ca_window_func.attach ) {
-      bound_fill = ((CAWindow *) src)->fill;
-    }
-    st->scratch_cap = st->total_elements * src->bytes;
-    st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
-    ca_axis_dispatch_gather(parent, st->parent_axis_dims, raw_descs, raw_ndim,
-                            src->bytes, st->total_elements, bound_fill,
-                            st->scratch_ptr);
+    st->root       = parent;
+    st->alias_mode = CA_ITER_ALIAS_STRIDED;
+    st->alias_ptr  = (char *) parent->ptr;
 
-    /* Lay out as a single 1-D L2 strided slab: ptr = scratch,
-       n = total_elements, stride = bytes.  next_slab_strided reads
-       inner_stride from composed_strides[ndim - 1] and skips the
-       outer loop when outer_idx == NULL, so a 1-D logical layout
-       (st->ndim = 1, composed_strides[0] = bytes) yields exactly one
-       contig run.  Note st->ndim diverges from src->ndim here — the
-       iterator's logical ndim is 1, but the view itself can be N-D
-       (the materialised buffer is flat). */
-    st->ndim                = 1;
-    st->alias_mode          = CA_ITER_ALIAS_NONE;
-    st->alias_ptr           = st->scratch_ptr;
-    st->composed_strides[0] = src->bytes;
-    st->composed_base       = 0;
-    st->slab_n              = src->elements;
-    st->total_slabs         = 1;
-    st->slabs_emitted       = 0;
-    st->chunk_size          = st->slab_n;
-    st->outer_idx           = NULL;
-
-    /* Step 6: mask gather, same as L1 descriptor branch. */
+    /* Mask gather (= view row-major boolean8_t). */
     if ( ca_has_mask(src) ) {
       ca_size_t mcap = src->elements > 0 ? src->elements : 1;
       st->scratch_mask = (boolean8_t *) xmalloc(mcap);
@@ -2307,6 +1660,458 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
       st->alias_mask = st->scratch_mask;
     }
     return CA_ITER_OK;
+  }
+slab_axes_by_transfer:
+  if ( src_kind == CA_ITER_SRC_ATTACH ) {
+    /* CA_SLAB_AXES + SRC_ATTACH (every view classified SRC_ATTACH).
+       The cases below, in order: CAStack walked through its parents
+       (CA_ITER_ALIAS_STACK, STACK_OUTER_K), a single FIBER_CONTIG fiber
+       through ca_xfer_stride (PER_FIBER_FUSED), and otherwise the whole
+       view gathered into scratch with ki_gather_view and walked with
+       K-D strides in view row-major layout.
+
+       The most common entry path here is wrap_readonly(int_src,
+       CA_FLOAT64) → CAFake, enabling sum_ki etc. to accept any
+       numeric data_type source via auto-cast (= D2.2 confirmed in
+       rev2 sparring). */
+    if ( axes == NULL || naxes <= 0 || naxes > src->ndim ) {
+      return CA_ITER_ERR_POLICY;
+    }
+    int8_t in_slab[CA_RANK_MAX];
+    int8_t k;
+    for ( k = 0; k < CA_RANK_MAX; k++ ) in_slab[k] = 0;
+    for ( k = 0; k < naxes; k++ ) {
+      int8_t ax = axes[k];
+      if ( ax < 0 || ax >= src->ndim ) return CA_ITER_ERR_POLICY;
+      if ( in_slab[ax] )               return CA_ITER_ERR_POLICY;
+      in_slab[ax] = 1;
+    }
+
+    st->src      = src;
+    st->src_kind = CA_ITER_SRC_ATTACH;
+    st->level    = 2;
+    st->policy   = policy;
+    st->ndim     = src->ndim;
+    st->flags    = flags;
+    st->bytes    = src->bytes;
+    st->naxes    = naxes;
+
+    /* Row-major byte / element strides on the attached view buffer.
+       Computed first so the F.6.1 predicate can inspect fiber-axis
+       effective stride before deciding whether to materialise. */
+    ca_size_t row_byte_strides[CA_RANK_MAX];
+    ca_size_t row_elem_strides[CA_RANK_MAX];
+    {
+      ca_size_t b = src->bytes, e = 1;
+      for ( k = src->ndim - 1; k >= 0; k-- ) {
+        row_byte_strides[k] = b;
+        row_elem_strides[k] = e;
+        b *= src->dim[k];
+        e *= src->dim[k];
+      }
+    }
+
+    /* PROPOSAL_CASTACK_LOOP_INTERCHANGE Vector A rev4 (direct per-
+       parent ptr access path + tile cache).  Engages when:
+         - source.attach is ca_stack_func.attach (= CAStack identity)
+         - no mask (= horizontal mask propagation per-slab gather is
+           out of scope; falls back to SRC_ATTACH whole-view path)
+         - naxes == 1 && axes[0] == k_axis (= K-axis-only slab, the
+           demand-driving case = reduce along the stacked axis like
+           view.mean(axis: k_axis))
+       init attaches K parents up front (O(1) per entity parent),
+       caches parent->ptr aliases + uniform parent-native byte strides,
+       allocates a slab-sized scratch (= K * bytes) plus a tile cache
+       sized to fit the L1d budget.  next_slab_axes refills TILE fibers
+       per K contig parent reads (rev4 2026-06-19) and serves the next
+       TILE-1 calls from the L1d-resident cache, beating SRC_ATTACH
+       across all measured sizes.  No size-threshold gate: rev3's gate
+       was a perf trade-off justification that the tile cache erased.
+
+       K.3 (PROPOSAL_CASTACK_K_AXIS, 2026-06-20): engage predicate
+       generalised from `axes[0] == 0` to `axes[0] == k_axis`.  The
+       tile cache mechanism + outer_idx -> parent axis mapping are
+       already k_axis-agnostic: outer_idx[m] maps to parent axis m
+       regardless of k_axis position (= for k_axis = 0 outer is stack
+       axes 1..N-1 = parent axes 0..N-2; for k_axis > 0 outer is stack
+       axes [0..k_axis-1, k_axis+1..N-1] = parent axes [0..k_axis-1,
+       k_axis..N-2]; either way outer_idx[m] = parent axis m). */
+    /* Shortcut STACK.
+       Layer       data and fiber: the slab is cut contiguous from the K
+                   parents through a tile cache.
+       Speeds up   read walks of an unmasked CAStack whose one slab axis
+                   is the stack axis.
+       Why         about 2x on a mean along the stack axis of 4 parents
+                   of 500x2000.
+       Enters      a CAStack, no mask, a read walk, one slab axis that is
+                   k_axis.
+       Promises    1 (the slab is contiguous), 6 (no mask exists to touch).
+       Switch      ca_fast_paths_enabled(): off, the transfer walk.
+       Checked by  the slab-axis and fiber rows of the stack parent along
+                   axis 0 in the delivery matrix. */
+    if ( ca_func[src->obj_type].attach == ca_stack_func.attach
+         && !ca_has_mask(src)
+         && !(flags & CA_KERNEL_WRITE)
+         && naxes == 1 && axes[0] == ((CAStack *) src)->k_axis
+         && ca_fast_paths_enabled() ) {
+      CAStack *stack = (CAStack *) src;
+      int8_t   parent_ndim = src->ndim - 1;
+      int8_t   sp = 0, op = 0;
+
+      st->slab_elements = 1;
+      for ( k = 0; k < src->ndim; k++ ) {
+        if ( in_slab[k] ) {
+          st->slab_axes_buf[sp]      = k;
+          st->slab_dims[sp]          = src->dim[k];
+          st->slab_elements         *= src->dim[k];
+          sp++;
+        } else {
+          st->outer_axes[op]         = k;
+          st->outer_dims[op]         = src->dim[k];
+          st->outer_strides[op]      = row_byte_strides[k];     /* unused on STACK path */
+          st->outer_mask_strides[op] = row_elem_strides[k];     /* unused on STACK path */
+          op++;
+        }
+      }
+      st->slab_ndim     = sp;
+      st->outer_ndim    = op;
+      st->composed_base = 0;
+      st->desc_ndim     = 0;
+      /* slab_strides on STACK path: slab_axes == [0], scratch is
+         packed contig over K elements (= K * bytes), so single-axis
+         slab walk uses bytes stride. */
+      st->slab_strides[0]      = src->bytes;
+      st->slab_mask_strides[0] = 1;   /* harmless on no-mask path */
+
+      ca_size_t total = 1;
+      for ( int8_t m = 0; m < st->outer_ndim; m++ ) total *= st->outer_dims[m];
+      st->total_slabs   = total;
+      st->slab_n        = st->slab_elements;
+      st->slabs_emitted = 0;
+      st->chunk_size    = st->slab_n;
+
+      if ( st->outer_ndim > 0 ) {
+        CA_ASSUME(st->outer_ndim <= CA_RANK_MAX);   /* bound alloc over rank */
+        st->outer_idx = ALLOC_N(ca_size_t, st->outer_ndim);
+        for ( int8_t m = 0; m < st->outer_ndim; m++ ) st->outer_idx[m] = 0;
+      } else {
+        st->outer_idx = NULL;
+      }
+
+      /* Attach K parents and cache their ptr aliases.  CAStack
+         guarantees uniform shape (MEMO §3.2) so one set of parent
+         native byte strides covers all K (= parents[0]->dim is
+         canonical). */
+      /* stack_n_parents counts the parents attached so far: an attach
+         that raises leaves finish with exactly those to detach. */
+      st->stack_n_parents = 0;
+      st->stack_parent_ptrs =
+          (char **) xmalloc(stack->n_parents * sizeof(char *));
+      for ( int32_t kk = 0; kk < stack->n_parents; kk++ ) {
+        ca_attach(stack->parents[kk]);   /* window: finish detaches the counted parents */
+        st->stack_parent_ptrs[kk] = (char *) stack->parents[kk]->ptr;
+        st->stack_n_parents = kk + 1;
+      }
+      {
+        ca_size_t s = src->bytes;
+        for ( int8_t kk = parent_ndim - 1; kk >= 0; kk-- ) {
+          st->stack_parent_strides[kk] = s;
+          s *= stack->parents[0]->dim[kk];
+        }
+      }
+
+      /* Slab-sized scratch (= K * bytes for slab_axes == [0]). */
+      st->scratch_cap = (ca_size_t) st->slab_elements * src->bytes;
+      st->scratch_ptr = (char *) ki_data_alloc(src->data_type, st->scratch_cap);
+
+      /* Tile cache (pilot/castack-axis0-loop-interchange): refill TILE
+         fibers per K parent reads, serve next TILE-1 fibers from L1d.
+         TILE budget = ~32 KB (half of M2 L1d).  Empirically tested
+         values; clamped to [8, 64] to keep the refill loop tight. */
+      {
+        ca_size_t K = (ca_size_t) stack->n_parents;
+        ca_size_t bytes = (ca_size_t) src->bytes;
+        ca_size_t tile = K > 0 ? (32 * 1024) / (K * bytes) : 0;
+        if ( tile < 8 )  tile = 8;
+        if ( tile > 64 ) tile = 64;
+        st->stack_tile_cap   = tile;
+        st->stack_tile_pos   = 0;
+        st->stack_tile_have  = 0;     /* force refill on first call */
+        st->stack_tile_cache = (char *) ki_data_alloc(src->data_type, K * tile * bytes);
+      }
+
+      st->alias_mode  = CA_ITER_ALIAS_STACK;
+      st->alias_ptr   = NULL;   /* no whole-view buffer */
+      st->alias_mask  = NULL;
+      return CA_ITER_OK;
+    }
+
+    /* CAStack source whose slab axes leave out the stack axis k_axis
+       (the stack axis stays in the outer iteration, e.g. a stack along
+       axis 0 reduced along axis 1).  Each slab is a region inside ONE
+       parent, selected by outer_idx[K_outer_pos].  The engine attaches
+       the K parents and caches their ptrs, copies the K parent masks
+       when the stack has a mask, and next_slab_axes points into
+       parents[k]->ptr + parent_off -- no gather of the data unless
+       FIBER_CONTIG needs a contiguous fiber.
+
+       Layering: engine detects CAStack identity by function-pointer
+       comparison and accesses parents[] / mask via ca_func[STACK]
+       operation table where possible.  CAStack downcast occurs only
+       for the n_parents / parents[] read in init_l2 (= same scope as
+       rev3 STACK; AC3 forbids parents[] walk in next_slab_axes only).
+       Q1 disposition: option (i) minimal-diff inline in SLAB_AXES
+       branch -- evaluated as smallest diff with acceptable layering
+       (proposal §3.1). */
+    /* STACK_OUTER_K: K-axis stays in outer iter (slab carved out of
+       one parent at a time).  K.3 (2026-06-20): engage predicate +
+       stack-axis -> parent-axis mapping generalised for arbitrary
+       k_axis.  stack axis s maps to parent axis (s if s < k_axis else
+       s - 1); only the K stack axis (s == k_axis) has no parent
+       counterpart. */
+    /* Shortcut STACK_OUTER_K.
+       Layer       data; the fiber layer sits on top.
+       Speeds up   read walks of a CAStack whose stack axis is an outer
+                   axis: each slab is cut from the one parent the outer
+                   index picks, without gathering the stack.
+       Why         about 11x on a mean along axis 1 of 4 parents of
+                   500x2000.
+       Enters      a CAStack, a read walk, the stack axis outside the slab.
+       Promises    2 (the parents' masks are copied), 6 (masks are read
+                   only when a parent has one), 8 (alias_ptr stays NULL,
+                   so no slab is lent as a window).
+       Switch      ca_fast_paths_enabled(): off, the transfer walk.
+       Checked by  the slab-axis, fiber and two-slab-axes rows of the
+                   stack parent along axes 1 and 2 in the delivery matrix. */
+    if ( ca_func[src->obj_type].attach == ca_stack_func.attach
+         && !(flags & CA_KERNEL_WRITE)
+         && naxes >= 1 && !in_slab[((CAStack *) src)->k_axis]
+         && ca_fast_paths_enabled() ) {
+      CAStack *stack = (CAStack *) src;
+      int8_t   k_axis = stack->k_axis;
+      int8_t   parent_ndim = src->ndim - 1;
+      int8_t   sp = 0, op = 0;
+
+      st->slab_elements = 1;
+      for ( k = 0; k < src->ndim; k++ ) {
+        if ( in_slab[k] ) {
+          st->slab_axes_buf[sp]      = k;
+          st->slab_dims[sp]          = src->dim[k];
+          st->slab_elements         *= src->dim[k];
+          /* slab_strides[sp] = parent native byte stride at parent
+             axis (k if k < k_axis else k - 1).  k == k_axis cannot
+             appear here -- the engage predicate above excludes it. */
+          sp++;
+        } else {
+          st->outer_axes[op]         = k;
+          st->outer_dims[op]         = src->dim[k];
+          st->outer_strides[op]      = row_byte_strides[k];
+          st->outer_mask_strides[op] = row_elem_strides[k];
+          op++;
+        }
+      }
+      st->slab_ndim     = sp;
+      st->outer_ndim    = op;
+      st->composed_base = 0;
+      st->desc_ndim     = 0;
+
+      /* Locate the K-axis (= stack axis k_axis) within outer_axes. */
+      st->stack_k_outer_pos = -1;
+      for ( int8_t m = 0; m < st->outer_ndim; m++ ) {
+        if ( st->outer_axes[m] == k_axis ) {
+          st->stack_k_outer_pos = m;
+          break;
+        }
+      }
+
+      /* Uniform parent native byte strides + parent element strides
+         for mask (= MEMO §3.2 uniform shape across parents,
+         parents[0]->dim is canonical).  Mask strides cached so
+         next_slab_axes can compute mask_off without downcasting
+         (= AC3 layering goal). */
+      {
+        ca_size_t sb = src->bytes;
+        ca_size_t se = 1;
+        for ( int8_t kk = parent_ndim - 1; kk >= 0; kk-- ) {
+          st->stack_parent_strides[kk]      = sb;
+          st->stack_parent_mask_strides[kk] = se;
+          sb *= stack->parents[0]->dim[kk];
+          se *= stack->parents[0]->dim[kk];
+        }
+      }
+
+      /* Fill slab_strides + slab_mask_strides for slab axes (all of
+         which are parent inner axes since K is in outer).  stack ax
+         -> parent ax: s if s < k_axis else s - 1. */
+      for ( int8_t s_i = 0; s_i < st->slab_ndim; s_i++ ) {
+        int8_t  stack_ax  = st->slab_axes_buf[s_i];
+        int8_t  parent_ax = (stack_ax < k_axis) ? stack_ax : (stack_ax - 1);
+        st->slab_strides[s_i]      = st->stack_parent_strides[parent_ax];
+        st->slab_mask_strides[s_i] = st->stack_parent_mask_strides[parent_ax];
+      }
+
+      ca_size_t total = 1;
+      for ( int8_t m = 0; m < st->outer_ndim; m++ ) total *= st->outer_dims[m];
+      st->total_slabs   = total;
+      st->slab_n        = st->slab_elements;
+      st->slabs_emitted = 0;
+      st->chunk_size    = st->slab_n;
+
+      if ( st->outer_ndim > 0 ) {
+        CA_ASSUME(st->outer_ndim <= CA_RANK_MAX);   /* bound alloc over rank */
+        st->outer_idx = ALLOC_N(ca_size_t, st->outer_ndim);
+        for ( int8_t m = 0; m < st->outer_ndim; m++ ) st->outer_idx[m] = 0;
+      } else {
+        st->outer_idx = NULL;
+      }
+
+      /* Attach K parents + cache ptr aliases.  Symmetric with rev3
+         Case B; for entity parents attach is O(1). */
+      /* stack_n_parents counts the parents attached so far: an attach
+         that raises leaves finish with exactly those to detach. */
+      st->stack_n_parents = 0;
+      st->stack_parent_ptrs =
+          (char **) xmalloc(stack->n_parents * sizeof(char *));
+      for ( int32_t kk = 0; kk < stack->n_parents; kk++ ) {
+        ca_attach(stack->parents[kk]);   /* window: finish detaches the counted parents */
+        st->stack_parent_ptrs[kk] = (char *) stack->parents[kk]->ptr;
+        st->stack_n_parents = kk + 1;
+      }
+
+      /* If CAStack carries mask (= horizontal propagation already
+         applied at create_mask), copy the K parent masks as they are
+         at the start of the walk; next_slab_axes points into the copy
+         of parent k at mask_off.  A copy, as on every other path: the
+         cursor is the walk's own, and a write to it reaches nothing. */
+      if ( ca_has_mask(src) ) {
+        /* The stack's mask may still read stand-ins for parents that
+           have gained a mask since; read through to those. */
+        ca_multi_parent_mask_refresh(src->mask, stack->parents,
+                                     stack->mask_standins,
+                                     stack->n_parents, 0);
+        /* Zero-filled: a slot is set once its copy is made, and finish
+           frees the copies whose slot is set. */
+        st->stack_parent_mask_ptrs =
+            (boolean8_t **) xmalloc(stack->n_parents * sizeof(boolean8_t *));
+        memset(st->stack_parent_mask_ptrs, 0,
+               stack->n_parents * sizeof(boolean8_t *));
+        for ( int32_t kk = 0; kk < stack->n_parents; kk++ ) {
+          CArray    *pm = ((CAStack *) src->mask)->parents[kk];
+          ca_size_t  n  = pm->elements;
+          boolean8_t *copy = (boolean8_t *) xmalloc(n > 0 ? n : 1);
+          st->stack_parent_mask_ptrs[kk] = copy;
+          ca_attach(pm);   /* window: only a memcpy before the detach */
+          memcpy(copy, pm->ptr, n);
+          ca_detach(pm);
+        }
+      } else {
+        st->stack_parent_mask_ptrs = NULL;
+      }
+
+      st->scratch_ptr = NULL;   /* no scratch: aliasing parent->ptr */
+      st->scratch_cap = 0;
+      st->alias_mode  = CA_ITER_ALIAS_STACK_OUTER_K;
+      st->alias_ptr   = NULL;
+      st->alias_mask  = NULL;
+      return CA_ITER_OK;
+    }
+
+    /* Shortcut PER_FIBER_FUSED (conversion views).
+       Layer       all three, per fiber: each fiber is fetched with the
+                   view's ca_xfer_stride into the fiber scratch, without
+                   gathering the whole view, and put back the same way.
+       Speeds up   a fiber walk of a fake or byte-swap view, or of a lazy
+                   monop that only casts, along its innermost axis.
+       Why         no difference measured on a sort along the last axis
+                   of a 2000x2000 fake view.
+       Enters      CA_KERNEL_FIBER_CONTIG, one slab axis, and
+                   ca_iter_should_per_fiber_fused.
+       Promises    1, 2, 3 and 4, as the CAWindow / CAShift hook above.
+       Switch      ca_fast_paths_enabled(): off, the transfer walk.
+       Checked by  the fiber rows of the fake parent in the delivery
+                   matrix. */
+    int per_fiber_fused = 0;
+    if ( (flags & CA_KERNEL_FIBER_CONTIG) && naxes == 1
+         && ca_fast_paths_enabled() ) {
+      int8_t    fiber_ax        = axes[0];
+      ca_size_t fiber_ax_stride = row_byte_strides[fiber_ax];
+      if ( ca_iter_should_per_fiber_fused(src, src_kind, fiber_ax,
+                                          fiber_ax_stride, flags) ) {
+        per_fiber_fused = 1;
+        st->alias_mode = CA_ITER_ALIAS_PER_FIBER_FUSED;
+        st->alias_ptr  = NULL;      /* no whole-view buffer */
+        st->fiber_axis = fiber_ax;
+        for ( int8_t kk = 0; kk < src->ndim; kk++ ) {
+          st->fiber_native_strides[kk] = row_byte_strides[kk];
+        }
+      }
+    }
+
+    if ( !per_fiber_fused ) {
+      /* 2026-05-31 refactor: iter-owns scratch via ca_xfer_all (was
+         ca_attach(src) + alias src->ptr). */
+      ki_gather_view(st, src, flags, 0);
+      st->alias_mode = CA_ITER_ALIAS_NONE;
+      st->alias_ptr  = st->scratch_ptr;
+    }
+
+    int8_t sp = 0, op = 0;
+    st->slab_elements = 1;
+    for ( k = 0; k < src->ndim; k++ ) {
+      if ( in_slab[k] ) {
+        st->slab_axes_buf[sp]      = k;
+        st->slab_dims[sp]          = src->dim[k];
+        st->slab_strides[sp]       = row_byte_strides[k];
+        st->slab_mask_strides[sp]  = row_elem_strides[k];
+        st->slab_elements         *= src->dim[k];
+        sp++;
+      } else {
+        st->outer_axes[op]         = k;
+        st->outer_dims[op]         = src->dim[k];
+        st->outer_strides[op]      = row_byte_strides[k];
+        st->outer_mask_strides[op] = row_elem_strides[k];
+        op++;
+      }
+    }
+    st->slab_ndim     = sp;
+    st->outer_ndim    = op;
+    st->composed_base = 0;
+    st->desc_ndim     = 0;  /* row-major STRIDE everywhere */
+
+    ca_size_t total = 1;
+    for ( int8_t m = 0; m < st->outer_ndim; m++ ) total *= st->outer_dims[m];
+    st->total_slabs   = total;
+    st->slab_n        = st->slab_elements;
+    st->slabs_emitted = 0;
+    st->chunk_size    = st->slab_n;
+
+    if ( st->outer_ndim > 0 ) {
+      st->outer_idx = ALLOC_N(ca_size_t, st->outer_ndim);
+      for ( int8_t m = 0; m < st->outer_ndim; m++ ) st->outer_idx[m] = 0;
+    } else {
+      st->outer_idx = NULL;
+    }
+
+    if ( ca_has_mask(src) ) {
+      if ( per_fiber_fused ) {
+        /* F.6.1 rev2 §3.3: mask travels with data per-fiber.  Mask
+           buffer is delivered through fiber_mask_scratch by
+           next_slab_axes; no whole-view materialise. */
+        st->alias_mask = NULL;
+      } else {
+        ca_size_t mcap = src->elements > 0 ? src->elements : 1;
+        st->scratch_mask = (boolean8_t *) xmalloc(mcap);
+        if ( src->elements > 0 ) {
+          ca_copy_data(src->mask, (char *) st->scratch_mask);
+        }
+        st->alias_mask = st->scratch_mask;
+      }
+    }
+    return CA_ITER_OK;
+  }
+  if ( src_kind != CA_ITER_SRC_CASTRIDE ) {
+    /* Any other unclassified kind. */
+    return CA_ITER_ERR_POLICY;
   }
 
   /* === CAStride / entity L2 path === */
@@ -2320,7 +2125,7 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
   st->naxes  = naxes;
 
   /* Compute composed strides + base.  For entity / CAStride contig we
-     synthesise row-major byte strides so next_slab_strided's offset
+     synthesise row-major byte strides so next_slab_axes's offset
      math is uniform across alias modes; for CAStride non-contig we
      compose leaf strides up to the root entity via the substrate. */
   int8_t nd = src->ndim;
@@ -2368,121 +2173,71 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
      Layout invariant: slab_axes_buf and outer_axes are both stored
      sort-ascending (in source-axis order), so multi-axis CA_SLAB_AXES
      is canonical regardless of the user's input order. */
-  if ( policy == CA_SLAB_AXES ) {
-    /* Validate axes input. */
-    if ( axes == NULL || naxes <= 0 || naxes > nd ) {
-      return CA_ITER_ERR_POLICY;
-    }
-    int8_t in_slab[CA_RANK_MAX];
-    int8_t k;
-    for ( k = 0; k < CA_RANK_MAX; k++ ) in_slab[k] = 0;
-    for ( k = 0; k < naxes; k++ ) {
-      int8_t ax = axes[k];
-      if ( ax < 0 || ax >= nd ) return CA_ITER_ERR_POLICY;
-      if ( in_slab[ax] )        return CA_ITER_ERR_POLICY;  /* duplicate */
-      in_slab[ax] = 1;
-    }
-
-    /* View row-major element strides (= mask scratch layout strides). */
-    ca_size_t row_elem_strides[CA_RANK_MAX];
-    {
-      ca_size_t s = 1;
-      for ( k = nd - 1; k >= 0; k-- ) {
-        row_elem_strides[k] = s;
-        s *= src->dim[k];
-      }
-    }
-
-    /* Partition axes (ascending order). */
-    int8_t sp = 0, op = 0;
-    st->slab_elements = 1;
-    for ( k = 0; k < nd; k++ ) {
-      if ( in_slab[k] ) {
-        st->slab_axes_buf[sp]    = k;
-        st->slab_dims[sp]        = src->dim[k];
-        st->slab_strides[sp]     = st->composed_strides[k];
-        st->slab_mask_strides[sp] = row_elem_strides[k];
-        st->slab_elements       *= src->dim[k];
-        sp++;
-      } else {
-        st->outer_axes[op]        = k;
-        st->outer_dims[op]        = src->dim[k];
-        st->outer_strides[op]     = st->composed_strides[k];
-        st->outer_mask_strides[op] = row_elem_strides[k];
-        op++;
-      }
-    }
-    st->slab_ndim  = sp;
-    st->outer_ndim = op;
-
-    /* total_slabs = Π outer_dims.  Empty product (all-axes case) = 1
-       → single slab = whole array (D1.4 WHOLE-equivalent). */
-    ca_size_t total = 1;
-    for ( int8_t m = 0; m < st->outer_ndim; m++ ) total *= st->outer_dims[m];
-    st->total_slabs   = total;
-    st->slab_n        = st->slab_elements;    /* mirror to legacy field */
-    st->slabs_emitted = 0;
-    st->chunk_size    = st->slab_n;
-
-    if ( st->outer_ndim > 0 ) {
-      st->outer_idx = ALLOC_N(ca_size_t, st->outer_ndim);
-      for ( int8_t m = 0; m < st->outer_ndim; m++ ) st->outer_idx[m] = 0;
-    } else {
-      st->outer_idx = NULL;
-    }
-
-    if ( use_strided ) {
-      ca_attach(root);            /* window: finish detaches st->root */
-      st->root       = root;      /* recorded once attached */
-      st->alias_mode = CA_ITER_ALIAS_STRIDED;
-      st->alias_ptr  = (char *) root->ptr;
-    } else if ( use_view_scratch ) {
-      st->root        = NULL;
-      ki_gather_view(st, src, flags, 1);
-      st->alias_mode = CA_ITER_ALIAS_NONE;
-      st->alias_ptr  = st->scratch_ptr;
-    } else {
-      st->root       = NULL;
-      ca_attach(src);
-      st->alias_mode = CA_ITER_ALIAS_CONTIG;
-      st->alias_ptr  = (char *) src->ptr;
-    }
-
-    /* Mask: gather to scratch_mask in view row-major order (= same as
-       L1 path).  The mask layout matches view->dim row-major, which is
-       what slab_mask_strides / outer_mask_strides walk. */
-    if ( ca_has_mask(src) ) {
-      ca_size_t mcap = src->elements > 0 ? src->elements : 1;
-      st->scratch_mask = (boolean8_t *) xmalloc(mcap);
-      if ( src->elements > 0 ) {
-        ca_copy_data(src->mask, (char *) st->scratch_mask);
-      }
-      st->alias_mask = st->scratch_mask;
-    }
-    return CA_ITER_OK;
+  /* Validate axes input. */
+  if ( axes == NULL || naxes <= 0 || naxes > nd ) {
+    return CA_ITER_ERR_POLICY;
+  }
+  int8_t in_slab[CA_RANK_MAX];
+  int8_t k;
+  for ( k = 0; k < CA_RANK_MAX; k++ ) in_slab[k] = 0;
+  for ( k = 0; k < naxes; k++ ) {
+    int8_t ax = axes[k];
+    if ( ax < 0 || ax >= nd ) return CA_ITER_ERR_POLICY;
+    if ( in_slab[ax] )        return CA_ITER_ERR_POLICY;  /* duplicate */
+    in_slab[ax] = 1;
   }
 
-  /* Outer prefix axes [0..ndim-2] drive total_slabs; innermost axis is
-     the slab.  0-d / 1-d sources collapse to a single yield. */
-  if ( nd <= 1 ) {
-    st->total_slabs = 1;
-    st->slab_n      = src->elements;
-    st->outer_idx   = NULL;
-  } else {
-    ca_size_t total = 1;
-    int8_t k;
-    for ( k = 0; k < nd - 1; k++ ) total *= src->dim[k];
-    st->total_slabs = total;
-    st->slab_n      = src->dim[nd - 1];
-    st->outer_idx   = ALLOC_N(ca_size_t, nd - 1);
-    for ( k = 0; k < nd - 1; k++ ) st->outer_idx[k] = 0;
+  /* View row-major element strides (= mask scratch layout strides). */
+  ca_size_t row_elem_strides[CA_RANK_MAX];
+  {
+    ca_size_t s = 1;
+    for ( k = nd - 1; k >= 0; k-- ) {
+      row_elem_strides[k] = s;
+      s *= src->dim[k];
+    }
   }
+
+  /* Partition axes (ascending order). */
+  int8_t sp = 0, op = 0;
+  st->slab_elements = 1;
+  for ( k = 0; k < nd; k++ ) {
+    if ( in_slab[k] ) {
+      st->slab_axes_buf[sp]    = k;
+      st->slab_dims[sp]        = src->dim[k];
+      st->slab_strides[sp]     = st->composed_strides[k];
+      st->slab_mask_strides[sp] = row_elem_strides[k];
+      st->slab_elements       *= src->dim[k];
+      sp++;
+    } else {
+      st->outer_axes[op]        = k;
+      st->outer_dims[op]        = src->dim[k];
+      st->outer_strides[op]     = st->composed_strides[k];
+      st->outer_mask_strides[op] = row_elem_strides[k];
+      op++;
+    }
+  }
+  st->slab_ndim  = sp;
+  st->outer_ndim = op;
+
+  /* total_slabs = Π outer_dims.  Empty product (all-axes case) = 1
+     → single slab = whole array (D1.4 WHOLE-equivalent). */
+  ca_size_t total = 1;
+  for ( int8_t m = 0; m < st->outer_ndim; m++ ) total *= st->outer_dims[m];
+  st->total_slabs   = total;
+  st->slab_n        = st->slab_elements;    /* mirror to legacy field */
   st->slabs_emitted = 0;
   st->chunk_size    = st->slab_n;
 
+  if ( st->outer_ndim > 0 ) {
+    st->outer_idx = ALLOC_N(ca_size_t, st->outer_ndim);
+    for ( int8_t m = 0; m < st->outer_ndim; m++ ) st->outer_idx[m] = 0;
+  } else {
+    st->outer_idx = NULL;
+  }
+
   if ( use_strided ) {
-    ca_attach(root);              /* window: finish detaches st->root */
-    st->root = root;              /* recorded once attached */
+    ca_attach(root);            /* window: finish detaches st->root */
+    st->root       = root;      /* recorded once attached */
     st->alias_mode = CA_ITER_ALIAS_STRIDED;
     st->alias_ptr  = (char *) root->ptr;
   } else if ( use_view_scratch ) {
@@ -2491,14 +2246,15 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
     st->alias_mode = CA_ITER_ALIAS_NONE;
     st->alias_ptr  = st->scratch_ptr;
   } else {
-    st->root = NULL;
+    st->root       = NULL;
     ca_attach(src);
     st->alias_mode = CA_ITER_ALIAS_CONTIG;
     st->alias_ptr  = (char *) src->ptr;
   }
 
-  /* Mask: gathered in view row-major order, as on the AXES path above;
-     next_slab_strided hands out alias_mask + slab * slab_n. */
+  /* Mask: gather to scratch_mask in view row-major order (= same as
+     L1 path).  The mask layout matches view->dim row-major, which is
+     what slab_mask_strides / outer_mask_strides walk. */
   if ( ca_has_mask(src) ) {
     ca_size_t mcap = src->elements > 0 ? src->elements : 1;
     st->scratch_mask = (boolean8_t *) xmalloc(mcap);
@@ -2533,74 +2289,6 @@ ca_iter_state_next_slab_unprotected (ca_iter_state *st,
   return 1;
 }
 
-static int
-ca_iter_state_next_slab_strided_unprotected (ca_iter_state *st,
-                                 char         **out_ptr,
-                                 boolean8_t   **out_mask,
-                                 ca_size_t     *out_n,
-                                 ca_size_t     *out_stride_bytes)
-{
-  if ( st == NULL || st->level != 2
-       || st->slabs_emitted >= st->total_slabs ) {
-    if ( out_ptr          ) *out_ptr          = NULL;
-    if ( out_mask         ) *out_mask         = NULL;
-    if ( out_n            ) *out_n            = 0;
-    if ( out_stride_bytes ) *out_stride_bytes = 0;
-    return 0;
-  }
-
-  int8_t    nd       = st->ndim;
-  ca_size_t inner_st = (nd > 0)
-                       ? st->composed_strides[nd - 1]
-                       : st->bytes;
-  ca_size_t off      = st->composed_base;
-  int8_t    k;
-
-  /* Sum outer prefix offset. For F-2 descriptor L2 alias the prefix can
-     contain INDEX axes (and, once OOB fill_slab lands, SHIFT axes), so
-     we delegate to the pre-classified prefix[] engine.  Otherwise (=
-     CAStride / entity outer = STRIDE-only by construction) use the
-     direct sum that has been the L2 inner loop since step 3.  For
-     0-d / 1-d sources, the loop / call is a no-op and off stays at
-     composed_base. */
-  if ( st->outer_idx != NULL ) {
-    if ( st->src_kind == CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE ) {
-      int oob = 0;
-      off += ca_axis_dispatch_prefix_offset(st->prefix, st->outer_idx,
-                                            nd - 1, &oob);
-      /* oob unreachable: outer SHIFT was downgraded in init_l2. */
-    } else {
-      for ( k = 0; k < nd - 1; k++ ) {
-        off += st->outer_idx[k] * st->composed_strides[k];
-      }
-    }
-  }
-
-  if ( out_ptr          ) *out_ptr          = st->alias_ptr + off;
-  /* mask layout mirrors value layout, but mask is contig boolean8_t
-     when alias_mask is a scratch buffer (step 6 baseline = always
-     gather mask into scratch_mask for uniformity).  Per-slab mask
-     offset = i in the outer cursor (= slabs_emitted at this point). */
-  if ( out_mask         ) {
-    *out_mask = st->alias_mask
-                ? st->alias_mask + st->slabs_emitted * st->slab_n
-                : NULL;
-  }
-  if ( out_n            ) *out_n            = st->slab_n;
-  if ( out_stride_bytes ) *out_stride_bytes = inner_st;
-
-  st->slabs_emitted += 1;
-
-  /* Advance outer_idx row-major (least-significant axis innermost,
-     so we tick outer_idx[ndim-2] first). */
-  if ( st->outer_idx != NULL ) {
-    for ( k = nd - 2; k >= 0; k-- ) {
-      if ( ++st->outer_idx[k] < st->src->dim[k] ) break;
-      st->outer_idx[k] = 0;
-    }
-  }
-  return 1;
-}
 
 /* CA_KERNEL_FIBER_CONTIG: a fiber (a walk with one slab axis) reaches the
    kernel as a contiguous run of cells and of mask flags.  Each path of
@@ -3265,8 +2953,8 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
 
          scatter wants the pre-merge raw descriptors (the engine re-runs
          _prepare internally with whatever we give it).  init cached
-         the post-merge axes in st->descs for next_slab_strided's
-         offset math; we re-call describe_axes here for the scatter
+         the post-merge axes in st->descs for the slab offset math; we
+         re-call describe_axes here for the scatter
          call rather than caching a second copy in the state struct. */
       ca_axis_desc_t raw_descs[CA_RANK_MAX];
       ca_size_t      raw_pdims[CA_RANK_MAX];
@@ -3451,7 +3139,6 @@ typedef struct {
   char            **out_ptr;
   boolean8_t      **out_mask;
   ca_size_t        *out_n;
-  ca_size_t        *out_stride_bytes;
   int               rc;
 } ca_iter_call_t;
 
@@ -3537,15 +3224,6 @@ ca_iter_call_next_slab (VALUE arg)
   return Qnil;
 }
 
-static VALUE
-ca_iter_call_next_slab_strided (VALUE arg)
-{
-  ca_iter_call_t *c = (ca_iter_call_t *) arg;
-  c->rc = ca_iter_state_next_slab_strided_unprotected(c->st, c->out_ptr,
-                                                      c->out_mask, c->out_n,
-                                                      c->out_stride_bytes);
-  return Qnil;
-}
 
 static VALUE
 ca_iter_call_next_slab_axes (VALUE arg)
@@ -3637,24 +3315,6 @@ ca_iter_state_next_slab (ca_iter_state *st,
   return ca_iter_mark_dirty(st, c.rc);
 }
 
-int
-ca_iter_state_next_slab_strided (ca_iter_state *st,
-                                 char         **out_ptr,
-                                 boolean8_t   **out_mask,
-                                 ca_size_t     *out_n,
-                                 ca_size_t     *out_stride_bytes)
-{
-  ca_iter_call_t c;
-  if ( st == NULL || !(st->flags & CA_ITER_FLAG_WALK_MAY_RAISE) ) {
-    return ca_iter_mark_dirty(st,
-             ca_iter_state_next_slab_strided_unprotected(st, out_ptr, out_mask,
-                                                         out_n, out_stride_bytes));
-  }
-  c.st = st; c.out_ptr = out_ptr; c.out_mask = out_mask; c.out_n = out_n;
-  c.out_stride_bytes = out_stride_bytes; c.rc = 0;
-  ca_iter_protect(st, ca_iter_call_next_slab_strided, (VALUE) &c);
-  return ca_iter_mark_dirty(st, c.rc);
-}
 
 int
 ca_iter_state_next_slab_axes (ca_iter_state *st,
@@ -3857,6 +3517,25 @@ ca_iter_ensure (int32_t n, ca_iter_state *states,
  * See devel/PROPOSAL_SMOKE_DEV_BUILD_GATE.md
  * ============================================================ */
 
+/* The innermost-axis walk the L2 smokes run: one strided run per
+   innermost row, handed out as (pointer, cell count, byte stride). */
+static int
+t1_smoke_open_rows (ca_iter_state *st, CArray *src, uint32_t flags)
+{
+  int8_t ax = (int8_t) (src->ndim - 1);
+  return ca_iter_state_init_l2(st, src, CA_SLAB_AXES, &ax, 1, flags);
+}
+
+static int
+t1_smoke_next_row (ca_iter_state *st, char **p, ca_size_t *n,
+                   ca_size_t *stride)
+{
+  if ( ! ca_iter_state_next_slab_axes(st, p, NULL) ) return 0;
+  *n      = st->slab_dims[0];
+  *stride = st->slab_strides[0];
+  return 1;
+}
+
 /* ---- Ruby smoke surface --------------------------------------------- */
 
 /* L1 smoke (steps 1+2): CArray.t1_smoke(ca) -> Hash with
@@ -3930,9 +3609,9 @@ rb_t1_smoke_strided (VALUE klass, VALUE vsrc)
   data        = rb_str_new(0, 0);
   strides_arr = rb_ary_new();
 
-  rc = ca_iter_state_init_l2(&st, src, CA_SLAB_WHOLE, NULL, 0, 0);
+  rc = t1_smoke_open_rows(&st, src, 0);
   if ( rc == CA_ITER_OK ) {
-    while ( ca_iter_state_next_slab_strided(&st, &p, NULL, &n, &stride_bytes) ) {
+    while ( t1_smoke_next_row(&st, &p, &n, &stride_bytes) ) {
       if ( p != NULL && n > 0 ) {
         ca_size_t i;
         for ( i = 0; i < n; i++ ) {
@@ -3979,12 +3658,12 @@ rb_t1_smoke_sum_strided_f64 (VALUE klass, VALUE vsrc)
              "t1_smoke_sum_strided_f64 expects a float64 source");
   }
 
-  rc = ca_iter_state_init_l2(&st, src, CA_SLAB_WHOLE, NULL, 0, 0);
+  rc = t1_smoke_open_rows(&st, src, 0);
   if ( rc != CA_ITER_OK ) {
     rb_raise(rb_eRuntimeError, "ca_iter_state_init L2 failed (rc=%d)", rc);
   }
 
-  while ( ca_iter_state_next_slab_strided(&st, &p, NULL, &n, &stride_bytes) ) {
+  while ( t1_smoke_next_row(&st, &p, &n, &stride_bytes) ) {
     /* Step 8.1: macro picks contig fast path when stride == sizeof(double),
        falls back to strided loop otherwise.  Removes the SIMD inhibition
        observed in step 5.5 §10.4.5 on descriptor materialise paths. */
@@ -4047,11 +3726,10 @@ rb_t1_smoke_write_fill_strided_f64 (VALUE klass, VALUE vsrc, VALUE vval)
     rb_raise(rb_eTypeError, "expects a float64 source");
   }
 
-  rc = ca_iter_state_init_l2(&st, src, CA_SLAB_WHOLE, NULL, 0,
-                             CA_KERNEL_WRITE);
+  rc = t1_smoke_open_rows(&st, src, CA_KERNEL_WRITE);
   if ( rc != CA_ITER_OK ) return INT2NUM(rc);
 
-  while ( ca_iter_state_next_slab_strided(&st, &p, NULL, &n, &stride) ) {
+  while ( t1_smoke_next_row(&st, &p, &n, &stride) ) {
     /* Step 8.1: contig fast path via macro (stride == sizeof(double)
        on materialise scratch, which is the descriptor L2 path that
        hit +18-22% in step 5.5 — macro removes that overhead). */
@@ -4122,7 +3800,7 @@ cmp_double (const void *a, const void *b)
 
 /* WRITE smoke: per-row sort via L2 strided dispatch.  For a 2D
    float64 src of shape [m, n], sort each of the m rows in ascending
-   order.  Uses next_slab_strided so each row is a strided slab; the
+   order.  Walks the innermost axis so each row is a strided slab; the
    kernel materialises into a tight contig scratch, qsorts, then
    writes back via the same stride.  This exercises L2 WRITE
    mechanics (multi-slab walk, per-slab fill of strided cells)
@@ -4144,11 +3822,10 @@ rb_t1_smoke_sort_row_f64 (VALUE klass, VALUE vsrc)
     rb_raise(rb_eTypeError, "expects a float64 source");
   }
 
-  rc = ca_iter_state_init_l2(&st, src, CA_SLAB_WHOLE, NULL, 0,
-                             CA_KERNEL_WRITE);
+  rc = t1_smoke_open_rows(&st, src, CA_KERNEL_WRITE);
   if ( rc != CA_ITER_OK ) return INT2NUM(rc);
 
-  while ( ca_iter_state_next_slab_strided(&st, &p, NULL, &n, &stride_bytes) ) {
+  while ( t1_smoke_next_row(&st, &p, &n, &stride_bytes) ) {
     if ( n > (ca_size_t) (sizeof(scratch) / sizeof(double)) ) {
       ca_iter_state_finish(&st);
       rb_raise(rb_eRuntimeError, "row too large for smoke scratch");
@@ -4250,8 +3927,8 @@ rb_t1_smoke_attach (VALUE klass, VALUE vsrc)
 }
 
 /* L2 bench-grade smoke (sub-step 5.3+).  Same shape as t1_smoke_attach
-   but uses init_l2 / next_slab_strided so descriptor sources can be
-   exercised through the L2 path. */
+   but walks the innermost axis through init_l2 so descriptor sources
+   can be exercised through the L2 path. */
 static VALUE
 rb_t1_smoke_attach_strided (VALUE klass, VALUE vsrc)
 {
@@ -4264,10 +3941,10 @@ rb_t1_smoke_attach_strided (VALUE klass, VALUE vsrc)
   volatile char   sink  = 0;
 
   TypedData_Get_Struct(vsrc, CArray, &carray_data_type, src);
-  rc = ca_iter_state_init_l2(&st, src, CA_SLAB_WHOLE, NULL, 0, 0);
+  rc = t1_smoke_open_rows(&st, src, 0);
   if ( rc != CA_ITER_OK ) return INT2NUM(rc);
 
-  while ( ca_iter_state_next_slab_strided(&st, &p, NULL, &n, &stride) ) {
+  while ( t1_smoke_next_row(&st, &p, &n, &stride) ) {
     if ( p != NULL && n > 0 ) sink ^= p[0];
     total += n;
   }
@@ -4620,10 +4297,10 @@ rb_t1_smoke_remap_read_strided (VALUE klass, VALUE vref, VALUE vidx)
   view = ca_remap_new(ref, idx);
   data = rb_str_new(0, 0);
 
-  rc = ca_iter_state_init_l2(&st, view, CA_SLAB_WHOLE, NULL, 0, 0);
+  rc = t1_smoke_open_rows(&st, view, 0);
   if ( rc == CA_ITER_OK ) {
     ca_size_t stride;
-    while ( ca_iter_state_next_slab_strided(&st, &p, NULL, &n, &stride) ) {
+    while ( t1_smoke_next_row(&st, &p, &n, &stride) ) {
       ca_size_t i;
       for ( i = 0; i < n; i++ ) {
         rb_str_cat(data, p + i * stride, st.bytes);
@@ -5235,5 +4912,6 @@ Init_ca_kernel_iterator (void)
   rb_define_const(rb_cCArray, "T1_ITER_ALIAS_CONTIG",    INT2NUM(CA_ITER_ALIAS_CONTIG));
   rb_define_const(rb_cCArray, "T1_ITER_ALIAS_STRIDED",   INT2NUM(CA_ITER_ALIAS_STRIDED));
   rb_define_const(rb_cCArray, "T1_ITER_ALIAS_ATTACH",    INT2NUM(CA_ITER_ALIAS_ATTACH));
+  rb_define_const(rb_cCArray, "T1_ITER_ALIAS_PER_SLAB",  INT2NUM(CA_ITER_ALIAS_PER_SLAB));
 #endif /* CARRAY_DEV_BUILD */
 }
