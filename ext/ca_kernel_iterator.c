@@ -864,7 +864,18 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
      misdispatch. */
   if ( policy == CA_SLAB_AXES ) return CA_ITER_ERR_POLICY;
 
-  uint8_t src_kind = ca_iter_classify_source(src);
+  /* The same routing as init_l2: a descriptor view whose parent lends no
+     memory, or a grid with holes, takes the transfer walk.  An L1 walk
+     yields the whole view as one slab, so a descriptor view the L2 walk
+     could borrow is gathered here like any other descriptor view. */
+  ca_axis_desc_t route_descs[CA_RANK_MAX];
+  ca_size_t      route_pdims[CA_RANK_MAX];
+  int8_t         route_ndim = 0;
+  uint8_t src_kind = ca_iter_route_source(src, route_descs, route_pdims,
+                                          &route_ndim);
+  if ( src_kind == CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE ) {
+    src_kind = CA_ITER_SRC_DESCRIPTOR;
+  }
 
   st->src      = src;
   st->src_kind = src_kind;

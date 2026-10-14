@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: C extensions: a whole-array kernel iterator write walk
+  (`ca_iter_state_init_l1`) over a selection of a type-converting view,
+  such as `a.fake(:float64)[sel, nil]`, now writes the cells that are
+  masked in the array as well, as every other walk does.
+
 - Change: an index that mixes a CArray with other keys (`a[i, 1..3]`,
   `a[mask, -1..1]`) reads every other key as an index without a CArray
   does.  A range there picked other cells: one ending before its start
