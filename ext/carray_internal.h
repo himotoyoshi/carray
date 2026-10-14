@@ -540,10 +540,11 @@ CArray     *ca_multi_parent_mask (CArray *p, CArray **standin);
 
 /* Let the stand-ins of a multi-parent view's mask give way to the parents'
    own masks.  `mask` is the view's mask (a CAStack or CAMeld over the
-   parents' masks), `parents` / `standins` the view's.  A writable stand-in
-   is replaced when its parent has gained a mask, or, with for_write, by a
-   mask created on the parent.  The mask's own transfer functions call this
-   on entry; it does nothing inside an attach window. */
+   parents' masks), `parents` / `standins` the view's.  A stand-in is
+   replaced when its parent has gained a mask (a read-only parent can gain
+   one through its operand or root), or, with for_write, a writable
+   stand-in by a mask created on the parent.  The mask's own transfer
+   functions call this on entry; it does nothing inside an attach window. */
 void        ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
                                           CArray **standins, int32_t n,
                                           int for_write);

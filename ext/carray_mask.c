@@ -461,14 +461,17 @@ ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
   }
   /* A replaced stand-in stays allocated until the view is freed: a copy
      of the mask (dup) may still point at it. */
+  /* A read-only part (a lazy expression, a broadcast) is never given a
+     mask by a write, but can still have one later through its operand or
+     root, so its stand-in gives way to a mask it has come to have. */
   for ( k = 0; k < n; k++ ) {
     CArray *z = standins[k];
     if ( z == NULL || mp->parents[k] != z
-         || ca_test_flag(z, CA_FLAG_READ_ONLY)
          || ca_multi_parent_mask_unmaskable(parents[k]) ) {
       continue;
     }
-    if ( ! ( for_write || ca_has_mask(parents[k]) ) ) {
+    if ( ! ( ( for_write && ! ca_test_flag(z, CA_FLAG_READ_ONLY) )
+             || ca_has_mask(parents[k]) ) ) {
       continue;
     }
     ca_create_mask(parents[k]);
