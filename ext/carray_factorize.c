@@ -1216,8 +1216,6 @@ fz_unique_flat_body (VALUE arg)
   else                        { fz_hash_init(&h); }
   fz_levels_init(&lv, (int) ca->bytes, ca->data_type == CA_OBJECT);
 
-  int8_t axis = (int8_t) (ca->ndim - 1);   /* innermost fiber; hash not reset =
-                                              one seen-set over the whole array */
   ca_iter_state *st_in = &fr->st[0];
   char       *p_in;
   boolean8_t *m;
@@ -1278,7 +1276,7 @@ fz_unique_flat_body (VALUE arg)
       }                                                                        \
     } while (0)
 
-  CA_FOR_EACH_FIBER_MASKED(*st_in, ca, axis, CA_KERNEL_READ, p_in, n, m) {
+  CA_FOR_EACH_WHOLE_MASKED(*st_in, ca, CA_KERNEL_READ, p_in, n, m) {
     switch ( dt ) {
     case CA_INT8:   UQ_LOOP(int8_t,   (int64_t));  break;
     case CA_INT16:  UQ_LOOP(int16_t,  (int64_t));  break;
@@ -1323,7 +1321,7 @@ rb_ca_unique_flat (VALUE self)
 }
 
 /* Intern every non-masked cell of cv into h, one seen-set over the whole array
-   (the hash is not reset between fibers).  When lv is non-NULL, the first-seen
+   walked in row-major order.  When lv is non-NULL, the first-seen
    raw element of each distinct value is pushed to it (appearance order), so the
    same pass builds both a probe set and the distinct-value list.  Dispatches the
    three key lanes exactly as the discovery family: numeric widen with all NaN
@@ -1334,7 +1332,6 @@ static void
 fz_intern_all (ca_iter_state *st_v, fz_hash *h, CArray *cv, fz_levels *lv)
 {
   int8_t dt = cv->data_type;
-  int8_t vaxis = (int8_t) (cv->ndim - 1);
   char       *p_v;
   boolean8_t *mv;
   ca_size_t   nv;
@@ -1387,7 +1384,7 @@ fz_intern_all (ca_iter_state *st_v, fz_hash *h, CArray *cv, fz_levels *lv)
       }                                                                        \
     } while (0)
 
-  CA_FOR_EACH_FIBER_MASKED(*st_v, cv, vaxis, CA_KERNEL_READ, p_v, nv, mv) {
+  CA_FOR_EACH_WHOLE_MASKED(*st_v, cv, CA_KERNEL_READ, p_v, nv, mv) {
     switch ( dt ) {
     case CA_INT8:   FZ_IA(int8_t,   (int64_t));  break;
     case CA_INT16:  FZ_IA(int16_t,  (int64_t));  break;
