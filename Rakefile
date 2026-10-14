@@ -326,9 +326,11 @@ task :build_c_extension_examples => [
 # up to 8; SPEC_JOBS=1 runs them all in one process as before).  The files
 # are dealt out largest first into four bundles per process, so each bundle
 # mixes heavy and light files, and the processes take bundles off a queue.
-# A file that reads the process's resident size sees the load of the other
-# processes, so it runs alone after the rest.
-SPEC_AI_ALONE = ["spec/spec_ai/test_iter_raise_cleanup.rb"]
+# A file that measures the process's memory (resident size, or the malloc
+# zone in use) sees the load of the other processes, so it runs alone after
+# the rest.
+SPEC_AI_ALONE = ["spec/spec_ai/test_iter_raise_cleanup.rb",
+                 "spec/spec_ai/test_copy_raise_cleanup.rb"]
 
 SPEC_AI_COMMAND = ["ruby", "-I", "ext", "-I", "lib", "-r", "test/unit",
                    "-r", "./spec/spec_ai/attach_balance.rb", "-e",
