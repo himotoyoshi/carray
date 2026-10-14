@@ -321,7 +321,63 @@ task :build_c_extension_examples => [
   :build_with_buffer_example,
 ]
 
-desc "Run spec_ai tests (ruby -I ext -I lib)"
+# spec_ai runs its files in several processes at once (SPEC_JOBS, default
+# up to 8; SPEC_JOBS=1 runs them all in one process as before).  The files
+# are dealt out largest first into four bundles per process, so each bundle
+# mixes heavy and light files, and the processes take bundles off a queue.
+# A file that reads the process's resident size sees the load of the other
+# processes, so it runs alone after the rest.
+SPEC_AI_ALONE = ["spec/spec_ai/test_iter_raise_cleanup.rb"]
+
+SPEC_AI_COMMAND = ["ruby", "-I", "ext", "-I", "lib", "-r", "test/unit",
+                   "-r", "./spec/spec_ai/attach_balance.rb", "-e",
+                   "files = ARGV.dup; ARGV.clear; files.each { |f| require File.expand_path(f) }"]
+
+SPEC_AI_SUMMARY = /(\d+) tests, (\d+) assertions, (\d+) failures, (\d+) errors, (\d+) pendings, (\d+) omissions, (\d+) notifications/
+
+def run_spec_ai_bundle (files)
+  require "open3"
+  out, status = Open3.capture2e(*SPEC_AI_COMMAND, *files)
+  counts = (m = out.scan(SPEC_AI_SUMMARY).last) ? m.map(&:to_i) : nil
+  ok = status.success? && counts && counts[2] == 0 && counts[3] == 0
+  { files: files, out: out, counts: counts, ok: ok, status: status }
+end
+
+def run_spec_ai_parallel (files, jobs)
+  started = Time.now
+  alone, rest = files.partition { |f| SPEC_AI_ALONE.include?(f) }
+  bundles = Array.new([jobs * 4, rest.size].min) { [] }
+  rest.sort_by { |f| -File.size(f) }.each_with_index { |f, i| bundles[i % bundles.size] << f }
+  queue = Queue.new
+  bundles.sort_by { |b| -b.sum { |f| File.size(f) } }.each { |b| queue << b }
+  results = Queue.new
+  workers = Array.new(jobs) do
+    Thread.new do
+      while (b = (queue.pop(true) rescue nil))
+        r = run_spec_ai_bundle(b)
+        results << r
+        print(r[:ok] ? "." : "F")
+      end
+    end
+  end
+  workers.each(&:join)
+  results << run_spec_ai_bundle(alone).tap { |r| print(r[:ok] ? "." : "F") } unless alone.empty?
+  puts
+  all = Array.new(results.size) { results.pop }
+  all.reject { |r| r[:ok] }.each do |r|
+    puts "=" * 72
+    puts "Failed bundle (exit #{r[:status].exitstatus.inspect}#{r[:counts] ? "" : ", no summary: crashed"}):"
+    puts r[:files].map { |f| "  #{f}" }
+    puts r[:out]
+  end
+  sums = all.map { |r| r[:counts] || [0] * 7 }.transpose.map(&:sum)
+  printf "%d tests, %d assertions, %d failures, %d errors, %d pendings, %d omissions, %d notifications\n", *sums
+  printf "%d files in %d bundles, %d processes at a time, %.1f s\n", files.size, all.size, jobs, Time.now - started
+  failed = all.reject { |r| r[:ok] }
+  fail "spec_ai: #{failed.size} bundle(s) failed" unless failed.empty?
+end
+
+desc "Run spec_ai tests (ruby -I ext -I lib, SPEC_JOBS processes at once)"
 task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_parts_check,
                   :runtime_error_check, :index_error_check, :cell_buffer_check,
                   :view_setup_mask_check, :protect_parts_check,
@@ -344,7 +400,14 @@ task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_parts_check
   # it, so it does not want collecting either.
   # attach_balance.rb checks around every test that no view was left
   # attached (development builds only).
-  sh "ruby -I ext -I lib -r test/unit -r ./spec/spec_ai/attach_balance.rb -e 'Dir[\"spec/spec_ai/**/test_*.rb\"].sort.each{|f| require_relative f}'"
+  require "etc"
+  files = Dir["spec/spec_ai/**/test_*.rb"].sort
+  jobs = Integer(ENV["SPEC_JOBS"] || [Etc.nprocessors, 8].min)
+  if jobs <= 1
+    sh(*SPEC_AI_COMMAND, *files)
+  else
+    run_spec_ai_parallel(files, jobs)
+  end
 end
 
 desc "Run spec_ai with every fast path switched off (development builds only)"
