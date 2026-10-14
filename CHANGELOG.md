@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `convert` yields `true` / `false` for a boolean array and the element
+  for a Face (a `CATime` gave its storage bytes), as `map!` and `ca[i]` do.
+  A `CAObject` of boolean type receives `true` / `false` in `store_addr`,
+  `store_index` and `fill_data`, and a boolean window's `fill_value` is
+  `true` or `false`; they were 1 and 0. For C extensions, `rb_ca_ptr2obj`
+  (`rb_ca_fetch_ptr`) answers with the value `ca[i]` gives.
+
 - Fix: a whole-array store whose conversion raised part way (a NaN stored
   into an integer array, `ints[] = floats`) left the target's mask cleared,
   and a store through a view cleared the parent's mask. The mask now comes

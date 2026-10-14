@@ -616,4 +616,9 @@ ca_percentile_linear (double lo, double hi, double r, ca_size_t k, ca_size_t n)
   return lo * (1.0 - r) + hi * r;
 }
 
+/* rb_ca_ptr2obj without the Face decode and the boolean true/false: a
+   boolean is 0 or 1 and a Face cell is its storage value.  For the element
+   readers, which check the mask first and decode after (carray_cast.c). */
+VALUE rb_ca_ptr2obj_storage (VALUE self, void *ptr);
+
 #endif /* CARRAY_INTERNAL_H */

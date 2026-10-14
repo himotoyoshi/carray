@@ -1893,10 +1893,9 @@ VALUE   rb_ca_fill_copy (VALUE self, VALUE val);
 /* address calculation */
 VALUE   rb_ca_addr2index (VALUE self, VALUE raddr);
 
-/* A cell's bytes as the Ruby value of self's data type, as the bulk paths
-   (cast, serialize) read it: a boolean is 0 or 1 and a Face cell is its
-   storage value.  For the value ca[i] gives, use rb_ca_fetch_index /
-   rb_ca_fetch_addr. */
+/* A cell's bytes (self's data type, self->bytes wide) as the value ca[i]
+   gives for that cell: true or false for a boolean, the element for a
+   Face, a record for a struct.  The mask is not consulted. */
 VALUE   rb_ca_ptr2obj (VALUE self, void *ptr);
 #define rb_ca_fetch_ptr(self, ptr) rb_ca_ptr2obj(self, ptr)
 

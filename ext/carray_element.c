@@ -376,7 +376,7 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
     elem_parse_idx_array(ca, ridx, idx);
 
     /* Super-hot path: entity + common numeric data type + no mask.
-       Bypass ca_fetch_index dispatch AND rb_ca_ptr2obj cast-table dispatch.
+       Bypass ca_fetch_index dispatch AND rb_ca_ptr2obj_storage cast-table dispatch.
        Covers the bench's float64 / int64 / int32 cases. */
     if ( ca_is_entity(ca) && ! ca->mask ) {
       ca_size_t addr = elem_entity_addr(ca, idx);
@@ -408,13 +408,13 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
       else {
         ca_fetch_index(ca, idx, v);
       }
-      out = rb_ca_ptr2obj(self, v);
+      out = rb_ca_ptr2obj_storage(self, v);
     }
     else {
       volatile VALUE holder;
       char *v = ALLOCV_N(char, holder, ca->bytes);
       ca_fetch_index(ca, idx, v);
-      out = rb_ca_ptr2obj(self, v);
+      out = rb_ca_ptr2obj_storage(self, v);
       ALLOCV_END(holder);
     }
 

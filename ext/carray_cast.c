@@ -1771,8 +1771,11 @@ rb_ca_ptr2ptr (VALUE ra1, void *ptr1, VALUE ra2, void *ptr2)
 }
 
 
+/* A cell's bytes as the value of self's data type before the last two
+   steps of ca[i]: a boolean is 0 or 1 and a Face cell is its storage
+   value.  The element readers call this, check the mask, then decode. */
 VALUE
-rb_ca_ptr2obj (VALUE self, void *ptr)
+rb_ca_ptr2obj_storage (VALUE self, void *ptr)
 {
   volatile VALUE obj;
   static CArray dummy;
@@ -1786,6 +1789,20 @@ rb_ca_ptr2obj (VALUE self, void *ptr)
   else {
     return obj;
   }
+}
+
+VALUE
+rb_ca_ptr2obj (VALUE self, void *ptr)
+{
+  CArray *ca;
+  VALUE obj = rb_ca_ptr2obj_storage(self, ptr);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(obj, self, ca);
+  if ( ca->data_type == CA_BOOLEAN &&
+       ( obj == INT2FIX(0) || obj == INT2FIX(1) ) ) {
+    obj = ( obj == INT2FIX(1) ) ? Qtrue : Qfalse;
+  }
+  return obj;
 }
 
 /* Surface -> storage-domain conversion for a Face store (mirror of the
