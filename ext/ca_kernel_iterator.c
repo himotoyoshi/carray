@@ -516,7 +516,7 @@ ca_iter_should_per_fiber_fused (CArray   *src,
   }
 
   /* F.6.4 audit (devel/bench_f6_4_audit.rb): CSA (CASelectAxis) /
-     CAGrid / CASelect / CAMapping all kept on the whole-view
+     CAGrid / CASelect all kept on the whole-view
      materialise path.  Per-fiber ca_xfer_stride is a LOSER for
      these views (1.25-4.7x slower across all axis positions
      measured) because the descriptor framework's
@@ -553,7 +553,7 @@ ca_iter_should_per_fiber_fused (CArray   *src,
      is added in a future phase) -- no separate audit needed for
      that case.  Predicate stays unchanged.
 
-     F.6.7 will audit CAReduce. */
+     CAReduce is not routed here either (returns 0). */
   return 0;
 }
 
@@ -1130,11 +1130,11 @@ ca_iter_state_init_l2_unprotected (ca_iter_state    *st,
         }
       }
 
-      /* Phase C T3 (C.1): slab axis has INDEX or SHIFT kind → per-slab
-         materialise fallback path (D1.1 (B) + D1.2 (A)).  CAMapping-style
-         views (raw_ndim != src->ndim) are out of C.1 scope — descriptor
-         exposes a flat 1-D INDEX gather that doesn't expose the view-
-         axis partition the user gave via slab_axes.  Reject explicitly. */
+      /* Slab axis has an INDEX or SHIFT kind → per-slab materialise path.
+         The rank check guards a descriptor whose rank differs from the
+         view's (it would not expose the axis partition slab_axes names).
+         Every describe_axes in the engine reports the view's rank, so the
+         check does not fire today; it stays as the contract's guard. */
       if ( raw_ndim != src->ndim ) {
         return CA_ITER_ERR_POLICY;
       }
@@ -4368,8 +4368,9 @@ rb_t1_smoke_reduce_read (VALUE klass, VALUE vparent, VALUE vcount, VALUE voffset
 }
 
 /* WRITE broadcast smoke for CAReduce: fills the reduce view with
-   `val` (boolean / 0 or 1) and lets sync_slab → ca_sync run the
-   broadcast scatter back to parent.  After the call parent's
+   `val` (boolean / 0 or 1) and lets sync_slab send the changed cells
+   back through the view (ki_scratch_push_changed), which broadcasts them
+   to the parent.  After the call parent's
    [offset..offset+elems*count) bytes should all equal val.  Returns
    rc; on rc != OK parent is not modified. */
 static VALUE
@@ -4398,7 +4399,7 @@ rb_t1_smoke_reduce_write_broadcast (VALUE klass, VALUE vparent,
   }
   while ( ca_iter_state_next_slab(&st, &p, NULL, &n) ) {
     for ( i = 0; i < n; i++ ) p[i] = v;
-    ca_iter_state_sync_slab(&st);  /* triggers ca_sync → broadcast */
+    ca_iter_state_sync_slab(&st);  /* sends the changed cells back */
   }
   ca_iter_state_finish(&st);
   ca_free(reduce);
@@ -4499,7 +4500,8 @@ rb_t1_smoke_remap_read_strided (VALUE klass, VALUE vref, VALUE vidx)
 }
 
 /* WRITE smoke: fill view's slab buffer with `val` (float64), let
-   sync_slab → ca_sync run the scatter back to ref via xfer_all PUT. */
+   sync_slab send the changed cells back to ref through the view
+   (ki_scratch_push_changed: ca_xfer_addrs or ca_xfer_all PUT). */
 static VALUE
 rb_t1_smoke_remap_write_fill_f64 (VALUE klass, VALUE vref, VALUE vidx,
                                   VALUE vval)
@@ -4538,11 +4540,11 @@ rb_t1_smoke_remap_write_fill_f64 (VALUE klass, VALUE vref, VALUE vidx,
    correctness of the macro expansion (= same byte-parity result as
    the raw API equivalent). */
 
-/* sum reduction using CA_FOR_EACH_SLAB.  innermost slab axis only,
-   float64 source, accumulator = scalar (single full-reduction slab
-   when naxes == src->ndim, otherwise per-outer-slab accumulator
-   written to a row-major output buffer).  Mirrors carray_kernel_sum
-   structurally but uses the macro for lifecycle. */
+/* sum reduction using CA_FOR_EACH_SLAB over the slab axes given in
+   argv[1..] (K-D slabs).  Reads the source as float64 without checking
+   its data_type.  Accumulator = scalar (single full-reduction slab when
+   naxes == src->ndim, otherwise per-outer-slab accumulator written to a
+   row-major output buffer). */
 static VALUE
 rb_caf_smoke_sum_f64 (int argc, VALUE *argv, VALUE klass)
 {
@@ -4631,8 +4633,8 @@ rb_caf_smoke_sum_f64 (int argc, VALUE *argv, VALUE klass)
 
 /* map kernel using CA_FOR_EACH_SLAB_INOUT.  Doubles each element of
    a float64 source into a fresh same-shape output.  Slab axis is
-   always the innermost (= argv[1] is unused for simplicity, axis
-   fixed to ca->ndim - 1).  Demonstrates the 2-iter pattern. */
+   always the innermost (ca->ndim - 1); there is no axis argument.
+   Demonstrates the 2-iter pattern. */
 static VALUE
 rb_caf_smoke_double_f64 (VALUE klass, VALUE vsrc)
 {
@@ -4706,8 +4708,7 @@ rb_caf_fiber_smoke_sum_f64 (VALUE klass, VALUE vsrc, VALUE vaxis)
 }
 
 /* form 2 (NO_MASK INOUT): per-axis fiber copy * scalar.
-   Catalog: CA_FOR_EACH_FIBER_INOUT.  Sorts each fiber for non-trivial
-   gather/scatter behavior. */
+   Catalog: CA_FOR_EACH_FIBER_INOUT.  Doubles each cell of each fiber. */
 static VALUE
 rb_caf_fiber_smoke_double_f64 (VALUE klass, VALUE vsrc, VALUE vaxis)
 {
@@ -4792,8 +4793,8 @@ rb_caf_fiber_smoke_zero_masked_f64 (VALUE klass, VALUE vsrc, VALUE vaxis)
 }
 
 /* F.5 bench helper: sort_copy via CA_FOR_EACH_FIBER_INOUT.
-   Functional equivalent of ext/carray_order.c::rb_ca_sort_copy_axis_*
-   (= hand-rolled gather/scatter with explicit slab_strides[0] loops).
+   Functional equivalent of the per-axis sort_copy (rb_ca_sort_copy in
+   ext/carray_sort.c).
    The macro form lets us A/B the author-side overhead of stride math
    vs the catalog-macro-driven engine gather/scatter. */
 static int
