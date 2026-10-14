@@ -98,6 +98,24 @@ CArray#__reduceat_quantile__
 CArray#__reduceat_variance__
 CArray#__reduceat_wsum_wmean__
 
+# --- value-lookup kernels behind unique / value_counts / is_in / ... (private):
+#     kept under their current names (the user's decision: the long names
+#     read worse)
+CAConstString#__factorize_appearance__
+CArray#__count_below__
+CArray#__difference__
+CArray#__factorize_appearance__
+CArray#__intersection__
+CArray#__is_in__
+CArray#__is_mode__
+CArray#__locate_addr__
+CArray#__mask_duplicates__
+CArray#__mode_axis__
+CArray#__nunique__
+CArray#__union__
+CArray#__unique_flat__
+CArray#__value_counts_flat__
+
 # --- NOT YET SORTED.  Each of these is to be made private / protected with an
 #     ordinary name (or renamed and moved above with the user's permission).
 #     Remove a line when its method is done; never add one here.
@@ -113,7 +131,6 @@ CABinOp#__binop_right__
 CABinOp#__op_id__
 CABinOp#__trapping__
 CABinOp.__build__
-CAConstString#__factorize_appearance__
 CAConstString.__build__
 CAGroupIterator#__accumulate_by_kernel__
 CAGroupIterator#__all_folded__
@@ -144,34 +161,21 @@ CATriOp#__triop_op3__
 CATriOp.__build__
 CArray#__blank_like__
 CArray#__comparable_storage__
-CArray#__count_below__
 CArray#__create_mask__
-CArray#__difference__
 CArray#__each_fiber_key__
 CArray#__face_clip__
 CArray#__face_storage__
-CArray#__factorize_appearance__
 CArray#__gap_fill__
 CArray#__gap_fill_linear__
 CArray#__hold__
 CArray#__hold_axis__
 CArray#__interpolable__
-CArray#__intersection__
-CArray#__is_in__
-CArray#__is_mode__
 CArray#__linear_fiber__
 CArray#__linear_fill_along__
-CArray#__locate_addr__
-CArray#__mask_duplicates__
-CArray#__mode_axis__
-CArray#__nunique__
 CArray#__orderable_storage__
 CArray#__reconcile_operand__
 CArray#__strip_mask_const__
-CArray#__union__
-CArray#__unique_flat__
 CArray#__unmask_const__
-CArray#__value_counts_flat__
 CArray#__wmean_object__
 CArray#__wsum_object__
 CArray.__alloc_uninit__
