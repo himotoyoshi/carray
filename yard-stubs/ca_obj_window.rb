@@ -21,7 +21,8 @@ class CArray
   # parent alias it, so writes through the view reach the parent; cells
   # outside take `fill_value` (default `0`), and `fill_value: UNDEF` masks
   # them instead.  A write that lands outside the parent has no cell to land
-  # in and is discarded.
+  # in and is discarded; under `fill_value: UNDEF` such a cell stays masked
+  # through `unmask` too.
   #
   # A range wider than its axis is how an array is **padded**: `a.window(-1..
   # a.dim0, -1..a.dim1)` puts a one-cell border all round, which is NumPy's

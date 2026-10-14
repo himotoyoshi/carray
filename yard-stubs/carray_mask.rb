@@ -27,6 +27,9 @@ class CArray
   #   mask (`value_array? == true`).
   #
   #   Use this to read or write the data slot of masked elements.
+  #   Nothing in a value array is masked, so `unmask` on it does nothing,
+  #   while a write that would mask a cell (`UNDEF`, `mask=`,
+  #   `invert_mask`) raises TypeError.
   #   @return [CArray]
   def value; end
 

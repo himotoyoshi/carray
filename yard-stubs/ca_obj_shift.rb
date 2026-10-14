@@ -22,7 +22,9 @@ class CArray
   # parent to position `i + shift`).  Out-of-range cells take `fill_value`
   # (default `0`); passing `fill_value: UNDEF` masks them instead of
   # filling.  In-range cells alias the parent, so writes through the view
-  # reach the parent.  The default `0` is the storage value, so for a time
+  # reach the parent.  A write to an out-of-range cell has no cell to land
+  # in and is discarded; under `fill_value: UNDEF` such a cell stays masked
+  # through `unmask` too.  The default `0` is the storage value, so for a time
   # array it is 1970-01-01; `ts - ts.shift(1, fill_value: UNDEF)` leaves the
   # first difference missing.
   #
