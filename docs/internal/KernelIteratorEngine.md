@@ -114,20 +114,21 @@ The parent is attached (`st->root`) and the descriptor engine (`ca_axis_dispatch
 
 | walk | case | `alias_mode` |
 |---|---|---|
-| L1 whole | any | `NONE`: the view gathered into scratch by `ca_axis_dispatch_gather` |
+| L1 whole, read | any | `NONE`: the view gathered into scratch by `ca_axis_dispatch_gather` |
+| L1 whole, **write** | any | **the transfer walk** (§3.1) |
 | slab axes | all slab axes STRIDE, no outer SHIFT | `STRIDED` over the parent |
-| slab axes | an outer axis is SHIFT, or a SHIFT slab axis that leaves the innermost axis out | `NONE`: the whole view gathered, then walked with row-major strides |
+| slab axes, read | an outer axis is SHIFT, or a SHIFT slab axis that leaves the innermost axis out | `NONE`: the whole view gathered, then walked with row-major strides |
 | slab axes, read | a slab axis is INDEX or SHIFT (other than the above) | `PER_SLAB`: one slab gathered at a time; `PER_SLAB_HOIST` when the innermost slab axis is a stride and no axis is SHIFT (a slab of two or more axes) |
-| slab axes, **write** | a slab axis is INDEX or SHIFT | **the transfer walk** (§3.1): the per-slab gather reads only |
+| slab axes, **write** | a slab axis is INDEX or SHIFT, or an outer axis is SHIFT | **the transfer walk** (§3.1): the descriptor engine's gathers read only |
 | fiber | CAWindow / CAShift whose innermost axis is SHIFT | `PER_FIBER_FUSED` (§3.4); with SHIFT on outer axes only, see §7.5 |
 
-A write on these routes is scattered back into the attached parent (`ca_axis_dispatch_scatter`), and `finish` closes the parent with `ca_sync_detach`. **The write-back here is kept by the parent's attach and sync**, not by a transfer; see §7.2.
+Only the `STRIDED` route is written through: the kernel writes in place in the attached parent, and `finish` closes the parent with `ca_sync_detach`. **That write-back is kept by the parent's attach and sync**, not by a transfer; see §7.2. Every gathered route here reads only, and a write takes the transfer walk, which sends back only the changed cells: a gather by the descriptor engine keeps no copy to compare against, and a view that shows a root cell twice (a grid with a repeated index) would otherwise let the copy the kernel did not write overwrite the one it did.
 
 ### 3.4 Shortcuts
 
 | `alias_mode` | taken when | what it does | layers it handles |
 |---|---|---|---|
-| `PER_FIBER_FUSED` | one contiguous fiber of a fake or byte-swap view (or a single-cast lazy monop) along its innermost axis; one fiber of a CAWindow / CAShift whose innermost axis is SHIFT | each fiber is fetched with `ca_xfer_stride` GET into the fiber scratch, and on a write put back with `ca_xfer_stride` PUT | data, fiber, write-back — all three per fiber, through the view's region transfer |
+| `PER_FIBER_FUSED` | a read of one contiguous fiber of a fake or byte-swap view (or a single-cast lazy monop) along its innermost axis; one fiber of a CAWindow / CAShift whose innermost axis is SHIFT, read or write | each fiber is fetched with `ca_xfer_stride` GET into the fiber scratch, and on a write put back with `ca_xfer_stride` PUT | data, fiber, write-back — all three per fiber, through the view's region transfer. The put-back sends the whole fiber, so a conversion view writes by transfer instead (a cell the kernel did not write would not come back through a lossy conversion unchanged); a CAWindow / CAShift neither converts nor repeats a cell |
 | `PER_SLAB` / `PER_SLAB_HOIST` | §3.3 | one slab gathered from the parent per index of the outer axes | data; the fiber layer sits on top |
 | `STACK` | a CAStack, read, unmasked, one slab axis that is the stack axis | the K parents are attached and read directly through a tile cache | data and fiber |
 | `STACK_OUTER_K` | a CAStack, read, the stack axis among the outer axes | the slab is cut from the parent the outer index picks; the parents' masks are copied | data; fiber on top |
@@ -158,14 +159,14 @@ Taken with `iw_route` (§0) on `b = CArray.float64(3, 4, 5).seq!`. R = read, W =
 |---|---|---|---|
 | `b`, `b[1..2, nil, nil]`, `b.reshape(12, 5)` | CONTIG | CONTIG | CONTIG (`+g` off the last axis) |
 | `b[nil, 1..2, 1..3]`, `b.transpose` | CAStride `NONE` (copy) | STRIDED | STRIDED (`+g` where not contiguous) |
-| `b[CA_INT64([2, 0]), nil, nil]` (grid, INDEX on axis 0) | descriptor `NONE` | axis 0: R `PER_SLAB`, W transfer; others: STRIDED | as slab axis |
-| `b[nil, nil, CA_INT64([4, 0, 2])]` (grid, INDEX innermost) | descriptor `NONE` | axis 2: R `PER_SLAB`, W transfer; others: STRIDED | as slab axis |
-| `b[CA_BOOLEAN([1, 0, 1]), nil, nil]` (select axis) | descriptor `NONE` | STRIDED | STRIDED |
-| `b.window(0..1, 1..3, 2..4)` (in bounds) | descriptor `NONE` | STRIDED | STRIDED |
-| `b.shift(1, 0, 0)`, `b.window(-1..1, nil, nil)` (SHIFT on axis 0) | descriptor `NONE` | axis 0: R `NONE` (whole view), W transfer; others: `NONE` | as slab axis |
-| `b.shift(0, 0, 1)` (SHIFT innermost) | descriptor `NONE` | axes 0, 1: `NONE` (outer SHIFT); axis 2: R `PER_SLAB`, W transfer | `PER_FIBER_FUSED` on every axis |
+| `b[CA_INT64([2, 0]), nil, nil]` (grid, INDEX on axis 0) | R descriptor `NONE`, W transfer | axis 0: R `PER_SLAB`, W transfer; others: STRIDED | as slab axis |
+| `b[nil, nil, CA_INT64([4, 0, 2])]` (grid, INDEX innermost) | R descriptor `NONE`, W transfer | axis 2: R `PER_SLAB`, W transfer; others: STRIDED | as slab axis |
+| `b[CA_BOOLEAN([1, 0, 1]), nil, nil]` (select axis) | R descriptor `NONE`, W transfer | STRIDED | STRIDED |
+| `b.window(0..1, 1..3, 2..4)` (in bounds) | R descriptor `NONE`, W transfer | STRIDED | STRIDED |
+| `b.shift(1, 0, 0)`, `b.window(-1..1, nil, nil)` (SHIFT on axis 0) | R descriptor `NONE`, W transfer | R `NONE` (whole view), W transfer | as slab axis |
+| `b.shift(0, 0, 1)` (SHIFT innermost) | R descriptor `NONE`, W transfer | axes 0, 1: R `NONE` (outer SHIFT); axis 2: R `PER_SLAB`; W transfer | `PER_FIBER_FUSED` on every axis |
 | `b.swap_bytes`, `b.roll(1, 0, 0)`, `b.tile(1, 2, 1)`, CAMeld | transfer | transfer | transfer |
-| `CArray.int32(3,4,5).fake(:float64)` | transfer | transfer | axis 2: `PER_FIBER_FUSED`; others: transfer |
+| `CArray.int32(3,4,5).fake(:float64)` | transfer | transfer | axis 2: R `PER_FIBER_FUSED`; otherwise transfer |
 | `CArray.stack(…)` over three slices | transfer | axis 0: R `STACK`; axes 1, 2: R `STACK_OUTER_K`; W transfer | as slab axis |
 | a grid over a fake | transfer | transfer | transfer |
 | `b.lazy * 2` | transfer | transfer | transfer (W refused: read-only) |
@@ -198,13 +199,13 @@ Tests that assert the route itself (an `alias_mode`, the number of slabs a walk 
 | # | promise | kept by | detector |
 |---|---|---|---|
 | 1 | a fiber (`CA_KERNEL_FIBER_CONTIG`) reaches the kernel as a contiguous run of cells and of mask flags | the part `ki_fiber_contig_data` / `ki_fiber_contig_mask`, called on every slab-axes route; `PER_FIBER_FUSED` fetches each fiber into the fiber scratch; `STACK` cuts its slab contiguous | the matrix (fiber walk) |
-| 2 | the mask cursor handed out is a copy, never a live mask | written per route: every route gathers the mask into `scratch_mask` (or the fiber mask scratch); `STACK_OUTER_K` copies the parents' masks | `test_iter_write_back.rb` (a mask written through a read walk reaches nothing) |
-| 3 | a write lands on the cells that were gathered, and only the changed ones are sent | alias routes: the kernel writes in place; transfer and CAStride scratch: the part `ki_scratch_push_changed`; descriptor routes: `ca_axis_dispatch_scatter` + the parent's `ca_sync_detach`; gathered fiber: `ca_stride_scatter_run` back to `alias_ptr + last_data_off`; `PER_FIBER_FUSED`: `ca_xfer_stride` PUT | the matrix (write) |
+| 2 | the mask cursor handed out is a copy, never a live mask | the part `ki_take_mask_copy` on every route that hands out a whole-view mask; the fiber mask scratch on `PER_FIBER_FUSED`; `STACK_OUTER_K` copies the parents' masks | `test_iter_write_back.rb` (a mask written through a read walk reaches nothing) |
+| 3 | a write lands on the cells that were gathered, and only the changed ones are sent | alias routes (the descriptor `STRIDED` route included): the kernel writes in place; every write through a scratch: the part `ki_gather_view` (keeps the copy) + `ki_scratch_push_changed` — the descriptor engine's gathers read only, and a write over a descriptor view takes the transfer walk at init; gathered fiber: `ca_stride_scatter_run` back to `alias_ptr + last_data_off`; `PER_FIBER_FUSED` on a CAWindow / CAShift: `ca_xfer_stride` PUT of the fiber | the matrix (write) |
 | 4 | what a walk opened is closed on every exit: init failure, a raise in the kernel, a raise in a gather or write-back | init clears the state before it can return; `ca_iter_ensure` for the kernel's raise; `CA_ITER_FLAG_WALK_MAY_RAISE` puts the walks that can raise under `rb_protect`; `finish` frees field by field | `test_iter_delivery_detectors.rb` (attached views, iterator buffers, malloc zone), `test_iter_raise_cleanup.rb`, `attach_balance.rb` |
 | 5 | an input sharing its root with the destination is read from a copy made before the write | paired walks: `CA_ITER_FLAG_OWNS_SRC` + `ca_iter_reopen_on_copy`; two walks opened separately: the header's contract (the read side copies) | overlap tests |
 | 6 | a read walk creates nothing on the source or its parents, masks included | written per route: masks are gathered only when `ca_has_mask` | `test_iter_delivery_detectors.rb`, the stack / meld mask tests |
 | 7 | Ruby values produced while gathering (CAObject, lazy object arrays) stay visible to the GC until the walk ends | the object scratch is held for the walk | `test_iter_delivery_detectors.rb` and `test_lazy_object_gc.rb` (`GC.stress`) |
-| 8 | a slab may be handed out as a window onto the source only when the walk reads the source's own memory | in the engine, only `CONTIG` / `STRIDED` lend memory; `each_slab` (`ext/carray_slab.c`) makes a window only when `st->t1->alias_ptr == src->ptr` | `test_each_slab.rb` in the `2` run |
+| 8 | a slab may be handed out as a window onto the source only when the walk reads the source's own memory | in the engine, only `CONTIG` / `STRIDED` lend memory; `each_slab` (`ext/carray_slab.c`) asks the part `ca_slab_walk_reads_src_in_place` (an entity, and `alias_ptr == src->ptr`) | `test_each_slab.rb` in the `2` run |
 | 9 | **a kernel addresses its output by the walk's buffer, not by the array's pointer**: a fresh output is laid out row-major and so is any scratch the walk cuts it from, so an output slab's offset from `st_out.alias_ptr` is its offset in the output | the scan and rank kernels `ext/mkkernel.rb` emits, the gap-fill hold (`ext/carray_hold.c`) — they write the output's mask by that offset | the `2` run (with `co->ptr` instead, the mask lands elsewhere) |
 
 Promises 1, 3 (partly), 4, 5 and 7 are parts called from every route. 2, 6 and 8 are written out route by route; that is where a new route can quietly differ.
@@ -215,11 +216,11 @@ Promises 1, 3 (partly), 4, 5 and 7 are parts called from every route. 2, 6 and 8
 
 ### 7.1 A shortcut that does not know a promise
 
-Most past faults were a route added for speed that kept a promise the general route keeps, but by its own code, and missed it: fibers delivered contiguous only by the general route, a stack route handing out a parent's live mask, a meld route assuming every parent is present. The cure has been the same each time: put the promise in a part and call it from the shortcut, and add the shortcut's row to the matrix.
+Most past faults were a route added for speed that kept a promise the general route keeps, but by its own code, and missed it: fibers delivered contiguous only by the general route, a stack route handing out a parent's live mask, a meld route assuming every parent is present, and two write-backs that sent back every gathered cell instead of the changed ones (the descriptor engine's whole-view scatter, which let the untouched copy of a repeated grid row overwrite the written one, and the conversion fiber shortcut, which brought an int64 above 2^53 back through float64 rounded). The cure has been the same each time: put the promise in a part and call it from the shortcut, and add the shortcut's row to the matrix.
 
 ### 7.2 A route whose promise is kept by someone else
 
-The descriptor routes keep promise 3 through the attached parent: the scatter writes into the parent's buffer and `ca_sync_detach` takes it home. When the parent is a conversion view, its sync skips the cells masked in the array, so a write of a masked cell through a selection of a fake was lost. This is why a descriptor view over a parent that lends no memory goes by transfer (`ca_iter_route_source`), and why both L1 and L2 must route through it.
+The descriptor `STRIDED` route keeps promise 3 through the attached parent: the kernel writes into the parent's buffer and `ca_sync_detach` takes it home. When the parent is a conversion view, its sync skips the cells masked in the array, so a write of a masked cell through a selection of a fake was lost. This is why a descriptor view over a parent that lends no memory goes by transfer (`ca_iter_route_source`), and why both L1 and L2 must route through it.
 
 A parent that is a view with a buffer of its own attached at the time of the walk is not redirected (the test is `! parent->ptr`); its write-back is then its sync. Nothing in the library leaves such a parent attached across a walk outside the development-only `attach!`.
 

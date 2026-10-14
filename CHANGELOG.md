@@ -36,6 +36,18 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: C extensions: a whole-array kernel iterator write walk
+  (`ca_iter_state_init_l1` with `CA_KERNEL_WRITE`) over a view that
+  shows a cell of its array twice, such as `a[CA_INT64([0, 0, 2]), nil]`,
+  keeps what the kernel wrote into one copy; the copy it left alone
+  used to overwrite it.
+
+- Fix: C extensions: a kernel iterator write walk along the last axis
+  (`CA_FOR_EACH_FIBER` with `CA_KERNEL_WRITE`) of a type-converting
+  view, such as `a.fake(:float64)` over an int64 array, leaves the cells
+  the kernel did not write as they were. They were written back through
+  the conversion, so an int64 above 2**53 came back rounded.
+
 - Change: C extensions: fifteen kernel iterator macros that only
   shortened another one are removed. Write what they stood for:
   `CA_SLAB_REDUCE_F64` / `_F32` / `_I32` / `_I64` are

@@ -32,6 +32,17 @@
 #include "carray_slab.h"
 #include "ca_obj_face.h"
 
+/* Promise 8 of the kernel iterator: a slab may be lent to Ruby as a view
+   onto the source's own memory only when the source is an entity and the
+   walk reads that memory in place (alias_ptr is src->ptr, not a scratch or
+   a root it gathered from).  Any other slab is a copy, and a view built on
+   it would read memory the walk frees or reuses. */
+static int
+ca_slab_walk_reads_src_in_place (const ca_iter_state *it, CArray *src)
+{
+  return ca_is_entity(src) && it->alias_ptr == src->ptr;
+}
+
 /* Forward declarations: per-form loop bodies are defined later in this
    file and take a state pointer directly. */
 static VALUE ca_slab_run_map          (ca_slab_iter_state_t *st);
@@ -377,7 +388,7 @@ ca_slab_setup_input_slab_view (ca_slab_iter_state_t *st, CArray *src,
        the iterator hands out from the root, a parent or its own scratch --
        takes path (b): the iterator describes every slab by p_in and
        slab_strides, whatever its mode.                                  */
-    int contig = ( ca_is_entity(src) && st->t1->alias_ptr == src->ptr )
+    int contig = ca_slab_walk_reads_src_in_place(st->t1, src)
                  && ca_slab_strides_are_row_major_contig(slab_ndim,
                                                          st->t1->slab_dims,
                                                          st->t1->slab_strides,
@@ -441,7 +452,7 @@ ca_slab_setup_input_slab_view (ca_slab_iter_state_t *st, CArray *src,
        an entity the iterator walks in place, whose fiber is contiguous.
        A view's fiber comes from the root or the iterator's scratch, so it
        goes through a carrier. */
-    in_alias   = ( ca_is_entity(src) && st->t1->alias_ptr == src->ptr ) && (in_stride == src->bytes);
+    in_alias   = ca_slab_walk_reads_src_in_place(st->t1, src) && (in_stride == src->bytes);
 
     if ( in_alias ) {
       /* ALIAS: parent = src.  ca_stride_setup auto-creates slab_view->mask
