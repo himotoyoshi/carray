@@ -93,7 +93,7 @@ class CArray
       else
         num / den
       end
-    CArray.__reduce_fill__(result, opts[:fill_value])
+    CArray.__fill_undefined_result_cells__(result, opts[:fill_value])
   end
   private :__wmean_object__
 

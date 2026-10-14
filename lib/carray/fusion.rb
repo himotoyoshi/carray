@@ -350,7 +350,7 @@ class CArray
       # expression, say -- has no array to read and is taken as a whole.
       def shifted (n)
         array = n.parent
-        bounds = n.__axis_bounds__
+        bounds = n.__boundary_rule_of_each_axis__
         if Fusion.lazy?(array) || array.dim != n.dim ||
            ! bounds.all? { |b| b == :fill || b == :mask }
           return leaf(n)

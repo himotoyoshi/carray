@@ -41,7 +41,7 @@ class CASegmentIterator < CAIterator
     kw = {}
     kw[:offsets] = offsets unless offsets.nil?
     kw[:lengths] = lengths unless lengths.nil?
-    bounds = CArray.__segment_bounds__("segments", **kw)
+    bounds = CArray.__segment_boundaries_from_lengths_or_offsets__("segments", **kw)
     origin, finish = bounds[0], bounds[-1]
     if origin < 0 || finish > value.elements
       raise ArgumentError,
@@ -236,7 +236,7 @@ class CASegmentIterator < CAIterator
   #   @return [Array<CArray>]
   def quantile
     unless MONOID_TYPES.include?(grouped.data_type)
-      return CArray.__answer_as__(:quantile) { [0, 25, 50, 75, 100].map { |p| percentile(p) } }
+      return CArray.__name_errors_after_method__(:quantile) { [0, 25, 50, 75, 100].map { |p| percentile(p) } }
     end
     outs = Array.new(5) { CArray.float64(@k) }
     grouped.send(:__reduceat_quantile__, @offsets, *outs)
@@ -550,7 +550,7 @@ class CASegmentIterator < CAIterator
   # data type is the core's (`cumsum` of a boolean is uint64, of an integer
   # float64), a Face keeps its Face (`cummin` of a time column is a time), and
   # a scan the core refuses (`cumsum` of a time column) raises in the core's
-  # words.  When the fused C kernel __axis_group_scan__ answers in that data
+  # words.  When the fused C kernel __scan_by_axis_groups__ answers in that data
   # type, it runs with the whole source as a single grouped axis and the
   # segment of each cell (#codes) as the single bundle, emitting in source
   # order; otherwise each segment is scanned by the core and scattered back.
@@ -711,7 +711,7 @@ class CASegmentIterator < CAIterator
   # one that no cell belongs to: every cell comes back UNDEF, as it does when
   # there are segments and a cell is in none of them.
   def scan (op)
-    CArray.__answer_as__(op) { scan_answered(op) }
+    CArray.__name_errors_after_method__(op) { scan_answered(op) }
   end
 
   def scan_answered (op)
@@ -724,7 +724,7 @@ class CASegmentIterator < CAIterator
     bundle = @k > 0 ? [codes, @k, [0]]
                     : [CArray.int64(@value.elements).fill(-1), 1, [0]]
     scan_source.reshape(@value.elements)
-               .__axis_group_scan__([0], [bundle], op)
+               .__scan_by_axis_groups__([0], [bundle], op)
                .reshape(*@src_shape)
   end
 
@@ -1140,9 +1140,9 @@ class CASegmentIterator < CAIterator
       define_method(op) do |*args, min_count: nil, fill_value: nil, **kw|
         # The segment reduction already leaves an empty segment as the core
         # does, so only a min_count asking for more is applied here.
-        need = CArray.__min_count_need__(op, min_count, 0)
+        need = CArray.__present_cells_needed_per_result_cell__(op, min_count, 0)
         # an error from the core reductions a member is made of names the member
-        result = CArray.__answer_as__(op) { super(*args, **kw) }
+        result = CArray.__name_errors_after_method__(op) { super(*args, **kw) }
         return result if need == 0 && fill_value.nil?
         if need > 0
           present = if op == :wsum || op == :wmean
@@ -1161,7 +1161,7 @@ class CASegmentIterator < CAIterator
         if short
           (result.is_a?(Array) ? result : [result]).each { |r| r[short] = UNDEF }
         end
-        CArray.__reduce_fill__(result, fill_value)
+        CArray.__fill_undefined_result_cells__(result, fill_value)
       end
     end
   end

@@ -228,7 +228,7 @@ rb_ca_s_segment_index (int argc, VALUE *argv, VALUE klass)
   return rout;
 }
 
-/* CArray.__segment_bounds__(name, lengths: l | offsets: o) -> int64[k+1]
+/* CArray.__segment_boundaries_from_lengths_or_offsets__(name, lengths: l | offsets: o) -> int64[k+1]
 
    Internal: the validated boundaries, for a Ruby caller that takes the same
    two keywords (CArray#segments).  `name` heads the error messages. */
@@ -239,7 +239,7 @@ rb_ca_s_segment_bounds (int argc, VALUE *argv, VALUE klass)
   ca_size_t k;
   VALUE rname;
   if ( argc < 1 ) {
-    rb_raise(rb_eArgError, "__segment_bounds__: the caller's name is required");
+    rb_raise(rb_eArgError, "__segment_boundaries_from_lengths_or_offsets__: the caller's name is required");
   }
   rname = argv[0];
   StringValue(rname);
@@ -253,5 +253,5 @@ Init_carray_segment (void)
   id_offsets = rb_intern("offsets");
   rb_define_singleton_method(rb_cCArray, "segment_offsets", rb_ca_s_segment_offsets, -1);
   rb_define_singleton_method(rb_cCArray, "segment_index",   rb_ca_s_segment_index,   -1);
-  rb_define_singleton_method(rb_cCArray, "__segment_bounds__", rb_ca_s_segment_bounds, -1);
+  rb_define_singleton_method(rb_cCArray, "__segment_boundaries_from_lengths_or_offsets__", rb_ca_s_segment_bounds, -1);
 }

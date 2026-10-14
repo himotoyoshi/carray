@@ -566,7 +566,7 @@ ca_answer_as_caller (VALUE (*body)(VALUE), VALUE arg)
   return rb_ensure(body, arg, ca_answer_restore, Qnil);
 }
 
-/* CArray.__answer_as__(name) { ... }: the same for a method written in Ruby. */
+/* CArray.__name_errors_after_method__(name) { ... }: the same for a method written in Ruby. */
 static VALUE
 rb_ca_s_answer_as_body (VALUE unused)
 {
@@ -716,7 +716,7 @@ ca_min_count_arg (VALUE v, const char *name)
   return n;
 }
 
-/* CArray.__min_count_need__(op, min_count, least): how many present cells a
+/* CArray.__present_cells_needed_per_result_cell__(op, min_count, least): how many present cells a
    result cell of `op` needs (ca_too_few_present), for a reduction written
    in Ruby; it masks the cells whose count is below it. */
 static VALUE
@@ -794,7 +794,7 @@ ca_reduce_fill (VALUE result, VALUE fill, int whole)
   return ( result == CA_UNDEF ) ? fill : result;
 }
 
-/* CArray.__reduce_fill__(result, fill_value): ca_reduce_fill for a
+/* CArray.__fill_undefined_result_cells__(result, fill_value): ca_reduce_fill for a
    reduction written in Ruby.  A fill_value of nil or UNDEF leaves the
    undefined cells as they are. */
 static VALUE
@@ -1221,11 +1221,11 @@ Init_carray_utils (void)
   rb_define_method(rb_cCArray, "normalize_axes", rb_ca_normalize_axes, -1);
   rb_define_singleton_method(rb_cCArray, "normalize_axis",
                              rb_ca_s_normalize_axis, -1);
-  rb_define_singleton_method(rb_cCArray, "__min_count_need__",
+  rb_define_singleton_method(rb_cCArray, "__present_cells_needed_per_result_cell__",
                              rb_ca_s_min_count_need, 3);
-  rb_define_singleton_method(rb_cCArray, "__reduce_fill__",
+  rb_define_singleton_method(rb_cCArray, "__fill_undefined_result_cells__",
                              rb_ca_s_reduce_fill, 2);
-  rb_define_singleton_method(rb_cCArray, "__answer_as__",
+  rb_define_singleton_method(rb_cCArray, "__name_errors_after_method__",
                              rb_ca_s_answer_as, 1);
 
 }

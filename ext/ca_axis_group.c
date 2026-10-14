@@ -283,7 +283,7 @@ group_op_code (VALUE vop)
 #define GACC_XOR \
   ( ((boolean8_t *) co->ptr)[o] ^= (*(boolean8_t *)(p + gw_doff[e]) ? 1 : 0) )
 
-/* __axis_group_reduce__(group_axes, bundles, op) — group-reduces self along
+/* __reduce_by_axis_groups__(group_axes, bundles, op) — group-reduces self along
  * the union of `group_axes` (ascending source-axis indices = the slab) into
  * composite groups described by `bundles`, preserving the band (= non-grouped)
  * axes.  Internal: the Ruby surface is CAGroupIterator.
@@ -983,7 +983,7 @@ group_scan_build_plan (ca_iter_state *st, boolean8_t *m,
     omask[o] = 1;                                \
   } while (0)
 
-/* The CA_OBJECT lane of __axis_group_scan__.  Every cell calls into Ruby,
+/* The CA_OBJECT lane of __scan_by_axis_groups__.  Every cell calls into Ruby,
    so the walk can raise part way; its state lives in the caller's frame, in
    c->st, and ca_iter_ensure finishes it however this body leaves.  The
    buffers are ALLOCV-backed, so the unwind collects them. */
@@ -1115,9 +1115,9 @@ group_scan_op_code (VALUE vop)
   rb_raise(rb_eArgError, "axis_group_scan: unsupported op :%"PRIsVALUE, rb_id2str(id));
 }
 
-/* __axis_group_scan__(group_axes, bundles, op) — group-keyed segment scan of
+/* __scan_by_axis_groups__(group_axes, bundles, op) — group-keyed segment scan of
  * self over the union of `group_axes` into composite groups described by
- * `bundles` (same argument shape as __axis_group_reduce__).  Internal.
+ * `bundles` (same argument shape as __reduce_by_axis_groups__).  Internal.
  *
  * Unlike the reduce the grouped axes are not collapsed: the result is a new
  * CArray of the same shape as self, each cell holding the running statistic of
@@ -1421,8 +1421,8 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
 void
 Init_ca_axis_group (void)
 {
-  rb_define_method(rb_cCArray, "__axis_group_reduce__",
+  rb_define_method(rb_cCArray, "__reduce_by_axis_groups__",
                    rb_ca_axis_group_reduce, 3);
-  rb_define_method(rb_cCArray, "__axis_group_scan__",
+  rb_define_method(rb_cCArray, "__scan_by_axis_groups__",
                    rb_ca_axis_group_scan, 3);
 }

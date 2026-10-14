@@ -88,7 +88,7 @@ class CAKeyWindowIterator < CAIterator
     ex_hi = exclude == :upper || exclude == :both
     expected = iv && (bw / iv + aw / iv + 1 - (ex_lo ? 1 : 0) - (ex_hi ? 1 : 0)).round
     @lo, @hi, @complete =
-      CArray.__key_window_ranges__(sk, sg, bw, aw, ex_lo, ex_hi, iv, expected)
+      CArray.__find_key_window_row_ranges__(sk, sg, bw, aw, ex_lo, ex_hi, iv, expected)
 
     # Each row's position among the sorted rows (UNDEF for a row with no
     # window), to put the answers back in row order.

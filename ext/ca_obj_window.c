@@ -1838,7 +1838,7 @@ Init_ca_obj_window (void)
   /* No `count` accessor: the per-axis window widths are what `shape`
      already answers, and the name belongs to CArray#count. */
   rb_define_method(rb_cCAWindow, "start",  rb_cw_start, 0);
-  rb_define_method(rb_cCAWindow, "__axis_bounds__", rb_ca_window_axis_bounds, 0);
+  rb_define_method(rb_cCAWindow, "__boundary_rule_of_each_axis__", rb_ca_window_axis_bounds, 0);
   rb_define_method(rb_cCAWindow, "size0",  rb_cw_size0, 0);
 
 #ifdef CARRAY_DEV_BUILD

@@ -554,7 +554,7 @@ class CAWindowIterator < CAIterator
   # answer for -- in which case the caller delegates as before.
   def fold_by_offset (op, min_count, fill_value = nil)
     return nil unless CArray.__fast_paths_enabled__
-    need = CArray.__min_count_need__(op, min_count, 0)
+    need = CArray.__present_cells_needed_per_result_cell__(op, min_count, 0)
     return nil unless op == :mean || OFFSET_FOLD.key?(op)
     # The elementwise kernels act on a Face's storage; its reductions are its own.
     return nil if @source.face?
@@ -568,7 +568,7 @@ class CAWindowIterator < CAIterator
     folded = mask_empty_windows(folded) if EMPTY_WINDOW_IS_UNDEFINED.include?(op)
     folded = apply_min_count(folded, need)
     # A `fill_value:` on the call replaces a result that came out undefined.
-    CArray.__reduce_fill__(folded, fill_value)
+    CArray.__fill_undefined_result_cells__(folded, fill_value)
   end
 
   # The mean is the sum over the same offsets, divided by the number of cells
@@ -635,7 +635,7 @@ class CAWindowIterator < CAIterator
     @source.is_nan.any
   end
 
-  # A result only where the window held `need` cells (CArray.__min_count_need__).
+  # A result only where the window held `need` cells (CArray.__present_cells_needed_per_result_cell__).
   def apply_min_count (folded, need)
     return folded if need == 0
     counts = window_cell_counts
@@ -783,7 +783,7 @@ class CAWindowIterator < CAIterator
     end
     addr[oob] = UNDEF unless @bounds == :nearest
     addr[mi.is_masked.eq(1)] = UNDEF if mi.has_mask?
-    CArray.__reduce_fill__(addr, kw[:fill_value])
+    CArray.__fill_undefined_result_cells__(addr, kw[:fill_value])
   end
 
   public

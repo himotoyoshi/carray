@@ -228,7 +228,7 @@ class AxisGroup
             "#{op}: unknown keyword#{unknown.size > 1 ? "s" : ""}: " +
             unknown.map(&:inspect).join(", ")
     end
-    CArray.__min_count_need__(op, kw[:min_count], 0)
+    CArray.__present_cells_needed_per_result_cell__(op, kw[:min_count], 0)
     nil
   end
 
@@ -248,7 +248,7 @@ class AxisGroup
   # or every cell for a count of the mask); fill_value: then fills the masked
   # cells -- as a core reduction does with each.
   def self.__finish_reduction__ (iter, op, kw, result)
-    need = CArray.__min_count_need__(op, kw[:min_count], 0)
+    need = CArray.__present_cells_needed_per_result_cell__(op, kw[:min_count], 0)
     if need > 0
       counts = if MASK_COUNTS.include?(op.to_sym)
                  iter.elements(axis: kw[:axis])
@@ -261,7 +261,7 @@ class AxisGroup
         result = UNDEF
       end
     end
-    CArray.__reduce_fill__(result, kw[:fill_value])
+    CArray.__fill_undefined_result_cells__(result, kw[:fill_value])
   end
 
   # Parse an axis: spec into [has_group, fused_band_slot_positions].
@@ -524,7 +524,7 @@ class CAGroupIterator
   # in row-major position order along the grouped axes (per band). Excluded /
   # source-masked cells are UNDEF (they join no running total). All five route
   # through the shared scan_op dispatcher, driving the fused C kernel
-  # __axis_group_scan__ (ext/ca_axis_group.c) with peak O(k) extra. A scan
+  # __scan_by_axis_groups__ (ext/ca_axis_group.c) with peak O(k) extra. A scan
   # cannot fold a band into the statistic (that would collapse an axis), so it
   # accepts only axis: :group; without :group each delegates to the value's
   # same-named scan.
@@ -868,7 +868,7 @@ class CAGroupIterator
     end
     return scan_by_core(op) unless kernel_scans?(op)
     group_axes, bundles, = spec.reduce_plan([])
-    value.__axis_group_scan__(group_axes, bundles, op)
+    value.__scan_by_axis_groups__(group_axes, bundles, op)
   end
 
   # Whether the scatter kernels read this payload: an integer or a float,

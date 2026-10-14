@@ -5,7 +5,7 @@ require "carray"
 # with B failed", naming the method the caller called, from every method and
 # every iterator -- not a method it is made of (median used to say
 # "partition_index:", mode "sort:", a categorical cummax
-# "__axis_group_scan__:"), and not without a name (min, max and the running
+# "__scan_by_axis_groups__:"), and not without a name (min, max and the running
 # extrema used to give Ruby's bare message).
 
 class TestComparisonFailureMessage < Test::Unit::TestCase

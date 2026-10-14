@@ -524,7 +524,7 @@ class CACategoricalIterator < CASegmentIterator
     if kernel_scans?(op, answer)
       bundle = @k > 0 ? [@cat.codes, @k, [axis]]
                       : [CArray.int64(h.shape[axis]).fill(-1), 1, [axis]]
-      return h.__axis_group_scan__([axis], [bundle], op)
+      return h.__scan_by_axis_groups__([axis], [bundle], op)
     end
     each_group_along(axis, ->(shape) { blank_like(answer, shape) }) do |g|
       g.public_send(op, axis: axis)

@@ -66,7 +66,7 @@
     }                                                                         \
   }
 
-/* CArray.__key_window_ranges__(keys, groups, before, after,
+/* CArray.__find_key_window_row_ranges__(keys, groups, before, after,
                                 exclude_lower, exclude_upper,
                                 interval, expected)
    keys:     int64 or float64 entity, sorted within each group
@@ -92,7 +92,7 @@ rb_ca_s_key_window_ranges (VALUE self, VALUE vkeys, VALUE vgroups,
 
   if ( !rb_obj_is_kind_of(vkeys, rb_cCArray) ||
        !rb_obj_is_kind_of(vgroups, rb_cCArray) ) {
-    rb_raise(rb_eTypeError, "__key_window_ranges__: CArray arguments expected");
+    rb_raise(rb_eTypeError, "__find_key_window_row_ranges__: CArray arguments expected");
   }
   GetCArray(vkeys, ck);
   GetCArray(vgroups, cg);
@@ -100,7 +100,7 @@ rb_ca_s_key_window_ranges (VALUE self, VALUE vkeys, VALUE vgroups,
        ck->ndim != 1 || cg->ndim != 1 || cg->data_type != CA_INT64 ||
        ck->elements != cg->elements || ca_has_mask(ck) || ca_has_mask(cg) ||
        ( ck->data_type != CA_INT64 && ck->data_type != CA_FLOAT64 ) ) {
-    rb_raise(rb_eArgError, "__key_window_ranges__: unexpected arguments");
+    rb_raise(rb_eArgError, "__find_key_window_row_ranges__: unexpected arguments");
   }
   n = ck->elements;
   grp = (const int64_t *) cg->ptr;
@@ -144,6 +144,6 @@ rb_ca_s_key_window_ranges (VALUE self, VALUE vkeys, VALUE vgroups,
 void
 Init_carray_key_windows (void)
 {
-  rb_define_singleton_method(rb_cCArray, "__key_window_ranges__",
+  rb_define_singleton_method(rb_cCArray, "__find_key_window_row_ranges__",
                              rb_ca_s_key_window_ranges, 8);
 }

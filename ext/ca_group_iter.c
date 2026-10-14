@@ -14,9 +14,9 @@
   Split summary:
     - ca_argv_has_group / rb_ca_fetch_group  : here (called by carray_access.c)
     - CAGroupIterator + the tier-1 reduction methods driving
-      __axis_group_reduce__ : here
+      __reduce_by_axis_groups__ : here
     - reduce_plan / bundle assembly / output-axis permutation (metadata) : Ruby
-    - the O(N) compute kernel __axis_group_reduce__ : ca_axis_group.c
+    - the O(N) compute kernel __reduce_by_axis_groups__ : ca_axis_group.c
 
 --------------------------------------------------------------------------- */
 
@@ -282,7 +282,7 @@ Init_ca_group_iter (void)
   id_axis_group        = rb_intern("axis_group");
   id_reduce_plan       = rb_intern("reduce_plan");
   id_parse_axis        = rb_intern("parse_axis");
-  id_axis_group_reduce = rb_intern("__axis_group_reduce__");
+  id_axis_group_reduce = rb_intern("__reduce_by_axis_groups__");
   id_reshape           = rb_intern("reshape");
   id_transpose         = rb_intern("transpose");
   id_labels            = rb_intern("labels");
