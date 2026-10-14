@@ -16,7 +16,7 @@
 #
 # Fast path activates when:
 #   - axis kwarg is a single Integer (or absent for flat reduce)
-#   - no mask on CAMeld or any parent (skipna needs per-cell dispatch;
+#   - no mask on CAMeld or any parent (skipping masked cells needs per-cell dispatch;
 #     the decompose would not see correct mask propagation across parents)
 #   - no non-:axis kwargs (min_count / fill_value / keep_axis / etc. punt
 #     to super; those change finalisation semantics)

@@ -8,7 +8,7 @@ require "test/unit"
 # Contract (devel/PROPOSAL_EMPTY_REDUCE_IDENTITY.md):
 #   - default min_count: zero-contribution slab (empty OR all-masked) -> identity
 #   - min_count: K (K > 0) opt-in: < K valid cells -> UNDEF
-#   - partial-mask / normal reductions unchanged (skipna)
+#   - partial-mask / normal reductions unchanged (masked cells skipped)
 #   - non-identity kernels (min/max/mean/variance/...) keep UNDEF on empty
 class TestEmptyReduceIdentity < Test::Unit::TestCase
   def test_empty_sum_is_zero
@@ -24,7 +24,7 @@ class TestEmptyReduceIdentity < Test::Unit::TestCase
   end
 
   def test_empty_and_all_masked_agree
-    # skipna: both are "sum over the empty set of unmasked cells".
+    # Masked cells are skipped: both are "sum over the empty set of unmasked cells".
     a = CA_FLOAT64([1, 2, 3]); a[] = UNDEF
     assert_equal(CA_FLOAT64([]).sum, a.sum)
   end

@@ -1,6 +1,6 @@
 # §8 of PROPOSAL_KLEENE_BOOLEAN_LOGIC: the `skip_masked:` keyword on the
 # boolean folds all / any / none.  Default (skip_masked: true) is the existing
-# available-case (skipna) behavior; skip_masked: false gives the three-valued
+# available-case behavior; skip_masked: false gives the three-valued
 # (Kleene) fold, consistent with element-wise `|` / `&`.
 
 require "test/unit"
@@ -42,7 +42,7 @@ class TestKleeneFold < Test::Unit::TestCase
     assert_equal "T", cell(ba("F", "F").none(skip_masked: false))
   end
 
-  def test_default_is_skipna_unchanged
+  def test_default_skips_masked_unchanged
     # masked cells ignored (available-case), always true/false
     m = ba("T", "U")
     assert_equal true,  m.any                     # default skip_masked: true

@@ -51,7 +51,7 @@ class TestMedianObjectMask < Test::Unit::TestCase
 
   def test_object_median_axis_with_mask
     # Per-axis order statistics honour the mask: each fiber's median is taken
-    # over its own present values (skipna), matching the reduction family.
+    # over its own present values, matching the reduction family.
     # Row 1 has one masked cell so its present run is [10,11,13,14] (n=4,
     # median 12.0); the other rows are fully present.
     a = CArray.object(3, 5) { |i, j| 10*i + j }
