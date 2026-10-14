@@ -12,7 +12,10 @@
 #               engine can be re-implemented behind them (the surface stays fixed).
 #   - INTERNAL: everything else (state-machine functions, alias_mode /
 #               src_kind enums, scratch / stack / fiber bookkeeping
-#               fields).  Free to refactor across 3.x.
+#               fields, and the macros only ext/mkkernel.rb emits: the
+#               8-way SUM8 / MIN8 / MAX8 / STAR8 reductions,
+#               CA_SLAB_SCAN_T_GATED, CA_SLAB_REDUCE_T_VAR_EX).  Free to
+#               refactor across 3.x.
 #
 # This guard fails CI if any FROZEN name disappears from the header
 # (= renamed / removed).  It is the mechanical pin behind the prose
@@ -24,7 +27,7 @@
 # a frozen identifier vanishing.
 #
 # Run via: `rake kernel_surface_check` (or directly with
-# `ruby devel/check_kernel_surface_freeze.rb`).
+# `ruby utils/check_kernel_surface_freeze.rb`).
 
 HEADER = File.expand_path("../ext/ca_kernel_iterator.h", __dir__)
 
@@ -38,6 +41,8 @@ FROZEN_MACROS = %w[
   CA_FOR_EACH_FIBER_MASKED
   CA_FOR_EACH_FIBER_INOUT
   CA_FOR_EACH_FIBER_INOUT_MASKED
+  CA_FOR_EACH_FIBER_PAIR
+  CA_FOR_EACH_FIBER_PAIR_MASKED
   CA_SLAB_REDUCE_T
   CA_SLAB_REDUCE_T_EX
   CA_SLAB_REDUCE_T_PLUS
@@ -79,6 +84,8 @@ FROZEN_FUNCS = %w[
   ca_iter_state_close
   ca_iter_check_init
   ca_iter_check_same_shape
+  ca_iter_ensure
+  ca_iter_register_source_kind
 ]
 
 # Enum / status tokens authors write literally at a macro call site or in
