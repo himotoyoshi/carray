@@ -75,6 +75,20 @@ bytes. (For a CAStride subclass, the mask is itself a CAStride subclass with
 `mask->mask == NULL` — the cascade terminates because a mask has no mask of its
 own.)
 
+## Stand-ins: a view's mask over a parent that has none
+
+Some views have masked cells of their own: a grid's holes, the out-of-range cells of a window or shift built with `fill_value: UNDEF`, and the cells of a stack or meld that come from a masked part. Their mask is a view over the parent's mask, but the parent may have no mask. Asking such a view about its mask must not give the parent one, so the mask reads an all-false **stand-in** in the parent's place.
+
+The rule: asking about the mask, or writing nothing but false into it, gives the parent no mask. The stand-in gives way to the parent's own mask once the parent has one, or once a true has been written into it. A write of a value into the view writes false into its mask, so it gives the parent no mask either, as the same write into an entity does not.
+
+Three parts in `ext/carray_mask.c` (declared in `carray_internal.h`) hold the rule, and a view that keeps stand-ins uses them and nothing of its own:
+
+- `ca_mask_standin_new(parent)` makes the stand-in, read-only when the parent is.
+- `ca_mask_standin_current(mask_view, reading, parent, standin)` says what the mask reads now. Every entry into the mask's cells calls it first: each transfer, fill, attach and allocate slot, and any walk that reads the parents directly (the kernel iterator's stack paths). It leaves the reading alone while the mask view is attached with its buffer out, since that buffer and its detach belong to the stand-in.
+- `ca_mask_standin_settle(parent, standin)` runs after a write that may have put a true into the stand-in: the trues are added to the parent's mask, made for it. A parent that can never have a mask (a value array, a mask array) refuses them with `TypeError`.
+
+A write goes into the stand-in as it is and is settled afterwards, so a true that lands on a cell the view leaves out (a hole, an out-of-range cell) never reaches the parent. A view whose mask reads a stand-in declines `fold_stride`, since a write folded through to the stand-in would skip the settle. `ca_multi_parent_mask`, `ca_multi_parent_mask_refresh` and `ca_multi_parent_mask_settle` apply the parts to each part of a stack or meld. `rake mask_standin_check` refuses a stand-in made or switched by hand.
+
 ## UNDEF: the C singleton
 
 `UNDEF` is the sentinel a caller assigns to mark a cell missing. At the C level it

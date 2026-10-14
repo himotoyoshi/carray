@@ -213,7 +213,7 @@ write), declines `fold_stride`, and is routed to the kernel iterator as
 `SRC_ATTACH` (`ca_grid_has_holes`). Showing the holes gives a parent that has
 no mask none: the mask grid reads an all-false stand-in held by the grid, and
 gives way to the parent's own mask once the parent has one or a true is
-written outside the holes. A new door that takes integer positions
+written outside the holes ([ch. 5](05_mask_and_undef.md), "Stand-ins"). A new door that takes integer positions
 answers the same way: the read gives `UNDEF` at the masked position, the
 write leaves it alone, as `project` and `gather_nd` do.
 
