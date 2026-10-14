@@ -48,6 +48,12 @@ class CArray
   #   Sets the mask array of `self` to `new_mask`. Allocates the mask
   #   array first if `self` does not yet have one. Cannot be called on
   #   a value array or a mask array.
+  #
+  #   `mask=` replaces the whole mask with `new_mask`. A masked cell of
+  #   `new_mask` makes the cell masked, as a masked value does in any
+  #   store. To mask the cells where a condition holds, prefer
+  #   `self[cond] = UNDEF`. There a masked cell of `cond` selects nothing,
+  #   as it does in any index.
   #   @param new_mask [CArray, Boolean, Integer] mask values. A
   #     non-CArray value is broadcast and stored elementwise; a CArray
   #     of any type is coerced to boolean.

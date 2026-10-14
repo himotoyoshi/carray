@@ -150,6 +150,21 @@ t.mask = false         #  clear the whole mask
 t.count_masked         #  => 0
 ```
 
+`mask=` replaces the whole mask with the array it is given. A masked cell of that array makes the cell masked, as a masked value does in any store. To mask the cells where a condition holds, prefer the indexer form `self[cond] = UNDEF`. There a masked cell of `cond` selects nothing, as it does in any index:
+
+```ruby
+cond = CA_BOOLEAN([true, true, false, false])
+cond[1] = UNDEF                  #  => [ true, _, false, false ]
+
+r = CArray.float64(4).seq!
+r[cond] = UNDEF
+r                                #  => [ _, 1.0, 2.0, 3.0 ]    cond's masked cell selects nothing
+
+s = CArray.float64(4).seq!
+s.mask = cond
+s                                #  => [ _, _, 2.0, 3.0 ]      cond's masked cell is masked as well
+```
+
 `has_mask?` asks whether a mask exists at all, which is a different question from whether anything is missing right now: once an array has been given a mask it keeps it, even after the last masked cell is cleared. `count_masked` is the one to ask about the present state.
 
 `is_invalid` is the matching probe for IEEE-special values. It returns a boolean without mutating the input:
