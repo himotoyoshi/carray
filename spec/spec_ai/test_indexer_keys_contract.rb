@@ -144,13 +144,64 @@ class TestIndexerKeysContract < Test::Unit::TestCase
     assert_raise(IndexError) { b[CA_FLOAT64([1.0])] }
   end
 
-  def test_a_bignum_key_is_out_of_range
+  # Positions are int64 (ca_size_t), and an axis of a view that holds no
+  # memory can be longer than a Fixnum reaches.
+  def huge
+    CArray.uint8(1) { 7 }.broadcast_to(2**62 + 10)
+  end
+
+  def test_an_integer_that_fits_int64_is_a_position_even_as_a_bignum
+    v = huge
+    assert_equal 7, v[2**62 + 5]
+    assert_equal 7, v[-(2**62)]                 # from the end
+    assert_equal 7, v[2**62 + 9]
+    assert_equal [7, 7, 7], v[(2**62)..(2**62 + 2)].to_a
+    assert_equal [7, 7], v[[2**62, 2]].to_a
+    assert_raise(IndexError) { v[2**62 + 10] }  # past the end, by the usual check
+    assert_raise(IndexError) { v[-(2**62) - 11] }
+
+    w = CArray.uint8(1, 1) { 7 }.broadcast_to(2, 2**61 + 3)
+    assert_equal 7, w[2**62 + 1]                # address
+    assert_equal 7, w[1, 2**61 + 2]
+    assert_raise(IndexError) { w[2**62 + 6] }
+
+  end
+
+  def test_an_integer_past_int64_is_out_of_range
     b = CArray.int32(4)
-    [2**70, -(2**70), 0..2**70].each do |k|
+    [2**63, -(2**63) - 1, 2**70, -(2**70), 0..2**70].each do |k|
       assert_raise(IndexError, k.inspect) { b[k] }
       assert_raise(IndexError, k.inspect) { b[k] = 1 }
     end
     assert_raise(IndexError) { CArray.int32(2, 2)[2**70] }
+    assert_raise(IndexError) { huge[2**63] }
+  end
+
+  def test_a_step_is_its_value_and_one_past_int64_reaches_one_cell
+    b = CArray.int32(5).seq
+    assert_equal [0], b[(0..4).step(2**62)].to_a
+    assert_equal [0], b[(0..4).step(2**70)].to_a
+    assert_equal [4], b[(4..0).step(-(2**70))].to_a
+    assert_equal [2], b[(2..0).step(-2**63)].to_a
+    v = huge
+    assert_equal [7, 7], v[(0..(2**62 + 9)).step(2**62 + 1)].to_a
+    assert_equal [7], v[(0..(2**62 + 9)).step(2**63)].to_a
+  end
+
+  # A Float with no fraction is a position only while it is exact: past 2**53
+  # it cannot tell neighbouring integers apart.
+  def test_a_float_key_is_a_position_only_up_to_2_53
+    v = huge
+    assert_equal 7, v[2.0**53]
+    assert_equal 7, v[-(2.0**53)]
+    assert_equal 7, v[2**53 + 2]                # the Integer is fine
+    [2.0**53 + 2, -(2.0**53) - 2, 2.0**62, 1e19].each do |k|
+      assert_raise(IndexError, k.inspect) { v[k] }
+      assert_raise(IndexError, k.inspect) { v[0..k] }
+      assert_raise(IndexError, k.inspect) { v[(0..9).step(k)] }
+    end
+    err = assert_raise(IndexError) { v[2.0**53 + 2] }
+    assert_match(/invalid for the index/, err.message)
   end
 
   def test_ranges_on_an_axis_of_length_zero

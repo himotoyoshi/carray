@@ -141,7 +141,7 @@ Each `argv[i]` is classified, populating `info.index_type[i]` and
 
 | `argv[i]`                                       | `index_type`        | `index[i]` payload                          | error path                                   |
 |-------------------------------------------------|---------------------|---------------------------------------------|----------------------------------------------|
-| `Integer` or `Float`                            | `SCALAR`            | `scalar = key(v)` (§3.3.1, negative normalised) | `IndexError` on out-of-range (a `Bignum` included) and on a `Float` that is not an integer |
+| `Integer` or `Float`                            | `SCALAR`            | `scalar = key(v)` (§3.3.1, negative normalised) | `IndexError` on out-of-range (an Integer past int64 included) and on a `Float` that is not an exact integer |
 | `nil`                                           | `ALL`               | none                                        | —                                            |
 | `false` or `:~`                                 | rubber expansion: fill `rndim = ndim - argc + 1` axes with `ALL` (`:~` = rubber sigil, RB.1; `false` legacy) | — | —                  |
 | `Range`                                         | `BLOCK`             | `{start, count, step = ±1}` (see §3.3.1)    | range check; an empty range (`2...2`, or `2..` at the end) is `{start, 0, 1}` and may start at the end of the axis |
@@ -175,12 +175,19 @@ step  = key(arg.step) if ArithmeticSequence,
         else ±1 (+1 when last >= start, -1 otherwise)
 
 key(v): the one rule for a key that names a position, a scalar key
-        included: an Integer; a Float that holds an integer (a count from
-        `sum`) is that integer; a Float with a fraction, NaN, Inf, or
-        anything else, raises IndexError; an integer past the Fixnum range
-        (a Bignum, or a Float that large) is out of range (IndexError) as
-        an endpoint or a scalar key, and a step larger than any axis (one
-        cell) as a step.  A Float CArray is not an index array.
+        included.  Positions are int64 (ca_size_t):
+        - an Integer that fits int64, Bignum included, is that position
+          (an axis of a view that holds no memory can be longer than a
+          Fixnum reaches); the range check is the usual one
+        - an Integer past int64 is past every axis: out of range
+          (IndexError) as an endpoint or a scalar key, and a step larger
+          than any axis (one cell) as a step
+        - a Float with no fraction and |v| <= 2**53 is that integer (a
+          count from `sum` is a Float); past 2**53 a Float cannot tell
+          neighbouring integers apart, so it raises IndexError as an
+          invalid key, as a Float with a fraction, NaN or Inf does
+        - anything else raises IndexError
+        A Float CArray is not an index array.
 
 if dim[i] == 0: a range starting at 0 reads no cells; any other start
                 is out of range
@@ -351,5 +358,7 @@ if (argc == 1 && ndim > 1 && FIXNUM_P(argv[0])) {
 }
 ```
 
-`Bignum` values fail `FIXNUM_P` and fall through to the general path,
-which reports them out of range with `IndexError` (no axis is that long).
+`Bignum` and `Float` values fail `FIXNUM_P` and fall through to the
+general path, which reads them by `key(v)` (§3.3.1): an Integer that fits
+int64 is an address checked against the element count, one past int64 is
+out of range with `IndexError`.
