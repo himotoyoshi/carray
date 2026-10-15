@@ -4589,11 +4589,12 @@ module MkKernel
     io.puts "  }"
   end
 
-  # Reduce-family Face gate.  Descends a Face to its storage: a numeric
-  # storage requires ORDERABLE, else it raises; a fixlen storage is reduced
-  # by memcmp, which is the order of a CAFixlenString.  CAConstString and
-  # CARecord, whose bytes are no order, answer min / max / minmax in Ruby
-  # and do not reach this gate.  self/src are rebound to storage.  When
+  # Reduce-family Face gate.  Descends an ORDERABLE Face to its storage and
+  # refuses any other (ca_face_require_orderable): a fixlen storage is
+  # reduced by memcmp only when the Face declares that its bytes are its
+  # order (CAFixlenString).  CAConstString and CARecord, whose bytes are no
+  # order, answer min / max / minmax in Ruby and do not reach this gate.
+  # self/src are rebound to storage.  When
   # `relift` is set (value-returning kernels), the original Face is saved to
   # the function-scope `_reduce_face` so the dispatcher can re-lift the output.
   def self.emit_reduce_face_gate(io, name, relift)
@@ -4602,13 +4603,11 @@ module MkKernel
     end
     io.puts "  if ( ca_is_face(src) ) {"
     io.puts "    VALUE _face = self;"
-    io.puts "    int _orderable = ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE);"
-    io.puts "    VALUE _st = rb_ca_strip_face_value(self);"
+    io.puts "    VALUE _st;"
     io.puts "    CArray *_sc;"
+    io.puts %Q[    ca_face_require_orderable(_face, ca_calling_method_name(), "order");]
+    io.puts "    _st = rb_ca_strip_face_value(self);"
     io.puts "    GetCArray(_st, _sc);"
-    io.puts "    if ( _sc->data_type != CA_FIXLEN && ! _orderable ) {"
-    io.puts %Q[      ca_face_refuse_order(ca_calling_method_name(), _face, "order");]
-    io.puts "    }"
     if relift
       io.puts "    _reduce_face = _face;"
     end
@@ -5633,9 +5632,7 @@ module MkKernel
     io.puts "     storage, which ORDERABLE licenses; the query gate below brings"
     io.puts "     the reference and the query into one space and descends. */"
     io.puts "  if ( ca_is_face(src) ) {"
-    io.puts "    if ( ! ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {"
-    io.puts %Q[      ca_face_refuse_order(ca_calling_method_name(), self, "order");]
-    io.puts "    }"
+    io.puts %Q[    ca_face_require_orderable(self, ca_calling_method_name(), "order");]
     io.puts "    self_was_face = 1;"
     io.puts "  }"
 

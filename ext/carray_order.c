@@ -1172,9 +1172,7 @@ ca_linear_prep (VALUE self, VALUE raxis, const char *name, long *axis_out)
      Face) is caught by the rb_ca_to_float64 cast below, so no separate
      float-numeric flag is needed. */
   if ( ca_is_face(ca) ) {
-    if ( ! ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-      ca_face_refuse_order(name, self, "order");
-    }
+    ca_face_require_orderable(self, name, "order");
     self = rb_ca_strip_face_value(self);
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   }

@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: a Face written in Ruby over fixed-length storage that does not pass
+  `orderable_storage: true` is no longer ordered by its bytes. `min`,
+  `max`, `minmax` and their `axis:` forms raise `ArgumentError` instead of
+  answering by memcmp, and `sort`, `sort_addr`, `rank_index`,
+  `partition_copy`, `nlargest` and `max_by_key` raise `ArgumentError`
+  instead of `SystemStackError`. A Face that defines its own `order` is
+  still sorted by it. The built-in Faces answer as before.
+
 - New: `CArray#delete_attr(key)` removes an attribute from the array and
   returns its value. On a view it removes only the view's own key; a key
   the view shows from its parent stays visible.

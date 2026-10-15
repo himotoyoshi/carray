@@ -288,6 +288,17 @@ VALUE ca_face_strip_one (VALUE v);
 NORETURN(void ca_face_refuse_order (const char *name, VALUE face,
                                     const char *verb));
 
+/* The gate of every family that orders, compares, searches or hashes a Face
+   reference: returns when the Face is ORDERABLE_STORAGE, refuses otherwise
+   (ca_face_refuse_order).  Call this rather than testing the flag. */
+void ca_face_require_orderable (VALUE face, const char *name,
+                                const char *verb);
+
+/* Whether a Face is not ORDERABLE and answers #order itself (CAConstString,
+   CARecord), so a family that orders by a key takes that order instead of
+   the storage. */
+int  ca_face_orders_by_itself (VALUE face);
+
 /* The conversion a refusal of a Face whose cells encode its values points
    at (#to_string for a string Face, to_type(:object) for any other). */
 const char *ca_face_conversion_hint (VALUE face);

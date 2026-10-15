@@ -333,20 +333,16 @@ rb_ca_partition_copy_body (int argc, VALUE *argv, VALUE self)
     : ca_symbol_choice(vmasked_position, "masked_position", "first", "last", NULL);
 
   /* Face gate, the same policy as the sort family's.  An ORDERABLE Face
-     is selected on its storage and put back on the result.  A fixlen
-     storage that is not ORDERABLE has no order in its bytes: the partition
-     view orders by the Face's own order (ca_order_key), and its copy is
-     the answer.  Any other Face raises. */
+     is selected on its storage and put back on the result.  A Face that
+     orders by itself (ca_face_orders_by_itself) is partitioned by the view,
+     which orders by that order (ca_order_key), and its copy is the answer.
+     Any other Face raises. */
   volatile VALUE face = Qnil;
   {
     CArray *ca;
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
     if ( ca_is_face(ca) ) {
-      VALUE st = rb_ca_strip_face_value(self);
-      CArray *sc;
-      int orderable = ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE);
-      TypedData_Get_Struct(st, CArray, &carray_data_type, sc);
-      if ( sc->data_type == CA_FIXLEN && ! orderable ) {
+      if ( ca_face_orders_by_itself(self) ) {
         VALUE kw = rb_hash_new();
         VALUE pv_argv[2];
         rb_hash_aset(kw, ID2SYM(rb_intern("axis")), vaxis);
@@ -357,11 +353,9 @@ rb_ca_partition_copy_body (int argc, VALUE *argv, VALUE self)
         return rb_ca_copy(rb_funcallv_kw(self, rb_intern("partition"), 2, pv_argv,
                                          RB_PASS_KEYWORDS));
       }
-      if ( ! orderable ) {
-        ca_face_refuse_order("partition_copy", self, "order");
-      }
+      ca_face_require_orderable(self, "partition_copy", "order");
       face = self;
-      self = st;
+      self = rb_ca_strip_face_value(self);
     }
   }
 

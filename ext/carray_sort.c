@@ -519,33 +519,26 @@ rb_ca_axis2addr (int argc, VALUE *argv, VALUE self)
 /* The array the order of v is read from, for a method that orders v's
    cells (a sort, a selection, a ranking, an extremum by key).  A plain
    array is its own key.  An ORDERABLE Face orders by its storage, so the
-   key is the storage.  A Face whose storage is fixlen and not ORDERABLE
-   (CAConstString's offsets, a record's bytes) has no order in its bytes;
-   its own order stands in, as a dense rank, so ties stay ties and a
-   masked cell stays masked.  A Face that has no order (a CARecord without
-   order_by:) raises in that order; any other Face raises here. */
+   key is the storage.  A Face that is not ORDERABLE but defines its own
+   #order (CAConstString, whose cells are offsets; CARecord, whose bytes
+   are no order) is keyed by that order, as a dense rank, so ties stay ties
+   and a masked cell stays masked.  A Face that has no order (a CARecord
+   without order_by:) raises in that order; any other Face raises here. */
 VALUE
 ca_order_key (VALUE v, const char *name)
 {
-  CArray *ca, *sc;
-  VALUE stripped;
-  int orderable;
+  CArray *ca;
   TypedData_Get_Struct(v, CArray, &carray_data_type, ca);
   if ( ! ca_is_face(ca) ) {
     return v;
   }
-  orderable = ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE);
-  stripped = rb_ca_strip_face_value(v);
-  TypedData_Get_Struct(stripped, CArray, &carray_data_type, sc);
-  if ( sc->data_type == CA_FIXLEN && ! orderable ) {
+  if ( ca_face_orders_by_itself(v) ) {
     VALUE opts = rb_hash_new();
     rb_hash_aset(opts, ID2SYM(rb_intern("method")), ID2SYM(rb_intern("dense")));
     return rb_funcallv_kw(v, rb_intern("order"), 1, &opts, RB_PASS_KEYWORDS);
   }
-  if ( ! orderable ) {
-    ca_face_refuse_order(name, v, "order");
-  }
-  return stripped;
+  ca_face_require_orderable(v, name, "order");
+  return rb_ca_strip_face_value(v);
 }
 
 /* ===== sort / sort_copy (value & view surface, sibling of the

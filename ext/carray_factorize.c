@@ -209,24 +209,19 @@ fz_face_descend (VALUE self, volatile VALUE *pface, const char *name)
   }
   if ( ca_is_face(ca) ) {
     /* A record is its bytes: two records are the same value exactly when
-       their bytes are, so the fixlen lane answers for it. */
-    if ( ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE)
-         || ca->obj_type == CA_OBJ_RECORD ) {
-      *pface = self;
-      return rb_ca_strip_face_value(self);
+       their bytes are, so the fixlen lane answers for it.  Any other Face
+       is descended only when ORDERABLE.  One that cannot be descended must
+       not flow on undescended: whatever reads it next reads its storage
+       anyway, which is the encoding rather than the values.  A Face in this
+       position normally never arrives -- CAConstString and CACategorical
+       define their own members in Ruby -- but the overrides only fire when
+       the Face is the receiver, and this same helper descends the
+       *reference* for locate_addr, where it is the argument. */
+    if ( ca->obj_type != CA_OBJ_RECORD ) {
+      ca_face_require_orderable(self, name, "compare");
     }
-    /* A Face that cannot be descended must not flow on undescended: whatever
-       reads it next reads its storage anyway, which is the encoding rather
-       than the values.  A Face in this position normally never arrives --
-       CAConstString and CACategorical define their own members in Ruby -- but
-       the overrides only fire when the Face is the receiver, and this same
-       helper descends the *reference* for locate_addr, where it is the
-       argument. */
-    rb_raise(rb_eArgError,
-             "%s: %s is not orderable by storage (a cell encodes the value "
-             "rather than being it); convert it first -- %s -- or pass "
-             ".parent to work in storage space",
-             name, rb_obj_classname(self), ca_face_conversion_hint(self));
+    *pface = self;
+    return rb_ca_strip_face_value(self);
   }
   *pface = Qnil;
   return self;

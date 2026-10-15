@@ -177,9 +177,8 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
       rval = ca_face_element_to_storage(self, src, rval);
     }
     else {
-      if ( src->obj_type != CA_OBJ_RECORD
-           && ! ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-        ca_face_refuse_order("count(v)", self, "count");
+      if ( src->obj_type != CA_OBJ_RECORD ) {
+        ca_face_require_orderable(self, "count(v)", "count");
       }
       {
         volatile VALUE ref = self, query = rval;

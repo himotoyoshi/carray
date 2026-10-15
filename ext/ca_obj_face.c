@@ -717,6 +717,42 @@ ca_face_refuse_order (const char *name, VALUE face, const char *verb)
            ca_face_conversion_hint(face), verb);
 }
 
+/* The rule every family that orders, compares, searches or hashes the cells
+   of a Face reference keeps: the storage stands for the values only when the
+   Face declares ORDERABLE_STORAGE.  A fixlen storage is no exception -- its
+   bytes are an order only when the Face says so (CAFixlenString).  Returns
+   when the Face is ORDERABLE; refuses otherwise (ca_face_refuse_order).  A
+   family that can order by a key asks ca_face_orders_by_itself first. */
+void
+ca_face_require_orderable (VALUE face, const char *name, const char *verb)
+{
+  CArray *ca;
+  TypedData_Get_Struct(face, CArray, &carray_data_type, ca);
+  if ( ! ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
+    ca_face_refuse_order(name, face, verb);
+  }
+}
+
+/* Whether a Face is ordered by its own #order rather than by its storage:
+   it is not ORDERABLE and answers #order itself (CAConstString, CARecord),
+   so a family that orders by a key can take that order.  CArray#order is
+   not one: it sorts the storage and comes back to the gate. */
+int
+ca_face_orders_by_itself (VALUE face)
+{
+  ID id_order  = rb_intern("order");
+  ID id_method = rb_intern("method");
+  ID id_owner  = rb_intern("owner");
+  CArray *ca;
+  VALUE m;
+  TypedData_Get_Struct(face, CArray, &carray_data_type, ca);
+  if ( ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
+    return 0;
+  }
+  m = rb_funcall(face, id_method, 1, ID2SYM(id_order));
+  return ( rb_funcall(m, id_owner, 0) != rb_cCArray ) ? 1 : 0;
+}
+
 /* Refuse a numeric operation (arithmetic, math, a reduction) on a Face,
    whose cells encode its values rather than being numbers, pointing at what
    gives numbers.  Returns when `self` is not a Face. */
@@ -882,9 +918,7 @@ ca_face_reconcile_operand (VALUE reference, VALUE operand, const char *name)
   if ( ca_test_flag(ca, CA_FLAG_FACE_COMPARABLE_STORAGE) ) {
     return ca_face_operand_descend(ca_face_operand_values(operand), name);
   }
-  if ( ! ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-    ca_face_refuse_order(name, reference, "compare");
-  }
+  ca_face_require_orderable(reference, name, "compare");
   if ( rb_respond_to(reference, rb_intern("to_comparable")) ) {
     return rb_ca_strip_face_value(rb_funcall(reference,
                                              rb_intern("to_comparable"),
@@ -1125,9 +1159,7 @@ ca_face_reconcile_comparison (volatile VALUE *pself, volatile VALUE *pother)
     return;
   }
 
-  if ( ! ca_test_flag(sc, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-    ca_face_refuse_order("comparison", self, "compare");
-  }
+  ca_face_require_orderable(self, "comparison", "compare");
 
   {
     /* A Ruby Array is a list of values (to_comparable reads it cell by
