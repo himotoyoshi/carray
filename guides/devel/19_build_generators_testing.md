@@ -168,6 +168,8 @@ everywhere. In a release build the C test is the constant 1.
 every fast path with its general path on the whole suite. A test that fails
 in only one of them points at a fault in one of the two paths.
 
+The categorical, segment and group iterators are fast paths of this kind too. Their C kernels (the reduceat, fiber-scatter and scan kernels, and the group engine) are a faster way to what the core answers for each group, and with the fast paths off every group is reduced by the core itself. Only folding a band into a group statistic (`axis: [:group, k]`) has no route but the engine. `spec/spec_ai/test_iterator_kernels_follow_switch.rb` runs one battery both ways in two child processes, checks that no kernel runs with the fast paths off, and compares the answers. It spies the per-group kernels that `utils/dunder_methods.txt` lists, so a kernel added there is covered.
+
 `CARRAY_GENERAL_PATH=2` goes one step further for the kernel iterator. It
 switches the fast paths off as `1` does, and the iterator then delivers
 every source by transfer: the whole view gathered into scratch through the
