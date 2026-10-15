@@ -84,28 +84,29 @@ class CArray
     imag_i:  CAMonOp::OP_IMAG_I,
   }.freeze
 
+  # The lazy-or-eager dispatch of the operators, in a module in front of
+  # the eager methods: each reaches its eager method with super.  The
+  # blocks are shareable (they capture an op id at most), so the operators
+  # can be called from any Ractor.
+  module LazyDispatch; end
+  prepend LazyDispatch
+
   LAZY_MONOP_OP_IDS.each do |name, op_id|
-    # The eager implementation, taken before the redefinition below.
-    # Calling it with bind_call skips a method lookup on the eager path.
-    eager_um = instance_method(name)
-    # Redefine as lazy-or-eager dispatch.
-    define_method(name) do
+    LazyDispatch.send(:define_method, name, &Ractor.make_shareable(proc do
       if lazy_view?
         CAMonOp.__build__(self, op_id)
       else
-        eager_um.bind_call(self)
+        super()
       end
-    end
+    end))
   end
 
-  # Operator aliases (`~` -> bit_neg, `-@` -> neg) were installed by
-  # rb_define_alias at Init time (see MkKernel.alias_monop in
-  # ext/carray_kernels_monop.c) BEFORE this file redefines the target
-  # methods.  rb_define_alias snapshots the method entry, so the operator
-  # form still points at the original eager C function and skips the
-  # lazy dispatch above — `~a` / `-a` on a lazy view materialise instead
-  # of building a CAMonOp node.  Re-alias here so the operator form
-  # follows the redefined lazy-or-eager dispatch.
+  # Operator aliases (`~` -> bit_neg, `-@` -> neg) were installed in
+  # CArray by rb_define_alias at Init time (see MkKernel.alias_monop in
+  # ext/carray_kernels_monop.c), and name the eager C function: `~a` on a
+  # lazy view would materialise instead of building a CAMonOp node.  Made
+  # again here, an alias resolves through the prepended modules, so the
+  # operator form takes the dispatch above.
   alias_method :"~",  :bit_neg
   alias_method :"-@", :neg
 
@@ -126,8 +127,7 @@ class CArray
   # ---------------------------------------------------------------------------
 
   # @private
-  eager_abs = instance_method(:abs)
-  define_method(:abs) do
+  LazyDispatch.send(:define_method, :abs, &Ractor.make_shareable(proc do
     if lazy_view?
       # A boolean has no absolute value to change type for, as eager says.
       raise CArray::DataTypeError,
@@ -144,9 +144,9 @@ class CArray
         abs_i_node
       end
     else
-      eager_abs.bind_call(self)
+      super()
     end
-  end
+  end))
 
   # ---------------------------------------------------------------------------
   # real / imag lazy fuse (post-IC follow-up):
@@ -179,8 +179,7 @@ class CArray
   # ---------------------------------------------------------------------------
 
   # @private
-  eager_real = instance_method(:real)
-  define_method(:real) do
+  LazyDispatch.send(:define_method, :real, &Ractor.make_shareable(proc do
     if lazy_view?
       if complex?
         float_dt = (data_type == CA_CMPLX64) ? CA_FLOAT32 : CA_FLOAT64
@@ -195,13 +194,12 @@ class CArray
         self
       end
     else
-      eager_real.bind_call(self)
+      super()
     end
-  end
+  end))
 
   # @!visibility private
-  eager_imag = instance_method(:imag)
-  define_method(:imag) do
+  LazyDispatch.send(:define_method, :imag, &Ractor.make_shareable(proc do
     if lazy_view?
       imag_i_node = CAMonOp.__build__(self, CAMonOp::OP_IMAG_I)
       if boolean?
@@ -218,9 +216,9 @@ class CArray
         imag_i_node
       end
     else
-      eager_imag.bind_call(self)
+      super()
     end
-  end
+  end))
 
   # ---------------------------------------------------------------------------
   # arg lazy fuse: eager `arg` is a data_type-changing monop (see
@@ -241,8 +239,7 @@ class CArray
   # ---------------------------------------------------------------------------
 
   # @private
-  eager_arg = instance_method(:arg)
-  define_method(:arg) do
+  LazyDispatch.send(:define_method, :arg, &Ractor.make_shareable(proc do
     if lazy_view?
       raise CArray::DataTypeError,
             "data_type-changing monop not implemented for input data_type " \
@@ -262,9 +259,9 @@ class CArray
         arg_i_node
       end
     else
-      eager_arg.bind_call(self)
+      super()
     end
-  end
+  end))
 
   # ---------------------------------------------------------------------------
   # Binop dispatch.  Operator entries are redefined so a lazy operand on
@@ -316,16 +313,14 @@ class CArray
     # branch uses C99 `remainder`, round-half-to-even).
   }.freeze
 
-  eager_binops = {}
   LAZY_BINOP_OP_IDS.each do |method_name, op_id|
-    eager_um = eager_binops[method_name] = instance_method(method_name)
-    define_method(method_name) do |other|
+    LazyDispatch.send(:define_method, method_name, &Ractor.make_shareable(proc do |other|
       if lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
         CABinOp.__build__(self, other, op_id)
       else
-        eager_um.bind_call(self, other)
+        super(other)
       end
-    end
+    end))
   end
 
   # The shift count of an Integer is brought into the array's type before
@@ -333,12 +328,11 @@ class CArray
   prepend IntegerShiftCount
 
   # Binop word aliases (`add` -> `+`, `mul` -> `*`, `bit_and` -> `&`, …) were
-  # installed by rb_define_alias at Init time (see MkKernel.alias_binop in
-  # ext/carray_kernels_*.c) BEFORE the redefinitions above.  The C alias
-  # snapshots the original eager method entry, so the word form still points
-  # at the original C function and skips lazy dispatch — `a.lazy.add(1)`
-  # materialises instead of building a CABinOp node.  Re-alias here so the
-  # word form follows the redefined operator method.
+  # installed in CArray by rb_define_alias at Init time (see
+  # MkKernel.alias_binop in ext/carray_kernels_*.c) and name the eager C
+  # function, so `a.lazy.add(1)` would materialise.  Made again here, an
+  # alias resolves through the prepended modules -- IntegerShiftCount, then
+  # LazyDispatch -- so the word form takes the operator's.
   {
     add:        :+,
     sub:        :-,
@@ -351,21 +345,20 @@ class CArray
     bit_lshift: :<<,
     bit_rshift: :>>,
   }.each do |word, op|
-    alias_method(word, op)
+    alias_method word, op
   end
 
   # `pow` is the canonical C method (defined by rb_define_method in
   # ext/ca_op_ipower.c) that `**` is rb_define_alias'd to.  The `**`
-  # override in this file (with the ipower Integer-exponent fast path)
-  # does not propagate to `pow` through the C alias, so `a.lazy.pow(2)`
-  # falls to eager.  Re-alias so `pow` follows the redefined `**`.
+  # dispatch in this file does not reach `pow` through the C alias, so
+  # `a.lazy.pow(2)` would fall to eager; `pow` is aliased again here.
   alias_method :pow, :**
 
   # `fmax` / `fmin` are rb_define_alias'd to `pmax` / `pmin` at Init
-  # time (same C-alias-snapshot trap).  Re-alias so the C99-familiar
-  # spellings follow the redefined lazy dispatch above.
-  alias_method :fmax, :pmax
-  alias_method :fmin, :pmin
+  # time (the same C alias); they are aliased again beside them, in
+  # LazyDispatch.
+  LazyDispatch.send(:alias_method, :fmax, :pmax)
+  LazyDispatch.send(:alias_method, :fmin, :pmin)
 
   # ---------------------------------------------------------------------------
   # Triop dispatch (fma / fms / clip).  CATriOp is the CABinOp analog for
@@ -388,20 +381,20 @@ class CArray
   }.freeze
 
   LAZY_TRIOP_OP_IDS.each do |method_name, op_id|
-    eager_um = instance_method(method_name)
-    define_method(method_name) do |op2, op3|
+    LazyDispatch.send(:define_method, method_name, &Ractor.make_shareable(proc do |op2, op3|
       lazy_receiver = lazy_view? ||
                       (op2.is_a?(CArray) && op2.lazy_view?) ||
                       (op3.is_a?(CArray) && op3.lazy_view?)
       if lazy_receiver
         CATriOp.__build__(self, op2, op3, op_id)
       else
-        eager_um.bind_call(self, op2, op3)
+        super(op2, op3)
       end
-    end
+    end))
   end
   # The clip kernel takes both bounds; the public entry is `clip`.
   private :clamp_between
+  LazyDispatch.send(:private, :clamp_between)
 
   # `**` integer-exponent lazy fast path.
   #
@@ -423,8 +416,7 @@ class CArray
   # `power` binop kernel already uses `op_powi_<type>` for integer data_types
   # via the `int:` expr in MkKernel.binop :power, so OP_POW + int parent
   # is already fast.  The lazy-substrate gap was Float/Complex only.
-  eager_pow = eager_binops.fetch(:**)
-  define_method(:**) do |other|
+  LazyDispatch.send(:define_method, :**, &Ractor.make_shareable(proc do |other|
     if other.is_a?(Integer) && (float? || complex?) &&
        (lazy_view? || (other.is_a?(CArray) && other.lazy_view?))
       CABinOp.__build__(self, CScalar.int64.tap { |s| s[0] = other },
@@ -432,9 +424,9 @@ class CArray
     elsif lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
       CABinOp.__build__(self, other, CABinOp::OP_POW)
     else
-      eager_pow.bind_call(self, other)
+      super(other)
     end
-  end
+  end))
 
   # coerce: when self is a lazy view and the scalar appears on the LEFT
   # (e.g. `2 * a.lazy`), Ruby's Numeric#* calls a.lazy.coerce(2).  The
@@ -479,14 +471,13 @@ class CArray
   }.freeze
 
   LAZY_BINCMP_OP_IDS.each do |method_name, op_id|
-    eager_um = instance_method(method_name)
-    define_method(method_name) do |other|
+    LazyDispatch.send(:define_method, method_name, &Ractor.make_shareable(proc do |other|
       if lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
         CABinCmp.__build__(self, other, op_id)
       else
-        eager_um.bind_call(self, other)
+        super(other)
       end
-    end
+    end))
   end
 
   # tolerance-bearing bincmp ops (= is_close / is_equiv) use the same
@@ -499,14 +490,13 @@ class CArray
   }.freeze
 
   LAZY_BINCMP_TOL_OP_IDS.each do |method_name, op_id|
-    eager_um = instance_method(method_name)
-    define_method(method_name) do |other, tol|
+    LazyDispatch.send(:define_method, method_name, &Ractor.make_shareable(proc do |other, tol|
       if lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
         CABinCmp.__build__(self, other, op_id, tol.to_f.abs)
       else
-        eager_um.bind_call(self, other, tol)
+        super(other, tol)
       end
-    end
+    end))
   end
 
   # @!visibility private
@@ -519,29 +509,27 @@ class CArray
   }.freeze
 
   LAZY_MONCMP_OP_IDS.each do |name, op_id|
-    eager_um = instance_method(name)
-    define_method(name) do
+    LazyDispatch.send(:define_method, name, &Ractor.make_shareable(proc do
       if lazy_view?
         CAMonCmp.__build__(self, op_id)
       else
-        eager_um.bind_call(self)
+        super()
       end
-    end
+    end))
   end
 
   # A lazy receiver takes the scalar the eager coerce makes, and stays
   # lazy itself: the builder promotes the pair as the eager operator does.
   # @!visibility private
-  eager_coerce = instance_method(:coerce)
-  define_method(:coerce) do |other|
+  LazyDispatch.send(:define_method, :coerce, &Ractor.make_shareable(proc do |other|
     begin
-      scalar, receiver = eager_coerce.bind_call(self, other)
+      scalar, receiver = super(other)
     rescue RangeError => e
       raise unless other.is_a?(Integer)
       return [OutOfRangeInteger.new(other, self, e), self]
     end
     lazy_view? ? [scalar, self] : [scalar, receiver]
-  end
+  end))
 
   # An Integer the array's type cannot hold, on the left of an operator.
   # A comparison is answered from the array's side, where it compares by
