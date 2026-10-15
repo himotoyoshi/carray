@@ -4141,35 +4141,15 @@ module MkKernel
     io.puts "  const #{name}_pair_#{src} *pa = (const #{name}_pair_#{src} *) a;"
     io.puts "  const #{name}_pair_#{src} *pb = (const #{name}_pair_#{src} *) b;"
     if is_object
-      # PROPOSAL_MKKERNEL_OBJECT_DTYPE_BRANCH Phase 2: CA_OBJECT cmp via
-      # Ruby Comparable (= `<=>`).  Any Comparable element type (Numeric,
-      # String, custom class with <=> defined) works.  Raises Ruby
-      # TypeError mid-sort if a cell pair is uncomparable -- consistent
-      # with Array#sort behavior.
-      # A Float NaN sorts after every other value, as it does in a float
-      # array; two NaNs fall to the index tie-break.
-      io.puts "  int nan_a = CA_OBJ_ISNAN(pa->v);"
-      io.puts "  int nan_b = CA_OBJ_ISNAN(pb->v);"
-      io.puts "  if ( nan_a && !nan_b ) return 1;"
-      io.puts "  if ( nan_b && !nan_a ) return -1;"
-      io.puts "  if ( !nan_a ) {"
-      io.puts %Q{    VALUE r = rb_funcall(pa->v, rb_intern("<=>"), 1, pb->v);}
-      io.puts "    if ( NIL_P(r) ) {"
-      io.puts "      ca_obj_compare_refused(pa->v, pb->v);"
-      io.puts "    }"
-      io.puts "    int c = NUM2INT(r);"
-      io.puts "    if ( c > 0 ) return 1;"
-      io.puts "    if ( c < 0 ) return -1;"
-      io.puts "  }"
+      # The object order: `<=>`, a Float NaN after every other value
+      # (ca_obj_order_cmp); two NaNs fall to the index tie-break.
+      io.puts "  int c = ca_obj_order_cmp(pa->v, pb->v);"
+      io.puts "  if ( c != 0 ) return c;"
+    elsif is_fp
+      # The float order: NaN after every number (CA_FLOAT_ORDER_CMP).
+      io.puts "  int c = CA_FLOAT_ORDER_CMP(pa->v, pb->v);"
+      io.puts "  if ( c != 0 ) return c;"
     else
-      if is_fp
-        # NaN policy :end -- NaN sorts to the end (matches qcmp_f_type in
-        # carray_sort.c).
-        io.puts "  int nan_a = isnan(pa->v);"
-        io.puts "  int nan_b = isnan(pb->v);"
-        io.puts "  if ( nan_a && !nan_b ) return 1;"
-        io.puts "  if ( nan_b && !nan_a ) return -1;"
-      end
       io.puts "  if ( pa->v > pb->v ) return 1;"
       io.puts "  if ( pa->v < pb->v ) return -1;"
     end
@@ -7756,7 +7736,6 @@ MkKernel.search :bsearch,
         while ( lo < hi ) {
           ca_size_t mid = lo + (hi - lo) / 2;
           T_LOAD v = *(T_LOAD *)(slab_ptr + mid * slab_stride);
-          if ( isnan((double) v) ) { hi = mid; continue; }
           if ( v < query_val ) lo = mid + 1;
           else if ( v > query_val ) hi = mid;
           else { result = mid; break; }
@@ -7765,35 +7744,30 @@ MkKernel.search :bsearch,
     C
     float: <<~C,
       result = (ca_size_t) -1;
-      if ( ! isnan((double) query_val) ) {
+      if ( ! isnan((double) query_val) ) {   /* a NaN query matches nothing */
         ca_size_t lo = 0;
         ca_size_t hi = slab_n;
         while ( lo < hi ) {
           ca_size_t mid = lo + (hi - lo) / 2;
           T_LOAD v = *(T_LOAD *)(slab_ptr + mid * slab_stride);
-          if ( isnan((double) v) ) { hi = mid; continue; }
-          if ( v < query_val ) lo = mid + 1;
-          else if ( v > query_val ) hi = mid;
+          int c = CA_FLOAT_ORDER_CMP(v, query_val);
+          if ( c < 0 ) lo = mid + 1;
+          else if ( c > 0 ) hi = mid;
           else { result = mid; break; }
         }
       }
     C
     object: <<~C,
-      /* CA_OBJECT bsearch: ordering via rb_funcall(<=>).  Assumes the
-         slab is sorted by the same comparator used to build it, which puts
-         a Float NaN last; a NaN query matches nothing, as in float. */
+      /* CA_OBJECT bsearch: the object order (ca_obj_order_cmp), which the
+         slab is assumed to be sorted by; a NaN query matches nothing, as in
+         float. */
       result = (ca_size_t) -1;
       ca_size_t lo = 0;
       ca_size_t hi = CA_OBJ_ISNAN(query_val) ? 0 : slab_n;   /* NaN matches nothing */
       while ( lo < hi ) {
         ca_size_t mid = lo + (hi - lo) / 2;
         T_LOAD v = *(T_LOAD *)(slab_ptr + mid * slab_stride);
-        if ( CA_OBJ_ISNAN(v) ) { hi = mid; continue; }   /* NaN sorts last */
-        VALUE r = rb_funcall(v, rb_intern("<=>"), 1, query_val);
-        if ( NIL_P(r) ) {
-          ca_obj_compare_refused(v, query_val);
-        }
-        int c = NUM2INT(r);
+        int c = ca_obj_order_cmp(v, query_val);
         if ( c < 0 ) lo = mid + 1;
         else if ( c > 0 ) hi = mid;
         else { result = mid; break; }
@@ -7995,7 +7969,6 @@ MkKernel.search :bsearch_addr,
         while ( lo < hi ) {
           ca_size_t mid = lo + (hi - lo) / 2;
           T_LOAD v = *(T_LOAD *)(slab_ptr + mid * slab_stride);
-          if ( isnan((double) v) ) { hi = mid; continue; }
           if ( v < query_val ) lo = mid + 1;
           else if ( v > query_val ) hi = mid;
           else { result = mid; break; }
@@ -8004,15 +7977,15 @@ MkKernel.search :bsearch_addr,
     C
     float: <<~C,
       result = (ca_size_t) -1;
-      if ( ! isnan((double) query_val) ) {
+      if ( ! isnan((double) query_val) ) {   /* a NaN query matches nothing */
         ca_size_t lo = 0;
         ca_size_t hi = slab_n;
         while ( lo < hi ) {
           ca_size_t mid = lo + (hi - lo) / 2;
           T_LOAD v = *(T_LOAD *)(slab_ptr + mid * slab_stride);
-          if ( isnan((double) v) ) { hi = mid; continue; }
-          if ( v < query_val ) lo = mid + 1;
-          else if ( v > query_val ) hi = mid;
+          int c = CA_FLOAT_ORDER_CMP(v, query_val);
+          if ( c < 0 ) lo = mid + 1;
+          else if ( c > 0 ) hi = mid;
           else { result = mid; break; }
         }
       }
@@ -8024,12 +7997,7 @@ MkKernel.search :bsearch_addr,
       while ( lo < hi ) {
         ca_size_t mid = lo + (hi - lo) / 2;
         T_LOAD v = *(T_LOAD *)(slab_ptr + mid * slab_stride);
-        if ( CA_OBJ_ISNAN(v) ) { hi = mid; continue; }   /* NaN sorts last */
-        VALUE r = rb_funcall(v, rb_intern("<=>"), 1, query_val);
-        if ( NIL_P(r) ) {
-          ca_obj_compare_refused(v, query_val);
-        }
-        int c = NUM2INT(r);
+        int c = ca_obj_order_cmp(v, query_val);
         if ( c < 0 ) lo = mid + 1;
         else if ( c > 0 ) hi = mid;
         else { result = mid; break; }

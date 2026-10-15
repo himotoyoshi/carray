@@ -36,6 +36,7 @@
 
 #include "carray.h"
 #include "carray_internal.h"   /* CA_EXTREMUM_REPLACES */
+#include "ca_sort_kernels.h"   /* ca_partition_nan_f64 */
 #include <stdlib.h>   /* qsort */
 #include <math.h>     /* floor */
 
@@ -294,19 +295,12 @@ ca_nth_element_double (double *a, ca_size_t n, ca_size_t kth)
       { double f = (double) (m - 1) * p / 100.0;                               \
         ca_size_t ki = (ca_size_t) floor(f);                                   \
         double vlo, vhi;                                                        \
-        /* Push NaN to the tail, which is where CArray's sort puts it, so the  \
-           ki-th element here is the ki-th of the sorted segment. Selection    \
-           runs on the numeric prefix, since a comparison-based quickselect    \
-           has nothing to say about a NaN; a position or an upper neighbour    \
-           landing in the tail is NaN. The blend is CArray#percentile's, so    \
-           both answer alike for NaN and infinities. */                        \
-        ca_size_t nnum = m, t0 = 0;                                            \
-        while ( t0 < nnum ) {                                                  \
-          if ( scratch[t0] != scratch[t0] ) {                                  \
-            double tmp = scratch[--nnum];                                      \
-            scratch[nnum] = scratch[t0]; scratch[t0] = tmp;                    \
-          } else t0++;                                                         \
-        }                                                                      \
+        /* NaN to the tail, where CArray's sort puts it (ca_partition_nan),   \
+           so the ki-th element here is the ki-th of the sorted segment.       \
+           Selection runs on the numeric prefix; a position or an upper        \
+           neighbour landing in the tail is NaN. The blend is                  \
+           CArray#percentile's, so both answer alike for NaN and infinities. */\
+        ca_size_t nnum = ca_partition_nan_f64(scratch, m);                     \
         if ( ki < nnum ) {                                                     \
           ca_nth_element_double(scratch, nnum, ki); /* scratch[ki] = ki-th */  \
           vlo = scratch[ki];                                                   \

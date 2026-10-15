@@ -517,6 +517,28 @@ ca_obj_cmp (VALUE a, VALUE b)
   return rb_cmpint(r, a, b);
 }
 
+/* The order sort and every order statistic (partition, median,
+   percentile, rank, nlargest, the search family) put cells in: a NaN
+   after every number, NaN ties NaN.  Three-way (-1, 0, 1), ties not
+   broken.  A descending order keeps NaN after the numbers too, so it
+   negates only the comparison of two numbers.  ca_partition_nan_*
+   (ca_sort_kernels.h) moves the NaN of a float buffer to its tail by
+   the same rule; a new order kernel uses these and nothing of its own. */
+#define CA_FLOAT_ORDER_CMP(a, b)                                     \
+  ( isnan(a) ? ( isnan(b) ? 0 : 1 )                                  \
+             : ( isnan(b) ? -1 : ( ( (a) > (b) ) - ( (a) < (b) ) ) ) )
+
+/* The same order for object cells: a Float NaN after every other value,
+   other pairs by `<=>` (ca_obj_cmp, which refuses a pair it cannot
+   order). */
+static inline int
+ca_obj_order_cmp (VALUE a, VALUE b)
+{
+  int nan_a = CA_OBJ_ISNAN(a), nan_b = CA_OBJ_ISNAN(b);
+  if ( nan_a || nan_b ) return nan_a - nan_b;
+  return ca_obj_cmp(a, b);
+}
+
 /* op names the contest: `<` for a minimum, `>` for a maximum. */
 static inline int
 ca_obj_extremum_replaces (VALUE v, VALUE acc, ID op)
