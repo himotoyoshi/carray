@@ -214,7 +214,11 @@ the branch the condition chooses is (`:select`).
 the meaning they have. New ones are added; none is renamed or changes meaning.
 An evaluator that meets something it does not know **declines** — its `call`
 returns false and the walk computes the answer. It must not raise: an
-evaluator that raises is unregistered for the rest of the process. Declining
+evaluator that raises is unregistered for the rest of the process. An
+exception CArray raises while lending the arrays (one carrying
+`CArray::AddressBasis::Failure`, see ch. 21) is not the evaluator's, and does
+not unregister it; nor does a destination that cannot hold the mask, which is
+left to the walk without asking. Declining
 is what lets CArray add to the plan without a new evaluator being released at
 the same time — when the integer power became the node `ipow`, an older
 carray-jit declined it and the walk answered.

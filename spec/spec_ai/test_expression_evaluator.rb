@@ -123,6 +123,64 @@ class TestExpressionEvaluator < Test::Unit::TestCase
     assert_nil CArray.expression_evaluator
   end
 
+  # Opens what it reads through the address bases, the way an evaluator
+  # that compiles the plan does, and then declines.
+  def opening
+    asked = @asked
+    evaluator = Object.new
+    evaluator.define_singleton_method(:call) do |plan, out|
+      asked << plan
+      CArray::AddressBasis.open(plan.leaves + [out],
+                                plan.leaves.map { false } + [true]) { }
+      false
+    end
+    evaluator
+  end
+
+  # Raised by CArray, not by the evaluator: the evaluator stays.
+
+  def test_a_destination_that_cannot_hold_the_mask_is_left_to_the_walk
+    masked = @a.copy
+    masked[1] = UNDEF
+    CArray.expression_evaluator = opening
+    warned = with_stderr do
+      assert_raise(TypeError) { CArray.float64(BIG).value[] = CArray.fuse { masked + @b } }
+    end
+    assert_empty warned
+    assert_empty @asked
+    assert_not_nil CArray.expression_evaluator
+  end
+
+  def test_a_leaf_the_bases_would_refuse_is_not_handed_over
+    d = CArray.int32(2 * BIG) { |i| i }
+    d[5] = UNDEF
+    leaf = d.refer(CA_INT64, [BIG])
+    CArray.expression_evaluator = opening
+    warned = with_stderr { @result = (leaf.lazy + 1).copy }
+    assert_empty warned
+    assert_empty @asked
+    assert_equal (leaf + 1).to_a, @result.to_a
+    assert_not_nil CArray.expression_evaluator
+  end
+
+  class UnreadableLeaf < CAObject
+    def initialize (n); super(CA_FLOAT64, [n]); end
+    private
+    def fetch_addr (addr) = raise(IOError, "the backing store failed")
+    def copy_data (data) = raise(IOError, "the backing store failed")
+    def create_mask; end
+  end
+
+  def test_a_leaf_that_cannot_be_read_raises_from_the_walk
+    CArray.expression_evaluator = opening
+    warned = with_stderr do
+      assert_raise(IOError) { (UnreadableLeaf.new(BIG).lazy + 1).copy }
+    end
+    assert_empty warned
+    assert_equal 1, @asked.size
+    assert_not_nil CArray.expression_evaluator
+  end
+
   def test_something_that_cannot_be_called_is_refused
     assert_raise(ArgumentError) { CArray.expression_evaluator = 42 }
     assert_nil CArray.expression_evaluator

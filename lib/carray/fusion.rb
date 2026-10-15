@@ -131,30 +131,46 @@ class CArray
     end
 
     # The plan to hand over, or nil.  A marker over an array, or anything
-    # else with nothing to compute, is not worth handing over.
+    # else with nothing to compute, is not worth handing over.  Nothing here
+    # is the evaluator's doing, so nothing here retires it: an array that
+    # raises when it is looked at (a CAObject whose backing is gone) raises
+    # again in the walk, where the caller sees it.
     def self.worth_asking (view)
       return nil unless askable?(view)
       plan = plan(view) or return nil
       plan.nodes.any? { |n| n.is_a?(Op) } ? plan : nil
-    rescue StandardError => error
-      retire(error)
+    rescue StandardError
       nil
     end
 
     def self.ask (plan, out)
       evaluator = CArray.expression_evaluator or return false
       return false if overlaps?(plan, out)
-      # The walk leaves the destination masked where the expression is, so
-      # a destination that arrives masked loses its mask to an expression
-      # that has none.
+      return false unless ready_mask(plan, out)
+      begin
+        evaluator.call(plan, out) ? true : false
+      rescue AddressBasis::Failure
+        # Raised by CArray lending the arrays or taking them back: a refusal,
+        # or an array that cannot be read.  The walk meets the same array.
+        false
+      rescue StandardError => error
+        retire(error)
+        false
+      end
+    end
+
+    # The walk leaves the destination masked where the expression is, so a
+    # destination that arrives masked loses its mask to an expression that
+    # has none.  A destination that cannot hold a mask (a value array) is
+    # left to the walk, which says so.
+    def self.ready_mask (plan, out)
       if plan.masked
         out.mask = 0 unless out.has_mask?
       elsif out.has_mask?
         out.mask = 0
       end
-      evaluator.call(plan, out) ? true : false
-    rescue StandardError => error
-      retire(error)
+      true
+    rescue StandardError
       false
     end
 
@@ -368,8 +384,13 @@ class CArray
                          offset, bounds, fill)
       end
 
+      # A leaf the address bases would refuse to lend cannot be read by an
+      # evaluator, so the expression is not described.
       def leaf_index (array)
         @leaf_index.fetch(array.object_id) do
+          if (reason = AddressBasis.classify(array)[:refusal])
+            raise Refused, "a leaf: #{reason}"
+          end
           @leaves << array
           @leaf_index[array.object_id] = @leaves.size - 1
         end
