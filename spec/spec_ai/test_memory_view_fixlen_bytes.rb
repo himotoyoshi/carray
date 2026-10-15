@@ -75,13 +75,14 @@ class TestMemoryViewFixlenBytes < Test::Unit::TestCase
     assert_equal(true, CArray.memory_view_available?(a))
   end
 
-  def test_producer_format_is_cached
-    # Repeat calls should reuse the same Ruby String (ivar cache),
-    # giving a stable pointer for the duration of the view's lifetime.
+  def test_producer_format_is_stable
+    # The producer's format is kept for the life of the process, so the
+    # pointer a view holds stays valid; the query answers it frozen.
     a = CArray.fixlen(3, bytes: 4) { |i| "x%02d" % i }
     f1 = CArray.send(:memory_view_format_of, a)
     f2 = CArray.send(:memory_view_format_of, a)
-    assert_same(f1, f2, "format String should be cached on the instance")
+    assert_equal(f1, f2)
+    assert_true(f1.frozen?)
   end
 
   # ============================================================

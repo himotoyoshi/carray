@@ -31,6 +31,8 @@
 #include "ca_obj_face.h"   /* ca_strip_face for Face producers */
 #include "carray_internal.h"
 #include "ruby/memory_view.h"
+#include "ruby/st.h"
+#include "ruby/thread_native.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -687,26 +689,36 @@ ca_mv_available_p (VALUE obj)
   return ca_mv_check_alias_chain(ca, &rej);
 }
 
-/* "Ns" format for a plain CA_FIXLEN of N bytes.  The Strings are kept in
-   a table keyed by N for the life of the process, so the pointer stays
+/* "Ns" format for a plain CA_FIXLEN of N bytes.  The C strings are kept
+   in a table keyed by N for the life of the process, so the pointer stays
    valid for any view, and a frozen array (which cannot take an ivar) is
-   exported like any other. */
-static VALUE ca_mv_fixlen_formats = Qnil;
+   exported like any other.  The table is shared by every Ractor, hence
+   the lock. */
+static st_table              *ca_mv_fixlen_formats = NULL;
+static rb_nativethread_lock_t ca_mv_fixlen_formats_lock;
 
-static VALUE
+static const char *
 ca_mv_fixlen_format (ca_size_t bytes)
 {
-  VALUE key = SIZE2NUM(bytes);
-  VALUE fmt;
-  if ( NIL_P(ca_mv_fixlen_formats) ) {
-    ca_mv_fixlen_formats = rb_hash_new();
-    rb_gc_register_mark_object(ca_mv_fixlen_formats);
+  st_data_t found;
+  char     *fmt;
+  rb_nativethread_lock_lock(&ca_mv_fixlen_formats_lock);
+  if ( st_lookup(ca_mv_fixlen_formats, (st_data_t) bytes, &found) ) {
+    rb_nativethread_lock_unlock(&ca_mv_fixlen_formats_lock);
+    return (const char *) found;
   }
-  fmt = rb_hash_lookup(ca_mv_fixlen_formats, key);
-  if ( NIL_P(fmt) ) {
-    fmt = rb_obj_freeze(rb_sprintf("%lds", (long) bytes));
-    rb_hash_aset(ca_mv_fixlen_formats, key, fmt);
+  rb_nativethread_lock_unlock(&ca_mv_fixlen_formats_lock);
+  fmt = ALLOC_N(char, 24);
+  snprintf(fmt, 24, "%llds", (long long) bytes);
+  rb_nativethread_lock_lock(&ca_mv_fixlen_formats_lock);
+  if ( st_lookup(ca_mv_fixlen_formats, (st_data_t) bytes, &found) ) {
+    xfree(fmt);
+    fmt = (char *) found;
   }
+  else {
+    st_insert(ca_mv_fixlen_formats, (st_data_t) bytes, (st_data_t) fmt);
+  }
+  rb_nativethread_lock_unlock(&ca_mv_fixlen_formats_lock);
   return fmt;
 }
 
@@ -770,7 +782,7 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
   }
   else if (ca->data_type == CA_FIXLEN) {
     /* Plain CA_FIXLEN (no data_class): PEP 3118 "Ns" fixed-bytes. */
-    format = RSTRING_PTR(ca_mv_fixlen_format(ca->bytes));
+    format = ca_mv_fixlen_format(ca->bytes);
   }
   else {
     format = ca_mv_format_for(ca->data_type);
@@ -1645,7 +1657,7 @@ rb_ca_s_memory_view_format (VALUE klass, VALUE obj)
   if (ca->data_type == CA_FIXLEN) {
     /* Plain CA_FIXLEN: the same "Ns" String the producer (ca_mv_get)
        hands out via view->format. */
-    return ca_mv_fixlen_format(ca->bytes);
+    return rb_obj_freeze(rb_str_new_cstr(ca_mv_fixlen_format(ca->bytes)));
   }
   const char *fmt = ca_mv_format_for(ca->data_type);
   return fmt ? rb_str_new_cstr(fmt) : Qnil;
@@ -1678,6 +1690,8 @@ static const rb_memory_view_entry_t ca_memory_view_entry = {
 void
 Init_carray_memory_view (void)
 {
+  ca_mv_fixlen_formats = st_init_numtable();
+  rb_nativethread_lock_initialize(&ca_mv_fixlen_formats_lock);
   /* Statically known classes. */
   rb_memory_view_register(rb_cCArray,   &ca_memory_view_entry);
   rb_memory_view_register(rb_cCAWrap,   &ca_memory_view_entry);
