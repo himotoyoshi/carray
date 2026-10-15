@@ -4,7 +4,7 @@ require "carray"
 # An element-wise operation never evaluates a masked cell: a masked zero
 # divisor does not raise, and a cell that does raise leaves nothing
 # attached.  The eager operators and the lazy views decide which ops can
-# raise on a cell from one list (ca_binop_is_trapping); this checks the two
+# raise on a cell from one part (ca_op_raises_on_cell); this checks the two
 # paths agree on every op of that list, over views so that a window left
 # open would show.
 

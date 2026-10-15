@@ -283,7 +283,7 @@ ca_moncmp_eval (CAMonCmp *mc, const ca_lazy_req_t *req, void *data)
                "CAMonCmp: kernel not implemented (op_id=%u data_type=%d)",
                (unsigned) mc->op_id, (int) mc->parent->data_type);
     }
-    if ( mc->parent->data_type == CA_OBJECT ) {
+    if ( ca_op_raises_on_cell(CA_OP_KIND_MONCMP, mc->op_id, mc->parent->data_type) ) {
       slab_mask = ca_lazy_req_mask(req, 1, &mc->parent);
     }
     fn(slab_n, slab_mask,
@@ -467,7 +467,8 @@ rb_ca_moncmp_trapping (VALUE self)
 {
   CAMonCmp *mc;
   TypedData_Get_Struct(self, CAMonCmp, &camoncmp_data_type, mc);
-  return ( mc->parent->data_type == CA_OBJECT ) ? Qtrue : Qfalse;
+  return ca_op_raises_on_cell(CA_OP_KIND_MONCMP, mc->op_id, mc->parent->data_type)
+         ? Qtrue : Qfalse;
 }
 
 static VALUE

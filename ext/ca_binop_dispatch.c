@@ -29,7 +29,7 @@
 
 /* The kernel table of each op id.  The eager operators hold the tables
    themselves; ca_binop_op_id_of_table maps one back to its op id, so that
-   both ask ca_binop_is_trapping the same question. */
+   both ask ca_op_raises_on_cell the same question. */
 static ca_binop_func_t * const ca_binop_tables[CA_BINOP_COUNT] = {
   [CA_BINOP_ADD]       = ca_binop_add,
   [CA_BINOP_SUB]       = ca_binop_sub,
@@ -116,31 +116,3 @@ ca_binop_kernel_input_data_types (uint16_t op_id, int8_t l_dt, int8_t r_dt,
   if ( out_r_in_dt ) *out_r_in_dt = common;
 }
 
-/* ------------------------------------------------------------------- */
-/* trapping-op predicate                                                */
-/* ------------------------------------------------------------------- */
-
-int
-ca_binop_is_trapping (uint16_t op_id, int8_t common_dt)
-{
-  /* An object cell calls Ruby, which can raise for any op.  Integer
-     DIV / MOD / QUO / FMOD / RCP_MUL raise on a zero divisor, and POW /
-     IPOWER on zero to a negative power.  Float division returns NaN/Inf
-     and does not trap.                                                 */
-  int is_integer = ( common_dt >= CA_INT8 && common_dt <= CA_UINT64 );
-  if ( common_dt == CA_OBJECT ) return 1;
-  if ( ! is_integer ) return 0;
-
-  switch (op_id) {
-    case CA_BINOP_DIV:
-    case CA_BINOP_MOD:
-    case CA_BINOP_QUO:
-    case CA_BINOP_FMOD:
-    case CA_BINOP_RCP_MUL:
-    case CA_BINOP_POW:
-    case CA_BINOP_IPOWER:
-      return 1;
-    default:
-      return 0;
-  }
-}

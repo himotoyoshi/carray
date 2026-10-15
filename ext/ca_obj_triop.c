@@ -297,7 +297,7 @@ ca_triop_eval (CATriOp *to, const ca_lazy_req_t *req, void *data)
                "CATriOp: kernel not implemented (op_id=%u data_type=%d)",
                (unsigned) to->op_id, (int) to->data_type);
     }
-    if ( to->data_type == CA_OBJECT ) {
+    if ( ca_op_raises_on_cell(CA_OP_KIND_TRIOP, to->op_id, to->data_type) ) {
       CArray *ops[3];
       ops[0] = to->parent;
       ops[1] = to->op2;
@@ -640,9 +640,10 @@ rb_ca_triop_s_build (VALUE klass, VALUE cary1, VALUE cary2, VALUE cary3,
 static VALUE
 rb_ca_triop_trapping (VALUE self)
 {
-  CArray *ca;
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  return ( ca->data_type == CA_OBJECT ) ? Qtrue : Qfalse;
+  CATriOp *to;
+  TypedData_Get_Struct(self, CATriOp, &catriop_data_type, to);
+  return ca_op_raises_on_cell(CA_OP_KIND_TRIOP, to->op_id, to->data_type)
+         ? Qtrue : Qfalse;
 }
 
 static VALUE

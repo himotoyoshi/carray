@@ -323,7 +323,7 @@ ca_binop_eval (CABinOp *bo, const ca_lazy_req_t *req, void *data)
     boolean8_t *slab_mask = NULL;
     void *mscratch = NULL;
 
-    if ( ca_binop_is_trapping(bo->op_id, bo->data_type) ) {
+    if ( ca_op_raises_on_cell(CA_OP_KIND_BINOP, bo->op_id, bo->data_type) ) {
       CArray *ops[2];
       ops[0] = bo->parent;
       ops[1] = bo->right;
@@ -694,7 +694,7 @@ rb_ca_binop_trapping (VALUE self)
 {
   CABinOp *bo;
   TypedData_Get_Struct(self, CABinOp, &cabinop_data_type, bo);
-  return ca_binop_is_trapping(bo->op_id, bo->data_type) ? Qtrue : Qfalse;
+  return ca_op_raises_on_cell(CA_OP_KIND_BINOP, bo->op_id, bo->data_type) ? Qtrue : Qfalse;
 }
 
 static VALUE

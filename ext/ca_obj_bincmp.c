@@ -410,7 +410,7 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
                "CABinCmp: kernel not implemented (op_id=%u data_type=%d)",
                (unsigned) bc->op_id, (int) bc->common_dt);
     }
-    if ( bc->common_dt == CA_OBJECT ) {
+    if ( ca_op_raises_on_cell(CA_OP_KIND_BINCMP, bc->op_id, bc->common_dt) ) {
       slab_mask = ca_lazy_req_mask(req, 2, bc->operands);
     }
     fn(slab_n, slab_mask,
@@ -723,7 +723,8 @@ rb_ca_bincmp_trapping (VALUE self)
 {
   CABinCmp *bc;
   TypedData_Get_Struct(self, CABinCmp, &cabincmp_data_type, bc);
-  return ( bc->common_dt == CA_OBJECT ) ? Qtrue : Qfalse;
+  return ca_op_raises_on_cell(CA_OP_KIND_BINCMP, bc->op_id, bc->common_dt)
+         ? Qtrue : Qfalse;
 }
 
 static VALUE

@@ -12,7 +12,8 @@
 
 #include "carray.h"
 #include "carray_internal.h"   /* ca_lazy_arena_* */
-#include "ca_binop_dispatch.h"  /* ca_binop_is_trapping */
+#include "ca_binop_dispatch.h"  /* ca_binop_op_id_of_table */
+#include "ca_monop_dispatch.h"  /* ca_monop_op_id_of_table */
 
 /* Operand scratch for a chunked / gathered kernel run.
 
@@ -276,10 +277,11 @@ ca_chunked_run (ca_chunked_run_t *run)
 /* ---- Kernels that can raise -----------------------------------------
 
    An operator kernel runs with its alias operands attached.  Most kernels
-   cannot raise and are called directly.  Three kinds can:
+   cannot raise and are called directly.  Two kinds can:
 
-   - an object lane, which calls Ruby for every cell
-   - an integer division by zero (div, mod, fmod, rcp, rcp_mul)
+   - a kernel that can raise on a cell (ca_op_raises_on_cell: an object
+     lane, which calls Ruby for every cell; an integer division, remainder
+     or reciprocal by zero; an integer power of zero to a negative power)
    - a data type the operator has no kernel for (the not_implement slot)
 
    Those run through ca_op_guarded, which releases the operands the call
@@ -293,41 +295,71 @@ ca_op_is_integer (int8_t dt)
   return ( dt >= CA_INT8 && dt <= CA_UINT64 );
 }
 
+int
+ca_op_raises_on_cell (int kind, int op_id, int8_t dt)
+{
+  if ( dt == CA_OBJECT ) {
+    return 1;
+  }
+  if ( ! ca_op_is_integer(dt) ) {
+    return 0;
+  }
+  switch ( kind ) {
+  case CA_OP_KIND_MONOP:
+    return op_id == CA_MONOP_RCP;
+  case CA_OP_KIND_BINOP:
+    switch ( op_id ) {
+    case CA_BINOP_DIV:
+    case CA_BINOP_MOD:
+    case CA_BINOP_QUO:
+    case CA_BINOP_FMOD:
+    case CA_BINOP_RCP_MUL:
+    case CA_BINOP_POW:
+    case CA_BINOP_IPOWER:
+      return 1;
+    default:
+      return 0;
+    }
+  default:
+    return 0;
+  }
+}
+
+/* The eager forms: a kernel that can raise on a cell
+   (ca_op_raises_on_cell), or a data type the operator has no kernel for. */
 static int
 ca_monop_may_raise (ca_monop_func_t func[], int8_t dt)
 {
-  return dt == CA_OBJECT
-      || func[dt] == ca_monop_not_implement
-      || ( func == ca_monop_rcp && ca_op_is_integer(dt) );
+  return func[dt] == ca_monop_not_implement
+      || ca_op_raises_on_cell(CA_OP_KIND_MONOP, ca_monop_op_id_of_table(func), dt);
 }
 
-/* Which ops raise on a cell is ca_binop_is_trapping's list, the one the
-   lazy views skip masked cells by. */
 static int
 ca_binop_may_raise (ca_binop_func_t func[], int8_t dt)
 {
-  int op_id;
-  if ( dt == CA_OBJECT || func[dt] == ca_binop_not_implement ) return 1;
-  op_id = ca_binop_op_id_of_table(func);
-  return op_id >= 0 && ca_binop_is_trapping((uint16_t) op_id, dt);
+  return func[dt] == ca_binop_not_implement
+      || ca_op_raises_on_cell(CA_OP_KIND_BINOP, ca_binop_op_id_of_table(func), dt);
 }
 
 static int
 ca_triop_may_raise (ca_triop_func_t func[], int8_t dt)
 {
-  return dt == CA_OBJECT || func[dt] == ca_triop_not_implement;
+  return func[dt] == ca_triop_not_implement
+      || ca_op_raises_on_cell(CA_OP_KIND_TRIOP, -1, dt);
 }
 
 static int
 ca_moncmp_may_raise (ca_moncmp_func_t func[], int8_t dt)
 {
-  return dt == CA_OBJECT || func[dt] == ca_moncmp_not_implement;
+  return func[dt] == ca_moncmp_not_implement
+      || ca_op_raises_on_cell(CA_OP_KIND_MONCMP, -1, dt);
 }
 
 static int
 ca_bincmp_may_raise (ca_bincmp_func_t func[], int8_t dt)
 {
-  return dt == CA_OBJECT || func[dt] == ca_bincmp_not_implement;
+  return func[dt] == ca_bincmp_not_implement
+      || ca_op_raises_on_cell(CA_OP_KIND_BINCMP, -1, dt);
 }
 
 /* One kernel call, packed so that it can run under rb_ensure. */

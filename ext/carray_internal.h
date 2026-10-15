@@ -630,6 +630,16 @@ void        ca_multi_parent_mask_settle (CArray *mask, CArray **parents,
 int8_t      ca_promote_scalar_type (int8_t at, VALUE obj, int8_t st);
 int8_t      ca_value_match_type (int8_t t, int8_t a, int8_t b);
 
+/* Whether a kernel can raise on a cell of type `dt`, so that a masked cell
+   must be skipped rather than computed: any op on an object cell (it calls
+   Ruby), an integer division, remainder or reciprocal by zero, and an
+   integer power of zero to a negative exponent.  The eager operators and
+   the lazy views (and the plans CArray::Fusion hands an evaluator) ask
+   this alone.  `op_id` is the kind's op number, or -1 when not known. */
+enum { CA_OP_KIND_MONOP, CA_OP_KIND_BINOP, CA_OP_KIND_TRIOP,
+       CA_OP_KIND_MONCMP, CA_OP_KIND_BINCMP };
+int         ca_op_raises_on_cell (int kind, int op_id, int8_t dt);
+
 /* The type a value query (a Ruby value or a CArray) and a reference of
    type `ref` are compared in, as `eq` compares them: count(v) and the
    search family read the reference through a view of that type.  An

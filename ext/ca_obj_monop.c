@@ -338,18 +338,6 @@ ca_size_t ca_monop_materialise_call_count = 0;
 #define CA_MAX_LAZY_DEPTH 256
 #endif
 
-/* Whether an op can raise on a cell, so that a masked cell must be
-   skipped rather than computed: any op on an object cell (it calls Ruby),
-   and an integer reciprocal (zero raises). */
-static int
-ca_monop_is_trapping (uint16_t op_id, int8_t dt)
-{
-  if ( dt == CA_OBJECT ) {
-    return 1;
-  }
-  return ( op_id == CA_MONOP_RCP && dt >= CA_INT8 && dt <= CA_UINT64 );
-}
-
 /* Whether a cast from `from` to `to` raises on a NaN cell: a float or
    complex value has no integer for NaN. */
 static int
@@ -604,12 +592,12 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
       ca_lazy_arena_release(scratch);
       cur_dt = target_dt;
     } else {
-      if ( ! mask_taken && ca_monop_is_trapping(op_id, cur_dt) ) {
+      if ( ! mask_taken && ca_op_raises_on_cell(CA_OP_KIND_MONOP, op_id, cur_dt) ) {
         slab_mask  = ca_lazy_req_mask(req, 1, &leaf);
         mask_taken = 1;
       }
       apply_monop_in_place(op_id, cur_dt, slab_n, data,
-                           ca_monop_is_trapping(op_id, cur_dt) ? slab_mask : NULL);
+                           ca_op_raises_on_cell(CA_OP_KIND_MONOP, op_id, cur_dt) ? slab_mask : NULL);
       cur_dt = ca_lazy_promote_monop(op_id, cur_dt);
     }
   }
@@ -988,7 +976,7 @@ rb_ca_monop_trapping (VALUE self)
   CAMonOp *mo;
   TypedData_Get_Struct(self, CAMonOp, &camonop_data_type, mo);
   return ( ! ca_monop_is_cast(mo->op_id)
-           && ca_monop_is_trapping(mo->op_id, mo->parent->data_type) )
+           && ca_op_raises_on_cell(CA_OP_KIND_MONOP, mo->op_id, mo->parent->data_type) )
          ? Qtrue : Qfalse;
 }
 
