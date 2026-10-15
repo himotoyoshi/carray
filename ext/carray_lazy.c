@@ -456,7 +456,8 @@ ca_gc_release_buffer (void *ptr)
    as the largest request it has served (e.g. N=1M f64, depth-8 chain =
    8 × 8MB = 64MB kept resident).  A request no free slot can hold grows
    a free slot; a new slot opens only while every warm one is in use.
-   When all 32 are in use the acquire raises: this signals a programming
+   Past 256 MB the idle slots are given back at the next top-level entry
+   (ca_lazy_arena_trim).  When all 32 are in use the acquire raises: this signals a programming
    error or a pathological chain rather than a graceful fallback.
 
    One arena per Ractor (see ca_lazy_arena_get).  Within a Ractor it is
@@ -522,11 +523,49 @@ ca_lazy_arena_get (void)
   return arena;
 }
 
+/* Above this the arena returns memory: the idle slots are freed, the
+   smallest first, until what it holds is under the limit.  The largest
+   slot is always kept, so a workload that repeats one request keeps its
+   warm buffer however large it is. */
+#define CA_LAZY_ARENA_KEEP_BYTES ((ca_size_t) 256 << 20)
+
+static void
+ca_lazy_arena_trim (ca_lazy_arena_t *arena)
+{
+  ca_size_t total = 0;
+  int i, largest = -1;
+  for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
+    if ( arena->slots[i].ptr == NULL ) continue;
+    total += arena->slots[i].bytes;
+    if ( largest < 0 || arena->slots[i].bytes > arena->slots[largest].bytes ) {
+      largest = i;
+    }
+  }
+  while ( total > CA_LAZY_ARENA_KEEP_BYTES ) {
+    int smallest = -1;
+    for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
+      ca_lazy_arena_slot_t *s = &arena->slots[i];
+      if ( s->ptr == NULL || s->in_use || i == largest ) continue;
+      if ( smallest < 0 || s->bytes < arena->slots[smallest].bytes ) {
+        smallest = i;
+      }
+    }
+    if ( smallest < 0 ) break;
+    total -= arena->slots[smallest].bytes;
+    xfree(arena->slots[smallest].ptr);
+    arena->slots[smallest].ptr   = NULL;
+    arena->slots[smallest].bytes = 0;
+  }
+}
+
 void
 ca_lazy_arena_enter (void)
 {
   ca_lazy_arena_t *arena = ca_lazy_arena_get();
   if ( arena->depth == 0 ) {
+    /* Only a slot no one holds is freed: a lazy view's attach takes
+       scratch outside any enter / exit bracket. */
+    ca_lazy_arena_trim(arena);
     /* Top-level reset to recover from a prior exception that left
        slots in_use without a matching release.  Safe because
        depth==0 means no nested caller is mid-acquire. */
