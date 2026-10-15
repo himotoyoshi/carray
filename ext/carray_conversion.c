@@ -483,7 +483,13 @@ rb_ca_load_binary (VALUE self, VALUE io)
                "%s: data size mismatch (got %" PRId64 " bytes, expected %" PRId64 ")",
                ca_calling_method_name(), (ca_size_t) RSTRING_LEN(io), (ca_size_t) ca_length(ca));
     }
+    if ( ca->data_type == CA_BOOLEAN ) {
+      io = rb_str_dup(io);
+      rb_str_modify(io);
+      ca_boolean_normalize_bytes(RSTRING_PTR(io), ca->elements);
+    }
     ca_sync_data(ca, RSTRING_PTR(io));
+    RB_GC_GUARD(io);
     return self;
     break;
   default:
@@ -510,6 +516,9 @@ rb_ca_load_binary (VALUE self, VALUE io)
           }
           memcpy(ca->ptr + off, RSTRING_PTR(r), want);
           off += want;
+        }
+        if ( ca->data_type == CA_BOOLEAN ) {
+          ca_boolean_normalize_bytes(ca->ptr, ca->elements);
         }
         ca_sync_detach(ca);
       }

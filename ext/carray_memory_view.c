@@ -1510,12 +1510,8 @@ ca_mv_from_body (VALUE arg)
     g.item_size = (size_t) v->item_size;
     ca_mv_holder_each(d, ca_mv_gather_one, &g);
   }
-  /* A boolean holds 0 or 1; any other byte reads as true. */
   if ( data_type == CA_BOOLEAN ) {
-    uint8_t *p = (uint8_t *) ca->ptr;
-    for (i = 0; i < ca->elements; i++) {
-      p[i] = ( p[i] != 0 );
-    }
+    ca_boolean_normalize_bytes(ca->ptr, ca->elements);
   }
 
   /* Mask bytes: any non-zero byte means masked. */

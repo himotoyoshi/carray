@@ -120,6 +120,19 @@ ca_object_cells_clear (void *ptr, ca_size_t n_elements)
   }
 }
 
+/* A boolean cell holds 0 or 1.  Bytes copied in from outside (a String or
+   an IO through load_binary, a MemoryView) are read as true when non-zero,
+   so every reader of the array sees one value; an array that shares
+   another's bytes cannot be held to this, and is refused instead. */
+static inline void
+ca_boolean_normalize_bytes (void *ptr, ca_size_t n)
+{
+  uint8_t *p = (uint8_t *) ptr;
+  for ( ca_size_t i = 0; i < n; i++ ) {
+    p[i] = ( p[i] != 0 );
+  }
+}
+
 static inline char *
 ca_alloc_cells (const CArray *ca)
 {
