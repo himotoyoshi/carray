@@ -179,8 +179,8 @@ class CArray
   #   is a one-liner on top of `flatten[axis2addr(...)]`.
   #
   #   Shape rule: `indices.ndim == self.ndim`, and
-  #   `indices.dim[j] == self.dim[j]` for all `j != axis`;
-  #   `indices.dim[axis]` is free.
+  #   `indices.shape[j] == self.shape[j]` for all `j != axis`;
+  #   `indices.shape[axis]` is free.
   #
   #   `indices` data_type: any integer kind (zero-copy when
   #   already `:int64`). Negative indices: Python-style

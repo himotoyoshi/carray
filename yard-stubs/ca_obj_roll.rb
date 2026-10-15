@@ -3,7 +3,7 @@
 # See yard-stubs/README.md and yard-stubs/STYLE.md.
 
 # Cyclic-shift view of the parent.  Same shape as the parent; each
-# axis `k` is rotated by `shift[k]` cells (modulo `parent.dim[k]`).
+# axis `k` is rotated by `shift[k]` cells (modulo `parent.shape[k]`).
 # All parent cells alias through the view exactly once, so writes
 # through the view reach the parent.
 #
@@ -25,7 +25,7 @@ class CArray
   # `shifts[k]` along each axis `k`.  Positive shifts move cell `i`
   # of the parent to position `i + shift`; negative shifts move it
   # the other way.  Each `shift[k]` is normalised into
-  # `[0, self.dim[k])` before use, so any integer is accepted.
+  # `[0, self.shape[k])` before use, so any integer is accepted.
   #
   # Fewer args than `ndim` treats the missing axes as `shift = 0`.
   # More args than `ndim` raises `ArgumentError`.

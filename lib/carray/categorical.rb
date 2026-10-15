@@ -265,7 +265,7 @@ class CACategorical < CAObject
     # copy first so a caller's array is never frozen as a side effect; the
     # label objects themselves are left untouched (container-level freeze).
     @labels = (labels.respond_to?(:to_a) ? labels.to_a : Array(labels)).dup.freeze
-    super(CA_FIXLEN, codes.dim,
+    super(CA_FIXLEN, codes.shape,
           bytes:     codes.bytes,
           storage:   codes.data_type,
           parent:    codes,
@@ -537,7 +537,7 @@ class CACategorical < CAObject
     list = other.flatten.to_a.map { |v|
       UNDEF.equal?(v) ? v : memo.fetch(v) { memo[v] = @labels.index(v) || @labels.size }
     }
-    CA_INT64(list).reshape(*other.dim)
+    CA_INT64(list).reshape(*other.shape)
   end
 
   # The code a fill value stands for: UNDEF stays UNDEF, a label is its code.

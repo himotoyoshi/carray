@@ -200,7 +200,7 @@ class CAWindowIterator < CAIterator
     buffer = padded_entity
     wanted = @ndim.times.map { |k| @origins[k]...(@origins[k] + @shape[k] + @widths[k] - 1) }
     return buffer if wanted.each_with_index.all? { |range, k|
-      range.begin.zero? && range.end == buffer.dim[k]
+      range.begin.zero? && range.end == buffer.shape[k]
     }
     buffer[*wanted]
   end

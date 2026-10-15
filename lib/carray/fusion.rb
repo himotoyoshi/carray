@@ -119,7 +119,7 @@ class CArray
     # Returns the array, or nil where nothing computed it.
     def self.evaluate (view)
       plan = worth_asking(view) or return nil
-      out = CArray.__alloc_uninit__(view.data_type, view.dim)
+      out = CArray.__alloc_uninit__(view.data_type, view.shape)
       ask(plan, out) ? out : nil
     end
 
@@ -232,7 +232,7 @@ class CArray
       w.visit(view)
       masked = w.leaves.any? { |a| a.has_mask? } ||
                w.nodes.any? { |n| n.is_a?(Shifted) && n.bounds.include?(:mask) }
-      Plan.new(w.nodes, w.leaves, view.data_type, view.dim, masked, w.signature)
+      Plan.new(w.nodes, w.leaves, view.data_type, view.shape, masked, w.signature)
     end
 
     def self.lazy? (x)
@@ -370,7 +370,7 @@ class CArray
       def shifted (n)
         array = n.parent
         bounds = n.__boundary_rule_of_each_axis__
-        if Fusion.lazy?(array) || array.dim != n.dim ||
+        if Fusion.lazy?(array) || array.shape != n.shape ||
            ! bounds.all? { |b| b == :fill || b == :mask }
           return leaf(n)
         end

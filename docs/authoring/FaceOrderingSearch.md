@@ -321,7 +321,7 @@ flags (so a Ruby-authored Face still declares its safety without a callback):
 ```ruby
 class Relabel < CAObject                 # single-interpretation int relabel
   def initialize(parent)
-    super(CA_INT64, parent.dim, parent: parent, face: true,
+    super(CA_INT64, parent.shape, parent: parent, face: true,
           orderable_storage: true, comparable_storage: true)
   end
 end

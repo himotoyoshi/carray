@@ -15,7 +15,7 @@ k").
 | method | semantics | output shape |
 |---|---|---|
 | `map_slab(axis:, data_type:) { \|slab\| ... }` | Per-axis element-wise vectorise | same as self |
-| `reduce_slab(axis:, [init:, data_type:]) { ... }` | Per-axis reduction (dual surface) | self.dim minus axis |
+| `reduce_slab(axis:, [init:, data_type:]) { ... }` | Per-axis reduction (dual surface) | self.shape minus axis |
 | `each_slab(axis:) { \|slab\| ... }` | Side-effect iteration | self (= return self) |
 
 The block always receives a **1-D CArray** representing one fiber along
@@ -79,7 +79,7 @@ ca.reduce_slab(axis: -1) { |slab| slab.median }
 ca.reduce_slab(axis: 0, init: 0.0) { |acc, x| acc + x }
 ```
 
-Output shape is `self.dim` with the slab axis removed. A 1-D self
+Output shape is `self.shape` with the slab axis removed. A 1-D self
 reducing axis 0 returns a 1-D length-1 result.
 
 The per-slab block form requires a **scalar** return — even a
@@ -259,7 +259,7 @@ medians = ca.median(axis: 1)        # dispatches through reduce_slab on CA_OBJEC
 ### Stencil via `each_slab` + view composition
 
 ```ruby
-out = CArray.float64(*ca.dim)
+out = CArray.float64(*ca.shape)
 ca.each_slab(axis: 1) do |row|
   # `row` is a length-N 1-D CAStride; slice + neighbour ops freely
   out[row.position[0], 1..-2] = (row[0..-3] + row[1..-2] + row[2..-1]) / 3.0

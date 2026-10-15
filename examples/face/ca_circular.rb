@@ -32,7 +32,7 @@ class CACircular < CAObject
       raise ArgumentError, "range must be :rad or :deg (got #{range.inspect})"
     end
     @range = range
-    super(CA_FLOAT64, parent.dim, parent: parent, face: true)
+    super(CA_FLOAT64, parent.shape, parent: parent, face: true)
   end
 
   attr_reader :range

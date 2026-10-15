@@ -300,10 +300,10 @@ class CArray
     case data_type 
     when CA_FIXLEN
       output << sprintf("CArray.%s(%s, :bytes=>%i)", 
-                        data_type_name, dim.inspect[1..-2], bytes)
+                        data_type_name, shape.inspect[1..-2], bytes)
     else
       output << sprintf("CArray.%s(%s)", 
-                        data_type_name, dim.inspect[1..-2])
+                        data_type_name, shape.inspect[1..-2])
     end
     return output
   end

@@ -16,7 +16,7 @@ a.tile(3)            shape [9]
     tile 0   tile 1   tile 2
 ```
 
-Along each axis `k`, the output length is `parent.dim[k] * reps[k]`, and
+Along each axis `k`, the output length is `parent.shape[k] * reps[k]`, and
 each of the `product(reps)` tiles is a **full-parent alias** — every tile
 reads the same parent block. This document is the reference for the
 `CATile` view class itself: its shape rule, view/write semantics, masks,
@@ -33,17 +33,17 @@ scales each axis length:
 
 ```
 result.ndim  == parent.ndim
-result.shape == [ parent.dim[k] * reps[k]  for each axis k ]
+result.shape == [ parent.shape[k] * reps[k]  for each axis k ]
 ```
 
 The repetition is a regular grid of tiles. Tile coordinate
 `(i_0, i_1, ...)` sits at output offset
-`(i_0 * parent.dim[0], i_1 * parent.dim[1], ...)`, and each tile is a
+`(i_0 * parent.shape[0], i_1 * parent.shape[1], ...)`, and each tile is a
 complete copy of the parent laid out in the same axis order. A read at
 view position `p` maps to the parent by modulo:
 
 ```
-parent_index[k] = p[k] % parent.dim[k]
+parent_index[k] = p[k] % parent.shape[k]
 ```
 
 ```ruby
@@ -230,7 +230,7 @@ composite-region gather/scatter path shared with the other N-region views.
 
 | operation | result |
 |---|---|
-| `a.tile(*reps)` | `CATile` view, shape `a.dim[k] * reps[k]` per axis |
+| `a.tile(*reps)` | `CATile` view, shape `a.shape[k] * reps[k]` per axis |
 | `a.tile([*reps])` | same (Array form) |
 | reps count | must equal `a.ndim` (else `ArgumentError`) |
 | each rep | must be `>= 1` (else `IndexError`) |

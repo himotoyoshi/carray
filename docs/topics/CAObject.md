@@ -420,7 +420,7 @@ otherwise stay inert on a `CAObject`:
 class Square < CAObject
   def initialize(parent)
     @p = parent
-    super(parent.data_type, parent.dim, parent: parent)
+    super(parent.data_type, parent.shape, parent: parent)
   end
 
   private
@@ -484,7 +484,7 @@ stored numbers:
 class CACircular < CAObject
   def initialize(parent_float64, range: :rad)
     @range = range
-    super(CA_FLOAT64, parent_float64.dim,
+    super(CA_FLOAT64, parent_float64.shape,
           parent: parent_float64,
           face:   true)
   end
@@ -519,7 +519,7 @@ storage `data_type`, and the operations compute as on a plain array:
 ```ruby
 class CALatitude < CAObject
   def initialize(parent_float64)
-    super(CA_FLOAT64, parent_float64.dim,
+    super(CA_FLOAT64, parent_float64.shape,
           parent: parent_float64,
           face:   true,
           numeric: true)
@@ -540,7 +540,7 @@ To declare a surface other than these two, pass it as `data_type`
 and name the storage with `:storage`:
 
 ```ruby
-super(CA_FIXLEN, parent_int64.dim,
+super(CA_FIXLEN, parent_int64.shape,
       bytes:   8,
       storage: CA_INT64,
       parent:  parent_int64,

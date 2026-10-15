@@ -236,7 +236,7 @@ every storage op directly to it.
 class MyPrice < CAObject
   def initialize(parent, currency: :usd)
     @currency = currency
-    super(CA_INT64, parent.dim, parent: parent, face: true)
+    super(CA_INT64, parent.shape, parent: parent, face: true)
   end
 end
 ```
@@ -507,7 +507,7 @@ class MyFace < CAObject
     @semantic_state = ...                    # whatever state the Face needs
 
     super(STORAGE_DTYPE,                     # parent.data_type: CA_INT64, CA_FLOAT64, ...
-          parent.dim,
+          parent.shape,
           parent: parent,
           face: true)                        # <-- sets CA_FLAG_IS_FACE
   end
@@ -543,7 +543,7 @@ circular statistics defined on top:
 class CACircular < CAObject
   def initialize(parent, range: :rad)
     @range = range                            # :rad or :deg
-    super(CA_FLOAT64, parent.dim, parent: parent, face: true)
+    super(CA_FLOAT64, parent.shape, parent: parent, face: true)
   end
 
   attr_reader :range
@@ -594,7 +594,7 @@ computing on the stored numbers:
 ```ruby
 class MyTagArray < CAObject
   def initialize(parent_int64)
-    super(CA_INT64, parent_int64.dim, parent: parent_int64, face: true)
+    super(CA_INT64, parent_int64.shape, parent: parent_int64, face: true)
   end
 end
 

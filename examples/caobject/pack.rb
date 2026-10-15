@@ -49,7 +49,7 @@ class CAPack < CAObject
         if mem.ndim < @ndim
           raise "mem.ndim < @ndim"
         else
-          newdim = mem.dim[0, @ndim]
+          newdim = mem.shape[0, @ndim]
         end
         if dim
           unless dim == newdim

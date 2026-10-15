@@ -19,7 +19,7 @@ class CALink < CAObject
     unless val.is_a?(CArray)
       val = CA_OBJECT(val)      
     end
-    super(val.data_type, val.dim, :bytes=>val.bytes, :read_only=>true)
+    super(val.data_type, val.shape, :bytes=>val.bytes, :read_only=>true)
   end
 
   private

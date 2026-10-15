@@ -112,7 +112,7 @@ t   = CArray.float32(2)            # template: two float32 = 8 bytes
 
 sub = rec.field(0, t)
 sub.class                          #=> CARefer
-sub.dim                            #=> [3, 2]   (parent shape + template shape)
+sub.shape                            #=> [3, 2]   (parent shape + template shape)
 ```
 
 This is the natural way to read a small fixed-size array member out of
