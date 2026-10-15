@@ -2978,7 +2978,8 @@ rb_ca_clip_uint64 (VALUE self)
     }
     ca_detach(src);
     if ( found_nan ) {
-      rb_raise(rb_eFloatDomainError, "NaN cannot be converted to uint64");
+      rb_raise(rb_eFloatDomainError, "%s: NaN cannot be converted to uint64",
+               ca_calling_method_name());
     }
     if ( ca_has_mask(ca) ) {
       ca_copy_mask(out, ca);

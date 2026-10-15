@@ -302,7 +302,8 @@ puts
                  *p2 = q;
                }
                else {
-                 rb_raise(rb_eRangeError, "out of range to cast to boolean (0 or 1)");
+                 rb_raise(rb_eRangeError, "%s: out of range to cast to boolean (0 or 1)",
+                          ca_calling_method_name());
                }
              }
              p1++; p2++; m++;
@@ -315,7 +316,8 @@ puts
                *p2 = q;
              }
              else {
-               rb_raise(rb_eRangeError, "out of range to cast to boolean (0 or 1)");
+               rb_raise(rb_eRangeError, "%s: out of range to cast to boolean (0 or 1)",
+                          ca_calling_method_name());
              }
              p1++; p2++; 
            }
@@ -348,8 +350,8 @@ puts
       nan_check = <<-END_CHECK.gsub(/^ {6}/, '')
          for (k=0; k<n; k++) {
            if ( ( ! m || ! m[k] ) && #{isnan} ) {
-             rb_raise(rb_eFloatDomainError, "NaN cannot be converted to %s",
-                      ca_type_name[#{type_const[type2]}]);
+             rb_raise(rb_eFloatDomainError, "%s: NaN cannot be converted to %s",
+                      ca_calling_method_name(), ca_type_name[#{type_const[type2]}]);
            }
          }
       END_CHECK

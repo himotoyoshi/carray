@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: a store that cannot convert a cell names the method, as the
+  other refusals do: "[]=: NaN cannot be converted to int32" and "[]=:
+  out of range to cast to boolean (0 or 1)". The exception classes are
+  unchanged.
+
 - Change: a write into a read-only array that is not frozen (a lazy
   expression or a view of one, a `CAConstString`, a view of a frozen array)
   raises "<method>: can not modify read-only array", naming the method that
