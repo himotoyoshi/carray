@@ -120,6 +120,15 @@ path, `ca_obj_monop.c`). So "adding a lazy op" is really "give the existing
 op-id a lazy node", and once the kernel table exists the work is table-wiring, not
 new gather code.
 
+A builder refuses a type its table has no kernel for when the node is built,
+through the eager operators' own part, `ca_op_refuse_unimplemented(operand,
+data_type, eclass)` (`carray_internal.h`), naming the type eager would look in
+(a boolean read as int64, an integer taken to float64 by a unary op), so the
+two say the same; `spec/spec_ai/test_lazy_refuses_as_eager.rb` runs every
+operator of the lazy tables over the types. The Ruby side of each operator is
+a `def` written by `CArray.define_named_methods` from a template, so a refusal
+inside it names the operator.
+
 Taking a unary op as the example (the binary side is symmetric across
 `ca_binop_dispatch.{h,c}` and `ca_obj_binop.c`):
 
