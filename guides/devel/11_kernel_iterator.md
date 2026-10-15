@@ -265,8 +265,9 @@ int  ca_iter_can_alias (void *ap, int level);   /* level = 1 | 2 | 3 */
 - **`init_l2`** prepares an **L2 strided** walk over the axes you name.
   The kernel sees per-slab pointers and reads the byte strides from the
   state. Source routing covers entity / CAStride contig (alias),
-  CAStride non-contig (alias, no scratch), and the descriptor-framework
-  views (CAGrid / CASelect / CAMapping / CAWindow / CAShift / CSA) via the
+  CAStride non-contig (strided over the root, no scratch, when the root
+  lends memory; a gathered scratch when it does not), and the
+  descriptor-framework views (CAGrid / CASelect / CAWindow / CAShift / CSA) via the
   per-axis-descriptor engine. `init_l2` takes `CA_SLAB_AXES` only; to
   walk the array one strided row at a time, name the last axis.
 
@@ -296,7 +297,14 @@ After each `next_slab*` + body, the caller invokes `sync_slab`
 - READ walk (`!(flags & CA_KERNEL_WRITE)`) → no-op.
 - alias path (no scratch) → no-op; the kernel wrote to parent storage
   directly through `alias_ptr`.
-- scratch path → scatter back via `ca_sync_data(src, scratch)`.
+- scratch path → send back the cells the kernel changed in the scratch.
+
+A view can show one root cell more than once: a repeated index
+(`a[CA_INT64([0, 0, 2]), nil]`), a `tile`, a stack or meld that holds the
+same parent twice. When a kernel writes such a view, which of the values
+written to the repeated positions the root cell ends with is not
+specified. It depends on the route the walk takes, and a value equal to
+the one the kernel was given is not sent back.
 
 `finish` releases everything: scratch buffers, attached parents, fiber
 caches, the K-parent ptr cache for CAStack, the per-tile cache, the
@@ -623,7 +631,7 @@ A kernel that writes back declares `CA_KERNEL_WRITE`. The engine then:
    if the kernel can write directly through parent storage; scratch if
    the view's access pattern requires gather + scatter).
 3. After the kernel's body, `sync_slab` either is a no-op (alias) or
-   scatters the slab back via `ca_sync_data` (scratch path).
+   sends back the cells the kernel changed in the slab (scratch path).
 4. On `finish`, any remaining scratch is freed and the parent is detached.
 
 The CA_KERNEL_FIBER_CONTIG path additionally caches a per-fiber data
@@ -661,7 +669,7 @@ INTERNAL routing keys you might see in the engine and in `ca_iter_state`:
 
 ```c
 CA_ITER_SRC_CASTRIDE             /* entity, CAStride family */
-CA_ITER_SRC_DESCRIPTOR           /* CAGrid / CASelect / CAMapping / CAWindow / CAShift / CSA */
+CA_ITER_SRC_DESCRIPTOR           /* CAGrid / CASelect / CAWindow / CAShift / CSA */
 CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE
 CA_ITER_SRC_ATTACH               /* CAFake / CAByteSwap / CABitfield / CABitarray / CAReduce /
                                     CAObject / CATile / CARoll / CAStack / CAMeld / CARemap /
@@ -671,7 +679,8 @@ CA_ITER_SRC_ATTACH               /* CAFake / CAByteSwap / CABitfield / CABitarra
 The classifier reads these off the source's op table, which only works for the
 view classes compiled into the engine. A class installed from outside declares
 its kind with `ca_iter_register_source_kind(obj_type, CA_ITER_SRC_ATTACH)` in its
-`Init_`; without it the source is delivered the same way, by attaching it, so the
+`Init_`; without it the source is delivered the same way, by the transfer walk through its
+xfer slots, so the
 declaration states the routing rather than changing it. It is the one part of
 this routing an external author touches, so it is additive rather than
 free-to-refactor. See [ch. 8](08_view_catalog.md), "Adding a

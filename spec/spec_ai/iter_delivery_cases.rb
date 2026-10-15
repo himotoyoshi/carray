@@ -52,8 +52,9 @@ module IterDeliveryCases
     "repeated row" => ->(p) { p[CA_INT64([0, 0, 2]), nil, nil] },
   }
 
-  # Read only: a tile repeats cells, a lazy expression has no cells to
-  # write.
+  # Read only here: a lazy expression has no cells to write, and a tile
+  # shows every cell twice, so which written value a root cell ends with
+  # is not specified ("repeated row" above writes distinct values only).
   READ_VIEWS = VIEWS.merge(
     "tile" => ->(p) { p.tile(1, 2, 1) },
     "lazy" => ->(p) { (p.lazy * 2) + 1 },

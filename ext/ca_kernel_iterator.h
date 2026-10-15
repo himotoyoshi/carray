@@ -179,7 +179,8 @@ typedef enum {
 #define CA_ITER_ERR_NOT_CHEAP   1    /* the classifier does not recognise
                                         the source (a view with no attach
                                         slot; any other external obj_type
-                                        is delivered by attaching it)    */
+                                        is delivered by the transfer walk,
+                                        through its xfer slots)          */
 #define CA_ITER_ERR_POLICY      2    /* policy or axes refused: a policy
                                         not implemented, axes NULL / out
                                         of range / duplicated, AXES at
@@ -264,10 +265,10 @@ typedef struct {
   /* --- CAStride compose-fold cache (L2 alias path) ---
      For CAStride-family sources at L2, init_l2 runs
      ca_stride_compose_to_root once to get the root + per-axis
-     byte strides + base offset.  Cached here so next_slab_axes's
-     per-iter offset calc is just Σ outer_idx[k] * composed_strides[k].
-     Inline CA_RANK_MAX array (no heap alloc) since CA_DIM_MAX=16 keeps
-     the footprint at 128 bytes per state.  root is the array attached at
+     byte strides + base offset, kept here for the author to read.  The
+     walk itself steps from composed_base by outer_strides (below), which
+     init builds from the composed strides.  Inline CA_RANK_MAX array (no
+     heap alloc).  root is the array attached at
      init whose memory the walk reads: the compose-fold root of an L2
      CAStride walk (an entity, or a view that lends memory) or the parent
      of a descriptor view.  NULL when the walk reads src itself or a
@@ -296,7 +297,7 @@ typedef struct {
   ca_size_t           total_elements;              /* view.elements snapshot */
 
   /* --- iteration cursor --- */
-  ca_size_t        *outer_idx;         /* [outer_ndim] (L2 WHOLE: [nd-1])  */
+  ca_size_t        *outer_idx;         /* [outer_ndim]                     */
   ca_size_t         slab_n;            /* current slab element count       */
   ca_size_t         total_slabs;
   ca_size_t         slabs_emitted;
@@ -535,9 +536,9 @@ int  ca_iter_state_init_l1 (ca_iter_state    *st,
            view's rank.  The whole array as one contiguous run is L1
            (init_l1 with CA_SLAB_WHOLE); one strided run per innermost
            row is CA_SLAB_AXES with the last axis.
-   flags:  as init_l1.  CA_KERNEL_WRITE is refused with
-           CA_ITER_ERR_FLAGS when a slab axis is an INDEX or SHIFT
-           axis of a descriptor view.
+   flags:  as init_l1.  A CA_KERNEL_WRITE walk over a descriptor view
+           whose slab has an INDEX or SHIFT axis goes by the transfer
+           walk.
 
    Pair with ca_iter_state_next_slab_axes. */
 int  ca_iter_state_init_l2 (ca_iter_state    *st,
@@ -631,8 +632,14 @@ int  ca_iter_state_next_slab_axes (ca_iter_state *st,
        buffer is written back once, by finish (ca_sync_detach)
      - scratch path, at L1 or L2: the cells the kernel changed are sent
        back through the source (ki_scratch_push_changed: ca_xfer_addrs,
-       or ca_xfer_all PUT when every cell changed) for SRC_ATTACH and
-       CAStride; the descriptor scatter for descriptor views */
+       or ca_xfer_all PUT when every cell changed); a write over a
+       descriptor view takes this path, opened as a transfer walk
+
+   A view that shows one root cell more than once (a repeated index, a
+   tile, a stack or meld holding the same parent twice): which of the
+   values written to its positions the root cell ends with is not
+   specified.  It depends on the route, and a value equal to the one
+   delivered is not sent back. */
 void ca_iter_state_sync_slab (ca_iter_state *st);
 
 /* Release any resources held by `st` and detach parent.  On a WRITE

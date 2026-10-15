@@ -359,9 +359,9 @@ ca_iter_classify_source (CArray *src)
 
   /* Anything else -- a view class installed from outside that did not
      register, or an in-tree class with no case above (such as the mask
-     views CAMaskOfOperands and CAObjectMask).  Attaching is the one thing every view can do, and it is
-     what a registration would declare, so the array is delivered that way
-     rather than refused. */
+     views CAMaskOfOperands and CAObjectMask).  It is classified as a
+     registration would declare it, SRC_ATTACH, and delivered by the
+     transfer walk through its xfer slots rather than refused. */
   if ( attach != NULL ) return CA_ITER_SRC_ATTACH;
 
   return CA_ITER_SRC_NONE;
