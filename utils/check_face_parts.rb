@@ -11,6 +11,14 @@
 #   and refuses the rest.  A direct to_comparable call or
 #   ca_face_operand_descend elsewhere is a second copy of that rule; Ruby
 #   reaches the part through reconcile_operand.
+# - A Face reference is read as its storage by a family that orders,
+#   compares, searches or hashes its cells only through
+#   ca_face_require_orderable, and is ordered by its own #order only through
+#   ca_face_orders_by_itself (used by ca_order_key).  A flag test of its own
+#   is a second copy of that gate, and the copies had drifted: one took any
+#   fixlen storage as ordered by memcmp, one handed a fixlen Face to an
+#   #order that came straight back.  A direct ca_face_refuse_order is the
+#   refusal of such a copy.
 # - The storage under a Face is found by ca_strip_face (C) or
 #   face_storage (Ruby).  A loop of its own that walks the parents is a
 #   second copy, and the first place one goes wrong when a Face gains a
@@ -33,6 +41,10 @@ RULES = [
    "ca_face_operand_descend: use ca_face_reconcile_operand"],
   [/\brb_funcall\w*\s*\([^;]*?"to_comparable"/m,
    "to_comparable called directly: use ca_face_reconcile_operand"],
+  [/\bca_test_flag\s*\([^;]*?CA_FLAG_FACE_ORDERABLE_STORAGE/m,
+   "an ORDERABLE test: use ca_face_require_orderable (or ca_face_orders_by_itself for a key)"],
+  [/\bca_face_refuse_order\s*\(/,
+   "ca_face_refuse_order called directly: use ca_face_require_orderable"],
   [/\bwhile\s*\(\s*\w+\s*&&\s*ca_is_face\s*\(\s*\w+\s*\)\s*\)|\bwhile\s*\(\s*ca_face_safe_check\s*\(/,
    "a hand loop down to the storage: use ca_strip_face"],
 ]
