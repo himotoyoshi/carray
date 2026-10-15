@@ -1125,7 +1125,8 @@ ca_lazy_evaluated (VALUE self)
   if ( ! ca_is_lazy_view(ca) ) {
     return Qnil;
   }
-  if ( ! RTEST(rb_attr_get(rb_cCArray, id_evaluator)) ) {
+  /* registered in the main Ractor, and asked only there */
+  if ( ! ca_in_main_ractor() || ! RTEST(rb_attr_get(rb_cCArray, id_evaluator)) ) {
     return Qnil;
   }
   return rb_funcall(rb_const_get(rb_cCArray, id_fusion), id_evaluate, 1, self);

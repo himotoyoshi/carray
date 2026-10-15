@@ -853,8 +853,13 @@ class << CArray
   # is not an answer: one that raises is dropped, with a warning, and
   # expressions are walked from there on.
   #
+  # Only the main Ractor asks it: it is registered there, and is not
+  # shared with the others, where expressions are walked.
+  #
   # @return [#call, nil]
-  attr_reader :expression_evaluator
+  def expression_evaluator
+    Ractor.current == Ractor.main ? @expression_evaluator : nil
+  end
 
   # @param object [#call, nil] see {#expression_evaluator}
   # @raise [ArgumentError] when it cannot be called.

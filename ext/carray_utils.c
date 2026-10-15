@@ -17,6 +17,7 @@
 
 #include "ruby/st.h"
 #include "ruby/thread_native.h"
+#include "ruby/ractor.h"
 
 static ID id_begin, id_end, id_excl_end;
 #define RANGE_BEG(r)  (rb_funcall(r, id_begin, 0))
@@ -1222,9 +1223,22 @@ rb_set_options (VALUE ropt, const char *spec_in, ...)
 }
 
 
+/* Whether this runs in the main Ractor: Init does, and leaves a value in
+   its Ractor-local storage that no other Ractor has. */
+static rb_ractor_local_key_t ca_main_ractor_key;
+
+int
+ca_in_main_ractor (void)
+{
+  VALUE mark;
+  return rb_ractor_local_storage_value_lookup(ca_main_ractor_key, &mark);
+}
+
 void
 Init_carray_utils (void)
 {
+  ca_main_ractor_key = rb_ractor_local_storage_value_newkey();
+  rb_ractor_local_storage_value_set(ca_main_ractor_key, Qtrue);
   ca_id_names = st_init_numtable();
   rb_nativethread_lock_initialize(&ca_id_names_lock);
   id_answering = rb_intern("__carray_answering_method__");

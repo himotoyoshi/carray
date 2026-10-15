@@ -757,4 +757,7 @@ long ca_index_expand_rubber (int ndim, long argc, const VALUE *argv, VALUE *out)
    key is read. */
 int  ca_index_key_is_scalar (VALUE arg);
 
+/* Whether this runs in the main Ractor (carray_utils.c). */
+int ca_in_main_ractor (void);
+
 #endif /* CARRAY_INTERNAL_H */

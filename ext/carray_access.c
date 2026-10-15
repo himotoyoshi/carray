@@ -709,6 +709,7 @@ rb_ca_store_all (VALUE self, VALUE rval)
          && ca->data_type == cv->data_type
          && ca->ndim == cv->ndim
          && ca->elements == cv->elements
+         && ca_in_main_ractor()
          && RTEST(rb_attr_get(rb_cCArray, ca_id_expression_evaluator())) ) {
       int8_t k;
       int    same = 1;
