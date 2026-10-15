@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `CACategorical#eq` and `#ne` compare a CArray operand cell by cell,
+  by label. Another categorical is matched whatever order its labels are
+  in, and a masked cell on either side gives UNDEF. Before, any array was
+  looked up as one label and every cell answered false, `c.eq(c)`
+  included. A scalar or a Ruby Array is still one label, as for
+  `CArray#eq`.
+
 - Fix: a Face written in Ruby over fixed-length storage that does not pass
   `orderable_storage: true` is no longer ordered by its bytes. `min`,
   `max`, `minmax` and their `axis:` forms raise `ArgumentError` instead of

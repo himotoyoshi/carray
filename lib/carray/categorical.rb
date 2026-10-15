@@ -338,14 +338,6 @@ class CACategorical < CAObject
   # the integer code. The raw codes stay reachable via #codes for code-space
   # work (interop, ML features), but they are not the everyday surface.
 
-  # Boolean mask of cells whose category == label. Excluded cells stay UNDEF
-  # (their category is unknown); an unknown label yields an all-false mask.
-  # @overload eq(label)
-  #   Returns a boolean CArray marking cells whose category equals
-  #   `label`. Excluded cells stay masked; an unknown label yields
-  #   an all-false result.
-  #   @param label [Object] category to match.
-  #   @return [CArray]
   # @overload resize(*newdim, fill_value: UNDEF)
   #   Returns a categorical resized to `newdim` (see {CArray#resize}).
   #   The new cells are excluded (UNDEF) unless `fill_value` names one of
@@ -367,16 +359,28 @@ class CACategorical < CAObject
     CACategorical.from_codes(codes.insert_block(offset, bsize) { fill }, labels)
   end
 
+  # Boolean mask of cells whose category == label. Excluded cells stay UNDEF
+  # (their category is unknown); an unknown label yields an all-false mask.
+  # @overload eq(label)
+  #   Returns a boolean CArray marking cells whose category equals
+  #   `label`. A CArray is compared cell by cell, by label: another
+  #   categorical is matched whatever order its labels are in, and a
+  #   masked cell on either side gives UNDEF. Anything else, a Ruby Array
+  #   included, is one label, as for {CArray#eq}. An unknown label matches
+  #   nothing.
+  #   @param label [Object, CArray] category to match, or one per cell.
+  #   @return [CArray]
   def eq(label)
-    codes.eq(@labels.index(label) || @labels.size)
+    codes.eq(codes_of(label))
   end
 
   # @overload ne(label)
   #   Returns the complement of {#eq}.
-  #   @param label [Object] category to compare against.
+  #   @param label [Object, CArray] category to compare against, or one per
+  #     cell.
   #   @return [CArray]
   def ne(label)
-    codes.ne(@labels.index(label) || @labels.size)
+    codes.ne(codes_of(label))
   end
 
   # @overload count(label)
@@ -517,6 +521,24 @@ class CACategorical < CAObject
   # that has none. Every code-to-label path goes through here rather than
   # indexing @labels itself, because two decodes are two chances to disagree,
   # and disagreeing is how #unique came to contradict #to_a on the same cell.
+  # An operand of #eq / #ne as codes of this vocabulary. A value that is not
+  # one of the labels gets labels.size, which no cell holds. A CArray is read
+  # cell by cell, a masked cell staying masked; a categorical goes through its
+  # own codes, so the two vocabularies need not agree. Anything else is one
+  # label, as CArray#eq takes it.
+  def codes_of (other)
+    return @labels.index(other) || @labels.size unless other.is_a?(CArray)
+    if other.is_a?(CACategorical)
+      table = other.labels.map { |l| @labels.index(l) || @labels.size }
+      return CA_INT64(table)[other.codes] unless table.empty?
+    end
+    memo = {}
+    list = other.flatten.to_a.map { |v|
+      UNDEF.equal?(v) ? v : memo.fetch(v) { memo[v] = @labels.index(v) || @labels.size }
+    }
+    CA_INT64(list).reshape(*other.dim)
+  end
+
   # The code a fill value stands for: UNDEF stays UNDEF, a label is its code.
   def code_for_fill (value)
     return UNDEF if UNDEF.equal?(value)
