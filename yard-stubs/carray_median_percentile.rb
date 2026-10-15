@@ -27,7 +27,9 @@ class CArray
   #   `UNDEF` when `fill_value` is `nil`).
   #
   #   With `keep_axis: true`, the reduced axis is retained with
-  #   length 1 rather than dropped.
+  #   length 1 rather than dropped. Along the only axis of a 1-D array
+  #   the result is a bare value, as `sum(axis: 0)` is (a one-cell array
+  #   with `keep_axis: true`).
   #   @param axis [Integer, nil]
   #   @param min_count [Integer] minimum not-masked count required.
   #   @param fill_value [Object, nil] replacement when the not-masked
@@ -47,7 +49,8 @@ class CArray
   #   `p` may be given as individual positional arguments, a single
   #   `Array<Numeric>`, or a single 1-D `CArray`. When the effective
   #   `p` count (after flattening) is 1, the result is unwrapped:
-  #   flat form returns a `Float`, per-axis form returns a `CArray`.
+  #   flat form returns a `Float`, per-axis form returns a `CArray`
+  #   (a bare value along the only axis of a 1-D array, as {#median}).
   #   With 2 or more `p` values the result is an `Array` whose length
   #   matches the number of requested `p` values.
   #
