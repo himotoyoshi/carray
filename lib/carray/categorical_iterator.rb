@@ -315,7 +315,7 @@ class CACategoricalIterator < CASegmentIterator
   # counted from the codes and the value's mask, one group at a time.
   def axis_counts (axis, op)
     h = @value
-    return axis_moments(axis, op)[:count] if h.integer? || h.float?
+    return axis_moments(axis, op)[:count] if kernel_reads?(h.data_type)
     axis = checked_axis(axis, op)
     full_c  = resolve_axis_codes(@cat.codes, h.shape, axis)
     band    = h.shape.dup; band.delete_at(axis)
@@ -349,7 +349,7 @@ class CACategoricalIterator < CASegmentIterator
   # this one thing was the odd choice; a caller who wants a fused kernel's
   # four answers shares them by keeping the result.
   def axis_moments (axis, op)
-    return axis_moments_by_core(axis, op) unless MONOID_TYPES.include?(@value.data_type)
+    return axis_moments_by_core(axis, op) unless kernel_reads?(@value.data_type)
     h = @value
     axis = checked_axis(axis, op)
     band = h.shape.dup; band.delete_at(axis)
@@ -420,7 +420,7 @@ class CACategoricalIterator < CASegmentIterator
   # Axis-aware mean: sums / counts (float64); empty group cells (count=0) MASKED.
   # Matches flat #mean per fiber.
   def axis_mean (axis)
-    return axis_by_core(axis, :mean) unless MONOID_TYPES.include?(@value.data_type)
+    return axis_by_core(axis, :mean) unless kernel_reads?(@value.data_type)
     m   = axis_moments(axis, :mean)
     cnt = m[:count]
     out = m[:sum] / cnt.float64      # count 0 -> NaN
@@ -493,7 +493,9 @@ class CACategoricalIterator < CASegmentIterator
 
   def group_cells (h, axis, c, none)
     codes = @cat.codes
-    if codes.shape == [h.shape[axis]]
+    # Classified along the axis, a group is taken by index; the general way,
+    # masking the rest of a copy, gives the same cells.
+    if codes.shape == [h.shape[axis]] && CArray.__fast_paths_enabled__
       sel = none ? CArray.boolean(codes.elements) { false } : codes.eq(c)
       sel = sel.strip_mask(false) if sel.has_mask?
       idx = [nil] * h.ndim
@@ -611,6 +613,7 @@ class CACategoricalIterator < CASegmentIterator
             "must equal source.shape #{h.shape.inspect}. Wrap 1-D / band-shape " \
             "weights via `.broadcast_to(*source.shape)` before passing."
     end
+    return weighted_by_core(weights, axis) unless kernel_reads?(h.data_type)
     codes_h_shape = resolve_axis_codes(@cat.codes, h.shape, axis)
     weights_f64   = weights.data_type == CA_FLOAT64 ? weights : weights.float64
     band          = h.shape.dup; band.delete_at(axis)
@@ -621,10 +624,25 @@ class CACategoricalIterator < CASegmentIterator
     [ws_out, wm_out]
   end
 
+  # wsum and wmean of each group by the core: the group's cells of the value
+  # and of the weights, each other cell masked, reduced along the axis.
+  def weighted_by_core (weights, axis)
+    h = @value
+    %i[wsum wmean].map do |op|
+      answers = (0...[@k, 1].max).map do |c|
+        group_cells(h, axis, c, @k.zero?)
+          .public_send(op, group_cells(weights, axis, c, @k.zero?), axis: axis)
+      end
+      out = CArray.stack(answers, axis: 0).copy
+      @k.zero? ? out[0...0, *([nil] * (out.ndim - 1))].copy : out
+    end
+  end
+  private :weighted_by_core
+
   # Axis-aware prod: dedicated kernel (identity 1.0, separate from moments to
   # avoid conflating with sum's zero-identity memset).
   def axis_prod (axis)
-    return axis_by_core(axis, :prod) unless MONOID_TYPES.include?(@value.data_type)
+    return axis_by_core(axis, :prod) unless kernel_reads?(@value.data_type)
     h = @value
     axis = checked_axis(axis, :prod)
     codes_h_shape = resolve_axis_codes(@cat.codes, h.shape, axis)

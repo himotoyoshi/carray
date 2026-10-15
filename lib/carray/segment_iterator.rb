@@ -220,7 +220,7 @@ class CASegmentIterator < CAIterator
   #   @return [CArray]
   def percentile (p, axis: nil)
     return axis_order_stat(axis, :percentile, p) if axis
-    unless MONOID_TYPES.include?(grouped.data_type)
+    unless kernel_reads?
       return per_segment(core_reduce_kind(:percentile, p)) { |s| s.percentile(p) }
     end
     out = CArray.float64(@k)
@@ -235,7 +235,7 @@ class CASegmentIterator < CAIterator
   #   MASKED. For a single fraction q in 0..1 use `percentile(q * 100)`.
   #   @return [Array<CArray>]
   def quantile
-    unless MONOID_TYPES.include?(grouped.data_type)
+    unless kernel_reads?
       return CArray.__name_errors_after_method__(:quantile) { [0, 25, 50, 75, 100].map { |p| percentile(p) } }
     end
     outs = Array.new(5) { CArray.float64(@k) }
@@ -278,7 +278,7 @@ class CASegmentIterator < CAIterator
   #   @return [CArray]
   def prod(axis: nil)
     return axis_prod(axis) if axis
-    return per_segment(core_reduce_kind(:prod)) { |s| s.prod } unless MONOID_TYPES.include?(grouped.data_type)
+    return per_segment(core_reduce_kind(:prod)) { |s| s.prod } unless kernel_reads?
     out = CArray.float64(@k)
     grouped.send(:__reduceat_prod__, @offsets, out)
     out
@@ -331,6 +331,7 @@ class CASegmentIterator < CAIterator
   #   @return [CArray]
   def nunique (axis: nil)
     return axis_by_core(axis, :nunique) if axis
+    return per_segment(CA_INT64) { |s| s.nunique } unless CArray.__fast_paths_enabled__
     out = CArray.int64(@k)
     return out if grouped.elements.zero?
     # Each cell's value becomes a code, so a distinct (segment, value) pair is
@@ -464,7 +465,7 @@ class CASegmentIterator < CAIterator
   #   @return [CArray]
   def wsum (weights, axis: nil)
     return axis_wsum_wmean(weights, axis, :wsum)[0] if axis
-    kernel = MONOID_TYPES.include?(grouped.data_type)
+    kernel = kernel_reads?
     wg = scatter_weights(weights, kernel)
     return kernel_weighted(wg)[0] if kernel
     fold_weighted(:wsum, wg, 0.0) { |v, ws| v.wsum(ws) }
@@ -478,7 +479,7 @@ class CASegmentIterator < CAIterator
   #   @return [CArray]
   def wmean (weights, axis: nil)
     return axis_wsum_wmean(weights, axis, :wmean)[1] if axis
-    kernel = MONOID_TYPES.include?(grouped.data_type)
+    kernel = kernel_reads?
     wg = scatter_weights(weights, kernel)
     return kernel_weighted(wg)[1] if kernel
     fold_weighted(:wmean, wg, UNDEF) { |v, ws| v.wmean(ws) }
@@ -744,6 +745,7 @@ class CASegmentIterator < CAIterator
   # cumcount in int64 -- which is not the core's answer for every data type
   # (the core counts a boolean's running sum in uint64).
   def kernel_scans? (op, answer)
+    return false unless CArray.__fast_paths_enabled__
     return false if @value.face? || answer.face? || @value.complex?
     kernel_type =
       case op
@@ -901,7 +903,7 @@ class CASegmentIterator < CAIterator
   # collected segment by segment, as its other reductions are.
   def edge_values (op)
     n = grouped.elements
-    if n.zero? || (@value.face? && ! face_output?)
+    if n.zero? || (@value.face? && ! face_output?) || ! CArray.__fast_paths_enabled__
       return per_segment(core_reduce_kind(op)) { |s| s.public_send(op) }
     end
     slot = CArray.int64(n).seq!
@@ -942,10 +944,19 @@ class CASegmentIterator < CAIterator
   MONOID_TYPES = %i[int8 uint8 int16 uint16 int32 uint32
                     int64 uint64 float32 float64].freeze
 
+  # Whether the C reduceat and scatter kernels read a value of +data_type+:
+  # a numeric one, with the fast paths on.  They are a faster way to the
+  # core's answer for each group; a development build run with
+  # CARRAY_GENERAL_PATH set reduces every group by the core instead, which
+  # is how the two are compared.
+  def kernel_reads? (data_type = grouped.data_type)
+    MONOID_TYPES.include?(data_type) && CArray.__fast_paths_enabled__
+  end
+
   def moments
     return @moments if defined?(@moments)
     @moments =
-      if MONOID_TYPES.include?(grouped.data_type)
+      if kernel_reads?
         dt     = grouped.data_type
         counts = CArray.int64(@k)
         sums   = CArray.float64(@k)
@@ -961,7 +972,7 @@ class CASegmentIterator < CAIterator
   def arg_minmax
     return @arg_minmax if defined?(@arg_minmax)
     @arg_minmax =
-      if MONOID_TYPES.include?(grouped.data_type)
+      if kernel_reads?
         mn = CArray.int64(@k)
         mx = CArray.int64(@k)
         grouped.send(:__reduceat_argminmax__, @offsets, mn, mx)
@@ -975,7 +986,7 @@ class CASegmentIterator < CAIterator
   def all_any
     return @all_any if defined?(@all_any)
     @all_any =
-      if grouped.data_type == CA_BOOLEAN
+      if grouped.data_type == CA_BOOLEAN && CArray.__fast_paths_enabled__
         a = CArray.boolean(@k)
         o = CArray.boolean(@k)
         grouped.send(:__reduceat_all_any__, @offsets, a, o)

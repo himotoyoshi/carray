@@ -364,7 +364,9 @@ class CAGroupIterator
     #   Per-group count of cells equal to `v`.
     #   @return [CArray]
     def count (*args, **kw)
-      return super(**kw) if args.empty?
+      if args.empty?
+        return core_counts?(kw) ? reduce_by_core(:count, kw) : super(**kw)
+      end
       if args.size > 1
         raise ArgumentError, "wrong number of arguments (given #{args.size}, expected 0..1)"
       end
@@ -380,7 +382,7 @@ class CAGroupIterator
     #   @return [CArray]
     def all (**kw)
       boolean_payload!(:all)
-      super(**kw)
+      core_counts?(kw) ? reduce_by_core(:all, kw) : super(**kw)
     end
 
     # @overload any
@@ -388,7 +390,28 @@ class CAGroupIterator
     #   @return [CArray]
     def any (**kw)
       boolean_payload!(:any)
-      super(**kw)
+      core_counts?(kw) ? reduce_by_core(:any, kw) : super(**kw)
+    end
+
+    # @overload count_not_masked
+    #   Per-group count of present (non-masked) cells.
+    #   @return [CArray]
+    def count_not_masked (**kw)
+      core_counts?(kw) ? reduce_by_core(:count_not_masked, kw) : super(**kw)
+    end
+
+    private
+
+    # Whether a count or all / any of each group is taken from the core, as
+    # the other reductions of a payload the engine does not read are. The
+    # engine answers these for every payload; with the fast paths off (a
+    # development build run with CARRAY_GENERAL_PATH set) the core does --
+    # except for a band folded into the count, which has no route but the
+    # engine.
+    def core_counts? (kw)
+      return false if CArray.__fast_paths_enabled__
+      has_group, fused = AxisGroup.parse_axis(kw[:axis])
+      has_group && fused.empty?
     end
   end
   prepend ComposedFolds
@@ -425,8 +448,8 @@ class CAGroupIterator
     unless args.empty?
       raise ArgumentError, "wrong number of arguments (given #{args.size}, expected 0)"
     end
-    has_group, = AxisGroup.parse_axis(kw[:axis])
-    if ! has_group || kernel_reads_value?
+    has_group, fused = AxisGroup.parse_axis(kw[:axis])
+    if ! has_group || kernel_reads_value?(fused)
       yield(**kw)
     else
       reduce_by_core(op, kw)
@@ -836,6 +859,13 @@ class CAGroupIterator
     [ccat, kdims, gslots, bslots, gaxes]
   end
 
+  # With no band axis the group block is the whole value, grouped in one
+  # pass. With the fast paths off it goes through the band loop instead,
+  # which then has one position.
+  def whole_block? (bslots)
+    bslots.empty? && CArray.__fast_paths_enabled__
+  end
+
   # Iterate the band positions of a band-preserving grouping. For each band
   # position it yields the group block grouped by the composite categorical,
   # together with two indices: val_idx (source order -- nil across the group
@@ -889,9 +919,13 @@ class CAGroupIterator
   end
 
   # Whether the scatter kernels read this payload: an integer or a float,
-  # not a Face. They answer there in the core's data types.
-  def kernel_reads_value?
-    ! value.face? && (value.integer? || value.float?)
+  # not a Face. They answer there in the core's data types. With the fast
+  # paths off (a development build run with CARRAY_GENERAL_PATH set) each
+  # group is reduced by the core instead -- except a band folded into the
+  # statistic (+fused+), which has no route but the kernel.
+  def kernel_reads_value? (fused = [])
+    return false if value.face? || ! (value.integer? || value.float?)
+    CArray.__fast_paths_enabled__ || ! fused.empty?
   end
 
   # Whether the scan kernel gives the core's answer: it reads an integer,
@@ -899,6 +933,7 @@ class CAGroupIterator
   # float64 (an object in object), cummax / cummin in the payload's data type
   # and cumcount in int64 -- not the core's answer for a boolean's running sum.
   def kernel_scans? (op)
+    return false unless CArray.__fast_paths_enabled__
     return false if value.face? || value.complex?
     return true if value.object? || op == :cumcount
     core = CAIterator.core_probe(value).public_send(op).data_type
@@ -910,7 +945,7 @@ class CAGroupIterator
   # grouped through the composite categorical, whose scans are the core's.
   def scan_by_core (op, *args, **kw)
     ccat, _kd, gslots, bslots, gaxes = composite_layout
-    return value.group_by_category(ccat).public_send(op, *args, **kw) if bslots.empty?
+    return value.group_by_category(ccat).public_send(op, *args, **kw) if whole_block?(bslots)
     out = nil
     each_band_block(ccat, gslots, bslots, gaxes) do |val_idx, _oi, _co, gi|
       result = gi.public_send(op, *args, **kw)
@@ -981,7 +1016,7 @@ class CAGroupIterator
   def composite_order (op, args)
     ccat, kdims, gslots, bslots, gaxes = composite_layout
     nout = (op == :quantile) ? 5 : 1
-    if bslots.empty?
+    if whole_block?(bslots)
       res = value.group_by_category(ccat).public_send(op, *args)
       return nout == 1 ? res.reshape(*kdims) : res.map { |r| r.reshape(*kdims) }
     end
