@@ -2,6 +2,10 @@
 
 require 'carray_ext'
 
+# Errors name the method the user called: the outermost frame of the library
+# before the user's code, and the library's Ruby frames are the ones here.
+CArray.send(:library_root=, __dir__)
+
 # Top-level CAMath module -- math namespace for CArrays.
 # `CAMath.sin(ca)` works because module functions inherited
 # from Math (via include) accept any object that responds to

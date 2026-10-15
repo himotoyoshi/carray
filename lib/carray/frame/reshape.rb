@@ -122,10 +122,10 @@ class CAFrame
     # attributes, as a group index does.
     key.__send__(:carry_attrs, key.unique(sort: true))
   rescue ArgumentError => e
-    raise unless e.message.start_with?("sort:")
+    why = e.message[/\A[^:]+: (comparison of .+ failed)\z/, 1] or raise
     raise ArgumentError,
           "#{verb}: #{kw}: #{name.inspect} holds values that cannot be put in order " \
-          "(#{e.message.sub(/\Asort: /, "")}); its keys are sorted to make the " \
+          "(#{why}); its keys are sorted to make the " \
           "#{kw == "index" ? "rows" : "columns"}"
   end
 

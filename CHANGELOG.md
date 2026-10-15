@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: an error names the method you called rather than one it calls
+  inside. `value_counts` no longer says `sort_index`, `CA_INT32` and
+  `to_ca` no longer say `guess_array_shape`, and `CArray.int32` and
+  `CArray.new` no longer say `initialize`. The exception classes are
+  unchanged; code that matched the old names in a message needs the new
+  ones.
+
 - Fix: an array of more than `CA_RANK_MAX` (16) axes is refused before it
   is built. A Ruby Array nested 17 deep given to `CA_INT32`, `to_ca` or
   any other conversion crashed the process; `CArray.stack` of 16-axis

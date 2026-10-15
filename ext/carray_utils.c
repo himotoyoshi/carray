@@ -18,6 +18,7 @@
 #include "ruby/st.h"
 #include "ruby/thread_native.h"
 #include "ruby/ractor.h"
+#include "ruby/debug.h"     /* rb_profile_frames: the method the user called */
 
 static ID id_begin, id_end, id_excl_end;
 #define RANGE_BEG(r)  (rb_funcall(r, id_begin, 0))
@@ -574,14 +575,14 @@ ca_answer_restore (VALUE unused)
   return Qnil;
 }
 
+/* A C method that does its work by calling others runs them through here.
+   It used to fix the name at entry; the name is now found from the frames
+   when an error is raised (ca_user_called_method_id), which also reaches
+   the outer method, so nothing is fixed and nothing is paid on the way in. */
 VALUE
 ca_answer_as_caller (VALUE (*body)(VALUE), VALUE arg)
 {
-  if ( ca_answering_name() ) {
-    return body(arg);
-  }
-  ca_set_answering_name(ca_calling_method_name());
-  return rb_ensure(body, arg, ca_answer_restore, Qnil);
+  return body(arg);
 }
 
 /* CArray.__name_errors_after_method__(name) { ... }: the same for a method written in Ruby. */
@@ -601,6 +602,108 @@ rb_ca_s_answer_as (VALUE klass, VALUE name)
   return rb_ensure(rb_ca_s_answer_as_body, Qnil, ca_answer_restore, Qnil);
 }
 
+/* The directory the library's Ruby files are loaded from (lib/), set once
+   by lib/carray.rb as it loads, read only afterwards. */
+static char *ca_library_root = NULL;
+static long  ca_library_root_len = 0;
+
+/* CArray.library_root = dir (private): where the frames of the library's
+   own Ruby methods are.  The first call wins. */
+static VALUE
+rb_ca_s_set_library_root (VALUE klass, VALUE dir)
+{
+  if ( ca_library_root == NULL ) {
+    long  len = RSTRING_LEN(StringValue(dir));
+    char *copy = ALLOC_N(char, len + 1);
+    memcpy(copy, RSTRING_PTR(dir), len);
+    copy[len] = '\0';
+    ca_library_root_len = len;
+    ca_library_root = copy;
+  }
+  return Qnil;
+}
+
+/* Whether a frame without a source file -- a C method -- is one of the
+   library's: a method of a CA* or CScalar class, or a CA_* conversion
+   function.  A method of a core class (Array#map, Integer#times) is not. */
+static int
+ca_frame_is_library_cfunc (VALUE frame, VALUE name)
+{
+  VALUE path = rb_profile_frame_classpath(frame);
+  if ( ! NIL_P(path) ) {
+    const char *p = RSTRING_PTR(path);
+    long        n = RSTRING_LEN(path);
+    if ( ( n >= 2 && strncmp(p, "CA", 2) == 0 )
+         || ( n >= 7 && strncmp(p, "CScalar", 7) == 0 ) ) {
+      return 1;
+    }
+  }
+  return RSTRING_LEN(name) > 3 && strncmp(RSTRING_PTR(name), "CA_", 3) == 0;
+}
+
+/* The method the user called: going out from the innermost frame, the last
+   frame of the library -- a Ruby method under ca_library_root, or one of
+   its C methods -- before the user's own code (a block included) is
+   reached.  A core C method the library calls on the way (Array#map) is
+   passed through.  0 when no frame of the library is found. */
+#define CA_NAMING_FRAMES 64
+
+static ID
+ca_user_called_method_id (void)
+{
+  ID id_initialize = rb_intern("initialize");
+  ID id_new        = rb_intern("new");
+  VALUE frames[CA_NAMING_FRAMES];
+  int   lines[CA_NAMING_FRAMES];
+  int   n, i;
+  ID    found = 0;
+  if ( ca_library_root == NULL ) {
+    return 0;
+  }
+  n = rb_profile_frames(0, CA_NAMING_FRAMES, frames, lines);
+  for (i = 0; i < n; i++) {
+    VALUE file = rb_profile_frame_absolute_path(frames[i]);
+    VALUE name, label;
+    if ( ! NIL_P(file) && strcmp(StringValueCStr(file), "<cfunc>") == 0 ) {
+      name = rb_profile_frame_method_name(frames[i]);
+      if ( NIL_P(name) ) {
+        continue;
+      }
+      if ( ca_frame_is_library_cfunc(frames[i], name) ) {
+        found = rb_to_id(name);
+      }
+      else if ( found == id_initialize && rb_to_id(name) == id_new ) {
+        found = id_new;                       /* Class#new around our initialize */
+      }
+      continue;                               /* a core C method passes */
+    }
+    if ( NIL_P(file)                          /* -e, eval: the user's code */
+         || RSTRING_LEN(file) <= ca_library_root_len
+         || strncmp(RSTRING_PTR(file), ca_library_root, ca_library_root_len) != 0
+         || RSTRING_PTR(file)[ca_library_root_len] != '/' ) {
+      break;
+    }
+    /* A block of the library (an each inside a method, the autoload stub)
+       names nothing: the method around it is further out.  A block whose
+       method is a class body is a method made by define_method, and its
+       frame does not carry the method's name, so the walk gives up and the
+       innermost C method is named, as before the walk. */
+    label = rb_profile_frame_label(frames[i]);
+    if ( ! NIL_P(label) && strncmp(StringValueCStr(label), "block ", 6) == 0 ) {
+      VALUE base = rb_profile_frame_base_label(frames[i]);
+      if ( ! NIL_P(base) && RSTRING_LEN(base) > 0 && RSTRING_PTR(base)[0] == '<' ) {
+        return 0;
+      }
+      continue;
+    }
+    name = rb_profile_frame_method_name(frames[i]);
+    if ( ! NIL_P(name) ) {
+      found = rb_to_id(name);
+    }
+  }
+  return found;
+}
+
 const char *
 ca_calling_method_name (void)
 {
@@ -610,7 +713,10 @@ ca_calling_method_name (void)
   if ( (s = ca_answering_name()) ) {
     return s;
   }
-  id = rb_frame_this_func();
+  id = ca_user_called_method_id();
+  if ( ! id ) {
+    id = rb_frame_this_func();
+  }
   if ( ! id ) {
     return "axis";
   }
@@ -755,11 +861,10 @@ int
 ca_symbol_choice (VALUE v, const char *arg, const char *c0, const char *c1,
                   const char *name)
 {
-  const char *nm = name ? name : ca_calling_method_name();
   ID id;
   if ( ! SYMBOL_P(v) ) {
     rb_raise(rb_eTypeError, "%s: %s must be a Symbol (got %"PRIsVALUE")",
-             nm, arg, rb_obj_class(v));
+             name ? name : ca_calling_method_name(), arg, rb_obj_class(v));
   }
   id = SYM2ID(v);
   if ( id == rb_intern(c0) ) {
@@ -769,7 +874,7 @@ ca_symbol_choice (VALUE v, const char *arg, const char *c0, const char *c1,
     return 1;
   }
   rb_raise(rb_eArgError, "%s: unknown %s :%"PRIsVALUE" (expected :%s or :%s)",
-           nm, arg, rb_id2str(id), c0, c1);
+           name ? name : ca_calling_method_name(), arg, rb_id2str(id), c0, c1);
   return 0;
 }
 
@@ -948,7 +1053,7 @@ rb_ca_normalize_axes (int argc, VALUE *argv, VALUE self)
   const char *name;
 
   rb_scan_args(argc, argv, "11", &raxes, &rname);
-  name = NIL_P(rname) ? ca_calling_method_name() : StringValueCStr(rname);
+  name = NIL_P(rname) ? NULL : StringValueCStr(rname);   /* NULL: looked up on error */
   GetCArray(self, ca);
 
   if ( NIL_P(raxes) ) {
@@ -1289,6 +1394,8 @@ Init_carray_utils (void)
                              rb_ca_s_min_count_need, 3);
   rb_define_singleton_method(rb_cCArray, "__fill_undefined_result_cells__",
                              rb_ca_s_reduce_fill, 2);
+  rb_define_private_method(rb_singleton_class(rb_cCArray), "library_root=",
+                           rb_ca_s_set_library_root, 1);
   rb_define_singleton_method(rb_cCArray, "__name_errors_after_method__",
                              rb_ca_s_answer_as, 1);
 

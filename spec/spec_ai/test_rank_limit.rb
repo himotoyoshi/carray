@@ -32,21 +32,18 @@ class TestRankLimit < Test::Unit::TestCase
     st.signaled? ? "signal #{Signal.signame(st.termsig)}" : out.lines.last.to_s.chomp
   end
 
-  # `name` nil: the entry is a Ruby method over a C one, and the message names
-  # the C one (guess_array_shape, initialize) -- the general naming of such
-  # entries is its own rule, so only the form and the rank are held here.
   def assert_refused (name, n, line)
     m = MESSAGE.match(line.sub(/\AArgumentError: /, ""))
     assert line.start_with?("ArgumentError: "), "#{name}: #{line}"
     assert m, "#{name}: #{line}"
-    assert_equal name, m[:name], line if name
+    assert_equal name, m[:name], line
     assert_equal n, m[:n].to_i, line
   end
 
   def test_a_nested_array_one_level_too_deep
     deep = "v = 1; #{MAX + 1}.times { v = [v] }"
-    assert_refused nil, MAX + 1, child("#{deep}; CA_INT32(v)")
-    assert_refused nil, MAX + 1, child("#{deep}; v.to_ca")
+    assert_refused "CA_INT32", MAX + 1, child("#{deep}; CA_INT32(v)")
+    assert_refused "to_ca", MAX + 1, child("#{deep}; v.to_ca")
     assert_equal "ok", child("v = 1; #{MAX}.times { v = [v] }; raise unless CA_INT32(v).ndim == #{MAX}")
   end
 
@@ -63,14 +60,14 @@ class TestRankLimit < Test::Unit::TestCase
     a9  = CArray.int32(*[1] * 9)
     a1  = CA_INT32([1])
     {
-      nil               => [MAX + 1, -> { CArray.int32(*[1] * (MAX + 1)) }],
+      "int32"           => [MAX + 1, -> { CArray.int32(*[1] * (MAX + 1)) }],
       "reshape"         => [MAX + 1, -> { a1.reshape(*[1] * (MAX + 1)) }],
       "insert_axis"     => [MAX + 1, -> { a16.insert_axis(0) }],
       "broadcast_to"    => [MAX + 1, -> { a1.broadcast_to(*[1] * (MAX + 1)) }],
       "sliding_windows" => [18,      -> { a9.sliding_windows(*[1] * 9) }],
       "block_view"      => [18,      -> { a9.block_view(*[1] * 9) }],
     }.each do |name, (n, call)|
-      e = assert_raise(ArgumentError, name.to_s) { call.() }
+      e = assert_raise(ArgumentError, name) { call.() }
       assert_refused name, n, "ArgumentError: #{e.message}"
     end
   end

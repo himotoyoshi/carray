@@ -596,6 +596,10 @@ rb_ca_new_reduced (VALUE self, int8_t *slab_axes, int8_t naxes, int32_t data_typ
    variadic entry (rb_ca_parse_reduce_axes) and the kwarg entry
    (rb_ca_parse_reduce_axes_kw).  ctx names the method in error messages;
    the two public entries pass the method the user called. */
+/* ctx NULL names the method the user called, looked up only when a
+   message is built: the lookup walks the frames. */
+#define CA_CTX_NAME(ctx) ( (ctx) ? (ctx) : ca_calling_method_name() )
+
 static int8_t
 parse_axes_items (const VALUE *items, int count, CArray *ca,
                   int8_t *out_axes, const char *ctx)
@@ -604,17 +608,17 @@ parse_axes_items (const VALUE *items, int count, CArray *ca,
   int8_t seen[CA_RANK_MAX];
 
   if ( count <= 0 ) {
-    rb_raise(rb_eArgError, "%s: empty axes array", ctx);
+    rb_raise(rb_eArgError, "%s: empty axes array", CA_CTX_NAME(ctx));
   }
   if ( count > CA_RANK_MAX ) {   /* rank-check: a list of axes, no longer than the rank */
     rb_raise(rb_eArgError,
              "%s: too many axes (%d > CA_RANK_MAX=%d)",
-             ctx, count, CA_RANK_MAX);
+             CA_CTX_NAME(ctx), count, CA_RANK_MAX);
   }
   if ( count > ca->ndim ) {
     rb_raise(rb_eArgError,
              "%s: too many axes (%d > ndim=%d)",
-             ctx, count, (int) ca->ndim);
+             CA_CTX_NAME(ctx), count, (int) ca->ndim);
   }
 
   for ( i = 0; i < CA_RANK_MAX; i++ ) seen[i] = 0;
@@ -622,7 +626,7 @@ parse_axes_items (const VALUE *items, int count, CArray *ca,
     ca_size_t a = ca_normalize_axis_arg(items[i], (int) ca->ndim, ctx);
     if ( seen[a] ) {
       rb_raise(rb_eArgError,
-               "%s: duplicate axis %ld", ctx, (long) a);
+               "%s: duplicate axis %ld", CA_CTX_NAME(ctx), (long) a);
     }
     seen[a] = 1;
     out_axes[i] = (int8_t) a;
@@ -655,8 +659,7 @@ rb_ca_parse_reduce_axes (int argc, VALUE *argv, CArray *ca, int8_t *out_axes)
     items = (const VALUE *) RARRAY_CONST_PTR(arr);
   }
 
-  return parse_axes_items(items, count, ca, out_axes,
-                          ca_calling_method_name());
+  return parse_axes_items(items, count, ca, out_axes, NULL);
 }
 
 /* Kwarg form of rb_ca_parse_reduce_axes — accepts the `axis:` value as
@@ -697,14 +700,13 @@ rb_ca_parse_reduce_axes_kw_ctx (VALUE axis_val, CArray *ca, int8_t *out_axes,
   rb_raise(rb_eTypeError,
            "%s: axis must be nil, an Integer or an Array of Integer "
            "(got %"PRIsVALUE")",
-           ctx, rb_obj_class(axis_val));
+           CA_CTX_NAME(ctx), rb_obj_class(axis_val));
 }
 
 int8_t
 rb_ca_parse_reduce_axes_kw (VALUE axis_val, CArray *ca, int8_t *out_axes)
 {
-  return rb_ca_parse_reduce_axes_kw_ctx(axis_val, ca, out_axes,
-                                        ca_calling_method_name());
+  return rb_ca_parse_reduce_axes_kw_ctx(axis_val, ca, out_axes, NULL);
 }
 
 /* ------------------------------------------------------------------- */
