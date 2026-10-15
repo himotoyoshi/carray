@@ -78,7 +78,7 @@ ca_slab_parse_axes (ca_slab_iter_state_t *st, VALUE axis_arg, int8_t src_ndim)
   }
 
   n = (int) RARRAY_LEN(arr);
-  if ( n < 1 || n > CA_RANK_MAX ) {
+  if ( n < 1 || n > CA_RANK_MAX ) {   /* rank-check: a list of axes, no longer than the rank */
     rb_raise(rb_eArgError,
              "%s: axis count %d out of range [1..%d]",
              ca_calling_method_name(), n, CA_RANK_MAX);

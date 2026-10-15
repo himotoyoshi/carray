@@ -787,7 +787,7 @@ ca_index_axis_key (VALUE arg, ca_size_t dim, int axis,
   int is_grid = 0;
 
   ca_classifier_sym_cache_init();
-  if ( axis < 0 || axis >= CA_RANK_MAX ) {
+  if ( axis < 0 || axis >= CA_RANK_MAX ) {   /* rank-check: an axis number, not a rank */
     rb_raise(rb_eArgError, "axis %d is out of range", axis);
   }
   dims[axis]   = dim;
@@ -1087,7 +1087,7 @@ rb_ca_s_scan_index_v2 (VALUE self, VALUE rdim, VALUE ridx)
     elements *= dim[i];
   }
 
-  CA_CHECK_RANK(ndim);
+  CA_CHECK_RANK_GIVEN(ndim);
   CA_CHECK_DIM(ndim, dim);
 
   info.range_check = 1;

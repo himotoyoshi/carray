@@ -352,7 +352,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   /* --- bundles: small per-group code tables (metadata, kept alive) --- */
   Check_Type(vbundles, T_ARRAY);
   int  n_bundles = (int) RARRAY_LEN(vbundles);
-  if ( n_bundles <= 0 || n_bundles > CA_RANK_MAX ) {
+  if ( n_bundles <= 0 || n_bundles > CA_RANK_MAX ) {   /* rank-check: a count of key bundles */
     rb_raise(rb_eArgError, "axis_group_reduce: bad bundle count %d", n_bundles);
   }
   int32_t  *bundle_codes[CA_RANK_MAX];
@@ -1187,7 +1187,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   /* --- bundles: small per-group code tables (same as reduce) --- */
   Check_Type(vbundles, T_ARRAY);
   int  n_bundles = (int) RARRAY_LEN(vbundles);
-  if ( n_bundles <= 0 || n_bundles > CA_RANK_MAX ) {
+  if ( n_bundles <= 0 || n_bundles > CA_RANK_MAX ) {   /* rank-check: a count of key bundles */
     rb_raise(rb_eArgError, "axis_group_scan: bad bundle count %d", n_bundles);
   }
   int32_t  *bundle_codes[CA_RANK_MAX];

@@ -135,6 +135,7 @@ ca_stack_setup_with_axis (CAStack *ca, int32_t n_parents, CArray **parents,
       seen[i] = ca_is_face(parents[i]) ? CAVIEW(parents[i])->parent : parents[i];
     }
     ca_stack_check_uniform(n_parents, seen);
+    ca_check_rank_fits(seen[0]->ndim + 1, NULL);
     if ( k_axis < 0 || k_axis > seen[0]->ndim ) {
       rb_raise(rb_eArgError,
                "CAStack k_axis %d out of range [0, %d]",
@@ -160,6 +161,7 @@ ca_stack_setup_with_axis (CAStack *ca, int32_t n_parents, CArray **parents,
   ca_stack_check_uniform(n_parents, parents);
   ref = parents[0];
 
+  ca_check_rank_fits(ref->ndim + 1, NULL);
   if ( k_axis < 0 || k_axis > ref->ndim ) {
     rb_raise(rb_eArgError,
              "CAStack k_axis %d out of range [0, %d]",

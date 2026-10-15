@@ -1013,6 +1013,7 @@ ca_mv_holder_read_geometry (ca_mv_imported_holder_t *h, ssize_t item_size,
   ssize_t expect, need;
   int8_t k;
 
+  /* rank-check: a producer's rank, named by which MemoryView it is */
   if ( v->ndim < 0 || v->ndim > CA_RANK_MAX ) {
     rb_raise(rb_eArgError, "%sMemoryView ndim (%ld) exceeds CArray CA_RANK_MAX (%d)",
              who, (long) v->ndim, CA_RANK_MAX);

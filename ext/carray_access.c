@@ -229,9 +229,7 @@ static void
 ary_guess_shape (VALUE ary, int level, int *max_level, ca_size_t *dim)
 {
   volatile VALUE ary0;
-  if ( level > CA_RANK_MAX ) {
-    rb_raise(rb_eArgError, "too deep level array for conversion to carray");
-  }
+  ca_check_rank_fits(level + 1, NULL);
 
   if ( TYPE(ary) == T_ARRAY ) {
     if ( RARRAY_LEN(ary) == 0 && level == 0 ) {
@@ -1345,7 +1343,7 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
                "newaxis (:_) cannot be combined with :>, :%%, "
                "or rubber dim (false / :~)");
     }
-    if ( nclean >= CA_RANK_MAX ) {
+    if ( nclean >= CA_RANK_MAX ) {   /* rank-check: a count of indices */
       rb_raise(rb_eIndexError, "too many indices");
     }
     clean[nclean++] = a;
@@ -1411,7 +1409,7 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
         take += extra;
       }
       for (t = 0; t < take; t++) {
-        if ( base_cursor >= cb->ndim || nfinal >= CA_RANK_MAX ) {
+        if ( base_cursor >= cb->ndim || nfinal >= CA_RANK_MAX ) {   /* rank-check: a count of indices */
           base_cursor = -1;
           break;
         }
@@ -1514,7 +1512,7 @@ rb_ca_fetch_slab_sigil (int argc, VALUE *argv, VALUE self)
     eargv = expanded;
   }
 
-  if ( eargc > CA_RANK_MAX ) {
+  if ( eargc > CA_RANK_MAX ) {   /* rank-check: a count of indices */
     rb_raise(rb_eIndexError, "too many indices");
   }
 
@@ -1892,7 +1890,7 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   Check_Type(ridx, T_ARRAY);
 
   ndim = (int) RARRAY_LEN(rdim);
-  CA_CHECK_RANK(ndim);
+  CA_CHECK_RANK_GIVEN(ndim);
   for (i=0; i<ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
   }
@@ -2065,10 +2063,11 @@ parse_shape_kwarg (VALUE rshape, int *out_ndim, ca_size_t *dim,
 
   Check_Type(rshape, T_ARRAY);
   ndim = (int) RARRAY_LEN(rshape);
-  if ( ndim < 1 || ndim > CA_RANK_MAX ) {
+  if ( ndim < 1 ) {
     rb_raise(rb_eArgError, "invalid shape ndim %d (must be 1..%d)",
              ndim, CA_RANK_MAX);
   }
+  ca_check_rank_fits(ndim, NULL);
   for (i = 0; i < ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rshape, i));
     if ( dim[i] < 0 ) {

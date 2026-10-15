@@ -30,6 +30,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_check_rank_fits */
 #include "ca_obj_face.h"  /* CA_WRAPPER_LIFT */
 
 NORETURN(static void ca_broadcast_refuse_write (VALUE dst, VALUE src));
@@ -299,9 +300,7 @@ rb_ca_broadcast_to (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, cs);
 
-  if (argc < 0 || argc > CA_RANK_MAX) {
-    rb_raise(rb_eArgError, "broadcast_to: invalid number of dims (%d)", argc);
-  }
+  ca_check_rank_fits(argc, "broadcast_to");
   target_ndim = (int8_t) argc;
 
   if (target_ndim < cs->ndim) {

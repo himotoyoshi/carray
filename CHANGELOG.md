@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: an array of more than `CA_RANK_MAX` (16) axes is refused before it
+  is built. A Ruby Array nested 17 deep given to `CA_INT32`, `to_ca` or
+  any other conversion crashed the process; `CArray.stack` of 16-axis
+  arrays built a 17-axis array that crashed on an index or `inspect`.
+  Both raise `ArgumentError`. Every refusal of a rank above the limit
+  now reads "<method>: ndim <n> exceeds CA_RANK_MAX 16".
+
 - Fix: an axis is out of range whatever the width of the Integer given.
   `cumsum`, `sort_addr`, `bsearch`, `insert_axis` and the slab iterators
   took an axis past 32 bits, such as `2**32 + 1`, as a small one and

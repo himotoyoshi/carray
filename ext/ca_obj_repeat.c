@@ -39,9 +39,7 @@ ca_repeat_setup (CAStride *ca, CArray *parent, int8_t ndim, ca_size_t *count)
   int8_t data_ndim = 0;
   int8_t i, j;
 
-  if ( ndim < 0 || ndim > CA_RANK_MAX ) {
-    rb_raise(rb_eArgError, "invalid ndim %d", (int) ndim);
-  }
+  ca_check_rank_fits(ndim, NULL);
   for (i = 0; i < ndim; i++) {
     if (count[i] < 0) {
       rb_raise(rb_eArgError,
@@ -220,9 +218,7 @@ rb_ca_repeat (int argc, VALUE *argv, VALUE self)
     return rb_ca_repeat((int)RARRAY_LEN(args), (VALUE *)RARRAY_CONST_PTR(args), self);
   }
 
-  if ( argc > CA_RANK_MAX ) {         /* count[] and dim[] hold CA_RANK_MAX */
-    rb_raise(rb_eArgError, "invalid ndim %d", argc);
-  }
+  ca_check_rank_fits(argc, NULL);     /* count[] and dim[] hold CA_RANK_MAX */
 
   repeat = 1;
   for (i=0; i<argc; i++) {

@@ -853,6 +853,20 @@ rb_ca_normalize_axis_for_ndim (long raw, int ndim, const char *name)
   return (int) axis;
 }
 
+/* An array has at most CA_RANK_MAX axes, and every dim[] and strides[]
+   array in the library is that long.  A constructor or view whose result
+   would have more -- a shape given, a rank computed -- calls this before it
+   writes a single dim, and is refused with ArgumentError naming the method,
+   the rank and the limit.  `name` NULL names the method the user called. */
+void
+ca_check_rank_fits (long ndim, const char *name)
+{
+  if ( ndim > CA_RANK_MAX ) {
+    rb_raise(rb_eArgError, "%s: ndim %ld exceeds CA_RANK_MAX %d",
+             name ? name : ca_calling_method_name(), ndim, CA_RANK_MAX);
+  }
+}
+
 /* The axis an `axis` argument names among `ndim` axes: the one rule every
    entry that takes an axis from Ruby keeps.  An Integer, negative counting
    from the end; anything else raises TypeError, and an Integer outside
@@ -862,6 +876,7 @@ rb_ca_normalize_axis_for_ndim (long raw, int ndim, const char *name)
 int
 ca_normalize_axis_arg (VALUE raxis, int ndim, const char *name)
 {
+  ca_check_rank_fits(ndim, name);   /* no array has the axes to name */
   if ( RB_INTEGER_TYPE_P(raxis) && ! RB_FIXNUM_P(raxis) ) {
     rb_raise(rb_eArgError,
              "%s: axis %"PRIsVALUE" out of range for ndim %d",

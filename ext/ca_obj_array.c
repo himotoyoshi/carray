@@ -149,7 +149,7 @@ carray_setup_i (CArray *ca,
 
   /* check arguments */
   CA_CHECK_DATA_TYPE(data_type);
-  CA_CHECK_RANK(ndim);
+  CA_CHECK_RANK_GIVEN(ndim);
   CA_CHECK_DIM(ndim, dim);
   CA_CHECK_BYTES(data_type, bytes);
 
@@ -905,7 +905,7 @@ ca_scan_construct_args (int argc, VALUE *argv, int8_t *data_type,
   rb_ca_guess_type_and_bytes(rtype, rbytes, data_type, bytes);
 
   Check_Type(rdim, T_ARRAY);
-  CA_CHECK_RANK(RARRAY_LEN(rdim));     /* before dim[] is filled */
+  CA_CHECK_RANK_GIVEN(RARRAY_LEN(rdim));     /* before dim[] is filled */
   *ndim = RARRAY_LEN(rdim);
   for (i=0; i<*ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
@@ -1303,7 +1303,7 @@ rb_ca_s_wrap (int argc, VALUE *argv, VALUE self)
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
 
   Check_Type(rdim, T_ARRAY);
-  CA_CHECK_RANK(RARRAY_LEN(rdim));     /* before dim[] is filled */
+  CA_CHECK_RANK_GIVEN(RARRAY_LEN(rdim));     /* before dim[] is filled */
   ndim = RARRAY_LEN(rdim);
   for (i=0; i<ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
@@ -1609,7 +1609,7 @@ rb_ca_s_alloc_uninit (VALUE klass, VALUE rtype, VALUE rshape)
   int8_t i;
   rb_ca_guess_type_and_bytes(rtype, Qnil, &data_type, &bytes);
   Check_Type(rshape, T_ARRAY);
-  CA_CHECK_RANK(RARRAY_LEN(rshape));   /* before dim[] is filled */
+  CA_CHECK_RANK_GIVEN(RARRAY_LEN(rshape));   /* before dim[] is filled */
   ndim = (int8_t) RARRAY_LEN(rshape);
   for (i = 0; i < ndim; i++) dim[i] = NUM2SIZE(rb_ary_entry(rshape, i));
   return rb_carray_new(data_type, ndim, dim, bytes, NULL);

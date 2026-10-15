@@ -730,7 +730,7 @@ ca_object_setup (CAObject *ca,
   /* check arguments */
 
   CA_CHECK_DATA_TYPE(data_type);
-  CA_CHECK_RANK(ndim);
+  CA_CHECK_RANK_GIVEN(ndim);
   CA_CHECK_DIM(ndim, dim);
   CA_CHECK_BYTES(data_type, bytes);
 
@@ -1656,7 +1656,7 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
   }
 
   Check_Type(rdim, T_ARRAY);
-  CA_CHECK_RANK(RARRAY_LEN(rdim));     /* before dim[] is filled */
+  CA_CHECK_RANK_GIVEN(RARRAY_LEN(rdim));     /* before dim[] is filled */
 
   ndim = RARRAY_LEN(rdim);
   for (i=0; i<ndim; i++) {

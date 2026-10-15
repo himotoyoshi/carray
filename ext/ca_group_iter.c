@@ -21,6 +21,7 @@
 --------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_check_rank_fits */
 
 /* lib/carray/axis_group.rb registers these classes here on first load (and
    loading is wired so that load happens as soon as any categorical exists —
@@ -175,9 +176,7 @@ group_iter_shape_output (VALUE result, VALUE group_dims, VALUE perm, VALUE squee
   ng    = RARRAY_LEN(group_dims);
   nband = cr->ndim - 1;
   nd    = ng + nband;
-  if ( nd > CA_RANK_MAX ) {
-    rb_raise(rb_eArgError, "axis_group: output ndim %ld too large", nd);
-  }
+  ca_check_rank_fits(nd, "axis_group");
   for ( i = 0; i < ng; i++ ) {
     dims[i] = RARRAY_AREF(group_dims, i);
   }

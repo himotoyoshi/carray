@@ -75,7 +75,7 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   int8_t i;
 
   CA_CHECK_DATA_TYPE(data_type);
-  CA_CHECK_RANK(ndim);
+  CA_CHECK_RANK_GIVEN(ndim);
   CA_CHECK_DIM(ndim, dim);
   CA_CHECK_BYTES(data_type, bytes);
 
@@ -489,7 +489,7 @@ rb_ca_refer_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
       }
     }
     Check_Type(rdim, T_ARRAY);
-    CA_CHECK_RANK(RARRAY_LEN(rdim));   /* before dim[] is filled */
+    CA_CHECK_RANK_GIVEN(RARRAY_LEN(rdim));   /* before dim[] is filled */
     ndim = RARRAY_LEN(rdim);
     for (i = 0; i < ndim; i++) dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
     if (! NIL_P(roffset)) offset = NUM2SIZE(roffset);
@@ -611,9 +611,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  if (argc < 0 || argc > CA_RANK_MAX) {
-    rb_raise(rb_eArgError, "reshape: invalid number of dims (%d)", argc);
-  }
+  ca_check_rank_fits(argc, "reshape");
 
   /* Locate the (at most one) auto-infer placeholder.  `-1` is the
      conventional spelling; `:~` is the unified auto-fill sigil
@@ -796,11 +794,7 @@ rb_ca_insert_axis (int argc, VALUE *argv, VALUE self)
 
   ndim     = (int) ca->ndim;
   new_ndim = ndim + argc;
-  if (new_ndim > CA_RANK_MAX) {
-    rb_raise(rb_eArgError,
-             "insert_axis: resulting ndim %d exceeds CA_RANK_MAX %d",
-             new_ndim, CA_RANK_MAX);
-  }
+  ca_check_rank_fits(new_ndim, "insert_axis");
 
   ngap = ndim + 1;   /* gaps live in [0, ndim] (ndim = the end gap) */
 

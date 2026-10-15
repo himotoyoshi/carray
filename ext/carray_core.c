@@ -606,7 +606,7 @@ parse_axes_items (const VALUE *items, int count, CArray *ca,
   if ( count <= 0 ) {
     rb_raise(rb_eArgError, "%s: empty axes array", ctx);
   }
-  if ( count > CA_RANK_MAX ) {
+  if ( count > CA_RANK_MAX ) {   /* rank-check: a list of axes, no longer than the rank */
     rb_raise(rb_eArgError,
              "%s: too many axes (%d > CA_RANK_MAX=%d)",
              ctx, count, CA_RANK_MAX);

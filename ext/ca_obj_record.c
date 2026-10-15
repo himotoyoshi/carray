@@ -276,9 +276,7 @@ rb_ca_record_s_new (int argc, VALUE *argv, VALUE klass)
     shape_offset = 1;
   }
   ndim = argc - shape_offset;
-  if ( ndim < 0 || ndim > CA_RANK_MAX ) {
-    rb_raise(rb_eArgError, "invalid number of shape arguments (%d)", ndim);
-  }
+  ca_check_rank_fits(ndim, NULL);
   for ( i = 0; i < ndim; i++ ) {
     dim[i] = NUM2SIZE(argv[shape_offset + i]);
   }

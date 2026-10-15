@@ -390,6 +390,19 @@ int         ca_bincmp_integer_prepare (volatile VALUE *self, volatile VALUE *oth
                                        int op_id, int *signed_side);
 int         ca_bincmp_answer_when_negative (int op_id, int signed_side);
 long        ca_axis_integer (VALUE raxis, const char *name);
+/* Refuse a rank above CA_RANK_MAX before any dim is written (carray_utils.c). */
+void        ca_check_rank_fits (long ndim, const char *name);
+/* CA_CHECK_RANK inside the library: no axes at all is no shape, and above
+   CA_RANK_MAX goes to the part, which names the method.  The public macro
+   stays as it is for extensions. */
+#define CA_CHECK_RANK_GIVEN(ndim) \
+  do { \
+    long ca_nd_ = (long) (ndim); \
+    if ( ca_nd_ <= 0 ) { \
+      rb_raise(rb_eArgError, "invalid ndim"); \
+    } \
+    ca_check_rank_fits(ca_nd_, NULL); \
+  } while (0)
 /* An `axis` argument as an axis in [0, ndim): the rule every entry taking
    an axis from Ruby calls (carray_utils.c). */
 int         ca_normalize_axis_arg (VALUE raxis, int ndim, const char *name);

@@ -102,9 +102,7 @@ ca_stride_setup_view (CAStride *ca, int8_t obj_type, CArray *parent,
   ca_size_t elements;
   int  i;
 
-  if (ndim < 0 || ndim > CA_RANK_MAX) {
-    rb_raise(rb_eArgError, "invalid ndim %d", (int) ndim);
-  }
+  ca_check_rank_fits(ndim, NULL);
   for (i = 0; i < ndim; i++) {
     if (dim[i] < 0) {
       rb_raise(rb_eIndexError,
@@ -2160,9 +2158,10 @@ rb_ca_as_strided (int argc, VALUE *argv, VALUE self)
              "shape (%ld) and strides (%ld) length mismatch",
              len, RARRAY_LEN(rstrides));
   }
-  if (len <= 0 || len > CA_RANK_MAX) {
+  if (len <= 0) {
     rb_raise(rb_eArgError, "invalid ndim %ld", len);
   }
+  ca_check_rank_fits(len, NULL);
   ndim = (int8_t) len;
   for (i = 0; i < len; i++) {
     shape[i]   = NUM2SIZE(RARRAY_AREF(rshape,   i));
@@ -2200,11 +2199,7 @@ rb_ca_sliding_windows (int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, parent);
 
   ndim = parent->ndim;
-  if (2 * (int) ndim > CA_RANK_MAX) {
-    rb_raise(rb_eArgError,
-             "sliding_windows: result rank %d exceeds CA_RANK_MAX (%d)",
-             2 * (int) ndim, CA_RANK_MAX);
-  }
+  ca_check_rank_fits(2 * (long) ndim, "sliding_windows");
 
   rb_scan_args(argc, argv, "*:", (VALUE *) &rposary, (VALUE *) &ropt);
   if (! NIL_P(ropt)) {
@@ -2348,11 +2343,7 @@ rb_ca_unfold (int argc, VALUE *argv, VALUE self)
 
   ntrail = ndim - nspatial;
   outrank = (int) ndim + (int) nspatial;
-  if (outrank > CA_RANK_MAX) {
-    rb_raise(rb_eArgError,
-             "unfold: result rank %d exceeds CA_RANK_MAX (%d)",
-             outrank, CA_RANK_MAX);
-  }
+  ca_check_rank_fits(outrank, "unfold");
 
   if (NIL_P(rstep)) {
     for (i = 0; i < nspatial; i++) step[i] = 1;
@@ -2436,11 +2427,7 @@ rb_ca_block_view (int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, parent);
 
   ndim = parent->ndim;
-  if (2 * (int) ndim > CA_RANK_MAX) {
-    rb_raise(rb_eArgError,
-             "block_view: result rank %d exceeds CA_RANK_MAX (%d)",
-             2 * (int) ndim, CA_RANK_MAX);
-  }
+  ca_check_rank_fits(2 * (long) ndim, "block_view");
 
   rb_scan_args(argc, argv, "*:", (VALUE *) &rposary, (VALUE *) &ropt);
   rb_reject_options(ropt);

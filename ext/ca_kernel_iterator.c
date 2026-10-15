@@ -3408,7 +3408,7 @@ rb_t1_smoke_sum_axes_f64 (int argc, VALUE *argv, VALUE klass)
     rb_raise(rb_eTypeError, "t1_smoke_sum_axes_f64 expects a float64 source");
   }
   naxes = (int8_t) (argc - 1);
-  if ( naxes > CA_RANK_MAX ) {
+  if ( naxes > CA_RANK_MAX ) {   /* rank-check: a list of axes, each checked by the engine */
     rb_raise(rb_eArgError, "too many axes");
   }
   for ( i = 0; i < naxes; i++ ) {
@@ -3521,7 +3521,7 @@ rb_t1_test_new_reduced (int argc, VALUE *argv, VALUE klass)
      rb_ca_guess_type. */
   data_type = (int32_t) rb_ca_guess_type(argv[1]);
   naxes = (int8_t) (argc - 2);
-  if ( naxes > CA_RANK_MAX ) {
+  if ( naxes > CA_RANK_MAX ) {   /* rank-check: a list of axes, each checked by the engine */
     rb_raise(rb_eArgError, "too many axes");
   }
   for ( int i = 0; i < naxes; i++ ) {
