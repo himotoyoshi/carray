@@ -45,15 +45,10 @@ class CAKeyWindowIterator < CAIterator
   def initialize (value, on:, before: nil, after: nil, exclude: :lower,
                   by: nil, interval: nil)
     @value = value
-    unless value.ndim == 1
+    unless on.is_a?(CArray) && on.ndim == 1 && on.elements == value.dim0
       raise ArgumentError,
-            "windows: the value has shape #{value.shape.inspect}; " \
-            "windows on a key take one value per row"
-    end
-    unless on.is_a?(CArray) && on.ndim == 1 && on.elements == value.elements
-      raise ArgumentError,
-            "windows: on: is a CArray of one key per value " \
-            "(#{value.elements} values)"
+            "windows: on: is a CArray of one key per row " \
+            "(#{value.dim0} rows)"
     end
     unless EXCLUDE.include?(exclude)
       raise ArgumentError,
@@ -64,7 +59,7 @@ class CAKeyWindowIterator < CAIterator
       raise ArgumentError, "windows: give before:, after: or both"
     end
     @key      = on
-    @n        = value.elements
+    @n        = value.dim0
     @ndim     = 1
     @shape    = [@n]
     @interval = interval
@@ -103,21 +98,20 @@ class CAKeyWindowIterator < CAIterator
     @offsets = CArray.int64(m + 1)
     @offsets[0] = 0
     @offsets[1..-1] = starts + counts if m > 0
-    @segments = CASegmentIterator.new(value.project(@src_addr), offsets: @offsets)
+    @segments = segments_of(value)
   end
 
-  # The same windows over another value with one entry per row (a CAFrame
+  # The same windows over another value with one row per key (a CAFrame
   # column): the sorting and the window bounds are not computed again.
   def for_value (value) # :nodoc:
-    unless value.ndim == 1 && value.elements == @n
+    unless value.dim0 == @n
       raise ArgumentError,
             "windows: the value has shape #{value.shape.inspect}; " \
-            "windows on a key take one value per row (#{@n} rows)"
+            "windows on a key take one row per key (#{@n} rows)"
     end
     other = dup
     other.instance_variable_set(:@value, value)
-    other.instance_variable_set(:@segments,
-                                CASegmentIterator.new(value.project(@src_addr), offsets: @offsets))
+    other.instance_variable_set(:@segments, segments_of(value))
     other
   end
 
@@ -208,62 +202,68 @@ class CAKeyWindowIterator < CAIterator
                :min_index, :max_index], :segments_in_rows)
 
   private def segments_in_rows (op, *args, **kw)
-    in_rows(@segments.public_send(op, *args, **kw))
+    over_columns { |seg| in_rows(seg.public_send(op, *args, **kw)) }
   end
 
   # @overload percentile(p)
   #   Returns each window's p-th percentile.
   #   @return [CArray, Array<CArray>]
   def percentile (p, **kw)
-    in_rows(@segments.percentile(p, **kw))
+    over_columns { |seg| in_rows(seg.percentile(p, **kw)) }
   end
 
   # @overload quantile
   #   Returns each window's five-number summary `[min, Q1, median, Q3, max]`.
   #   @return [Array<CArray>]
   def quantile (**kw)
-    in_rows(@segments.quantile(**kw))
+    over_columns { |seg| in_rows(seg.quantile(**kw)) }
   end
 
   # @overload minmax
   #   Returns `[min, max]` of each window.
   #   @return [Array(CArray, CArray)]
   def minmax (**kw)
-    in_rows(@segments.minmax(**kw))
+    over_columns { |seg| in_rows(seg.minmax(**kw)) }
   end
 
   # @overload wsum(weights)
   #   Returns each window's weighted sum; `weights` is shaped like the value.
   #   @return [CArray]
   def wsum (weights, **kw)
-    in_rows(@segments.wsum(cells_of(weights), **kw))
+    over_columns { |seg, j| in_rows(seg.wsum(cells_of(weights, j), **kw)) }
   end
 
   # @overload wmean(weights)
   #   Returns each window's weighted mean.
   #   @return [CArray]
   def wmean (weights, **kw)
-    in_rows(@segments.wmean(cells_of(weights), **kw))
+    over_columns { |seg, j| in_rows(seg.wmean(cells_of(weights, j), **kw)) }
   end
 
   # @overload min_addr(min_count: nil, fill_value: nil)
   #   Returns the row of each window's minimum (int64).
   #   @return [CArray]
   def min_addr (fill_value: nil, **kw)
-    winner_row(@segments.min_addr(**kw), fill_value)
+    over_columns { |seg| winner_row(seg.min_addr(**kw), fill_value) }
   end
 
   # @overload max_addr(min_count: nil, fill_value: nil)
   #   Returns the row of each window's maximum (int64).
   #   @return [CArray]
   def max_addr (fill_value: nil, **kw)
-    winner_row(@segments.max_addr(**kw), fill_value)
+    over_columns { |seg| winner_row(seg.max_addr(**kw), fill_value) }
   end
 
   # @overload reduce(*args, data_type: nil) { |piece| ... }
   #   Folds each window with the block, as {CASegmentIterator#reduce}.
   #   @return [CArray]
   def reduce (*args, **kw, &block)
+    if @segments.is_a?(Array)
+      raise NotImplementedError,
+            "reduce: windows over a value of several columns (shape " \
+            "#{@value.shape.inspect}) have no block fold; reduce a column " \
+            "at a time (value[nil, j])"
+    end
     in_rows(@segments.reduce(*args, **kw, &block))
   end
 
@@ -274,8 +274,16 @@ class CAKeyWindowIterator < CAIterator
   def each
     return to_enum(:each) unless block_given?
     pieces = []
-    @segments.each { |piece| pieces << piece }
-    empty = @value[0...0]
+    if @segments.is_a?(Array)
+      rest = [nil] * (@value.ndim - 1)
+      (@offsets.elements - 1).times do |p|
+        rows = @src_addr[@offsets[p]...@offsets[p + 1]]
+        pieces << @value[rows, *rest]
+      end
+    else
+      @segments.each { |piece| pieces << piece }
+    end
+    empty = @value[0...0, *[nil] * (@value.ndim - 1)]
     @n.times do |r|
       p = @position[r]
       yield(UNDEF.equal?(p) ? empty : pieces[p])
@@ -310,10 +318,57 @@ class CAKeyWindowIterator < CAIterator
     out
   end
 
-  # A weights array taken through the same cells as the value.
-  def cells_of (weights)
-    return weights unless weights.is_a?(CArray) && weights.elements == @n
+  # A weights array taken through the same cells as the value: one weight
+  # per row, or for a value of several columns, weights shaped like it
+  # (column +j+ of them).
+  def cells_of (weights, j = nil)
+    return weights unless weights.is_a?(CArray)
+    if j && weights.ndim > 1 && weights.dim0 == @n
+      weights = weights.reshape(@n, weights.elements / @n)[nil, j]
+    end
+    return weights unless weights.elements == @n
     weights.project(@src_addr)
+  end
+
+  # The segment iterators the reductions run on: one for a value with one
+  # cell per row, and for a value of several columns (each row a profile)
+  # one per trailing column, every one over the same windows.
+  def segments_of (value)
+    return CASegmentIterator.new(value.project(@src_addr), offsets: @offsets) if value.ndim == 1
+    width = value.shape[1..].inject(1, :*)
+    flat  = value.reshape(@n, width)
+    Array.new(width) do |j|
+      CASegmentIterator.new(flat[nil, j].project(@src_addr), offsets: @offsets)
+    end
+  end
+
+  # A reduction of the windows: as it is for a value with one cell per row;
+  # for a value of several columns, of each column, the answers laid side
+  # by side in the value's trailing shape, as a group reduces a profile
+  # column along the rows.
+  def over_columns (&block)
+    return block.call(@segments, nil) unless @segments.is_a?(Array)
+    trail = @value.shape[1..]
+    if @segments.empty?
+      one = block.call(CASegmentIterator.new(CArray.new(@value.data_type, [0], bytes: @value.bytes),
+                                             offsets: CArray.int64(1)), nil)
+      return lay_out(Array.new(0), one, trail)
+    end
+    results = @segments.each_with_index.map { |seg, j| block.call(seg, j) }
+    lay_out(results, results.first, trail)
+  end
+
+  # Answers of the columns (each one per row) as one array of the rows and
+  # the trailing shape; an Array of answers (minmax, quantile) answer by
+  # answer.
+  def lay_out (results, sample, trail)
+    if sample.is_a?(Array)
+      return sample.each_index.map { |k| lay_out(results.map { |r| r[k] }, sample[k], trail) }
+    end
+    out = CArray.new(sample.data_type, [@n, *trail], bytes: sample.bytes)
+    flat = out.reshape(@n, results.size)
+    results.each_with_index { |r, j| flat[nil, j] = r }
+    out
   end
 
   # The rows of every window, window after window.

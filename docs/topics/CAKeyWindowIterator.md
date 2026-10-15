@@ -100,7 +100,12 @@ Each answers as the core reduction does over each window, `min_count:` and
 the partition members (`map`, the running scans, `lag`, `order`,
 `strip_mask(method:)`) are not offered.
 
-The value is one-dimensional, one value per key.
+The value has one row per key. A value of several columns (shape
+`(N, ...)`, each row a profile) is reduced column by column over the same
+windows, and every reduction keeps the trailing shape: a `(N, 20)` profile
+gives `(N, 20)`, each row the windowed statistic of every level. `each`
+yields the rows of a window, shaped `(rows in the window, ...)`. A block
+fold (`reduce { ... }`) takes a one-column value only.
 
 ## In a CAFrame
 
@@ -108,6 +113,7 @@ The value is one-dimensional, one value per key.
 w = df.windows(on: "time", before: "1 hour", by: "station")
 w.mean("temp")     # => CArray, one value per row
 w.mean             # => frame of the windowed mean of every column that has one
+                   #    (an N-D column too, keeping its trailing shape)
 w["temp"]          # => the CAKeyWindowIterator of one column
 w.elements         # => the number of rows in each window
 ```
