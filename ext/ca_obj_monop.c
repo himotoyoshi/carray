@@ -283,7 +283,7 @@ ca_monop_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
     /* PUT: only writable-view op_ids accept writes (cast, or byte_swap
        involution). */
     if ( ! ca_monop_is_writable_view(ca->op_id) ) {
-      rb_raise(rb_eRuntimeError, "CAMonOp is read-only (xfer_index PUT)");
+      ca_refuse_read_only();
     }
     {
       volatile VALUE holder;
@@ -522,7 +522,7 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
   /* Writable-view op_id PUT/GET is handled above.  Below: non-writable
      monop/monfunc.  PUT is read-only.  */
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CAMonOp is read-only (xfer_stride PUT)");
+    ca_refuse_read_only();
   }
   ca_monop_materialise_call_count++;
 
@@ -781,7 +781,7 @@ ca_monop_func_fill_data (void *ap, void *ptr)
      data_type (= same bytes for byte_swap, reverse-cast for cast).
      Non-writable monop/monfunc remains read-only.  */
   if ( ! ca_monop_is_writable_view(ca->op_id) ) {
-    rb_raise(rb_eRuntimeError, "CAMonOp is read-only (fill_data)");
+    ca_refuse_read_only();
   }
   {
     int is_cast = ca_monop_is_cast(ca->op_id);

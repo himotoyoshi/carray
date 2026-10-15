@@ -1365,6 +1365,7 @@ NORETURN(static void ca_mask_of_operands_read_only (void));
 static void
 ca_mask_of_operands_read_only (void)
 {
+  /* read-only-check: says it is the mask, which no lazy node owns */
   rb_raise(rb_eRuntimeError, "the mask of a lazy operation is read-only");
 }
 

@@ -228,7 +228,7 @@ ca_binop_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   ca_size_t s;
 
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinOp is read-only (xfer_index PUT)");
+    ca_refuse_read_only();
   }
 
   s = ca->bytes;
@@ -357,7 +357,7 @@ ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   ca_lazy_req_t req;
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinOp is read-only (xfer_stride PUT)");
+    ca_refuse_read_only();
   }
   ca_lazy_req_region(&req, ap, starts, counts, strides);
   ca_binop_eval((CABinOp *) ap, &req, data);
@@ -371,7 +371,7 @@ ca_binop_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
 {
   ca_lazy_req_t req;
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinOp is read-only (xfer_addrs PUT)");
+    ca_refuse_read_only();
   }
   ca_lazy_req_addrs(&req, n, addrs);
   ca_binop_eval((CABinOp *) ap, &req, data);
@@ -437,7 +437,7 @@ NORETURN(static void ca_binop_func_fill_data (void *ap, void *ptr));
 static void
 ca_binop_func_fill_data (void *ap, void *ptr)
 {
-  rb_raise(rb_eRuntimeError, "CABinOp is read-only (fill_data)");
+  ca_refuse_read_only();
 }
 
 /* Build out.mask: the operands' masks ORed on each read (CAMaskOfOperands), so

@@ -207,6 +207,7 @@ verify_usable (VALUE klass, CArray *ca, int writable)
     rb_raise(rb_eArgError, "object arrays hold Ruby values, not numbers");
   }
   if ( writable && ca_is_readonly(ca) ) {
+    /* read-only-check: names which array a basis was asked to write through */
     rb_raise(rb_eRuntimeError, "%"PRIsVALUE" is read-only", klass);
   }
 }

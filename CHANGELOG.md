@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: a write into a read-only array that is not frozen (a lazy
+  expression or a view of one, a `CAConstString`, a view of a frozen array)
+  raises "<method>: can not modify read-only array", naming the method that
+  wrote: "fill: can not modify read-only array". The exception class is
+  unchanged (`RuntimeError`; a frozen array raises `FrozenError`).
+
 - Fix: a lazy operator with no kernel for the data type refuses as the
   eager one does, "atan2: not defined for data_type int8", instead of
   "invalid data_type for binop (not implemented)"; the lazy `abs` and

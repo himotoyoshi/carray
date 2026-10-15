@@ -224,7 +224,7 @@ ca_bincmp_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   int8_t    k;
 
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinCmp is read-only (xfer_index PUT)");
+    ca_refuse_read_only();
   }
 
   for ( k = ca->ndim - 1; k >= 0; k-- ) {
@@ -444,7 +444,7 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   ca_lazy_req_t req;
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinCmp is read-only (xfer_stride PUT)");
+    ca_refuse_read_only();
   }
   ca_lazy_req_region(&req, ap, starts, counts, strides);
   ca_bincmp_eval((CABinCmp *) ap, &req, data);
@@ -457,7 +457,7 @@ ca_bincmp_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
 {
   ca_lazy_req_t req;
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinCmp is read-only (xfer_addrs PUT)");
+    ca_refuse_read_only();
   }
   ca_lazy_req_addrs(&req, n, addrs);
   ca_bincmp_eval((CABinCmp *) ap, &req, data);
@@ -523,7 +523,7 @@ NORETURN(static void ca_bincmp_func_fill_data (void *ap, void *ptr));
 static void
 ca_bincmp_func_fill_data (void *ap, void *ptr)
 {
-  rb_raise(rb_eRuntimeError, "CABinCmp is read-only (fill_data)");
+  ca_refuse_read_only();
 }
 
 /* mask = left.mask | right.mask, computed on each read (CAMaskOfOperands). */

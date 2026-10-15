@@ -947,7 +947,7 @@ ca_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   CArray *ca = (CArray *) ap;
 
   if ( dir == CA_XFER_PUT && ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can not store data to read-only array");
+    ca_refuse_read_only();
   }
 
   /* Fast path: non-CA_OBJECT element type needs no GC protection. */
@@ -1075,7 +1075,7 @@ ca_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data, int dir)
   CArray *ca = (CArray *) ap;
 
   if ( dir == CA_XFER_PUT && ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can not store data to read-only array");
+    ca_refuse_read_only();
   }
 
   /* Fast path: non-CA_OBJECT element type needs no GC protection. */
@@ -1518,7 +1518,7 @@ ca_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   CArray *ca = (CArray *) ap;
 
   if ( dir == CA_XFER_PUT && ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can not store data to read-only array");
+    ca_refuse_read_only();
   }
 
   if ( ca_region_is_empty(ca->ndim, counts) ) return;
@@ -2133,8 +2133,7 @@ ca_sync (void *ap)
   }
 
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError,
-             "can not modify read-only array");
+    ca_refuse_read_only();
   }
 
   /* Only a mask that exists can hold writes: one made inside the window
@@ -2344,8 +2343,7 @@ ca_sync_data (void *ap, char *ptr)
   CArray *ca = (CArray *) ap;
 
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError,
-             "can not sync data to read-only array");
+    ca_refuse_read_only();
   }
 
   if ( ca_is_view(ca) && CAVIEW(ca)->nosync ) {
@@ -2366,8 +2364,7 @@ ca_fill_data (void *ap, void *aptr)
   char *ptr = (char *) aptr;
 
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError,
-             "can not fill data to read-only array");
+    ca_refuse_read_only();
   }
 
   if ( ca_is_view(ca) ) {   /* view array */
@@ -2421,7 +2418,7 @@ ca_fill_stride (void *ap, ca_size_t base, int8_t ndim,
   CArray *ca = (CArray *) ap;
 
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can not fill data to read-only array");
+    ca_refuse_read_only();
   }
 
   if ( ca_region_is_empty(ndim, counts) ) return;
@@ -2541,7 +2538,7 @@ ca_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
   CArray *ca = (CArray *) ap;
 
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can not fill data to read-only array");
+    ca_refuse_read_only();
   }
 
   if ( ca_func[ca->obj_type].fill_addrs ) {
@@ -2572,7 +2569,7 @@ ca_fill (void *ap, void *aptr)
   char *ptr = (char *) aptr;
 
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can not fill data to read-only array");
+    ca_refuse_read_only();
   }
 
   ca_fill_data(ap, ptr);

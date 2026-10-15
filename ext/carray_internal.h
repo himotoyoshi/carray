@@ -390,6 +390,9 @@ int         ca_bincmp_integer_prepare (volatile VALUE *self, volatile VALUE *oth
                                        int op_id, int *signed_side);
 int         ca_bincmp_answer_when_negative (int op_id, int signed_side);
 long        ca_axis_integer (VALUE raxis, const char *name);
+/* Refuse a write into a read-only array that is not frozen (carray_test.c);
+   every guard calls this rather than raising its own. */
+NORETURN(void ca_refuse_read_only (void));
 /* Refuse an operator with no kernel for `data_type`, naming the method and
    the type (carray_operator.c); the eager operators and the lazy builders. */
 NORETURN(void ca_op_refuse_unimplemented (VALUE operand, int8_t data_type,

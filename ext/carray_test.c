@@ -694,8 +694,19 @@ rb_ca_modify (VALUE self)
   rb_check_frozen(self);
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can not modify read-only array");
+    ca_refuse_read_only();
   }
+}
+
+/* The refusal of a write into a read-only array that is not frozen (a
+   frozen one is Ruby's FrozenError, from rb_check_frozen): every guard
+   raises it, the entry points through rb_ca_modify and the transfers and
+   fills below them, which are the last line when an entry is missed. */
+void
+ca_refuse_read_only (void)
+{
+  rb_raise(rb_eRuntimeError, "%s: can not modify read-only array",
+           ca_calling_method_name());
 }
 
 /* CArray#freeze — freeze self and set CA_FLAG_READ_ONLY so subsequent
