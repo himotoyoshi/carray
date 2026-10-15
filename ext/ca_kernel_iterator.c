@@ -2356,6 +2356,13 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
 
 static VALUE ca_iter_finish_sync (VALUE arg);
 
+static VALUE
+ki_sync_detach_root (VALUE root)
+{
+  ca_sync_detach((CArray *) root);
+  return Qnil;
+}
+
 void
 ca_iter_state_finish (ca_iter_state *st)
 {
@@ -2430,36 +2437,52 @@ ca_iter_state_finish (ca_iter_state *st)
     st->stack_parent_mask_ptrs = NULL;
   }
   st->stack_n_parents = 0;
-  if ( st->root ) {
-    /* A write walk wrote into the root's attach buffer, which is the root
-       itself only for an entity: a view root (a transpose, a non-contig
-       block, a view lending no memory) gave a buffer of its own. */
-    CArray *root = st->root;
-    st->root = NULL;
-    if ( st->flags & CA_KERNEL_WRITE ) {
-      ca_sync_detach(root);
+  {
+    /* The state is emptied before anything here can raise: syncing a
+       write walk's root goes through the root's slots.  A finish that
+       raised is then finished already, and a second call returns at once
+       instead of detaching src again. */
+    CArray *root       = st->root;
+    CArray *src        = st->src;
+    CArray *own        = (st->flags & CA_ITER_FLAG_OWNS_SRC) ? src : NULL;
+    int     write      = (st->flags & CA_KERNEL_WRITE) != 0;
+    int     detach_src = root == NULL
+                         && ( st->alias_mode == CA_ITER_ALIAS_CONTIG
+                              || st->alias_mode == CA_ITER_ALIAS_STRIDED );
+    int     tag        = 0;
+    st->root       = NULL;
+    st->src        = NULL;
+    st->alias_ptr  = NULL;
+    st->flags     &= ~CA_ITER_FLAG_OWNS_SRC;
+    if ( root ) {
+      /* A write walk wrote into the root's attach buffer, which is the root
+         itself only for an entity: a view root (a transpose, a non-contig
+         block, a view lending no memory) gave a buffer of its own. */
+      if ( write ) {
+        /* protect: frees the iterator's own copy before the raise passes on */
+        rb_protect(ki_sync_detach_root, (VALUE) root, &tag);
+      }
+      else {
+        ca_detach(root);
+      }
     }
-    else {
-      ca_detach(root);
+    else if ( detach_src ) {
+      /* alias path (CONTIG/STRIDED for CAStride family): we attached
+         src directly at init, so detach it here.  A SRC_ATTACH walk owns
+         its own scratch (alias_mode = NONE, freed above) and attached
+         nothing to detach. */
+      ca_detach(src);
     }
-  } else if ( st->alias_mode == CA_ITER_ALIAS_CONTIG
-              || st->alias_mode == CA_ITER_ALIAS_STRIDED ) {
-    /* alias path (CONTIG/STRIDED for CAStride family): we attached
-       src directly at init, so detach it here.  A SRC_ATTACH walk owns
-       its own scratch (alias_mode = NONE, freed above) and attached
-       nothing to detach. */
-    ca_detach(st->src);
+    if ( own ) {
+      if ( ca_is_object_type(own) ) {
+        ca_gc_release_buffer(own->ptr);
+      }
+      ca_free(own);
+    }
+    if ( tag ) {
+      rb_jump_tag(tag);
+    }
   }
-  if ( st->flags & CA_ITER_FLAG_OWNS_SRC ) {
-    CArray *own = st->src;
-    st->flags &= ~CA_ITER_FLAG_OWNS_SRC;
-    if ( ca_is_object_type(own) ) {
-      ca_gc_release_buffer(own->ptr);
-    }
-    ca_free(own);
-  }
-  st->src       = NULL;
-  st->alias_ptr = NULL;
 }
 
 /* Finish a walk the way the block macros leave it: a slab of a write walk
@@ -2564,6 +2587,8 @@ ca_iter_mark_walk_may_raise (ca_iter_state *st)
 /* When body raises, finish st -- and the state it is paired with (see
    ca_iter_state_init_l2_paired), which is open in the same frame and
    would otherwise be jumped over. */
+static VALUE ca_iter_ensure_finish_one (VALUE arg);
+
 static void
 ca_iter_protect (ca_iter_state *st, VALUE (*body)(VALUE), VALUE arg)
 {
@@ -2571,10 +2596,16 @@ ca_iter_protect (ca_iter_state *st, VALUE (*body)(VALUE), VALUE arg)
   rb_protect(body, arg, &tag);
   if ( tag ) {
     ca_iter_state *pair = (ca_iter_state *) st->pair;
-    ca_iter_state_finish(st);
+    volatile VALUE error = rb_errinfo();
+    int ignored = 0;
+    /* protect: finishes the pair even when finishing st raises; the
+       body's exception is the one passed on */
+    rb_protect(ca_iter_ensure_finish_one, (VALUE) st, &ignored);
     if ( pair != NULL ) {
-      ca_iter_state_finish(pair);
+      /* protect: as above */
+      rb_protect(ca_iter_ensure_finish_one, (VALUE) pair, &ignored);
     }
+    rb_set_errinfo(error);
     rb_jump_tag(tag);
   }
 }
