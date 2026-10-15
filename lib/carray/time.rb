@@ -27,6 +27,11 @@
 # Civil-date arithmetic on int64 CArrays: the calendar kernel every time
 # grid is built on (Howard Hinnant's days<->civil algorithms, vectorized).
 # Internal to the time surface: nothing here is part of the public API.
+# Loaded with the file, not inside the methods: a require is a lock that
+# Ractors running these methods at the same time can deadlock on.
+require 'date'
+require 'time'
+
 module CATimeCivil
   module_function
 
@@ -115,7 +120,6 @@ module CATimeUnitAlgebra
   # other String.  An instant that lands on the +unit+ grid is given in that
   # unit, so a day array minus "2024-01-02" answers in days.
   def scalar_operand(x, unit)
-    require 'date'
     case x
     when CATimedelta::Element
       CATimedelta.wrap(CScalar.int64 { x.value }, unit: x.unit)
@@ -683,8 +687,6 @@ class CATime
     # @return [Time] the instant this scalar denotes (UTC).  For a calendar
     #   unit this is the first instant (midnight of day 1) of the granule.
     def to_time
-      require 'time'
-      require 'date'
       case unit.base
       when :Y then d = epoch_date.next_year(value * unit.count);  Time.utc(d.year, d.month, d.day)
       when :M then d = epoch_date.next_month(value * unit.count); Time.utc(d.year, d.month, d.day)
@@ -696,7 +698,6 @@ class CATime
     # @return [Date] the date this scalar denotes (UTC).  A sub-day unit is
     #   floored to its day.
     def to_date
-      require 'date'
       case unit.base
       when :Y then epoch_date.next_year(value * unit.count)
       when :M then epoch_date.next_month(value * unit.count)
@@ -854,7 +855,6 @@ class CATime
     # (Jan 31 -> Feb 28), but the base is day 1, so no clamping ever occurs --
     # do not move the base off the first of the month without revisiting.
     def epoch_date
-      require 'date'
       Date.new(1970, 1, 1, Date::GREGORIAN)  # proleptic Gregorian, matching to_time
     end
 
@@ -1407,7 +1407,6 @@ class CATime
 
   # One instant as a length-1 time array in its own unit, or nil.
   private def lift_value (operand)
-    require 'date'
     case operand
     when CATime::Element
       CATime.wrap(CA_INT64([operand.value]), unit: operand.unit)
@@ -1417,7 +1416,6 @@ class CATime
   end
 
   def to_comparable (operand)
-    require 'date'   # Date is one of the operand kinds below
     case operand
     when CATime
       return operand if operand.unit == unit
@@ -1523,7 +1521,6 @@ class CATime
   #   CArray.  Array-level counterpart to {Element#to_time}.
   #   @return [CArray]
   def to_time
-    require 'time'
     if CATimeUnitAlgebra::FIXED.key?(unit.base)
       f = unit.tick_ratio                        # exact seconds / tick (Rational)
       parent.convert(:object) {|v| Time.at(v * f, in: 'UTC')}
@@ -1538,7 +1535,6 @@ class CATime
   #   {Element#to_date}.
   #   @return [CArray]
   def to_date
-    require 'date'
     # 2440588 = JD of 1970-01-01; proleptic Gregorian to match to_time and the field accessors.
     days_since_epoch.convert(:object) {|d| Date.jd(2440588 + d, Date::GREGORIAN)}
   end
@@ -1548,7 +1544,6 @@ class CATime
   #   as an object CArray.
   #   @return [CArray]
   def to_datetime
-    require 'date'
     to_time.convert(:object) {|t| t.to_datetime}
   end
 
@@ -1671,7 +1666,6 @@ class CATime
   #   Returns the Julian Day Number for each element.
   #   @return [CArray]
   def jd
-    require 'date'
     to_time.convert(:int) {|t| t.to_date.jd}
   end
 
@@ -1680,7 +1674,6 @@ class CATime
   #   day) for each element.
   #   @return [CArray]
   def ajd
-    require 'date'
     to_time.convert(:double) {|t| t.to_datetime.ajd.to_f}
   end
 
@@ -2366,8 +2359,6 @@ module CATimeLiteral
   # Exact Rational seconds since the Unix epoch for a start literal (Time /
   # Date / DateTime / Integer unix-seconds / String).  UTC default.
   def epoch_seconds(spec, format = nil)
-    require 'date'
-    require 'time'
     case spec
     when Time     then spec.to_r
     when Integer  then Rational(spec)
@@ -2404,8 +2395,6 @@ module CATimeLiteral
 
   # [year, month] (UTC) of a start literal, for a calendar-resolution grid.
   def year_month(spec, format = nil)
-    require 'date'
-    require 'time'
     case spec
     when Time    then t = spec.utc; [t.year, t.month]
     when Integer then t = Time.at(spec, in: 'UTC'); [t.year, t.month]
@@ -2549,7 +2538,6 @@ module CATimeLiteral
   # become ticks for the whole array at once, and a cell that is not a
   # String goes through tick_index.
   def ticks_from_cells(x, res, format, on_error, seconds: false)
-    require 'date'
     kind, per = tick_kind(res)
     return nil unless kind
     if format.is_a?(String)
@@ -2633,7 +2621,6 @@ module CATimeLiteral
   # The unit CArray.time reads +x+ in when none is given: the finest any of
   # its values shows (see the unit: of CArray.time), :s when none shows one.
   def unit_shown(x, format)
-    require 'date'
     cells = x.is_a?(CArray) ? x.flatten.to_a : [x]
     text = cells.select { |v| v.is_a?(String) }
     units = []

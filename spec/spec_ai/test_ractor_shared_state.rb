@@ -75,6 +75,15 @@ class TestRactorSharedState < Test::Unit::TestCase
     BODY
   end
 
+  # CATime's methods do not require a library while they run: Ractors
+  # requiring at the same time deadlock.
+  def test_time_methods_in_parallel_ractors
+    assert_ractors_agree <<~'BODY'
+      t = CArray.int64(100) { |i| i }.time(unit: :D)
+      (0...300).count { t[0].to_s != "1970-01-01" }
+    BODY
+  end
+
   def test_undef_is_shareable
     assert_true UNDEF.frozen?
     assert_true Ractor.shareable?(UNDEF) if defined?(Ractor)
