@@ -81,6 +81,7 @@ typedef struct {
   int       *has_box;         /* per slot: 1 when box_start/box_count hold a box */
   ca_size_t *box_start;       /* slots * CA_RANK_MAX; the whole array when */
   ca_size_t *box_count;       /*   has_box is 0 */
+  int        lent;            /* every basis was acquired and the block entered */
   int        body_done;       /* the block returned without raising */
   volatile VALUE put_error;   /* the first write-back that raised, or nil */
   /* ca_with_address_bases: the caller's body and what it is handed */
@@ -234,19 +235,87 @@ folds_to_an_entity (CArray *ca)
    its neighbour.  A per-cell kernel writes cells independently and cannot
    express that.  Checked for every tier: a box transfer moves the same
    mask, and the neighbour is marked when it is written back. */
-static void
-verify_mask_cells (VALUE klass, CArray *ca)
+static int
+mask_cells_split (CArray *ca)
 {
   CArray   *root;
   ca_size_t strides[CA_RANK_MAX];
   ca_size_t base = 0;
-  if ( ! ca->mask || ! ca_is_stride_family(ca) ) return;
+  if ( ! ca->mask || ! ca_is_stride_family(ca) ) return 0;
   ca_stride_compose_to_root((CAStride *) ca, &root, strides, &base);
-  if ( ca->bytes != root->bytes ) {
+  return ca->bytes != root->bytes;
+}
+
+static void
+verify_mask_cells (VALUE klass, CArray *ca)
+{
+  if ( mask_cells_split(ca) ) {
     rb_raise(rb_eArgError,
              "%"PRIsVALUE" reinterprets the element size and carries a mask; "
              "its mask cells do not map one to one onto the parent's",
              klass);
+  }
+}
+
+/* Why an array would be refused for reading, or NULL. */
+static const char *
+read_refusal (CArray *ca)
+{
+  if ( ca->data_type == CA_OBJECT ) {
+    return "object arrays hold Ruby values, not numbers";
+  }
+  if ( mask_cells_split(ca) ) {
+    return "it reinterprets the element size and carries a mask";
+  }
+  return NULL;
+}
+
+/* CArray::AddressBasis::Failure.  An exception raised while the arrays are
+   checked, lent or taken back is extended with it; one raised by the block
+   they are lent to is not.  Something that hands the arrays to code of its
+   own can then tell a refusal or a failing array (a CAObject whose backing
+   cannot be read) from a fault of that code. */
+static VALUE mFailure;
+
+static void
+mark_failure (VALUE error)
+{
+  if ( RTEST(rb_obj_is_kind_of(error, rb_eException)) && ! OBJ_FROZEN(error) ) {
+    rb_extend_object(error, mFailure);
+  }
+}
+
+typedef struct {
+  VALUE   klass;
+  CArray *ca;
+  int     writable;
+} verify_args;
+
+static VALUE
+verify_array_body (VALUE argument)
+{
+  verify_args *a = (verify_args *) argument;
+  /* A view takes its mask from its parent when first asked for it; one
+     added to the parent after the view was made is not on ca->mask yet. */
+  ca_update_mask(a->ca);
+  verify_usable(a->klass, a->ca, a->writable);
+  verify_mask_cells(a->klass, a->ca);
+  return Qnil;
+}
+
+static void
+verify_array (VALUE klass, CArray *ca, int writable)
+{
+  verify_args a;
+  int         tag = 0;
+  a.klass = klass;
+  a.ca = ca;
+  a.writable = writable;
+  /* protect: marks the exception as a Failure and raises it again; nothing is held */
+  rb_protect(verify_array_body, (VALUE) &a, &tag);
+  if ( tag ) {
+    mark_failure(rb_errinfo());
+    rb_jump_tag(tag);
   }
 }
 
@@ -387,7 +456,9 @@ open_body (VALUE argument)
     rb_ary_push(state->bases, basis);
   }
   {
-    VALUE result = rb_yield(state->bases);
+    VALUE result;
+    state->lent = 1;
+    result = rb_yield(state->bases);
     state->body_done = 1;
     return result;
   }
@@ -465,6 +536,8 @@ open_ensure (VALUE argument)
 {
   open_state *state = (open_state *) argument;
   int i;
+  /* Raised before the block was entered: by lending an array */
+  if ( ! state->lent ) mark_failure(rb_errinfo());
   for ( i = state->slots - 1; i >= 0; i-- ) {
     CArray *ca = state->carrays[i];
     if ( ca == NULL ) continue;
@@ -518,6 +591,7 @@ open_ensure (VALUE argument)
   xfree(state->block);
   if ( state->body_done && RTEST(rb_obj_is_kind_of(state->put_error,
                                                    rb_eException)) ) {
+    mark_failure(state->put_error);
     rb_exc_raise(state->put_error);
   }
   return Qnil;
@@ -588,8 +662,9 @@ packed_body (VALUE argument)
   }
 
   {
-    VALUE result = rb_yield_values(4, pointers, strides, mask_pointers,
-                                   mask_strides);
+    VALUE result;
+    state->lent = 1;
+    result = rb_yield_values(4, pointers, strides, mask_pointers, mask_strides);
     state->body_done = 1;
     return result;
   }
@@ -639,6 +714,7 @@ ab_prepare (open_state *state, int n, CArray **arrays, const int *writable,
     state->has_box       = (int *)      p; p += ints;
     state->c_bases       = (ca_address_basis_t *) p;
   }
+  state->lent = 0;
   state->body_done = 0;
   state->put_error = Qnil;
 
@@ -705,11 +781,7 @@ address_basis_open (int argc, VALUE *argv, VALUE module)
     VALUE   object = rb_ary_entry(arrays, i);
     CArray *ca;
     GetCArray(object, ca);
-    /* A view takes its mask from its parent when first asked for it; one
-       added to the parent after the view was made is not on ca->mask yet. */
-    ca_update_mask(ca);
-    verify_usable(rb_obj_class(object), ca, RTEST(rb_ary_entry(writable_flags, i)));
-    verify_mask_cells(rb_obj_class(object), ca);
+    verify_array(rb_obj_class(object), ca, RTEST(rb_ary_entry(writable_flags, i)));
     verify_box(box_start, box_count, i, ca);
   }
 
@@ -779,7 +851,9 @@ c_body (VALUE argument)
     }
   }
   {
-    VALUE result = state->c_body(state->c_bases, state->c_arg);
+    VALUE result;
+    state->lent = 1;
+    result = state->c_body(state->c_bases, state->c_arg);
     state->body_done = 1;
     return result;
   }
@@ -812,9 +886,7 @@ ca_with_address_bases (int32_t n, CArray **arrays, const int *writable,
     /* a CAObject (a Face among them) is named by its own class */
     klass = ca_is_caobject(ca) ? rb_obj_class(((CAObject *) ca)->self)
                                : ca_class[ca->obj_type];
-    ca_update_mask(ca);
-    verify_usable(klass, ca, writable ? writable[i] : 0);
-    verify_mask_cells(klass, ca);
+    verify_array(klass, ca, writable ? writable[i] : 0);
     if ( box_start && ((box_start[i] == NULL) != (box_count[i] == NULL)) ) {
       rb_raise(rb_eArgError, "a region needs both starts and counts");
     }
@@ -846,6 +918,7 @@ address_basis_classify (VALUE module, VALUE object)
   int     tier;
 
   GetCArray(object, ca);
+  ca_update_mask(ca);
   tier = tier_for(ca);
 
   result = rb_hash_new();
@@ -858,6 +931,11 @@ address_basis_classify (VALUE module, VALUE object)
   rb_hash_aset(result, ID2SYM(rb_intern("dim")), size_array(ca->dim, ca->ndim));
   rb_hash_aset(result, ID2SYM(rb_intern("bytes")), LL2NUM((long long) ca->bytes));
   rb_hash_aset(result, ID2SYM(rb_intern("data_type")), INT2NUM(ca->data_type));
+  {
+    const char *refusal = read_refusal(ca);
+    rb_hash_aset(result, ID2SYM(rb_intern("refusal")),
+                 refusal ? rb_str_new_cstr(refusal) : Qnil);
+  }
   return result;
 }
 
@@ -877,4 +955,6 @@ Init_carray_address_basis (void)
   rb_define_const(mAddressBasis, "TIER_ENTITY", INT2NUM(TIER_ENTITY));
   rb_define_const(mAddressBasis, "TIER_STRIDE", INT2NUM(TIER_STRIDE));
   rb_define_const(mAddressBasis, "TIER_XFER", INT2NUM(TIER_XFER));
+
+  mFailure = rb_define_module_under(mAddressBasis, "Failure");
 }

@@ -57,7 +57,8 @@ CArray::AddressBasis.classify(array)   #=> Hash
 form. `classify` reports how an array *would* be opened without opening it,
 which is what a caller uses to decide whether a fast path applies.
 
-`classify` refuses nothing. `open` refuses, before it opens any array:
+`classify` refuses nothing; its `:refusal` is the reason `open` would refuse
+the array for reading, or nil. `open` refuses, before it opens any array:
 
 - an array whose `data_type` is `CA_OBJECT`, because its cells are `VALUE`s
   and a generated kernel computes on numbers (`ArgumentError`);
@@ -338,6 +339,14 @@ when its I/O fails. The close sets that exception aside, sends the remaining
 regions back, frees every buffer and detaches every root, and raises it
 afterwards — unless the block raised, in which case the block's exception is
 the one that propagates.
+
+**CArray's exceptions carry `CArray::AddressBasis::Failure`.** An exception
+raised while the arrays are checked, opened or closed — a refusal, an array
+whose own transfer fails — is extended with that module. One raised by the
+block is not, and neither is a mistake in the request (a region outside the
+array, a missing flag). A caller that runs code of its own in the block tells
+the two apart by it: `Fusion` keeps a registered evaluator when the failure
+is CArray's, and lets the walk meet the same array.
 
 ## What is pinned, and where
 

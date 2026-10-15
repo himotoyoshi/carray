@@ -406,6 +406,68 @@ class TestAddressBasis < Test::Unit::TestCase
     end
   end
 
+  # --- whose exception it is ---------------------------------------------
+  #
+  # An exception raised while the arrays are checked, lent or taken back
+  # carries AB::Failure; one raised by the block does not.  Something that
+  # hands the bases to code of its own tells the two apart by it.
+
+  def test_a_refusal_is_marked_as_a_failure
+    f = CArray.float64(4).seq!
+    f[1] = UNDEF
+    error = assert_raise(ArgumentError) do
+      AB.open([f.refer(CA_INT32, [8])], [false]) { }
+    end
+    assert_kind_of AB::Failure, error
+  end
+
+  def test_an_array_that_cannot_be_read_is_marked_as_a_failure
+    error = assert_raise(IOError) { AB.open([FailingRead.new], [false]) { } }
+    assert_kind_of AB::Failure, error
+  end
+
+  FAILING_WRITE = <<~RUBY
+    class FailingWrite < CAObject
+      def initialize; super(CA_FLOAT64, [4]); end
+      private
+      def fetch_addr (addr) = 1.0
+      def store_addr (addr, value) = raise(IOError, "the backing store failed")
+      def create_mask; end
+    end
+  RUBY
+  eval(FAILING_WRITE)
+
+  def test_a_write_back_that_fails_is_marked_as_a_failure
+    error = assert_raise(IOError) do
+      AB.open([FailingWrite.new], [true]) do |bases|
+        Fiddle::Pointer.new(bases.first[:pointer], 8)[0, 8] = [2.0].pack("d")
+      end
+    end
+    assert_kind_of AB::Failure, error
+  end
+
+  def test_what_the_block_raises_is_not_marked
+    error = assert_raise(RuntimeError) do
+      AB.open([entity], [false]) { raise "the kernel gave up" }
+    end
+    assert_not_kind_of AB::Failure, error
+  end
+
+  def test_a_mistake_in_the_request_is_not_marked
+    error = assert_raise(ArgumentError) do
+      AB.open([entity], [false], [[5, 0]], [[2, 1]]) { }
+    end
+    assert_not_kind_of AB::Failure, error
+  end
+
+  def test_classify_reports_why_an_array_would_be_refused
+    f = CArray.float64(4).seq!
+    f[1] = UNDEF
+    assert_nil AB.classify(f)[:refusal]
+    assert_match(/element size/, AB.classify(f.refer(CA_INT32, [8]))[:refusal])
+    assert_match(/object/, AB.classify(CArray.object(3))[:refusal])
+  end
+
   def test_a_block_that_is_not_given_is_still_a_closed_open
     assert_raise(LocalJumpError) { AB.open([xfer_view], [false]) }
   end
