@@ -475,7 +475,12 @@ named without doing anything, and `CArray.__name_errors_after_method__(name)
 { ... }` is only for a method that answers under another name. A method
 made by `define_method` is the exception: its frame does not carry its
 name, so when the walk meets one it gives up and the innermost C method is
-named, as it was before the walk. The walk
+named, as it was before the walk. A family of methods is therefore made by
+`CArray.define_named_methods(mod, names, :helper)` (`lib/carray/runtime.rb`),
+which writes one `def` per name handing its name to a private helper
+(`super_block: true` also hands it the method it overrides as a block). `rake
+define_method_check` keeps each file of `lib/` from gaining a
+`define_method`; one that stays says why with `# define_method:`. The walk
 costs about 0.1 us, so call it where the message is built, not on entry.
 `rake method_naming_check` refuses `rb_frame_this_func` outside
 `carray_utils.c`.
