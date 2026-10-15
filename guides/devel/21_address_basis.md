@@ -346,6 +346,24 @@ array, a missing flag). A caller that runs code of its own in the block tells
 the two apart by it: `Fusion` keeps a registered evaluator when the failure
 is CArray's, and lets the walk meet the same array.
 
+## What a basis does not guard
+
+**Two bases that write the same cell.** Opening one array twice, or an array
+and a view of it, lends two bases that can reach the same cell. What that
+cell holds afterwards is not specified: a box sends its changed cells back
+when it is closed, after anything written in place, and the arrays are closed
+in the reverse of the order they were given. Neither is something to rely on.
+Reading through one basis what was written through another is not specified
+either, since a box is a copy taken at the opening. Arrays that share storage
+are not refused — `a[0..1]` and `a[2..3]` share it and touch different cells
+— so the caller keeps the cells it writes apart.
+
+**What is written is not checked.** A basis lends the storage: a Face is lent
+as its storage type (a `CATime` as eight-byte fixlen) and its values are not
+checked on the way back, and a boolean cell takes whatever byte is written.
+A kernel writes values the array's own store would accept — 0 or 1 into a
+boolean — or the array holds something no other route could have put there.
+
 ## What is pinned, and where
 
 `spec/spec_ai/test_address_basis.rb` covers the three tiers, the region, the
