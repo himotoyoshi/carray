@@ -880,7 +880,10 @@ ca_classifier_try_argc1_special (ca_classifier_ctx_t *ctx)
   /* T_STRING: "field" → MEMBER. */
   if ( TYPE(arg) == T_STRING ) {
     info->type   = CA_REG_MEMBER;
-    info->symbol = ID2SYM(rb_intern(StringValueCStr(arg)));
+    /* A dynamic Symbol: the collector reclaims it, so indexing with
+       strings that name no member does not grow the symbol table. */
+    StringValueCStr(arg);
+    info->symbol = rb_to_symbol(arg);
     return 1;
   }
 

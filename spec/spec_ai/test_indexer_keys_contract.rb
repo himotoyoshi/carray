@@ -284,4 +284,14 @@ class TestIndexerKeysContract < Test::Unit::TestCase
     assert_equal [0, 1, 2, 3], a.to_a
   end
 
+
+  # A string that names no member raises, and leaves no Symbol behind.
+  def test_a_string_key_does_not_grow_the_symbol_table
+    a = CArray.float64(4).seq!
+    GC.start
+    before = Symbol.all_symbols.size
+    2000.times { |i| a["no_such_member_#{i}"] rescue nil }
+    GC.start
+    assert_operator Symbol.all_symbols.size - before, :<, 100
+  end
 end
