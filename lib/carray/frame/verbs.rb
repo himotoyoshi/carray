@@ -19,8 +19,7 @@ class CAFrame
   # memo §3.8). Column data is untouched and shared with the original.
   def drop(*names)
     cols = @columns.dup
-    names.each do |name|
-      key = column_key(name, "drop")
+    column_keys(names, "drop").each do |key|
       raise KeyError, "no column #{key.inspect}" unless cols.key?(key)
       cols.delete(key)
     end
@@ -74,10 +73,11 @@ class CAFrame
       raise ArgumentError, "split_column: sep must be a String or a Regexp (got #{sep.inspect})"
     end
     names = Array(into).map { |n| column_name_arg(n, "split_column") }
-    if names.size < 2 || names.uniq.size != names.size
+    if names.size < 2
       raise ArgumentError,
-            "split_column: into: names two or more columns, each once (got #{names.inspect})"
+            "split_column: into: names two or more columns (got #{names.inspect})"
     end
+    CAFrame.__send__(:refuse_repeated_names, names, "split_column", "into: names")
     taken = names & (@columns.keys - [key])
     unless taken.empty?
       raise ArgumentError, "split_column: #{taken.inspect} already a column"
@@ -198,10 +198,11 @@ class CAFrame
                     trailing.map { |d| (0...d).to_a }.inject { |a, b| a.product(b).map(&:flatten) }
     end
     names = given || positions.map { |pos| "#{key}_#{pos.join('_')}" }
-    unless names.size == count && names.uniq.size == count
+    unless names.size == count
       raise ArgumentError,
-            "unstack_column: into: names #{names.size} columns, each once; #{key.inspect} has #{count} positions"
+            "unstack_column: into: names #{names.size} columns; #{key.inspect} has #{count} positions"
     end
+    CAFrame.__send__(:refuse_repeated_names, names, "unstack_column", "into: names")
     taken = names & (@columns.keys - [key])
     unless taken.empty?
       raise ArgumentError, "unstack_column: #{taken.inspect} already a column"
@@ -256,10 +257,7 @@ class CAFrame
     if names.empty?
       raise ArgumentError, "#{verb}: #{selection.inspect} selects no column"
     end
-    if names.uniq.size != names.size
-      raise ArgumentError, "#{verb}: #{selection.inspect} names a column more than once"
-    end
-    names
+    CAFrame.__send__(:refuse_repeated_names, names, verb)
   end
 
   # Mask cells of a column that equal +value+ (sentinel -> mask, memo §11.4).

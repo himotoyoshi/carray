@@ -455,10 +455,7 @@ class CAFrame
                            "(got #{name.inspect} for #{key.inspect})"
         end
       end
-      dup = map.values.tally.select { |_, k| k > 1 }.keys
-      unless dup.empty?
-        raise ArgumentError, "from_csv: columns: names #{dup.first.inspect} more than once"
-      end
+      CAFrame.__send__(:refuse_repeated_names, map.values, "from_csv", "columns: names")
       map.values
     end
 
@@ -486,10 +483,7 @@ class CAFrame
           (first..last).to_a
         end
       end
-      dup = indexes.tally.select { |_, k| k > 1 }.keys
-      unless dup.empty?
-        raise ArgumentError, "from_csv: columns: selects column #{dup.first} more than once"
-      end
+      CAFrame.__send__(:refuse_repeated_names, indexes, "from_csv", "columns: selects column")
       if ncol && (bad = indexes.find { |j| j >= ncol })
         raise ArgumentError, "from_csv: columns: #{bad} is past the #{ncol} columns of the file"
       end

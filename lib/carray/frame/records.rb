@@ -28,12 +28,8 @@ class CAFrame
     return new if records.empty?
 
     keys = record_key_union(records)
-    keys.group_by(&:to_s).each do |name, same|
-      next if same.size == 1
-      raise ArgumentError,
-            "from_records: the keys #{same.map(&:inspect).join(' and ')} both name " \
-            "the column #{name.inspect}; use one spelling"
-    end
+    refuse_repeated_names(keys.map(&:to_s), "from_records", "the keys name the column",
+                          hint: "a String key and a Symbol key spell it both ways; use one spelling")
     n = records.size
     cols = {}
     keys.each do |key|

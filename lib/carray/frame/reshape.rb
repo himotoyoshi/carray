@@ -64,17 +64,14 @@ class CAFrame
   def pivot(index:, columns:, values:, aggregate: nil)
     plan = pivot_plan(column_key(index, "pivot"), column_key(columns, "pivot"), aggregate, "pivot")
     labels = Array.new(plan[:nc]) { |j| plan[:clab][j].to_s }
-    value_names = values.is_a?(Array) ? values.map { |v| column_key(v, "pivot") } : nil
+    value_names = values.is_a?(Array) ? column_keys(values, "pivot") : nil
     names =
       if value_names
         value_names.flat_map { |v| labels.map { |l| "#{v}_#{l}" } }
       else
         labels
       end
-    dup = names.tally.select { |_, count| count > 1 }.keys
-    unless dup.empty?
-      raise ArgumentError, "pivot: output columns would share the names #{dup.inspect}"
-    end
+    CAFrame.__send__(:refuse_repeated_names, names, "pivot", "the output columns would name")
 
     source = plan[:source].reshape(plan[:nr], plan[:nc])
     cols = {}
@@ -162,6 +159,7 @@ class CAFrame
       source[CA_INT64(pairs.labels)] = CArray.int64(pairs.labels.size).seq
     else
       if cell.nunique != cell.elements
+        # names-check: two rows for one cell of the grid
         first = cell.to_a.tally.find { |_, count| count > 1 }.first
         raise ArgumentError,
               "pivot: more than one row for #{index}=#{rlab[first / nc].inspect}, " \
@@ -214,9 +212,9 @@ class CAFrame
   # @raise [ArgumentError] when there is nothing to melt, or the value
   #   columns differ in data type.
   def melt(id: [], value_columns: nil, var_name: "variable", value_name: "value")
-    ids = Array(id).map { |n| column_key(n, "melt") }
+    ids = column_keys(Array(id), "melt")
     ids.each { |name| self[name] }
-    vars = (value_columns || column_names - ids).map { |n| column_key(n, "melt") }
+    vars = column_keys(value_columns || column_names - ids, "melt")
     raise ArgumentError, "melt: no columns to melt" if vars.empty?
     overlap = vars & ids
     unless overlap.empty?
@@ -296,6 +294,7 @@ class CAFrame
   def stack_rows(by:, on: nil)
     keys = (by.is_a?(Array) ? by : [by]).map { |k| k.is_a?(Symbol) ? column_key(k, "stack_rows") : k }
     raise ArgumentError, "stack_rows: by: names no key" if keys.empty?
+    CAFrame.__send__(:refuse_repeated_names, keys.grep(String), "stack_rows", "by: names")
     frame = @index ? CAFrame.new({ @axis_name => @index }.merge(@columns)) : self
     keys.each { |k| frame.__send__(:key_column, k, "stack_rows") }
     # With nothing but the key there is no column to stack, and the result
@@ -325,6 +324,7 @@ class CAFrame
             "stack_rows: every row has to belong to a group; " \
             "the key has no value for #{frame.nrow - stacked} of #{frame.nrow} rows"
     end
+    # names-check: equal sizes, not names
     unless sizes.uniq.size <= 1
       # One group of each size, so the message says where to look.
       examples = sizes.each_with_index.uniq { |n, _| n }.map do |n, g|
@@ -426,6 +426,7 @@ class CAFrame
       raise ArgumentError, "unstack_rows: the frame has no N-D column to unstack"
     end
     lengths = stacked.transform_values { |c| c.shape[1] }
+    # names-check: equal lengths, not names
     unless lengths.values.uniq.size == 1
       raise ArgumentError,
             "unstack_rows: the N-D columns differ in length along their first axis #{lengths}"

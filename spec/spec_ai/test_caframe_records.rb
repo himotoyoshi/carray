@@ -193,7 +193,8 @@ class TestCAFrameFromRecords < Test::Unit::TestCase
   def test_symbol_and_string_spellings_of_one_name_raise
     assert_equal ["temp", "rh"], CAFrame.from_records([{ temp: 1, rh: 2 }]).column_names
     err = assert_raise(ArgumentError) { CAFrame.from_records([{ :temp => 1, "temp" => 2 }]) }
-    assert_equal 'from_records: the keys :temp and "temp" both name the column "temp"; use one spelling', err.message
+    assert_equal 'from_records: the keys name the column "temp" more than once; ' \
+                 "a String key and a Symbol key spell it both ways; use one spelling", err.message
     assert_raise(ArgumentError) { CAFrame.from_records([{ temp: 1 }, { "temp" => 2 }]) }
   end
 end

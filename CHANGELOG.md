@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: a CAFrame verb that takes a list of columns refuses a name given
+  twice, as the verbs that make columns do: `select("a", "a")` gave one
+  column, `group_by`, `sort_by_key`, `is_duplicate` and `describe` took
+  the name as if once, and `drop("a", "a")` raised `KeyError`; all raise
+  `ArgumentError` ("select: names "a" more than once"). `df["a", "a"]`
+  still returns the column twice. Every such refusal now reads
+  "<verb>: <what> <name> more than once".
+
 - Change: a Ruby Array given to a CAFrame as a column (`CAFrame.new("x"
   => [1, 2])`, `df["x"] = [...]`) is typed by its values as
   `from_records` types a record's: Integers an `int64` column, numbers a

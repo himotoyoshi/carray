@@ -248,11 +248,8 @@ class CAFrame
   private def join_key_names(on, verb, option)
     names = on.is_a?(Array) ? on : [on]
     raise ArgumentError, "#{verb}: #{option} names no key column" if names.empty?
-    names = names.map { |name| column_key(name, verb) }
-    if names.uniq.size < names.size
-      raise ArgumentError, "#{verb}: #{option} names a key column twice (#{on.inspect})"
-    end
-    names
+    CAFrame.__send__(:refuse_repeated_names, names.map { |name| column_key(name, verb) },
+                     verb, "#{option} names")
   end
 
   # Codes for the rows of both sides of a join on +lkeys+ / +rkeys+ (one
@@ -328,6 +325,7 @@ class CAFrame
     plan[:collisions].include?(name) ? "#{name}#{suffix}" : name
   end
 
+  # names-check: the output is checked as it is built, a column at a time
   private def put_join_column(cols, name, col)
     if cols.key?(name)
       raise ArgumentError,

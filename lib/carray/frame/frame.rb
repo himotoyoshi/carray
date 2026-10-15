@@ -370,8 +370,7 @@ class CAFrame
   def select(*names)
     raise ArgumentError, "select requires at least one column name" if names.empty?
     cols = {}
-    names.each do |name|
-      key = column_key(name, "select")
+    column_keys(names, "select").each do |key|
       raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
       cols[key] = @columns[key]
     end
@@ -820,6 +819,27 @@ class CAFrame
     return name if name.is_a?(String)
     raise TypeError, "#{verb}: a column name is a String (got #{name.inspect})"
   end
+
+  # A list of column names as a verb takes them: each a String, and none
+  # twice.
+  private def column_keys(names, verb)
+    CAFrame.__send__(:refuse_repeated_names, names.map { |n| column_key(n, verb) }, verb)
+  end
+
+  # Column names a verb makes or takes, none of them twice.  A frame holds
+  # one column per name, so a repeated name among new columns would keep
+  # only the last of them, and among the columns a verb takes would be
+  # taken once or twice depending on the verb.  Refused with ArgumentError
+  # "<verb>: <what> <name> more than once", +hint+ appended.  df[...] alone
+  # takes a name twice, as Hash#values_at does.
+  def self.refuse_repeated_names(names, verb, what = "names", hint: nil)
+    dup = names.tally.find { |_, count| count > 1 }
+    return names unless dup
+    message = "#{verb}: #{what} #{dup.first.inspect} more than once"
+    message += "; #{hint}" if hint
+    raise ArgumentError, message
+  end
+  private_class_method :refuse_repeated_names
 
   private def positional_range?(range)
     (range.begin.nil? || range.begin.is_a?(Integer)) &&

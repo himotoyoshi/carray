@@ -11,6 +11,7 @@ class CAFrame
   # external length-N CArray. Returns a GroupedFrame.
   def group_by(*keys)
     raise ArgumentError, "group_by needs at least one key" if keys.empty?
+    CAFrame.__send__(:refuse_repeated_names, keys.grep(String), "group_by")
     cat  = grouping_categorical(keys)
     axis = keys.size == 1 && keys.first.is_a?(String) ? keys.first : "group"
     key  = keys.size == 1 ? key_column(keys.first) : nil
@@ -47,7 +48,7 @@ class CAFrame
       raise ArgumentError,
             "is_duplicate: except: must be :first, :last or :none (got #{except.inspect})"
     end
-    names = names.map { |n| column_key(n, "is_duplicate") }
+    names = column_keys(names, "is_duplicate")
     names = column_names if names.empty?
     raise ArgumentError, "is_duplicate: the frame has no column to compare" if names.empty?
     cols = names.map do |n|

@@ -42,6 +42,7 @@ class CAFrame
       name, dir = parse_sort_key_spec(spec, order)
       [column_key(name, "sort_by_key"), sort_key_column(name), dir]
     end
+    CAFrame.__send__(:refuse_repeated_names, named.map(&:first), "sort_by_key")
     keys = named.map do |name, col, dir|
       dir == :desc ? col.order(descending: true, method: :dense) : col
     end

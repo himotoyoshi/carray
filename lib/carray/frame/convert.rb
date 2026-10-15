@@ -159,10 +159,7 @@ class CArray
               "to_frame: #{names.size} names for #{ncol} columns " \
               "(axis #{axis} has length #{ncol})"
       end
-      dup = names.find { |name| names.count(name) > 1 }
-      if dup
-        raise ArgumentError, "to_frame: column name #{dup.inspect} is given twice"
-      end
+      CAFrame.__send__(:refuse_repeated_names, names, "to_frame")
     end
     index = Array.new(ndim, nil)
     columns = {}

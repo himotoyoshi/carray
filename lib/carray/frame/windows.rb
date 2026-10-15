@@ -20,7 +20,7 @@ class CAFrame
   def windows (on:, before: nil, after: nil, exclude: :lower, by: nil, interval: nil)
     on_name  = column_key(on, "windows")
     key      = key_column(on_name, "windows")
-    by_names = by.nil? ? [] : (by.is_a?(Array) ? by : [by]).map { |b| column_key(b, "windows") }
+    by_names = by.nil? ? [] : column_keys(by.is_a?(Array) ? by : [by], "windows")
     by_cols  = by_names.map { |b| key_column(b, "windows") }
     plan = CAKeyWindowIterator.new(CArray.int64(nrow).seq, on: key,
                                    before: before, after: after, exclude: exclude,

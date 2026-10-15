@@ -234,6 +234,7 @@ class CAFrame
       end
       key.to_s
     end
+    # names-check: attribute keys, not column names
     dup = keys.tally.find { |_, n| n > 1 }
     raise ArgumentError, "#{verb}: attrs: names #{dup.first.inspect} twice" if dup
     keys
@@ -735,13 +736,9 @@ class CAFrame
     names ||= Array.new(ncol) { |j| "c#{j}" }
     # A frame holds one column per name, so a repeated one would keep only
     # the last of its columns.
-    dup = names.tally.select { |_, count| count > 1 }.keys
-    unless dup.empty?
-      raise ArgumentError,
-            "not a valid header row (#{dup.map(&:inspect).join(', ')} " \
-            "repeated); pass header: false for the default column names " \
-            "(c0, c1, ...), or name the columns with column_names:"
-    end
+    CAFrame.__send__(:refuse_repeated_names, names, "from_csv", "the header row names",
+                     hint: "pass header: false for the default column names " \
+                           "(c0, c1, ...), or name the columns with column_names:")
 
     cols = {}
     # Columns the C reader built as CAConstStrings over the text, for
