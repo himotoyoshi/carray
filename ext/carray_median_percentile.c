@@ -536,11 +536,39 @@ median_object_axis (VALUE self, long axis, long n, int keep_axis)
     VALUE kv = obj_kth_one(self, axis, (n - 1) / 2);
     result = kv;
   }
-  if ( keep_axis ) {
+  /* a 1-D self reduces to a bare object; mp_axis_answer keeps it */
+  if ( keep_axis && rb_obj_is_kind_of(result, rb_cCArray) ) {
     VALUE ia[1] = { LONG2NUM(axis) };
     result = rb_ca_insert_axis(1, ia, result);
   }
   return result;
+}
+
+/* [entry] An axis form's answer in the shape the other reductions give it.
+   A reduction that removes the only axis of a 1-D array is a bare value, as
+   sum(axis: 0) is, and keep_axis: makes it a one-cell array; the lanes answer
+   either way, so the answer is shaped here.  An answer the object lane took
+   as a slice of its partitioned copy is made an array of its own, as the
+   other reductions' answers are. */
+static VALUE
+mp_axis_answer (VALUE self, VALUE res, int keep_axis)
+{
+  CArray *ca;
+  GetCArray(self, ca);
+  int is_array = RTEST(rb_obj_is_kind_of(res, rb_cCArray));
+  if ( ca->ndim != 1 ) {
+    if ( is_array ) {
+      CArray *cr;
+      GetCArray(res, cr);
+      if ( ! ca_is_entity(cr) && ! ca_is_face(cr) ) res = rb_funcall(res, id_copy, 0);
+    }
+    return res;
+  }
+  if ( keep_axis ) {
+    if ( is_array ) return res;
+    return obj_keep_axis_full(self, res);
+  }
+  return is_array ? rb_funcall(res, id_aref, 1, INT2FIX(0)) : res;
 }
 
 /* [object] flat median: mask-strip / min_count, flatten, axis-0 reduce. */
@@ -879,12 +907,15 @@ rb_ca_median_m_body (int argc, VALUE *argv, VALUE self)
     if ( n == 0 ) return mp_axis_all_masked(self, axis, keep_axis);
     /* mask / min_count / fill_value require the per-fiber select (each fiber
        has its own n_present); the plain partition path assumes a uniform n. */
+    VALUE res;
     if ( RTEST(rb_ca_has_mask(self)) || min_count > 0 || !NIL_P(fill_value) )
-      return is_obj
+      res = is_obj
         ? median_object_axis_masked(self, axis, min_count, fill_value, keep_axis)
         : median_axis_masked(self, axis, min_count, fill_value, keep_axis);
-    return is_obj ? median_object_axis(self, axis, n, keep_axis)
-                  : median_axis(self, axis, n, keep_axis);
+    else
+      res = is_obj ? median_object_axis(self, axis, n, keep_axis)
+                   : median_axis(self, axis, n, keep_axis);
+    return mp_axis_answer(self, res, keep_axis);
   }
   return is_obj ? median_object_flat(self, min_count, fill_value, keep_axis)
                 : median_flat(self, min_count, fill_value, keep_axis);
@@ -1340,7 +1371,7 @@ rb_ca_percentile_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
                                              min_count, fill_value, keep_axis);
     } else {
       result = percentile_object_axis(self, pers, axis, method);
-      if ( keep_axis ) {
+      if ( keep_axis && ca->ndim > 1 ) {
         long len = RARRAY_LEN(result);
         VALUE w = rb_ary_new_capa(len);
         VALUE ia[1] = { LONG2NUM(axis) };
@@ -1348,6 +1379,11 @@ rb_ca_percentile_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
           rb_ary_push(w, rb_ca_insert_axis(1, ia, rb_ary_entry(result, i)));
         result = w;
       }
+    }
+    {
+      long len = RARRAY_LEN(result);
+      for ( long i = 0; i < len; i++ )
+        rb_ary_store(result, i, mp_axis_answer(self, rb_ary_entry(result, i), keep_axis));
     }
   } else if ( !is_obj ) {
     result = pct_flat(self, pers, min_count, fill_value, method, keep_axis);

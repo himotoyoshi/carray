@@ -108,16 +108,18 @@ class TestPercentileMedianAxis < Test::Unit::TestCase
   def test_percentile_1d_50
     a = CArray.float64(5)
     [1.0, 5.0, 3.0, 2.0, 4.0].each_with_index { |v, i| a[i] = v }
+    # the only axis reduced, a bare value, as sum(axis: 0) gives
     result = a.percentile(50, axis: 0)
-    assert_kind_of(CArray, result)
-    assert_in_delta(3.0, result[0], 1e-12)
+    assert_kind_of(Float, result)
+    assert_in_delta(3.0, result, 1e-12)
+    assert_equal [1], a.percentile(50, axis: 0, keep_axis: true).shape
   end
 
   def test_percentile_1d_0_and_100
     a = CArray.float64(4)
     [3.0, 1.0, 4.0, 2.0].each_with_index { |v, i| a[i] = v }
-    assert_in_delta(1.0, a.percentile(0, axis: 0)[0], 1e-12)
-    assert_in_delta(4.0, a.percentile(100, axis: 0)[0], 1e-12)
+    assert_in_delta(1.0, a.percentile(0, axis: 0), 1e-12)
+    assert_in_delta(4.0, a.percentile(100, axis: 0), 1e-12)
   end
 
   def test_percentile_1d_linear_interp
@@ -126,7 +128,7 @@ class TestPercentileMedianAxis < Test::Unit::TestCase
     # result = 0.25*10 + 0.75*20 = 17.5
     a = CArray.float64(4)
     [10.0, 30.0, 20.0, 40.0].each_with_index { |v, i| a[i] = v }
-    assert_in_delta(17.5, a.percentile(25, axis: 0)[0], 1e-12)
+    assert_in_delta(17.5, a.percentile(25, axis: 0), 1e-12)
   end
 
   # ---- percentile N-D ---------------------------------------------------

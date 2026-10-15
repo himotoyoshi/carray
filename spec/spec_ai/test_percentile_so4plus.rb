@@ -79,51 +79,51 @@ class TestPercentileSO4Plus < Test::Unit::TestCase
   def test_method_linear_default
     a = CArray.float64(11)
     (0..10).each { |i| a[i] = i.to_f }
-    assert_in_delta(2.5, a.percentile(25, axis: 0)[0], 1e-12)
-    assert_in_delta(2.5, a.percentile(25, axis: 0, method: :linear)[0], 1e-12)
+    assert_in_delta(2.5, a.percentile(25, axis: 0), 1e-12)
+    assert_in_delta(2.5, a.percentile(25, axis: 0, method: :linear), 1e-12)
   end
 
   def test_method_lower
     a = CArray.float64(11)
     (0..10).each { |i| a[i] = i.to_f }
-    assert_in_delta(2.0, a.percentile(25, axis: 0, method: :lower)[0], 1e-12)
+    assert_in_delta(2.0, a.percentile(25, axis: 0, method: :lower), 1e-12)
   end
 
   def test_method_higher
     a = CArray.float64(11)
     (0..10).each { |i| a[i] = i.to_f }
-    assert_in_delta(3.0, a.percentile(25, axis: 0, method: :higher)[0], 1e-12)
+    assert_in_delta(3.0, a.percentile(25, axis: 0, method: :higher), 1e-12)
   end
 
   def test_method_nearest_at_half_rounds_to_even
     a = CArray.float64(11)
     (0..10).each { |i| a[i] = i.to_f }
     # p=25 -> r=0.5, k=2 (even) -> idx 2 -> 2.0
-    assert_in_delta(2.0, a.percentile(25, axis: 0, method: :nearest)[0], 1e-12)
+    assert_in_delta(2.0, a.percentile(25, axis: 0, method: :nearest), 1e-12)
     # p=75 -> r=0.5, k=7 (odd) -> idx 8 -> 8.0
-    assert_in_delta(8.0, a.percentile(75, axis: 0, method: :nearest)[0], 1e-12)
+    assert_in_delta(8.0, a.percentile(75, axis: 0, method: :nearest), 1e-12)
   end
 
   def test_method_nearest_below_half
     a = CArray.float64(11)
     (0..10).each { |i| a[i] = i.to_f }
     # p=24 -> f = 2.4, k=2, r=0.4 < 0.5 -> idx 2 -> 2.0
-    assert_in_delta(2.0, a.percentile(24, axis: 0, method: :nearest)[0], 1e-12)
+    assert_in_delta(2.0, a.percentile(24, axis: 0, method: :nearest), 1e-12)
   end
 
   def test_method_nearest_above_half
     a = CArray.float64(11)
     (0..10).each { |i| a[i] = i.to_f }
     # p=26 -> f = 2.6, k=2, r=0.6 > 0.5 -> idx 3 -> 3.0
-    assert_in_delta(3.0, a.percentile(26, axis: 0, method: :nearest)[0], 1e-12)
+    assert_in_delta(3.0, a.percentile(26, axis: 0, method: :nearest), 1e-12)
   end
 
   def test_method_midpoint
     a = CArray.float64(11)
     (0..10).each { |i| a[i] = i.to_f }
-    assert_in_delta(2.5, a.percentile(25, axis: 0, method: :midpoint)[0], 1e-12)
+    assert_in_delta(2.5, a.percentile(25, axis: 0, method: :midpoint), 1e-12)
     # p=30 -> f=3.0 -> k=3, r=0 -> midpoint(sorted[3], sorted[4]) = 3.5
-    assert_in_delta(3.5, a.percentile(30, axis: 0, method: :midpoint)[0], 1e-12)
+    assert_in_delta(3.5, a.percentile(30, axis: 0, method: :midpoint), 1e-12)
   end
 
   # ---- multi-p × method combined ---------------------------------------
@@ -161,9 +161,9 @@ class TestPercentileSO4Plus < Test::Unit::TestCase
   # ---- backward compat -------------------------------------------------
 
   def test_single_p_axis_returns_carray
-    a = CArray.float64(11)
-    (0..10).each { |i| a[i] = i.to_f }
-    r = a.percentile(50, axis: 0)
+    a = CArray.float64(2, 11)
+    11.times { |i| a[0, i] = i.to_f; a[1, i] = 2.0 * i }
+    r = a.percentile(50, axis: 1)
     assert_kind_of(CArray, r)
     assert_in_delta(5.0, r[0], 1e-12)
   end
@@ -257,6 +257,32 @@ class TestPercentileSO4Plus < Test::Unit::TestCase
     x = CArray.const_string(%w[ab cd ab]).to_string
     assert_kind_of CAString, x.median(keep_axis: true)
     assert_kind_of CAString, x.percentile(50, keep_axis: true)
+  end
+
+  # A reduction that removes the only axis of a 1-D array is a bare value,
+  # as sum(axis: 0) is; keep_axis: keeps it as a one-cell array.
+  def test_one_axis_reduces_to_a_bare_value
+    f = CArray.float64(5) { |i| i / 4.0 }
+    o = CArray.object(5) { |i| Rational(i, 4) }
+    [f, o, f.mask_where(CArray.boolean(5) { |i| i == 1 })].each do |a|
+      assert_equal a.sum(axis: 0).class, a.median(axis: 0).class
+      assert_equal a.sum(axis: 0).class, a.percentile(30, axis: 0).class
+      assert_equal [a.sum(axis: 0).class], a.quantile(axis: 0).map(&:class).uniq
+      assert_equal [1], a.median(axis: 0, keep_axis: true).shape
+      assert_equal [[1]], a.percentile(30, 60, axis: 0, keep_axis: true).map(&:shape).uniq
+    end
+    assert_equal UNDEF, f.mask_where(CArray.boolean(5) { true }).median(axis: 0)
+    x = CArray.const_string(%w[ab cd ab]).to_string
+    assert_kind_of CAString, x.median(axis: 0, keep_axis: true)
+    assert_equal "ab", x.percentile(50, axis: 0, min_count: 1)
+  end
+
+  # Along an axis of more than one, an object array's answer is an array of
+  # its own, not a slice of the partitioned copy.
+  def test_object_answer_along_an_axis_is_an_array_of_its_own
+    o = CArray.object(3, 4) { |i, j| Rational(i + j, 3) }
+    assert_equal CArray, o.median(axis: 1).class
+    assert_equal [CArray], o.percentile(0, 100, axis: 1).map(&:class).uniq
   end
 
 end
