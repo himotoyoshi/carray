@@ -906,9 +906,11 @@ rb_ca_median_m_body (int argc, VALUE *argv, VALUE self)
     long n = (long) ca->dim[axis];
     if ( n == 0 ) return mp_axis_all_masked(self, axis, keep_axis);
     /* mask / min_count / fill_value require the per-fiber select (each fiber
-       has its own n_present); the plain partition path assumes a uniform n. */
+       has its own n_present); the plain partition path assumes a uniform n.
+       Switch      ca_fast_paths_enabled(): off, the per-fiber select. */
     VALUE res;
-    if ( RTEST(rb_ca_has_mask(self)) || min_count > 0 || !NIL_P(fill_value) )
+    if ( RTEST(rb_ca_has_mask(self)) || min_count > 0 || !NIL_P(fill_value)
+         || ! ca_fast_paths_enabled() )
       res = is_obj
         ? median_object_axis_masked(self, axis, min_count, fill_value, keep_axis)
         : median_axis_masked(self, axis, min_count, fill_value, keep_axis);
@@ -1359,9 +1361,10 @@ rb_ca_percentile_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
     long axis = rb_ca_normalize_axis_value(self, raxis, NULL);
     /* mask / min_count / fill_value require the per-fiber select (each fiber
        has its own n_present); the plain partition/sort path assumes a
-       uniform n.  These paths bake keep_axis into the reduced output. */
+       uniform n.  These paths bake keep_axis into the reduced output.
+       Switch      ca_fast_paths_enabled(): off, the per-fiber select. */
     int per_fiber = RTEST(rb_ca_has_mask(self)) || min_count > 0
-                    || !NIL_P(fill_value);
+                    || !NIL_P(fill_value) || ! ca_fast_paths_enabled();
     if ( !is_obj ) {
       result = per_fiber
         ? pct_axis_masked(self, pers, axis, method, min_count, fill_value, keep_axis)
