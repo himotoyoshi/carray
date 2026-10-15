@@ -63,6 +63,10 @@ class TestAddressBasis < Test::Unit::TestCase
     source[CArray.boolean(4, 4) { 1 }].reshape(4, 4)
   end
 
+  def xfer_view_of (source)
+    source[CArray.boolean(*source.shape) { 1 }].reshape(*source.shape)
+  end
+
   # --- classify ---------------------------------------------------------
 
   def test_classify_tiers
@@ -261,6 +265,31 @@ class TestAddressBasis < Test::Unit::TestCase
       marked = Fiddle::Pointer.new(basis[:mask_pointer] + 4 + 1, 1)[0, 1]
       assert_equal 1, marked.unpack1("C")
     end
+  end
+
+  # The mask takes the array's box: a tier-3 mask moves the cells asked for.
+  def test_a_boxed_mask_moves_only_the_box
+    a = CArray.int32(100, 100).seq!
+    a[0, 0] = UNDEF
+    view = xfer_view_of(a)
+    AB.open([view], [false], [[0, 0]], [[2, 3]]) do |bases|
+      assert_equal [3, 1], bases.first[:mask_strides]
+      mask = Fiddle::Pointer.new(bases.first[:mask_pointer], 6)[0, 6].bytes
+      assert_equal [1, 0, 0, 0, 0, 0], mask
+    end
+  end
+
+  def test_a_boxed_mask_writes_back_inside_the_box
+    a = CArray.int32(4, 4).seq!
+    a[0, 0] = UNDEF
+    view = xfer_view(a)
+    AB.open([view], [true], [[1, 1]], [[2, 2]]) do |bases|
+      b = bases.first
+      Fiddle::Pointer.new(b[:mask_pointer] + 2 * b[:mask_strides][0] +
+                          2 * b[:mask_strides][1], 1)[0, 1] = "\x01"
+    end
+    assert_equal [[0, 0], [2, 2]], (0...4).flat_map { |i| (0...4).map { |j| [i, j] } }
+                                          .select { |i, j| a.is_masked[i, j] }
   end
 
   def test_an_unmasked_array_reports_no_mask

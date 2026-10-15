@@ -216,10 +216,8 @@ neighbour would be marked on the way back.
 A mask added to a parent after a view of it was made is not on the view
 until the view is asked for it. `open` asks, so such a mask is opened.
 
-Note that a mask slot carries no region of its own: when the data is boxed,
-the mask is still transferred whole. That is consistent rather than wrong —
-both are addressed by the view's coordinates — but it is a transfer the box
-did not ask for.
+A mask has its array's shape, so it takes its array's box: in tier 3 the
+mask moves the same cells as the data, not the whole view's.
 
 ## The block form
 

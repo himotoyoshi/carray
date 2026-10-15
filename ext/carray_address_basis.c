@@ -735,6 +735,15 @@ ab_prepare (open_state *state, int n, CArray **arrays, const int *writable,
       state->carrays[n + i]  = mask;
       state->writable[n + i] = state->writable[i];
       state->tier[n + i]     = tier_for(mask);
+      /* The mask is the array's shape, so the array's box is its box: a
+         tier-3 mask moves the cells the kernel asked for, not all of them. */
+      if ( state->has_box[i] ) {
+        state->has_box[n + i] = 1;
+        memcpy(&state->box_start[(n + i) * CA_RANK_MAX], box_start[i],
+               ca->ndim * sizeof(ca_size_t));
+        memcpy(&state->box_count[(n + i) * CA_RANK_MAX], box_count[i],
+               ca->ndim * sizeof(ca_size_t));
+      }
     }
   }
 }
