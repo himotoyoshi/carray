@@ -205,6 +205,11 @@ An `Op` carries `kind` (`:monop`, `:binop`, `:triop`, `:moncmp`, `:bincmp`),
 `CArray.__kernel_body__`, with `#1`, `#2`, ... for the operands and the next
 number for the result), `mask` (`:pass`, `:union`, `:kleene_or`,
 `:kleene_and`, `:select`) and `trapping` (a masked cell must not be computed).
+`trapping` is what `ca_op_raises_on_cell` answers for the node, the same
+part the eager operators and the lazy views skip masked cells by: any op on
+an object cell, an integer division, remainder or reciprocal by zero, and an
+integer power of zero to a negative exponent. A new kernel that can raise on
+a cell is added there and nowhere else (`rake cell_raise_check`).
 A conversion between data types is a `:monop` named `cast_<type>` for the
 type it converts to, its body keyed by the type it converts from. A lazy
 `then_else` is the `:triop` `select`, masked where its condition is or where
