@@ -578,6 +578,14 @@ rb_ca_bincmp_new (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
   rb_check_carray_object(r_cary);
   TypedData_Get_Struct(l_cary, CArray, &carray_data_type, l);
   TypedData_Get_Struct(r_cary, CArray, &carray_data_type, r);
+  /* No kernel for the type the builder cast to: refuse as the eager
+     comparison does, before anything is allocated. */
+  {
+    ca_bincmp_func_t fn = ca_bincmp_kernel_lookup(op_id, l->data_type);
+    if ( fn == NULL || fn == ca_bincmp_not_implement ) {
+      ca_op_refuse_unimplemented(l_cary, l->data_type, rb_eTypeError);
+    }
+  }
   ca  = ca_bincmp_new(l, r, op_id, eps);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, l_cary);

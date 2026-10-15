@@ -108,24 +108,27 @@ class CArray
   # With +super_block+ the method passes its arguments as an Array and a Hash,
   # and a block that calls the method it overrides with the arguments the
   # block is given (`yield(*args, **kw)`).
-  def self.define_named_methods (mod, names, to, super_block: false)
-    names.each do |name|
-      unless name.to_s.match?(/\A[a-z_]\w*[?!]?\z/)
-        raise ArgumentError, "define_named_methods: #{name.inspect} is not a plain method name"
+  #
+  # With +template+ (and no +to+) each method is written out from it, for a
+  # method on a path where a helper call would cost: __NAME__ is the name and
+  # __VALUE__ the value +names+ (a Hash) gives it, inspected.
+  NAMED_METHOD = /\A(?:[a-z_]\w*[?!]?|\+|-|\*\*?|\/|%|<=>|==|<=?|>=?|<<|>>|&|\||\^|~|[+-]@)\z/
+  def self.define_named_methods (mod, names, to = nil, super_block: false, template: nil)
+    loc = caller_locations(1, 1).first
+    names.each do |name, value|
+      unless name.to_s.match?(NAMED_METHOD)
+        raise ArgumentError, "define_named_methods: #{name.inspect} is not a method name"
       end
-      if super_block
-        mod.class_eval(<<~RUBY, __FILE__, __LINE__ + 1)
-          def #{name} (*args, **kw, &blk)
-            #{to}(:#{name}, args, kw) { |*a, **k| super(*a, **k, &blk) }
-          end
-        RUBY
-      else
-        mod.class_eval(<<~RUBY, __FILE__, __LINE__ + 1)
-          def #{name} (...)
-            #{to}(:#{name}, ...)
-          end
-        RUBY
-      end
+      src = if template
+              template.gsub("__NAME__", name.to_s).gsub("__VALUE__", value.inspect)
+            elsif super_block
+              "def #{name}(*args, **kw, &blk)\n" \
+              "  #{to}(:#{name}, args, kw) { |*a, **k| super(*a, **k, &blk) }\n" \
+              "end\n"
+            else
+              "def #{name}(...)\n  #{to}(:#{name}, ...)\nend\n"
+            end
+      mod.class_eval(src, loc.path, loc.lineno)
     end
   end
   private_class_method :define_named_methods

@@ -390,6 +390,10 @@ int         ca_bincmp_integer_prepare (volatile VALUE *self, volatile VALUE *oth
                                        int op_id, int *signed_side);
 int         ca_bincmp_answer_when_negative (int op_id, int signed_side);
 long        ca_axis_integer (VALUE raxis, const char *name);
+/* Refuse an operator with no kernel for `data_type`, naming the method and
+   the type (carray_operator.c); the eager operators and the lazy builders. */
+NORETURN(void ca_op_refuse_unimplemented (VALUE operand, int8_t data_type,
+                                          VALUE eclass));
 /* Refuse a rank above CA_RANK_MAX before any dim is written (carray_utils.c). */
 void        ca_check_rank_fits (long ndim, const char *name);
 /* The checks of carray.h inside the library, each naming the method the

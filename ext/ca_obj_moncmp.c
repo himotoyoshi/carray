@@ -437,6 +437,14 @@ rb_ca_moncmp_new (VALUE p_cary, uint16_t op_id)
   CAMonCmp *ca;
   rb_check_carray_object(p_cary);
   TypedData_Get_Struct(p_cary, CArray, &carray_data_type, p);
+  /* No kernel for the parent's type: refuse as the eager comparison does,
+     before anything is allocated. */
+  {
+    ca_moncmp_func_t fn = ca_moncmp_kernel_lookup(op_id, p->data_type);
+    if ( fn == NULL || fn == ca_moncmp_not_implement ) {
+      ca_op_refuse_unimplemented(p_cary, p->data_type, rb_eCADataTypeError);
+    }
+  }
   ca  = ca_moncmp_new(p, op_id);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, p_cary);

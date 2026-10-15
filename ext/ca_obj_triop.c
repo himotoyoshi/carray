@@ -560,8 +560,7 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
 
   /* No kernel for that data_type: raise as the eager triop does. */
   if ( ca_triop_kernel_lookup_vvv(op_id, dt1) == ca_triop_not_implement ) {
-    rb_raise(rb_eCADataTypeError,
-             "invalid data_type for triop (not implemented)");
+    ca_op_refuse_unimplemented(cary1, dt1, rb_eCADataTypeError);
   }
   r1 = insert_cast(r1, dt1, &op1);
   r2 = insert_cast(r2, dt2, &op2);

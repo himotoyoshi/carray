@@ -91,15 +91,15 @@ class CArray
   module LazyDispatch; end
   prepend LazyDispatch
 
-  LAZY_MONOP_OP_IDS.each do |name, op_id|
-    LazyDispatch.send(:define_method, name, &Ractor.make_shareable(proc do
+  CArray.send(:define_named_methods, LazyDispatch, LAZY_MONOP_OP_IDS, template: <<~'RUBY')
+    def __NAME__
       if lazy_view?
-        CAMonOp.__build__(self, op_id)
+        CAMonOp.__build__(self, __VALUE__)
       else
         super()
       end
-    end))
-  end
+    end
+  RUBY
 
   # Operator aliases (`~` -> bit_neg, `-@` -> neg) were installed in
   # CArray by rb_define_alias at Init time (see MkKernel.alias_monop in
@@ -127,26 +127,26 @@ class CArray
   # ---------------------------------------------------------------------------
 
   # @private
-  LazyDispatch.send(:define_method, :abs, &Ractor.make_shareable(proc do
-    if lazy_view?
-      # A boolean has no absolute value to change type for, as eager says.
-      raise CArray::DataTypeError,
-            "data_type-changing monop not implemented for input data_type " \
-            "#{CArray.data_type_code(CA_BOOLEAN)}" if boolean?
-      abs_i_node = CAMonOp.__build__(self, CAMonOp::OP_ABS_I)
-      if complex?
-        # float_dt is a Symbol; convert via data_type_code so the cast
-        # op_id can be computed by Integer arithmetic.
-        float_dt = (data_type == CA_CMPLX64) ? CA_FLOAT32 : CA_FLOAT64
-        CAMonOp.__build__(abs_i_node,
-                          CAMonOp::CAST_BASE + CArray.data_type_code(float_dt))
+  module LazyDispatch
+    def abs
+      if lazy_view?
+        # A boolean has no absolute value: the eager abs refuses it.
+        return super() if boolean?
+        abs_i_node = CAMonOp.__build__(self, CAMonOp::OP_ABS_I)
+        if complex?
+          # float_dt is a Symbol; convert via data_type_code so the cast
+          # op_id can be computed by Integer arithmetic.
+          float_dt = (data_type == CA_CMPLX64) ? CA_FLOAT32 : CA_FLOAT64
+          CAMonOp.__build__(abs_i_node,
+                            CAMonOp::CAST_BASE + CArray.data_type_code(float_dt))
+        else
+          abs_i_node
+        end
       else
-        abs_i_node
+        super()
       end
-    else
-      super()
     end
-  end))
+  end
 
   # ---------------------------------------------------------------------------
   # real / imag lazy fuse (post-IC follow-up):
@@ -179,46 +179,50 @@ class CArray
   # ---------------------------------------------------------------------------
 
   # @private
-  LazyDispatch.send(:define_method, :real, &Ractor.make_shareable(proc do
-    if lazy_view?
-      if complex?
-        float_dt = (data_type == CA_CMPLX64) ? CA_FLOAT32 : CA_FLOAT64
-        # float_dt is a Symbol; convert via data_type_code for kernel
-        # op_id arithmetic.
-        CAMonOp.__build__(self,
-                          CAMonOp::CAST_BASE + CArray.data_type_code(float_dt))
+  module LazyDispatch
+    def real
+      if lazy_view?
+        if complex?
+          float_dt = (data_type == CA_CMPLX64) ? CA_FLOAT32 : CA_FLOAT64
+          # float_dt is a Symbol; convert via data_type_code for kernel
+          # op_id arithmetic.
+          CAMonOp.__build__(self,
+                            CAMonOp::CAST_BASE + CArray.data_type_code(float_dt))
+        else
+          # `real` of a real array is the array itself; preserve the lazy
+          # chain unchanged (eager returns self[] = CARefer wrap, but for
+          # lazy chain consumption returning self keeps streaming intact).
+          self
+        end
       else
-        # `real` of a real array is the array itself; preserve the lazy
-        # chain unchanged (eager returns self[] = CARefer wrap, but for
-        # lazy chain consumption returning self keeps streaming intact).
-        self
+        super()
       end
-    else
-      super()
     end
-  end))
+  end
 
   # @!visibility private
-  LazyDispatch.send(:define_method, :imag, &Ractor.make_shareable(proc do
-    if lazy_view?
-      imag_i_node = CAMonOp.__build__(self, CAMonOp::OP_IMAG_I)
-      if boolean?
-        # imag_i reads a boolean as int64; the eager imag stays boolean.
-        CAMonOp.__build__(imag_i_node,
-                          CAMonOp::CAST_BASE + CArray.data_type_code(CA_BOOLEAN))
-      elsif complex?
-        float_dt = (data_type == CA_CMPLX64) ? CA_FLOAT32 : CA_FLOAT64
-        # float_dt is a Symbol; convert via data_type_code for kernel
-        # op_id arithmetic.
-        CAMonOp.__build__(imag_i_node,
-                          CAMonOp::CAST_BASE + CArray.data_type_code(float_dt))
+  module LazyDispatch
+    def imag
+      if lazy_view?
+        imag_i_node = CAMonOp.__build__(self, CAMonOp::OP_IMAG_I)
+        if boolean?
+          # imag_i reads a boolean as int64; the eager imag stays boolean.
+          CAMonOp.__build__(imag_i_node,
+                            CAMonOp::CAST_BASE + CArray.data_type_code(CA_BOOLEAN))
+        elsif complex?
+          float_dt = (data_type == CA_CMPLX64) ? CA_FLOAT32 : CA_FLOAT64
+          # float_dt is a Symbol; convert via data_type_code for kernel
+          # op_id arithmetic.
+          CAMonOp.__build__(imag_i_node,
+                            CAMonOp::CAST_BASE + CArray.data_type_code(float_dt))
+        else
+          imag_i_node
+        end
       else
-        imag_i_node
+        super()
       end
-    else
-      super()
     end
-  end))
+  end
 
   # ---------------------------------------------------------------------------
   # arg lazy fuse: eager `arg` is a data_type-changing monop (see
@@ -239,29 +243,29 @@ class CArray
   # ---------------------------------------------------------------------------
 
   # @private
-  LazyDispatch.send(:define_method, :arg, &Ractor.make_shareable(proc do
-    if lazy_view?
-      raise CArray::DataTypeError,
-            "data_type-changing monop not implemented for input data_type " \
-            "#{CArray.data_type_code(CA_BOOLEAN)}" if boolean?
-      parent = self
-      if integer?
-        parent = CAMonOp.__build__(parent,
-                                   CAMonOp::CAST_BASE +
-                                   CArray.data_type_code(CA_FLOAT64))
-      end
-      arg_i_node = CAMonOp.__build__(parent, CAMonOp::OP_ARG_I)
-      if complex?
-        float_dt = (data_type == CA_CMPLX64) ? CA_FLOAT32 : CA_FLOAT64
-        CAMonOp.__build__(arg_i_node,
-                          CAMonOp::CAST_BASE + CArray.data_type_code(float_dt))
+  module LazyDispatch
+    def arg
+      if lazy_view?
+        return super() if boolean?             # the eager arg refuses it
+        parent = self
+        if integer?
+          parent = CAMonOp.__build__(parent,
+                                     CAMonOp::CAST_BASE +
+                                     CArray.data_type_code(CA_FLOAT64))
+        end
+        arg_i_node = CAMonOp.__build__(parent, CAMonOp::OP_ARG_I)
+        if complex?
+          float_dt = (data_type == CA_CMPLX64) ? CA_FLOAT32 : CA_FLOAT64
+          CAMonOp.__build__(arg_i_node,
+                            CAMonOp::CAST_BASE + CArray.data_type_code(float_dt))
+        else
+          arg_i_node
+        end
       else
-        arg_i_node
+        super()
       end
-    else
-      super()
     end
-  end))
+  end
 
   # ---------------------------------------------------------------------------
   # Binop dispatch.  Operator entries are redefined so a lazy operand on
@@ -313,15 +317,15 @@ class CArray
     # branch uses C99 `remainder`, round-half-to-even).
   }.freeze
 
-  LAZY_BINOP_OP_IDS.each do |method_name, op_id|
-    LazyDispatch.send(:define_method, method_name, &Ractor.make_shareable(proc do |other|
+  CArray.send(:define_named_methods, LazyDispatch, LAZY_BINOP_OP_IDS, template: <<~'RUBY')
+    def __NAME__(other)
       if lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
-        CABinOp.__build__(self, other, op_id)
+        CABinOp.__build__(self, other, __VALUE__)
       else
         super(other)
       end
-    end))
-  end
+    end
+  RUBY
 
   # The shift count of an Integer is brought into the array's type before
   # either form sees it (see CArray::IntegerShiftCount).
@@ -380,18 +384,18 @@ class CArray
     clamp_between: CATriOp::OP_CLIP,
   }.freeze
 
-  LAZY_TRIOP_OP_IDS.each do |method_name, op_id|
-    LazyDispatch.send(:define_method, method_name, &Ractor.make_shareable(proc do |op2, op3|
+  CArray.send(:define_named_methods, LazyDispatch, LAZY_TRIOP_OP_IDS, template: <<~'RUBY')
+    def __NAME__(op2, op3)
       lazy_receiver = lazy_view? ||
                       (op2.is_a?(CArray) && op2.lazy_view?) ||
                       (op3.is_a?(CArray) && op3.lazy_view?)
       if lazy_receiver
-        CATriOp.__build__(self, op2, op3, op_id)
+        CATriOp.__build__(self, op2, op3, __VALUE__)
       else
         super(op2, op3)
       end
-    end))
-  end
+    end
+  RUBY
   # The clip kernel takes both bounds; the public entry is `clip`.
   private :clamp_between
   LazyDispatch.send(:private, :clamp_between)
@@ -416,17 +420,19 @@ class CArray
   # `power` binop kernel already uses `op_powi_<type>` for integer data_types
   # via the `int:` expr in MkKernel.binop :power, so OP_POW + int parent
   # is already fast.  The lazy-substrate gap was Float/Complex only.
-  LazyDispatch.send(:define_method, :**, &Ractor.make_shareable(proc do |other|
-    if other.is_a?(Integer) && (float? || complex?) &&
-       (lazy_view? || (other.is_a?(CArray) && other.lazy_view?))
-      CABinOp.__build__(self, CScalar.int64.tap { |s| s[0] = other },
-                        CABinOp::OP_IPOWER)
-    elsif lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
-      CABinOp.__build__(self, other, CABinOp::OP_POW)
-    else
-      super(other)
+  module LazyDispatch
+    def **(other)
+      if other.is_a?(Integer) && (float? || complex?) &&
+         (lazy_view? || (other.is_a?(CArray) && other.lazy_view?))
+        CABinOp.__build__(self, CScalar.int64.tap { |s| s[0] = other },
+                          CABinOp::OP_IPOWER)
+      elsif lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
+        CABinOp.__build__(self, other, CABinOp::OP_POW)
+      else
+        super(other)
+      end
     end
-  end))
+  end
 
   # coerce: when self is a lazy view and the scalar appears on the LEFT
   # (e.g. `2 * a.lazy`), Ruby's Numeric#* calls a.lazy.coerce(2).  The
@@ -470,34 +476,34 @@ class CArray
     :feq => CABinCmp::OP_FEQ,
   }.freeze
 
-  LAZY_BINCMP_OP_IDS.each do |method_name, op_id|
-    LazyDispatch.send(:define_method, method_name, &Ractor.make_shareable(proc do |other|
+  CArray.send(:define_named_methods, LazyDispatch, LAZY_BINCMP_OP_IDS, template: <<~'RUBY')
+    def __NAME__(other)
       if lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
-        CABinCmp.__build__(self, other, op_id)
+        CABinCmp.__build__(self, other, __VALUE__)
       else
         super(other)
       end
-    end))
-  end
+    end
+  RUBY
 
   # tolerance-bearing bincmp ops (= is_close / is_equiv) use the same
   # CABinCmp dispatch but with a 2nd `tol` positional arg.  Kept in a
-  # separate dict because the LAZY_BINCMP_OP_IDS define_method block above
+  # separate dict because the LAZY_BINCMP_OP_IDS template above
   # uses arity 1 (|other|); these need arity 2 (|other, tol|).
   LAZY_BINCMP_TOL_OP_IDS = {
     :is_close => CABinCmp::OP_IS_CLOSE,
     :is_equiv => CABinCmp::OP_IS_EQUIV,
   }.freeze
 
-  LAZY_BINCMP_TOL_OP_IDS.each do |method_name, op_id|
-    LazyDispatch.send(:define_method, method_name, &Ractor.make_shareable(proc do |other, tol|
+  CArray.send(:define_named_methods, LazyDispatch, LAZY_BINCMP_TOL_OP_IDS, template: <<~'RUBY')
+    def __NAME__(other, tol)
       if lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
-        CABinCmp.__build__(self, other, op_id, tol.to_f.abs)
+        CABinCmp.__build__(self, other, __VALUE__, tol.to_f.abs)
       else
         super(other, tol)
       end
-    end))
-  end
+    end
+  RUBY
 
   # @!visibility private
   LAZY_MONCMP_OP_IDS = {
@@ -508,28 +514,30 @@ class CArray
     signbit:    CAMonCmp::OP_SIGNBIT,
   }.freeze
 
-  LAZY_MONCMP_OP_IDS.each do |name, op_id|
-    LazyDispatch.send(:define_method, name, &Ractor.make_shareable(proc do
+  CArray.send(:define_named_methods, LazyDispatch, LAZY_MONCMP_OP_IDS, template: <<~'RUBY')
+    def __NAME__
       if lazy_view?
-        CAMonCmp.__build__(self, op_id)
+        CAMonCmp.__build__(self, __VALUE__)
       else
         super()
       end
-    end))
-  end
+    end
+  RUBY
 
   # A lazy receiver takes the scalar the eager coerce makes, and stays
   # lazy itself: the builder promotes the pair as the eager operator does.
   # @!visibility private
-  LazyDispatch.send(:define_method, :coerce, &Ractor.make_shareable(proc do |other|
-    begin
-      scalar, receiver = super(other)
-    rescue RangeError => e
-      raise unless other.is_a?(Integer)
-      return [OutOfRangeInteger.new(other, self, e), self]
+  module LazyDispatch
+    def coerce(other)
+      begin
+        scalar, receiver = super(other)
+      rescue RangeError => e
+        raise unless other.is_a?(Integer)
+        return [OutOfRangeInteger.new(other, self, e), self]
+      end
+      lazy_view? ? [scalar, self] : [scalar, receiver]
     end
-    lazy_view? ? [scalar, self] : [scalar, receiver]
-  end))
+  end
 
   # An Integer the array's type cannot hold, on the left of an operator.
   # A comparison is answered from the array's side, where it compares by

@@ -36,6 +36,13 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: a lazy operator with no kernel for the data type refuses as the
+  eager one does, "atan2: not defined for data_type int8", instead of
+  "invalid data_type for binop (not implemented)"; the lazy `abs` and
+  `arg` of a boolean no longer give a type code. A refusal that comes from
+  the cells (comparing an object with a number) still waits for the
+  evaluation and names the method that evaluates.
+
 - Change: the common refusals open with the method you called, as the
   others do: a shape mismatch between operands or in a store, a negative
   size, a data type that is not one, a fixlen without `bytes:`, an index

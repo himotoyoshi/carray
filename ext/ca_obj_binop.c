@@ -590,8 +590,7 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
   /* No kernel for that data_type (fixlen arithmetic, ...): raise as the
      eager binop does, before a view is built over it. */
   if ( ca_binop_kernel_lookup_vv(op_id, l_in_dt) == ca_binop_not_implement ) {
-    rb_raise(rb_eCADataTypeError,
-             "invalid data_type for binop (not implemented)");
+    ca_op_refuse_unimplemented(l_cary, l_in_dt, rb_eCADataTypeError);
   }
 
   if ( l_in_dt != l->data_type ) {

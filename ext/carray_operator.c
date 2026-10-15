@@ -32,19 +32,17 @@ ca_op_acquire_operand_scratch (CArray *ca, ca_size_t n_elements)
 
 #include "ca_obj_face.h"   /* ca_face_reconcile_comparison (comparison Face gate) */
 
-/* A kernel table with no entry for the operand's data_type.  Name the
-   method and the type, or the Face, rather than leave it to the table's
-   stub, which knows neither. */
-NORETURN(static void ca_op_refuse_unimplemented (VALUE operand, CArray *ca,
-                                                VALUE eclass));
-
-static void
-ca_op_refuse_unimplemented (VALUE operand, CArray *ca, VALUE eclass)
+/* A kernel table with no entry for `data_type`, the type the operator
+   would run in.  Name the method and the type, or the Face, rather than
+   leave it to the table's stub, which knows neither.  The eager operators
+   and the lazy builders refuse through here, so the two say the same. */
+void
+ca_op_refuse_unimplemented (VALUE operand, int8_t data_type, VALUE eclass)
 {
   const char *name = ca_calling_method_name();
   ca_face_refuse_numeric(operand, name, eclass);
   rb_raise(eclass, "%s: not defined for data_type %s",
-           name, ca_type_name[ca->data_type]);
+           name, ca_type_name[data_type]);
 }
 
 VALUE rb_mCAMath;
@@ -688,7 +686,7 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
   }
   if ( func[ca1->data_type] == ca_monop_not_implement ) {
-    ca_op_refuse_unimplemented(self, ca1, rb_eCADataTypeError);
+    ca_op_refuse_unimplemented(self, ca1->data_type, rb_eCADataTypeError);
   }
 
   ca2 = ca_has_mask(ca1) ? ca_template_safe(ca1) : ca_template(ca1);
@@ -826,7 +824,7 @@ rb_ca_call_monop_bang (VALUE self, ca_monop_func_t func[])
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
   if ( func[ca1->data_type] == ca_monop_not_implement ) {
-    ca_op_refuse_unimplemented(self, ca1, rb_eCADataTypeError);
+    ca_op_refuse_unimplemented(self, ca1->data_type, rb_eCADataTypeError);
   }
 
   ca_attach(ca1);   /* window: the kernel runs through ca_op_guarded when it can raise */
@@ -866,7 +864,7 @@ rb_ca_call_monop_typed (VALUE self, ca_monop_func_t func[],
 
   out_dt = out_data_types[ca1->data_type];
   if ( out_dt < 0 ) {
-    ca_op_refuse_unimplemented(self, ca1, rb_eCADataTypeError);
+    ca_op_refuse_unimplemented(self, ca1->data_type, rb_eCADataTypeError);
   }
 
   /* Allocate output with the per-op output data_type.  Same shape as input. */
@@ -1221,7 +1219,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
     TypedData_Get_Struct(other, CArray, &carray_data_type, ca2);
   }
   if ( func[ca1->data_type] == ca_binop_not_implement ) {
-    ca_op_refuse_unimplemented(ca_is_face(ca1) ? self : other, ca1,
+    ca_op_refuse_unimplemented(ca_is_face(ca1) ? self : other, ca1->data_type,
                                rb_eCADataTypeError);
   }
 
@@ -1580,7 +1578,7 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
   TypedData_Get_Struct(other, CArray, &carray_data_type, ca2);
   if ( func[ca1->data_type] == ca_binop_not_implement ) {
-    ca_op_refuse_unimplemented(self, ca1, rb_eCADataTypeError);
+    ca_op_refuse_unimplemented(self, ca1->data_type, rb_eCADataTypeError);
   }
 
   self_is_scalar  = RTEST(rb_obj_is_cscalar(self));
@@ -1793,7 +1791,7 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
   if ( func[ca1->data_type] == ca_triop_not_implement ) {
     ca_op_refuse_unimplemented(ca_is_face(ca1) ? self
                                : ca_is_face(ca2) ? other2 : other3,
-                               ca1, rb_eCADataTypeError);
+                               ca1->data_type, rb_eCADataTypeError);
   }
 
   /* Element-count check: all non-scalar operands must agree.            */
@@ -1944,7 +1942,7 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
   TypedData_Get_Struct(other2, CArray, &carray_data_type, ca2);
   TypedData_Get_Struct(other3, CArray, &carray_data_type, ca3);
   if ( func[ca1->data_type] == ca_triop_not_implement ) {
-    ca_op_refuse_unimplemented(self, ca1, rb_eCADataTypeError);
+    ca_op_refuse_unimplemented(self, ca1->data_type, rb_eCADataTypeError);
   }
 
   /* self is the write target, so the destination rule applies to each
@@ -2092,7 +2090,7 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
   if ( func[ca1->data_type] == ca_moncmp_not_implement ) {
-    ca_op_refuse_unimplemented(self, ca1, rb_eCADataTypeError);
+    ca_op_refuse_unimplemented(self, ca1->data_type, rb_eCADataTypeError);
   }
 
   if ( ca_is_scalar(ca1) ) {
@@ -2366,7 +2364,7 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
   TypedData_Get_Struct(other, CArray, &carray_data_type, ca2);
   if ( func[ca1->data_type] == ca_bincmp_not_implement ) {
-    ca_op_refuse_unimplemented(ca_is_face(ca1) ? self : other, ca1,
+    ca_op_refuse_unimplemented(ca_is_face(ca1) ? self : other, ca1->data_type,
                                rb_eTypeError);
   }
 

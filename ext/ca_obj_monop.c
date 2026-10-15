@@ -914,8 +914,9 @@ rb_ca_monop_build (VALUE cary, uint16_t op_id)
      with no boolean kernel reads the 0/1 storage in int64. */
   if ( parent_dt == CA_BOOLEAN && ! ca_monop_is_writable_view(op_id) ) {
     if ( ca_monop_is_widening(op_id) ) {
-      rb_raise(rb_eCADataTypeError,
-               "invalid data type for monop (not implemented)");
+      /* the eager monop reads a boolean with no kernel as int64 (0/1), and
+         names that type in its refusal */
+      ca_op_refuse_unimplemented(cary, CA_INT64, rb_eCADataTypeError);
     }
     if ( ca_monop_kernel_lookup(op_id, CA_BOOLEAN) == ca_monop_not_implement ) {
       target = rb_ca_monop_new(target, CA_MONOP_CAST_BASE + CA_INT64);
@@ -933,8 +934,13 @@ rb_ca_monop_build (VALUE cary, uint16_t op_id)
        ( ca_monop_kernel_lookup(op_id, kernel_in_dt) == ca_monop_not_implement ||
          ( parent_dt == CA_FIXLEN &&
            ca_monop_kernel_lookup(op_id, CA_FIXLEN) == ca_monop_not_implement ) ) ) {
-    rb_raise(rb_eCADataTypeError,
-             "invalid data type for monop (not implemented)");
+    /* the eager monop takes an integer to float64 before it looks for the
+       kernel, and names the type it looked in */
+    ca_op_refuse_unimplemented(cary,
+                               parent_dt == CA_FIXLEN ? CA_FIXLEN
+                               : RTEST(rb_ca_is_integer_type(cary)) ? CA_FLOAT64
+                               : kernel_in_dt,
+                               rb_eCADataTypeError);
   }
 
   /* Insert cast node if the kernel wants a different input data_type.  */
