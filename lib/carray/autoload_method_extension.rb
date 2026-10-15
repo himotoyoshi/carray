@@ -32,8 +32,17 @@ module AutoloadMethodExtension
   private
 
   def autoload_define (target, name, library, original_spec)
-    stub = nil
-    target.define_method(name) do |*args, **kwargs, &block|
+    library       = Ractor.make_shareable(library.to_s.dup)
+    original_spec = Ractor.make_shareable(original_spec.to_s.dup)
+    # Shareable, so the stub answers in any Ractor; only the main one can
+    # require, and another is told what to load there.
+    target.define_method(name, &Ractor.make_shareable(proc do |*args, **kwargs, &block|
+      unless Ractor.current == Ractor.main
+        raise Ractor::IsolationError,
+              "'#{original_spec}' is loaded on first use from '#{library}', " \
+              "which only the main Ractor can require; require it there first"
+      end
+      stub_location = target.instance_method(name).source_location
       begin
         require library
       rescue LoadError
@@ -45,14 +54,13 @@ module AutoloadMethodExtension
       # forwarding would land straight back here and keep doing so until the
       # stack gave out -- naming neither the method nor the library. Say
       # which, once.
-      if target.instance_method(name) == stub
+      if target.instance_method(name).source_location == stub_location
         raise NoMethodError,
               "'#{original_spec}' is registered for autoload from " \
               "'#{library}', but that library defines no such method"
       end
       send(name, *args, **kwargs, &block)
-    end
-    stub = target.instance_method(name)
+    end))
     # The library replaces the stub with a plain `def`, which `ruby -w`
     # reports as a redefinition.  Replacing is what the stub is for, so mark
     # it as aliased: Ruby does not warn when the old definition has an alias.
