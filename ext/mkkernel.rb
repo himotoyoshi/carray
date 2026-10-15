@@ -4293,17 +4293,21 @@ module MkKernel
         io.puts "  #{name}_pair_#{src} *aux = ALLOCV_N(#{name}_pair_#{src}, haux, fiber_n);"
       end
     else
-      io.puts "  #{name}_pair_#{src} *buf ="
-      io.puts "    xmalloc(sizeof(#{name}_pair_#{src}) * (size_t) fiber_n);"
+      # ALLOCV as well: the walk that fills buf is the only thing that
+      # could raise, and it does not today, but the buffers need not rely
+      # on that.
+      io.puts "  volatile VALUE hbuf = 0, haux = 0;"
+      io.puts "  #{name}_pair_#{src} *buf = ALLOCV_N(#{name}_pair_#{src}, hbuf, fiber_n);"
     end
     if has_kind && src != :object
-      # PROPOSAL_PORTABLE_TEXTBOOK_SORT §9.5.2 Option γ: aux pair buffer
-      # for ca_sort_merge_pair_<src> (= ping-pong bottom-up mergesort).
-      # Allocated once outside the fiber loop, reused across fibers.
+      # The aux pair buffer for ca_sort_merge_pair_<src> (a ping-pong
+      # bottom-up mergesort), taken once outside the fiber loop.
       io.puts "  #{name}_pair_#{src} *aux = NULL;"
       io.puts "  if ( do_stable ) {"
-      io.puts "    aux = xmalloc(sizeof(#{name}_pair_#{src}) * (size_t) fiber_n);"
+      io.puts "    aux = ALLOCV_N(#{name}_pair_#{src}, haux, fiber_n);"
       io.puts "  }"
+    elsif src != :object
+      io.puts "  (void) haux;"
     end
 
     if view_flat
@@ -4564,15 +4568,8 @@ module MkKernel
     end
 
     io.puts "  }"
-    if src == :object
-      io.puts "  ALLOCV_END(hbuf);"
-      io.puts "  ALLOCV_END(haux);"
-    else
-      io.puts "  xfree(buf);"
-      if has_kind
-        io.puts "  if ( aux ) xfree(aux);"
-      end
-    end
+    io.puts "  ALLOCV_END(hbuf);"
+    io.puts "  ALLOCV_END(haux);"
     io.puts "  ca_iter_state_finish(&st_in);"
     io.puts "  ca_iter_state_finish(&st_out);"
     io.puts "  return vout;"
