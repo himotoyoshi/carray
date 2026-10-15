@@ -501,8 +501,18 @@ ca_slab_advance_slab_view (ca_slab_iter_state_t *st,
     slab_cs->base_offset = (ca_size_t) (p_in - src->ptr);
     if ( slab_cs->mask != NULL ) {
       CAStride *mask_cs = (CAStride *) slab_cs->mask;
-      mask_cs->ptr         = (char *) m_in;
-      mask_cs->base_offset = (ca_size_t) ((char *) m_in - src->mask->ptr);
+      if ( m_in != NULL ) {
+        mask_cs->ptr         = (char *) m_in;
+        mask_cs->base_offset = (ca_size_t) ((char *) m_in - src->mask->ptr);
+      }
+      else {
+        /* The walk was opened on a source without a mask and the block
+           has given it one since: there is no mask cursor, so the slab's
+           mask reads the source's mask at the cell the data starts on. */
+        mask_cs->ptr         = NULL;
+        mask_cs->base_offset = (ca_size_t) ((p_in - src->ptr) / src->bytes)
+                               * src->mask->bytes;
+      }
     }
   } else if ( st->own_data_scratch != NULL ) {
     /* Non-contig multi-axis: K-D gather from src memory (via
@@ -522,7 +532,7 @@ ca_slab_advance_slab_view (ca_slab_iter_state_t *st,
        both slab_view and carrier at the iter's delivered addr.         */
     slab_cs->ptr    = p_in;
     carrier_cw->ptr = p_in;
-    if ( slab_cs->mask != NULL ) {
+    if ( slab_cs->mask != NULL && m_in != NULL ) {
       CAStride *mask_cs = (CAStride *) slab_cs->mask;
       mask_cs->ptr           = (char *) m_in;
       carrier_cw->mask->ptr  = (char *) m_in;
