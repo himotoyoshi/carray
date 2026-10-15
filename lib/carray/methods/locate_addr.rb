@@ -1,4 +1,5 @@
 require "carray/methods/is_in"   # fixlen_widened_with, values_for_lookup
+require "carray/distance_limit"
 
 class CArray
 
@@ -142,6 +143,7 @@ class CArray
             ":ceil (got #{direction.inspect})"
     end
     [self, ref].each { |key| nearest_refuse_bytes(key) }
+    limit = tolerance && DistanceLimit.read(tolerance, self, "tolerance:")
     return CArray.int64(*shape) if elements == 0
     # A masked reference value matches nothing, as in locate_addr: sorting
     # puts the masked ones last, and only the others are searched.  A NaN
@@ -174,9 +176,9 @@ class CArray
     si = si.reshape(*shape)
     si[is_masked] = UNDEF if has_mask?
     idx = ri.project(si)
-    if tolerance
+    if limit
       dist = (ref.project(idx) - self).abs
-      idx[dist > nearest_tolerance(tolerance, dist)] = UNDEF
+      idx[dist > limit] = UNDEF
     end
     idx
   end
@@ -253,33 +255,6 @@ class CArray
     si = lt - 1
     si[upper] = lt[upper]
     si
-  end
-
-  # The tolerance in the units of the distance. A time key measures its
-  # distance as a CATimedelta, so its tolerance is a duration: a String in
-  # the spelling CArray.time takes for a unit ("10 minutes"), or a
-  # CATimedelta value. A bare number would mean a different length in each
-  # unit, so it is refused there; any other key takes a number.
-  private def nearest_tolerance(tolerance, dist)
-    unless dist.is_a?(CATimedelta)
-      if tolerance.is_a?(String)
-        raise ArgumentError,
-              "tolerance: #{tolerance.inspect} is a duration, but the key is " \
-              "#{data_type_name}; give a number"
-      end
-      return tolerance
-    end
-    case tolerance
-    when String
-      res = CATime::Resolution.parse(tolerance)
-      CATimedelta::Element.new(res.count, res.base)
-    when CATimedelta::Element
-      tolerance
-    else
-      raise ArgumentError,
-            "tolerance: a time key needs a duration such as \"10 minutes\" " \
-            "or a CATimedelta value (got #{tolerance.inspect})"
-    end
   end
 
   # @!endgroup

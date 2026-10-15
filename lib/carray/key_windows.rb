@@ -9,6 +9,7 @@
 # ----------------------------------------------------------------------------
 
 require "carray/segment_iterator"
+require "carray/distance_limit"
 
 # A moving window per row, bounded by a width of a key: the window of a row
 # whose key is t holds the rows whose key lies between t - before and
@@ -62,6 +63,9 @@ class CAKeyWindowIterator < CAIterator
     @n        = value.dim0
     @ndim     = 1
     @shape    = [@n]
+    before, after, interval = { before: before, after: after, interval: interval }.map do |kw, w|
+      CArray::DistanceLimit.read(w, on, "windows: #{kw}:")
+    end
     @interval = interval
     keys, bw, aw, iv = key_numbers(on, before, after, interval)
     @before_value = before
@@ -408,11 +412,6 @@ class CAKeyWindowIterator < CAIterator
             "(got #{CArray::Inspector.type_label(key)})"
     end
     widths = [before, after, interval]
-    widths.each do |w|
-      next if w.nil? || w.is_a?(Numeric)
-      raise ArgumentError,
-            "windows: a numeric key takes widths as numbers (got #{w.inspect})"
-    end
     if key.integer? && widths.compact.all? { |w| w.is_a?(Integer) }
       bw, aw, iv = widths
       bw ||= 0
@@ -432,25 +431,14 @@ class CAKeyWindowIterator < CAIterator
     return @key if width.nil?
     key = @key
     if key.is_a?(CATime) || key.is_a?(CATimedelta)
-      res = width.is_a?(CATimedelta::Element) ? width.unit : CATime::Resolution.parse(width)
-      key = key.to_unit(CATimeUnitAlgebra.finer(key.unit, res))
+      key = key.to_unit(CATimeUnitAlgebra.finer(key.unit, width.unit))
     end
     key.public_send(op, width)
   end
 
   # A duration in ticks of the key's unit, as a Rational.
   def duration_in_ticks (w, unit)
-    case w
-    when String
-      res = CATime::Resolution.parse(w)
-      count, base = res.count, res.base
-    when CATimedelta::Element
-      count, base = w.value * w.unit.count, w.unit.base
-    else
-      raise ArgumentError,
-            "windows: a time key takes widths as durations such as \"1 hour\" " \
-            "or a CATimedelta value (got #{w.inspect})"
-    end
+    count, base = w.value * w.unit.count, w.unit.base
     unless CATimeUnitAlgebra.same_group?(base, unit.base)
       raise ArgumentError,
             "windows: a width of #{count} #{base} cannot be measured on a key in " \
@@ -482,10 +470,6 @@ class CAKeyWindowIterator < CAIterator
   end
 
   def check_widths (bw, aw, iv)
-    unless bw >= 0 && aw >= 0
-      raise ArgumentError, "windows: before: and after: are numbers not below 0 " \
-                           "(got #{bw.inspect}, #{aw.inspect})"
-    end
     return unless iv
     unless iv > 0
       raise ArgumentError, "windows: interval: is positive"

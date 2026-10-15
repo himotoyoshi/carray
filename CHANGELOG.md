@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: `tolerance:` of `locate_nearest_addr`, `align_nearest_addr` and
+  `CAFrame#join_asof` refuses NaN and a negative length with
+  ArgumentError, as `windows` refuses them for `before:` and `after:`;
+  NaN had kept every match and a negative length dropped every one. A
+  zero duration String such as `"0 minutes"` is taken by both.
 - Fix: the index of `CAFrame#resample` shows the time column's
   attributes, as the index of `group_by` and `pivot` shows its key's;
   it had none, with or without `fill:`, `label:` and `origin:`.
