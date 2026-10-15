@@ -85,6 +85,7 @@ Self-contained operations you reach for by name.
 | [MaskDuplicates](topics/MaskDuplicates.md) | Guide | `mask_duplicates` — mark duplicates while keeping the shape |
 | [LinearInterpolation](topics/LinearInterpolation.md) | Guide | `linear_section` and `linear_fetch` |
 | [Serialization](topics/Serialization.md) | Reference | Serialize / deserialize via the `_CARRAY3` binary format |
+| [Ractor](topics/Ractor.md) | Guide | Using CArray in Ractors: what works, what crosses, sharing a frozen array |
 
 ## Interoperability
 
