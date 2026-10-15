@@ -714,7 +714,6 @@ Init_carray_attribute (void)
   rb_define_method(rb_cCArray, "bytes", rb_ca_bytes, 0);
   rb_define_method(rb_cCArray, "flags", rb_ca_flags, 0);
   rb_define_method(rb_cCArray, "ndim", rb_ca_ndim, 0);
-  rb_define_method(rb_cCArray, "rank", rb_ca_ndim, 0);
   rb_define_method(rb_cCArray, "shape", rb_ca_dim, 0);
   rb_define_method(rb_cCArray, "dim", rb_ca_dim, 0);
   rb_define_method(rb_cCArray, "dim0", rb_ca_dim0, 0);

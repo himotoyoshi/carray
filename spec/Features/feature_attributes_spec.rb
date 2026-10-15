@@ -9,7 +9,7 @@ describe "TestCArrayAttribute " do
     is_asserted_by {  a.class == CArray }
     is_asserted_by {  CA_OBJ_ARRAY == a.obj_type }
     is_asserted_by {  CA_INT32 == a.data_type }
-    is_asserted_by {  4 == a.rank }
+    is_asserted_by {  4 == a.ndim }
     is_asserted_by {  CArray.sizeof(CA_INT32) == a.bytes }
     is_asserted_by {  24 == a.elements }
     is_asserted_by {  [4, 3, 2, 1] == a.dim }
