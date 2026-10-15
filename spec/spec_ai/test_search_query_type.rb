@@ -25,9 +25,17 @@ class TestSearchQueryType < Test::Unit::TestCase
     assert_equal [UNDEF], i.search(CA_INT64([259])).to_a   # not 3 = 259 mod 256
   end
 
+  # An Integer the reference's type cannot hold is searched in the type its
+  # value needs, as `eq` compares it: it matches nothing, and the nearest
+  # cell is the one at the end it lies beyond.
   def test_integer_query_that_does_not_fit
-    assert_raise(RangeError) { CA_INT8([1, 3]).search(1000) }
-    assert_raise(RangeError) { CA_INT8([1, 3]).search_nearest(1000) }
+    i = CA_INT8([1, 3])
+    assert_nil i.search(1000)
+    assert_nil i.bsearch(1000)
+    assert_equal 1, i.search_nearest(1000)
+    assert_equal 0, i.search_nearest(-1000)
+    assert_nil CA_UINT8([255, 0]).search(-1)
+    assert_equal 0, CA_UINT64([1, 2**64 - 1]).search_nearest(-1)
   end
 
   def test_a_wider_float_query_array_is_not_rounded_to_the_reference

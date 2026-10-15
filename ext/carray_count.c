@@ -225,12 +225,11 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     CArray *cv;
     GetCArray(rval, cv);
 
-    /* A query of a wider type than an integer array is counted in the type
-       the two share, as `eq` compares: each v[k] below is then a value of
-       that type, not one truncated to the array's. */
-    if ( ca_is_integer_type(src) &&
-         ( ca_is_integer_type(cv) || ca_is_float_type(cv) ) ) {
-      int8_t qt = ca_promote_type(src->data_type, cv->data_type);
+    /* The array is counted in the type it and v match in, as `eq` compares
+       (ca_query_match_type): each v[k] below is then a value of that type,
+       not one cut to the array's. */
+    if ( ca_query_match_applies(src, rval) ) {
+      int8_t qt = ca_query_match_type(src->data_type, rval);
       if ( qt != src->data_type ) {
         self = rb_ca_wrap_readonly(self, INT2NUM(qt));
         GetCArray(self, src);
@@ -356,9 +355,9 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
                "count(v) on numeric array: v must be numeric, got %s",
                rb_obj_classname(rval));
     }
-    /* A Float query on an integer array is compared as a float, as `eq`
-       compares and `search` searches: 1.5 must not match 1.  An Integer
-       query keeps the array's type and is refused when it does not fit. */
+    /* The query is compared in the type it and the array match in, as `eq`
+       compares (ca_query_match_type): 1.5 does not match 1, and an Integer
+       the array's type cannot hold matches nothing. */
     if ( ca_is_integer_type(src) && ! RB_INTEGER_TYPE_P(rval)
          && ! RB_FLOAT_TYPE_P(rval) && ! RB_TYPE_P(rval, T_COMPLEX)
          && rb_obj_is_kind_of(rval, rb_cNumeric) ) {
@@ -373,8 +372,11 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
       argv = nargv;
       rval = nargv[0];
     }
-    if ( ca_is_integer_type(src) && RB_FLOAT_TYPE_P(rval) ) {
-      self = rb_ca_wrap_readonly(self, INT2NUM(CA_FLOAT64));
+    if ( ca_query_match_applies(src, rval) ) {
+      int8_t qt = ca_query_match_type(src->data_type, rval);
+      if ( qt != src->data_type ) {
+        self = rb_ca_wrap_readonly(self, INT2NUM(qt));
+      }
     }
     /* Pass full argv; count_equal_ki pops argv[0] as value_arg. */
     return rb_ca_count_equal_ki(argc, argv, self);

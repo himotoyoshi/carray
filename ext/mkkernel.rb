@@ -5662,26 +5662,12 @@ module MkKernel
     io.puts "    GetCArray(self, src);"
     io.puts "  }"
 
-    # The query and the reference are compared in the type they share, as
-    # `a.eq(q)` compares, not with the query cast to the reference's type:
-    # 3.9 must not match 3, a float64 query must not be rounded to a float32
-    # reference, and -1 must not read as 255.  A scalar takes the type the
-    # operators give it (ca_promote_scalar_type); a CArray query the type
-    # the two match in (ca_value_match_type).  The reference is read through
-    # a cast view of that type.  An Integer scalar keeps the reference's type
-    # and is refused when it does not fit.
-    io.puts "  if ( ca_is_integer_type(src) || ca_is_float_type(src) || src->data_type == CA_BOOLEAN ) {"
-    io.puts "    int8_t qt = src->data_type;"
-    io.puts "    if ( RB_FLOAT_TYPE_P(rval) ) {"
-    io.puts "      qt = ca_promote_scalar_type(src->data_type, rval, CA_FLOAT64);"
-    io.puts "    } else if ( rb_obj_is_kind_of(rval, rb_cCArray) ) {"
-    io.puts "      CArray *qv;"
-    io.puts "      TypedData_Get_Struct(rval, CArray, &carray_data_type, qv);"
-    io.puts "      if ( ca_is_integer_type(qv) || ca_is_float_type(qv) || qv->data_type == CA_BOOLEAN ) {"
-    io.puts "        qt = ca_value_match_type(ca_promote_type(src->data_type, qv->data_type),"
-    io.puts "                                 src->data_type, qv->data_type);"
-    io.puts "      }"
-    io.puts "    }"
+    # The query and the reference are compared in the type they match in,
+    # as `a.eq(q)` compares (ca_query_match_type): the reference is read
+    # through a cast view of that type, so the query is never cut to the
+    # reference's type.
+    io.puts "  if ( ca_query_match_applies(src, rval) ) {"
+    io.puts "    int8_t qt = ca_query_match_type(src->data_type, rval);"
     io.puts "    if ( qt != src->data_type ) {"
     io.puts "      self = rb_ca_wrap_readonly(self, INT2NUM(qt));"
     io.puts "      GetCArray(self, src);"

@@ -394,11 +394,16 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
   end
 
   # A search with an array query attaches the source and the query together;
-  # a query that does not convert to the source's type raises in the second.
-  releases("search_query_does_not_convert", ArgumentError) do
+  # a query value whose comparison raises does so with both attached.
+  UNEQUAL = Object.new
+  def UNEQUAL.== (other)
+    raise ArgumentError, "can not be compared"
+  end
+
+  releases("search_query_comparison_raises", ArgumentError) do
     t = CArray.int32(4, 6).seq.T
     v = t[1..4, nil]
-    [[v, t], -> { v.search(CA_OBJECT([1, "x"])) }]
+    [[v, t], -> { v.search(CA_OBJECT([1, UNEQUAL])) }]
   end
 
   releases("integer_division_by_zero", ZeroDivisionError) do

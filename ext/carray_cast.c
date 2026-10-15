@@ -2573,6 +2573,49 @@ ca_value_match_type (int8_t t, int8_t a, int8_t b)
   }
 }
 
+/* The type a value query and a reference of type `ref` are compared in,
+   by equality or order, as `eq` compares them: the reference is read
+   through a view of that type, so the query is never cut to the
+   reference's type (3.9 does not match 3, -1 does not read as 255).
+   A Float query takes the type the operators give it beside the
+   reference; an Integer query keeps the reference's type when it fits and
+   otherwise the type its value needs, where it matches nothing; a CArray
+   query takes the type the two arrays match in (the common type, widened
+   by ca_value_match_type).  Beside a reference that is not a number, a
+   scalar query keeps the reference's type. */
+int8_t
+ca_query_match_type (int8_t ref, VALUE query)
+{
+  int ref_int   = ( ref >= CA_INT8 && ref <= CA_UINT64 );
+  int ref_float = ( ref == CA_FLOAT32 || ref == CA_FLOAT64 );
+  if ( rb_obj_is_carray(query) ) {
+    CArray *q;
+    TypedData_Get_Struct(query, CArray, &carray_data_type, q);
+    return ca_value_match_type(ca_promote_type(ref, q->data_type), ref,
+                               q->data_type);
+  }
+  if ( ! ref_int && ! ref_float && ref != CA_BOOLEAN ) {
+    return ref;
+  }
+  if ( RB_FLOAT_TYPE_P(query) ) {
+    return ca_promote_scalar_type(ref, query, CA_FLOAT64);
+  }
+  if ( RB_INTEGER_TYPE_P(query) ) {
+    return ref_int ? ca_promote_scalar_type(ref, query, CA_INT64) : ref;
+  }
+  return ref;
+}
+
+/* ca.query_match_type(query) -- ca_query_match_type with self as the
+   reference, for the set family and locate_addr. */
+static VALUE
+rb_ca_query_match_type (VALUE self, VALUE query)
+{
+  CArray *ca;
+  GetCArray(self, ca);
+  return rb_ca_data_type_to_sym(ca_query_match_type(ca->data_type, query));
+}
+
 /* ca.value_match_type(t, other_type) -- ca_value_match_type with self's
    data type as the first operand, for the set family and locate_addr. */
 static VALUE
@@ -2605,13 +2648,23 @@ ca_arg_is_scalar (VALUE obj)
    by the rule the operators apply: a scalar of the same kind takes the
    array's type (0.1 beside float32 is float32, 1 beside int8 is int8); one
    of another kind promotes (1.5 beside int32 is float64).  An Integer that
-   does not fit the array's integer type takes the type of its value, where
-   an operator would raise RangeError. */
+   does not fit the array's integer type takes a type that holds it and the
+   array's values (int64, or object where no integer type does), where an
+   operator would raise RangeError. */
 int8_t
 ca_promote_scalar_type (int8_t at, VALUE obj, int8_t st)
 {
   if ( RB_INTEGER_TYPE_P(obj) && at >= CA_INT8 && at <= CA_UINT64 ) {
-    return ( ca_integer_range_side(obj, at) == 0 ) ? at : ca_promote_type(at, st);
+    int8_t vt;
+    if ( ca_integer_range_side(obj, at) == 0 ) {
+      return at;
+    }
+    /* The type the value needs, widened so that the array's values are
+       kept beside it (a uint64 array and -1 meet in object). */
+    vt = ( ca_integer_range_side(obj, CA_INT64) == 0 )  ? CA_INT64
+       : ( ca_integer_range_side(obj, CA_UINT64) == 0 ) ? CA_UINT64
+       : CA_OBJECT;
+    return ca_value_match_type(ca_promote_type(at, vt), at, vt);
   }
   if ( ca_cast_table2[st][at] >= 0 ) {
     return at;
@@ -3601,6 +3654,8 @@ Init_carray_cast (void)
            "result_type", rb_ca_s_result_type, -1);
   rb_define_private_method(rb_cCArray,
            "value_match_type", rb_ca_value_match_type, 2);
+  rb_define_private_method(rb_cCArray,
+           "query_match_type", rb_ca_query_match_type, 1);
 
   rb_define_singleton_method(rb_cCArray,
            "promote_list", rb_ca_s_promote_list, -1);

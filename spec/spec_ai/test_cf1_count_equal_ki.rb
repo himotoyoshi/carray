@@ -156,6 +156,19 @@ class TestCF1CountEqualKi < Test::Unit::TestCase
 
   def test_wider_integer_query_array_is_counted_in_the_shared_type
     assert_equal [1, 0], CA_INT8([1, 2]).count(CA_INT64([1, 300])).to_a
-    assert_raise(RangeError) { CA_INT8([1, 2]).count(300) }
+    assert_equal 0, CA_INT8([1, 2]).count(300)
+  end
+
+  # A query of the other sign is counted by value, as eq compares: -1 is not
+  # 255, and a value the array's type cannot hold matches nothing.
+  def test_mixed_sign_query_is_counted_by_value
+    s = CA_INT8([-1, 1, 0])
+    u = CA_UINT8([255, 1, 0])
+    assert_equal [0, 1], s.count(CA_UINT8([255, 1])).to_a
+    assert_equal [0, 1], u.count(CA_INT8([-1, 1])).to_a
+    assert_equal 0, u.count(-1)
+    assert_equal 0, s.count(255)
+    assert_equal 0, u.count(2**70)
+    assert_equal [0], u.reshape(1, 3).count(-1, axis: 1).to_a
   end
 end

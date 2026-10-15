@@ -630,6 +630,33 @@ void        ca_multi_parent_mask_settle (CArray *mask, CArray **parents,
 int8_t      ca_promote_scalar_type (int8_t at, VALUE obj, int8_t st);
 int8_t      ca_value_match_type (int8_t t, int8_t a, int8_t b);
 
+/* The type a value query (a Ruby value or a CArray) and a reference of
+   type `ref` are compared in, as `eq` compares them: count(v) and the
+   search family read the reference through a view of that type.  An
+   Integer that does not fit `ref` takes the type its value needs, where it
+   matches nothing.  count(v) and the search family ask it for a numeric
+   reference (ca_query_match_applies): a Face query is answered by the Face
+   gate first, and a string reference compares in its own type, padding
+   included. */
+int8_t      ca_query_match_type (int8_t ref, VALUE query);
+
+static inline int
+ca_query_match_applies (CArray *ref, VALUE query)
+{
+  if ( ! ( ca_is_integer_type(ref) || ca_is_float_type(ref)
+           || ref->data_type == CA_BOOLEAN ) ) {
+    return 0;
+  }
+  if ( rb_obj_is_carray(query) ) {
+    CArray *q;
+    TypedData_Get_Struct(query, CArray, &carray_data_type, q);
+    if ( ca_is_face(q) ) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 /* Equality of two object cells, as the float lanes answer it: Ruby's `==`,
    except that a Float NaN equals nothing, itself included.  rb_equal alone
    answers true for the same object, so whether two NaN cells matched would

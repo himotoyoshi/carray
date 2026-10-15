@@ -95,8 +95,10 @@ class TestIntegerEdges < Test::Unit::TestCase
   def test_an_integer_operand_that_does_not_fit_is_refused
     assert_raise(RangeError) { CA_INT32([5]) * 2**32 }
     assert_raise(RangeError) { CA_UINT8([0]).lazy + 256 }
-    assert_raise(RangeError) { CA_UINT8([0, 0, 1]).count(256) }
-    assert_raise(RangeError) { CA_INT32([0, 5, 10]).search(2**40) }
+    # count and search compare values, as eq does: such an Integer matches
+    # nothing rather than being refused
+    assert_equal 0, CA_UINT8([0, 0, 1]).count(256)
+    assert_nil CA_INT32([0, 5, 10]).search(2**40)
     assert_equal [2**63 + 1], (CA_UINT64([1]) + 2**63).to_a
     assert_equal [-2**63 + 1], (CA_INT64([1]) + -2**63).to_a
     assert_equal [1], (2 - CA_UINT8([1])).to_a
