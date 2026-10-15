@@ -31,6 +31,7 @@
 --------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "ruby/util.h"
 #include "carray_internal.h"
 #include "ca_obj_face.h"
 #include <ruby/encoding.h>
@@ -903,13 +904,12 @@ rb_ca_const_string_search (VALUE self, VALUE query)
    byte-for-byte faithful to `to_object.sort` with no collation
    loss. */
 
-/* qsort comparator context — single-threaded under the GVL (thread-safety is
-   a non-goal; see project memory), so a file-static context is safe. */
-static ca_const_string_scan_t *ca_const_string_sort_ctx;
-
+/* The scan is passed to the comparator, not held in a static: Ractors
+   sort at the same time. */
 static int
-ca_const_string_byte_cmp (const void *a, const void *b)
+ca_const_string_byte_cmp (const void *a, const void *b, void *ctx)
 {
+  ca_const_string_scan_t *scan = (ca_const_string_scan_t *) ctx;
   ca_size_t ia = *(const ca_size_t *) a;
   ca_size_t ib = *(const ca_size_t *) b;
   /* sort raises on masked input, so record() always sets these here; the
@@ -917,8 +917,8 @@ ca_const_string_byte_cmp (const void *a, const void *b)
   const char *pa = NULL, *pb = NULL;
   int64_t la = 0, lb = 0;
   int c;
-  ca_const_string_record(ca_const_string_sort_ctx, ia, &pa, &la);
-  ca_const_string_record(ca_const_string_sort_ctx, ib, &pb, &lb);
+  ca_const_string_record(scan, ia, &pa, &la);
+  ca_const_string_record(scan, ib, &pb, &lb);
   c = memcmp(pa, pb, (size_t) (la < lb ? la : lb));
   if ( c != 0 ) return c;
   return (la > lb) - (la < lb);
@@ -945,21 +945,19 @@ ca_const_string_sort_perm (ca_const_string_scan_t *s)
   }
   idx = ALLOC_N(ca_size_t, s->n);
   for ( i = 0; i < s->n; i++ ) idx[i] = i;
-  ca_const_string_sort_ctx = s;
-  qsort(idx, (size_t) s->n, sizeof(ca_size_t), ca_const_string_byte_cmp);
+  ruby_qsort(idx, (size_t) s->n, sizeof(ca_size_t), ca_const_string_byte_cmp, s);
   /* qsort is not stable.  Equal strings keep their order, as CArray's own
      sort does, so each run of them is put back in position order.  Breaking
      the tie inside the comparator instead doubles the sort on columns with
      many repeats. */
   for ( i = 0; i < s->n; ) {
     ca_size_t j = i + 1;
-    while ( j < s->n && ca_const_string_byte_cmp(&idx[i], &idx[j]) == 0 ) j++;
+    while ( j < s->n && ca_const_string_byte_cmp(&idx[i], &idx[j], s) == 0 ) j++;
     if ( j - i > 1 ) {
       qsort(idx + i, (size_t) (j - i), sizeof(ca_size_t), ca_const_string_index_cmp);
     }
     i = j;
   }
-  ca_const_string_sort_ctx = NULL;
   return idx;
 }
 
