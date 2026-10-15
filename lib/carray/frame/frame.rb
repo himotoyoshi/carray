@@ -59,15 +59,15 @@ class CAFrame
   def initialize(columns = {}, **opts)
     axis_name = opts.delete(:axis_name)
     index     = opts.delete(:index)
-    stray = opts.keys.reject { |k| k.is_a?(String) }
-    unless stray.empty?
-      raise ArgumentError,
-            "column keys must be Strings (Symbols are reserved); got #{stray.inspect}"
+    opts.each_key do |k|
+      CAFrame.__send__(:column_key, k, "CAFrame.new",
+                       hint: "axis_name: and index: are the options")
     end
     columns = columns.merge(opts) unless opts.empty?
 
     @columns   = {}
-    @axis_name = axis_name || DEFAULT_AXIS_NAME
+    @axis_name = axis_name.nil? ? DEFAULT_AXIS_NAME :
+                   CAFrame.__send__(:column_key, axis_name, "CAFrame.new", "axis_name:")
     @index     = nil
     # The row axis name this frame had before set_index promoted a column over
     # it, so reset_index can put it back.  A frame built with an index never
@@ -816,9 +816,21 @@ class CAFrame
   # A column name given as an argument: a String, as the frame's column
   # keys are. Symbols are the frame's options and types, never names.
   private def column_key(name, verb)
-    return name if name.is_a?(String)
-    raise TypeError, "#{verb}: a column name is a String (got #{name.inspect})"
+    CAFrame.__send__(:column_key, name, verb)
   end
+
+  # A name a verb is given for a column -- or, with +what+, for the row
+  # axis -- is a String: a Symbol is a frame's option or type, never a
+  # name.  Anything else is refused with TypeError "<verb>: <what> is a
+  # String (got :x)", +hint+ appended.  A +verb+ that is an option, as
+  # "types:", already ends in its colon.
+  def self.column_key(name, verb, what = "a column name", hint: nil)
+    return name if name.is_a?(String)
+    message = "#{verb.end_with?(":") ? verb : "#{verb}:"} #{what} is a String (got #{name.inspect})"
+    message += "; #{hint}" if hint
+    raise TypeError, message
+  end
+  private_class_method :column_key
 
   # A list of column names as a verb takes them: each a String, and none
   # twice.

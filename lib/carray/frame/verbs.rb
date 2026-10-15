@@ -303,7 +303,7 @@ class CAFrame
   #   cast(default: :float64, "station" => nil)  # every other column to float64
   #
   # A name that is not a column raises KeyError, and a Symbol key other than
-  # +:default+ raises ArgumentError; both before any column is read. Every
+  # +:default+ raises TypeError; both before any column is read. Every
   # column is read before any is rebound, so a raise leaves the frame as it
   # was. Returns self so calls chain.
   #
@@ -382,8 +382,7 @@ class CAFrame
       if key == :default
         default = t
       elsif key.is_a?(Symbol)
-        raise ArgumentError, "#{label} takes column names (Strings) and :default " \
-                             "as keys (got #{key.inspect})"
+        CAFrame.__send__(:column_key, key, label, hint: ":default is the only Symbol key")
       else
         Array(key).each { |name| named[column_key(name, label)] = t }
       end

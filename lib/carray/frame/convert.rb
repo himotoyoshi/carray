@@ -150,10 +150,7 @@ class CArray
     if names.empty?
       names = Array.new(ncol) { |j| "c#{j}" }
     else
-      bad = names.find { |name| !name.is_a?(String) }
-      if bad
-        raise TypeError, "to_frame: a column name is a String (got #{bad.inspect})"
-      end
+      names.each { |name| CAFrame.__send__(:column_key, name, "to_frame") }
       unless names.size == ncol
         raise ArgumentError,
               "to_frame: #{names.size} names for #{ncol} columns " \

@@ -156,6 +156,8 @@ class CAFrame
                     "#{verb}: the key has #{key.shape[0]} values for #{nrow} rows"
             end
             key
+          when Symbol
+            column_key(key, verb)
           else
             raise ArgumentError, "#{verb}: a group key is a column name or a CArray (got #{key.class})"
           end

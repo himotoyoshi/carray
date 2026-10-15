@@ -181,11 +181,9 @@ class CAFrame
     missing.each do |key, value|
       case key
       when :default then default = value
-      when String   then per_column[key] = value
       else
-        raise ArgumentError,
-              "#{verb}: missing: takes column names (Strings) and :default " \
-              "as keys (got #{key.inspect})"
+        per_column[CAFrame.__send__(:column_key, key, verb, "missing: a column name",
+                                    hint: ":default is the only Symbol key")] = value
       end
     end
     [default, per_column]

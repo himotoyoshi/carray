@@ -430,9 +430,7 @@ class CAFrame
       end
       selection.each do |c|
         next if c.is_a?(String)
-        if c.is_a?(Symbol)
-          raise TypeError, "from_csv: columns: a column name is a String (got #{c.inspect})"
-        end
+        CAFrame.__send__(:column_key, c, "from_csv", "columns: a column name") if c.is_a?(Symbol)
         next if c.is_a?(Integer) && c >= 0
         next if c.is_a?(Range) && (c.begin.nil? || (c.begin.is_a?(Integer) && c.begin >= 0)) &&
                 (c.end.nil? || c.end.is_a?(Integer))
@@ -450,10 +448,8 @@ class CAFrame
           raise ArgumentError, "from_csv: columns: a Hash selects one column per key, " \
                                "not a Range (got #{key.inspect})"
         end
-        unless name.is_a?(String)
-          raise TypeError, "from_csv: columns: a column name is a String " \
-                           "(got #{name.inspect} for #{key.inspect})"
-        end
+        CAFrame.__send__(:column_key, name, "from_csv", "columns: a column name",
+                         hint: "given for #{key.inspect}")
       end
       CAFrame.__send__(:refuse_repeated_names, map.values, "from_csv", "columns: names")
       map.values

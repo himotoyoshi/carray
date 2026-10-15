@@ -27,7 +27,9 @@ class TestCAFrameConstruction < Test::Unit::TestCase
   def test_bare_symbol_key_rejected
     # Column keys are strings (memo §3.7); a bare symbol key is ambiguous
     # with the :axis_name / :index options, so it is rejected loudly.
-    assert_raise(ArgumentError) { CAFrame.new(a: CA_INT32([1, 2])) }
+    err = assert_raise(TypeError) { CAFrame.new(a: CA_INT32([1, 2])) }
+    assert_equal "CAFrame.new: a column name is a String (got :a); " \
+                 "axis_name: and index: are the options", err.message
   end
 
   # Column names are Strings in every verb; a Symbol is refused, in an

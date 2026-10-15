@@ -36,6 +36,12 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: a CAFrame column name given as a Symbol raises TypeError
+  "<verb>: a column name is a String" everywhere: `CAFrame.new` with a
+  stray Symbol key, `cast` and the `types:` and `missing:` of
+  `from_csv` with a Symbol key other than `:default`, and `group_by(:x)`
+  raised ArgumentError before. `CAFrame.new(axis_name: :row)` is now
+  refused too; pass `"row"`. `df[:x]` stays the predicate syntax.
 - Change: a Face is named one way wherever a type is read, as `p df`
   names it: `describe`'s `type` column and the refusals of the CAFrame
   verbs, key windows, `bincount` and `locate_nearest_addr` read
