@@ -127,7 +127,7 @@ There are four ways in, one per shape the data arrives in:
 
 ### `CAFrame.new`
 
-Pass a Hash of `name => column`. Columns may be `CArray`s or anything that answers `to_ca` (a Ruby `Array`, a lazy view). Column names are **Strings**, here and in every verb that names a column: a Symbol is refused with `TypeError` (`drop: a column name is a String (got :temp)`), since Symbols are the frame's options and types. Pairs may be given inline:
+Pass a Hash of `name => column`. Columns may be `CArray`s, a Ruby `Array`, or anything else that answers `to_ca` (a lazy view). A `CArray` is kept as it is; a Ruby `Array` is typed by its values as [`from_records`](#caframefrom_records) types a record's: `[1, 2]` an `int64` column, `[1, 2.5]` a `float64` one, `[[1, 2], [3, 4]]` an N-D one, strings or mixed values `:object`, and `nil` or `UNDEF` a missing cell. `df["x"] = [...]` and the values a group's block gives are typed the same way. Column names are **Strings**, here and in every verb that names a column: a Symbol is refused with `TypeError` (`drop: a column name is a String (got :temp)`), since Symbols are the frame's options and types. Pairs may be given inline:
 
 ```ruby
 CAFrame.new("a" => CA_INT32([1, 2, 3]), "b" => CA_FLOAT64([1.0, 2.0, 3.0]))
@@ -193,11 +193,11 @@ A record value is **already a typed Ruby object** (`Float`, `Integer`, `Complex`
 | all `Integer` | `:int64` |
 | `Integer` and `Float` | `:float64` |
 | `Integer`, `Float` and `Complex` | `:cmplx128` |
-| strings / `DateTime` / booleans / `Rational` / `BigDecimal` / mixed | `:object` (left as is) |
+| strings / `DateTime` / booleans / `Rational` / `BigDecimal` / mixed, or an Integer an `int64` cannot hold | `:object` (left as is) |
 | numeric **arrays** of one shape | an N-D column (see [Making N-D columns](#making-n-d-columns-from-records)) |
 
 - The column set is the **union of keys** in first-appearance order; keys are stringified (String- or Symbol-keyed records both work).
-- A **missing key or `nil`** becomes `UNDEF`. An integer column with a hole stays `:int64` with an `UNDEF` cell — **no promotion to float**: the mask carries the missingness, so there is no need to force the column to float to hold a NaN.
+- A **missing key, `nil` or `UNDEF`** becomes `UNDEF`. An integer column with a hole stays `:int64` with an `UNDEF` cell — **no promotion to float**: the mask carries the missingness, so there is no need to force the column to float to hold a NaN.
 - `types:` casts named columns afterward (the same map / array-key forms as [`cast`](#changing-a-columns-type)), overriding the detected type:
 
 ```ruby

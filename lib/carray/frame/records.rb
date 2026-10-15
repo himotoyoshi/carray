@@ -63,10 +63,14 @@ class CAFrame
   end
   private_class_method :record_key_union
 
-  # Arrange one column's values (Ruby objects, nil for missing) into a CArray.
-  # All-Array cells of equal length -> N-D native column; numeric scalars ->
-  # native scalar column (nil -> UNDEF); anything else -> object column.
+  # Arrange one column's values (Ruby objects, nil or UNDEF for missing) into
+  # a CArray: the one rule a frame types Ruby values by, wherever it takes
+  # them (CAFrame.new and df[name]= given an Array, from_records, the values
+  # a group's block or Proc gives).  All-Array cells of equal length -> N-D
+  # native column; numeric scalars -> native scalar column (missing ->
+  # UNDEF); anything else -> object column.
   def self.build_record_column(values, n)
+    values = values.map { |v| UNDEF.equal?(v) ? nil : v }
     present = values.reject(&:nil?)
     return mask_missing(CArray.object(n) { values }) if present.empty?
 
@@ -127,8 +131,13 @@ class CAFrame
   # :int64 if every value is an Integer, :float64 for Integers and Floats,
   # :cmplx128 when Complex values join them, otherwise nil (keep object).
   # Other Numerics (Rational, BigDecimal) stay object: a float column would
-  # round them, and a Complex one has room for them only as floats too.
+  # round them, and a Complex one has room for them only as floats too.  So
+  # does an Integer an int64 cannot hold: it is kept as it is, not refused.
+  INT64_RANGE = (-2**63..2**63 - 1)
+  private_constant :INT64_RANGE
+
   def self.numeric_leaf_type(values)
+    return nil if values.any? { |v| v.is_a?(Integer) && !INT64_RANGE.cover?(v) }
     if values.all? { |v| v.is_a?(Integer) }
       :int64
     elsif values.all? { |v| v.is_a?(Integer) || v.is_a?(Float) }

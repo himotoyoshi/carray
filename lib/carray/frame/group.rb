@@ -617,7 +617,6 @@ class GroupedFrame
   # a record's values: Integers int64, numbers float64, arrays of one shape
   # an N-D column, anything else object. UNDEF and nil are missing.
   private def column_of_values(values)
-    values = values.map { |v| UNDEF.equal?(v) ? nil : v }
     CAFrame.__send__(:build_record_column, values, values.size)
   end
 

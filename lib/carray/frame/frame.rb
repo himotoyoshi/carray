@@ -573,7 +573,13 @@ class CAFrame
     CAFrame.new(cols, axis_name: @axis_name, index: @index)
   end
 
+  # A column given to the frame: a CArray as it is; a Ruby Array typed by its
+  # values as from_records types a record's (build_record_column); anything
+  # else through its to_ca.
   private def coerce_column(col)
+    if col.is_a?(Array)
+      return CAFrame.__send__(:build_record_column, col, col.size)
+    end
     if col.is_a?(CAFrame)
       raise ArgumentError,
             "a CAFrame cannot be a column (it answers to_ca as a 2-D matrix); " \

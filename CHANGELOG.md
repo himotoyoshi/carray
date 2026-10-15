@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: a Ruby Array given to a CAFrame as a column (`CAFrame.new("x"
+  => [1, 2])`, `df["x"] = [...]`) is typed by its values as
+  `from_records` types a record's: Integers an `int64` column, numbers a
+  `float64` one, arrays of one shape an N-D column, anything else
+  `:object`; it was always `:object`. Wrap the values in `CA_OBJECT(...)`
+  to keep an object column. `from_records` and the values of a group's
+  block read `UNDEF` as missing, as `nil` is, and keep an Integer an
+  `int64` cannot hold in an `:object` column instead of raising
+  `RangeError`. A CArray column is kept as it is.
+
 - New: windows on a key take a value of several columns (each row a
   profile, shape `(N, ...)`): every reduction is taken column by column
   over the same windows and keeps the trailing shape, and `each` yields
