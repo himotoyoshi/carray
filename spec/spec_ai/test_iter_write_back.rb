@@ -224,6 +224,21 @@ class TestIterWriteBack < Test::Unit::TestCase
     assert_equal a.to_a, out.to_a
   end
 
+  # The slab form too, also when the output is a view that would let the
+  # walk reach past it into its root.
+  def test_slab_inout_refuses_a_shape_mismatch
+    a = CArray.float64(5, 4).seq!(100)
+    root = CArray.float64(5, 4)
+    assert_raise(ArgumentError) { CArray.iw_slab_inout_copy(a, root[0..2, nil], 0) }
+    assert_equal [0.0] * 20, root.to_a.flatten
+    [CArray.float64(4, 5), CArray.float64(20)].each do |out|
+      assert_raise(ArgumentError) { CArray.iw_slab_inout_copy(a, out, 0) }
+    end
+    out = CArray.float64(5, 4)
+    CArray.iw_slab_inout_copy(a, out, 0)
+    assert_equal a.to_a, out.to_a
+  end
+
   # The fiber a body leaves with `break` is written back, whether the
   # walk hands out the destination's own memory or a gathered copy.
   def test_the_fiber_left_with_break_is_written_back

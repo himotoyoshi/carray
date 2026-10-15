@@ -831,15 +831,16 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    output iter runs WRITE; sync_slab is called on output after each
    body iteration.
 
-   Shape mismatch between ca_in / ca_out is NOT validated by the macro
-   — caller responsibility (= typically output is `rb_ca_template_with_type`
-   of input, guaranteeing same shape).  Init failure on either iter
-   raises — see CA_FOR_EACH_SLAB above. */
+   ca_in and ca_out must have the same shape (ndim and every dim[k]);
+   ca_iter_check_same_shape raises ArgumentError before either walk is
+   opened when they do not.  Init failure on either iter raises — see
+   CA_FOR_EACH_SLAB above. */
 /* Policy fixed to CA_SLAB_AXES internally — see CA_FOR_EACH_SLAB above. */
 #define CA_FOR_EACH_SLAB_INOUT(st_in, st_out, ca_in, ca_out,                  \
                                axes, naxes,                                   \
                                p_in, p_out, m_in, m_out)                      \
   for ( int __cafi_init = (                                                   \
+            ca_iter_check_same_shape((ca_in), (ca_out)),                      \
             ca_iter_check_init(                                               \
               ca_iter_state_init_l2(&(st_in),  (ca_in),  CA_SLAB_AXES,        \
                                     (axes), (naxes), 0)),                     \

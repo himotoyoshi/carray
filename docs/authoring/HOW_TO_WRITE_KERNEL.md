@@ -705,9 +705,10 @@ CA_FOR_EACH_SLAB_INOUT(st_in, st_out, ca_in, ca_out,
 ```
 
 Runs two iterators in lockstep — input is READ, output is WRITE — with
-`sync_slab` on the output after each iteration. Shape match between
-`ca_in` and `ca_out` is **not validated** by the macro (caller responsibility,
-typically `ca_out = rb_ca_template_with_type(ca_in, data_type, Qnil)`).
+`sync_slab` on the output after each iteration. `ca_in` and `ca_out` must
+have the same shape (`ndim` and every `dim[k]`); the macro raises
+`ArgumentError` before opening either walk when they do not. A typical
+output is `rb_ca_template_with_type(ca_in, data_type, Qnil)`.
 
 ### 6.3 CA_FOR_EACH_FIBER family — contig-delivery block macros
 

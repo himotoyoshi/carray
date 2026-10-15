@@ -218,6 +218,35 @@ iw_inout_copy (VALUE klass, VALUE vsrc, VALUE vdst, VALUE vaxis)
   return Qnil;
 }
 
+/* Copy src into dst slab by slab along `axis` with the SLAB_INOUT form,
+   stepping by the input's slab layout as a body that trusts the shapes
+   to agree would. */
+static VALUE
+iw_slab_inout_copy (VALUE klass, VALUE vsrc, VALUE vdst, VALUE vaxis)
+{
+  CArray       *src, *dst;
+  int8_t        axes[1];
+  ca_iter_state st_in, st_out;
+  char         *p_in, *p_out;
+  boolean8_t   *m_in, *m_out;
+  ca_size_t     i;
+
+  (void) klass;
+  axes[0] = (int8_t) NUM2INT(vaxis);
+  TypedData_Get_Struct(vsrc, CArray, &carray_data_type, src);
+  TypedData_Get_Struct(vdst, CArray, &carray_data_type, dst);
+
+  CA_FOR_EACH_SLAB_INOUT(st_in, st_out, src, dst, axes, 1,
+                         p_in, p_out, m_in, m_out) {
+    for ( i = 0; i < st_in.slab_dims[0]; i++ ) {
+      memcpy(p_out + i * st_out.slab_strides[0],
+             p_in  + i * st_in.slab_strides[0], sizeof(double));
+    }
+  }
+  (void) m_in; (void) m_out;
+  return Qnil;
+}
+
 /* Fill the first fiber along `axis` and leave the walk with `break`. */
 static VALUE
 iw_fiber_fill_break (VALUE klass, VALUE vdst, VALUE vaxis, VALUE vval)
@@ -777,6 +806,7 @@ Init_iter_write (void)
   rb_define_singleton_method(rb_cCArray, "iw_read_poke_mask", iw_read_poke_mask, 2);
   rb_define_singleton_method(rb_cCArray, "iw_strided_mask", iw_strided_mask, 1);
   rb_define_singleton_method(rb_cCArray, "iw_inout_copy", iw_inout_copy, 3);
+  rb_define_singleton_method(rb_cCArray, "iw_slab_inout_copy", iw_slab_inout_copy, 3);
   rb_define_singleton_method(rb_cCArray, "iw_fiber_fill_break", iw_fiber_fill_break, 3);
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill_poisoned", iw_slab_fill_poisoned, 3);
   rb_define_singleton_method(rb_cCArray, "iw_read_cells", iw_read_cells, 3);
