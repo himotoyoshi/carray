@@ -454,6 +454,13 @@ write_back (VALUE argument)
    set aside so that every other region is still written and freed and
    every root detached; the block's own exception, if it raised, wins. */
 static VALUE
+sync_root (VALUE root)
+{
+  ca_sync((CArray *) root);
+  return Qnil;
+}
+
+static VALUE
 open_ensure (VALUE argument)
 {
   open_state *state = (open_state *) argument;
@@ -461,8 +468,10 @@ open_ensure (VALUE argument)
   for ( i = state->slots - 1; i >= 0; i-- ) {
     CArray *ca = state->carrays[i];
     if ( ca == NULL ) continue;
-    /* A tier-1 or tier-2 basis addresses the root's own memory, so a write is
-       already where it belongs.  Only a region buffer has to be sent back. */
+    /* A tier-1 or tier-2 basis addresses the root's own memory; the root is
+       synced before it is detached, for the entity that keeps its cells
+       elsewhere while attached (the mask of a CAObject that has mask
+       hooks).  A region buffer is sent back cell by cell. */
     if ( state->region[i] ) {
       ca_size_t elements = 1;
       int8_t k;
@@ -492,6 +501,17 @@ open_ensure (VALUE argument)
       xfree(state->region[i]);
     }
     if ( state->attached_root[i] ) {
+      if ( ! ca_is_readonly(state->roots[i]) ) {
+        int tag = 0;
+        /* protect: keeps the error so that every root is detached first */
+        rb_protect(sync_root, (VALUE) state->roots[i], &tag);
+        if ( tag ) {
+          if ( NIL_P(state->put_error) ) {
+            state->put_error = rb_errinfo();
+          }
+          rb_set_errinfo(Qnil);
+        }
+      }
       ca_detach(state->roots[i]);
     }
   }
@@ -789,7 +809,9 @@ ca_with_address_bases (int32_t n, CArray **arrays, const int *writable,
     if ( ca == NULL ) {
       rb_raise(rb_eArgError, "ca_with_address_bases: array %d is NULL", (int) i);
     }
-    klass = ca_class[ca->obj_type];
+    /* a CAObject (a Face among them) is named by its own class */
+    klass = ca_is_caobject(ca) ? rb_obj_class(((CAObject *) ca)->self)
+                               : ca_class[ca->obj_type];
     ca_update_mask(ca);
     verify_usable(klass, ca, writable ? writable[i] : 0);
     verify_mask_cells(klass, ca);

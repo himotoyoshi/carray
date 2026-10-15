@@ -150,4 +150,12 @@ class TestAddressBasisC < Test::Unit::TestCase
     end
   end
 
+
+  # A read-only CAObject is named by its own class, as the Ruby entry does.
+  def test_a_read_only_face_is_named_by_its_class
+    cat = CA_OBJECT(%w[a b a]).categorize
+    e = assert_raise(RuntimeError) { CArray.ab_write_then_raise(cat) }
+    assert_match(/\ACACategorical is read-only/, e.message)
+  end
+
 end

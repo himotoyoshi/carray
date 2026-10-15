@@ -305,8 +305,10 @@ void kernel (char **pointers, int64_t *strides, int64_t *bounds,
 
 `open` runs the block under `rb_ensure`, and closes in reverse order.
 
-- A **tier-1 or tier-2** basis addresses the root's own memory, so a write is
-  already where it belongs. Closing detaches the root, and nothing else.
+- A **tier-1 or tier-2** basis addresses the root's own memory. Closing syncs
+  the root and detaches it. For an ordinary entity the sync does nothing; an
+  entity that keeps its cells elsewhere while attached (the mask of a
+  CAObject whose mask comes from Ruby hooks) receives the writes there.
 - A **tier-3** region is a buffer of its own. If the array was opened
   writable, closing sends back **the cells whose bytes the kernel changed**,
   a run along the last axis at a time, and frees the buffer. Sending the
