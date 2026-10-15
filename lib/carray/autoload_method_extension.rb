@@ -34,13 +34,14 @@ module AutoloadMethodExtension
   def autoload_define (target, name, library, original_spec)
     library       = Ractor.make_shareable(library.to_s.dup)
     original_spec = Ractor.make_shareable(original_spec.to_s.dup)
-    # Shareable, so the stub answers in any Ractor; only the main one can
-    # require, and another is told what to load there.
+    # Shareable, so the stub answers in any Ractor.  Only the main Ractor
+    # loads the library: Ractors that require at the same time can deadlock
+    # (Ruby 3.4), so another Ractor is told what to load there instead.
     target.define_method(name, &Ractor.make_shareable(proc do |*args, **kwargs, &block|
       unless Ractor.current == Ractor.main
         raise Ractor::IsolationError,
-              "'#{original_spec}' is loaded on first use from '#{library}', " \
-              "which only the main Ractor can require; require it there first"
+              "'#{original_spec}' is loaded on first use from '#{library}'; " \
+              "require it in the main Ractor before other Ractors use it"
       end
       stub_location = target.instance_method(name).source_location
       begin
