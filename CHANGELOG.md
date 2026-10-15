@@ -36,6 +36,9 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: the index of `CAFrame#resample` shows the time column's
+  attributes, as the index of `group_by` and `pivot` shows its key's;
+  it had none, with or without `fill:`, `label:` and `origin:`.
 - Change: a CAFrame column name given as a Symbol raises TypeError
   "<verb>: a column name is a String" everywhere: `CAFrame.new` with a
   stray Symbol key, `cast` and the `types:` and `missing:` of

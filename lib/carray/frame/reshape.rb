@@ -117,7 +117,7 @@ class CAFrame
   private def pivot_sorted_keys(key, kw, name, verb)
     # The keys label rows or columns, so they show the key column's
     # attributes, as a group index does.
-    key.__send__(:carry_attrs, key.unique(sort: true))
+    CAFrame.__send__(:key_labels, key, key.unique(sort: true))
   rescue ArgumentError => e
     why = e.message[/\A[^:]+: (comparison of .+ failed)\z/, 1] or raise
     raise ArgumentError,

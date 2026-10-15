@@ -109,9 +109,11 @@ class CAFrame
       else
         raise ArgumentError, "resample: label: must be :left or :right (got #{label.inspect})"
       end
+    # key-labels: the bins are the index, given the column's attributes below.
     grid = fill && bins.count_not_masked > 0 ? resample_grid(bins, unit) : bins.unique(sort: true)
     cat = CACategorical.from_codes(bins.locate_addr(grid), grid.to_a)
-    GroupedFrame.new(self, cat, name, @columns.key?(name) ? [name] : [], index: grid)
+    GroupedFrame.new(self, cat, name, @columns.key?(name) ? [name] : [],
+                     index: CAFrame.__send__(:key_labels, time, grid))
   end
 
   # Every bin from the first occupied one to the last, stepped from the
@@ -199,7 +201,8 @@ class GroupedFrame
     @axis_name = axis_name
     @key_names = key_names
     @labels    = cat.labels          # group values, in code order
-    @index     = index || (key && key.project(group_perm[group_bounds[0...ngroup]]))
+    @index     = index ||
+                 (key && CAFrame.__send__(:key_labels, key, key.project(group_perm[group_bounds[0...ngroup]])))
   end
 
   # Number of groups.

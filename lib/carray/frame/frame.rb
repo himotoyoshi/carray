@@ -853,6 +853,15 @@ class CAFrame
   end
   private_class_method :refuse_repeated_names
 
+  # The labels an index is made of from a key -- a group's first values,
+  # the resample bins, the sorted pivot keys -- as the key column shows
+  # them: +labels+, already of the key's data type, Face and unit, given
+  # the key's attributes.  Returns +labels+.
+  def self.key_labels(key, labels)
+    key.__send__(:carry_attrs, labels)
+  end
+  private_class_method :key_labels
+
   private def positional_range?(range)
     (range.begin.nil? || range.begin.is_a?(Integer)) &&
       (range.end.nil? || range.end.is_a?(Integer))
