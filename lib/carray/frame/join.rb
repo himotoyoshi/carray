@@ -271,6 +271,8 @@ class CAFrame
     _, lcode, rcode = parts[0]
     k = parts[0][0].elements
     parts.drop(1).each do |common, lc, rc|
+      # keys: the two frames are coded on the values they share, which
+      # CACategorical.from_keys (one side's own values) cannot give
       lt = lcode * common.elements + lc
       rt = rcode * common.elements + rc
       tuples = CArray.align_addr(lt, rt, join: :outer)[0]

@@ -451,20 +451,11 @@ class CAKeyWindowIterator < CAIterator
     if keys.empty?
       raise ArgumentError, "windows: by: names no key"
     end
-    code = nil
     keys.each do |k|
       unless k.is_a?(CArray) && k.ndim == 1 && k.elements == @n
         raise ArgumentError, "windows: by: is a CArray of one value per row (#{@n} rows)"
       end
-      distinct = CArray.align_addr(k, k, join: :outer)[0]
-      c = k.locate_addr(distinct)
-      if code.nil?
-        code = c
-      else
-        t = code * distinct.elements + c
-        code = t.locate_addr(CArray.align_addr(t, t, join: :outer)[0])
-      end
     end
-    code
+    CACategorical.send(:from_keys, keys).codes
   end
 end

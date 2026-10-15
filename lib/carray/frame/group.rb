@@ -62,7 +62,7 @@ class CAFrame
       end
       col
     end
-    cat   = cols.size == 1 ? cols.first.categorize : composite_categorical(cols)
+    cat   = CACategorical.send(:from_keys, cols)
     codes = cat.codes
     out =
       case except
@@ -142,36 +142,7 @@ class CAFrame
   # and elsewhere; already provided by the core (attr_reader :nrow).
 
   private def grouping_categorical(keys)
-    cols = keys.map { |k| key_column(k) }
-    if cols.size == 1
-      cols.first.categorize
-    else
-      composite_categorical(cols)
-    end
-  end
-
-  # A composite key.  Each column is categorized on its own, so a component
-  # compares exactly as a single key does (NaN is one value, -0.0 is 0.0, a
-  # masked cell matches nothing); a row's group is then the tuple of its
-  # component codes, and a group's label the tuple of the component labels.
-  # One masked component leaves the row in no group, as a masked single key.
-  private def composite_categorical(cols)
-    cats  = cols.map(&:categorize)
-    sizes = cats.map { |c| c.labels.size }
-    tuple = if sizes.inject(1, :*) <= 2**62
-              cats.drop(1).inject(cats[0].codes.int64) { |acc, c| acc * c.labels.size + c.codes.int64 }
-            else
-              codes = cats.map(&:codes)
-              t = CArray.object(nrow) { |i| codes.map { |c| c[i] } }
-              nrow.times { |i| t[i] = UNDEF if t[i].any? { |x| UNDEF.equal?(x) } }
-              t
-            end
-    rows = tuple.categorize
-    labels = rows.labels.map do |code|
-      parts = code.is_a?(Array) ? code : sizes.reverse.map { |n| code, d = code.divmod(n); d }.reverse
-      parts.each_with_index.map { |d, j| cats[j].labels[d] }
-    end
-    CACategorical.from_codes(rows.codes, labels)
+    CACategorical.send(:from_keys, keys.map { |k| key_column(k) })
   end
 
   # The column a group key names, checked: +verb+ is the method the caller

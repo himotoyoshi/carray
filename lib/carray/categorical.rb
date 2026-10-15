@@ -215,6 +215,34 @@ class CACategorical < CAObject
     end
   end
 
+  # The rows' categorical for key columns of one length (CAFrame#group_by,
+  # #is_duplicate, windows(on:, by:)).  Each column is categorized on its
+  # own, so a component compares as a single key does (NaN is one value,
+  # -0.0 is 0.0, a masked cell matches nothing); with several columns a
+  # row's category is the tuple of its component codes, labelled by the
+  # tuple of the component labels.  One masked component leaves the row in
+  # no category, as a masked single key does.
+  private_class_method def self.from_keys (cols)
+    return cols.first.categorize if cols.size == 1
+    nrow  = cols.first.elements
+    cats  = cols.map(&:categorize)
+    sizes = cats.map { |c| c.labels.size }
+    tuple = if sizes.inject(1, :*) <= 2**62
+              cats.drop(1).inject(cats[0].codes.int64) { |acc, c| acc * c.labels.size + c.codes.int64 }
+            else
+              codes = cats.map(&:codes)
+              t = CArray.object(nrow) { |i| codes.map { |c| c[i] } }
+              nrow.times { |i| t[i] = UNDEF if t[i].any? { |x| UNDEF.equal?(x) } }
+              t
+            end
+    rows = tuple.categorize
+    labels = rows.labels.map do |code|
+      parts = code.is_a?(Array) ? code : sizes.reverse.map { |n| code, d = code.divmod(n); d }.reverse
+      parts.each_with_index.map { |d, j| cats[j].labels[d] }
+    end
+    from_codes(rows.codes, labels)
+  end
+
   # codes : integer CArray, the storage parent, already normalised by the
   #         caller (categorize builds it that way; from_codes rewrites what it
   #         receives). Excluded cells are both masked AND store the type-max
