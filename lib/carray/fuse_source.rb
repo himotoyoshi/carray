@@ -44,13 +44,20 @@ class CArray
     # every time the same block is called and a different one for each
     # block, even two on one line.  Where Ruby has weak keys, a block whose
     # code is unloaded takes its entry with it.
-    SITES = defined?(ObjectSpace::WeakKeyMap) ? ObjectSpace::WeakKeyMap.new
-                                              : {}.compare_by_identity
+    def self.new_sites
+      defined?(ObjectSpace::WeakKeyMap) ? ObjectSpace::WeakKeyMap.new
+                                        : {}.compare_by_identity
+    end
+    SITES = new_sites
 
+    # A Ractor other than the main one keeps its own table, and evaluates
+    # every block in its frame: the empty scope a lambda is compiled in is
+    # the top of a file, which only the main Ractor has.
     def self.compiled (block)
       site = RubyVM::InstructionSequence.of(block)
       return compile(block) unless site
-      SITES[site] || (SITES[site] = compile(block))
+      sites = Ractor.current == Ractor.main ? SITES : (Ractor.current[:carray_fuse_sites] ||= new_sites)
+      sites[site] || (sites[site] = compile(block))
     end
 
     # The block's free locals, handed to a lambda that was compiled without
@@ -88,7 +95,7 @@ class CArray
       file, line = block.source_location
       scope = block.binding
       locals, needs_frame = free_locals(body, scope.local_variables)
-      return InFrame.new(text, file, line) if needs_frame
+      return InFrame.new(text, file, line) if needs_frame || Ractor.current != Ractor.main
       Compiled.new(locals, compile_lambda(text, locals, scope, file, line))
     end
 
