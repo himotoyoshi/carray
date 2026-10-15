@@ -570,8 +570,11 @@ class CASegmentIterator < CAIterator
   # @!method cumcount
   #   Per-segment 1-based within-segment ordinal (int64), source-shaped.
   #   @return [CArray]
-  [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
-    define_method(op, &Ractor.make_shareable(proc { |axis: nil| axis ? axis_scan(op, axis) : scan(op) }))
+  CArray.send(:define_named_methods, self,
+              [:cumsum, :cumprod, :cummax, :cummin, :cumcount], :segment_scan)
+
+  private def segment_scan (op, axis: nil)
+    axis ? axis_scan(op, axis) : scan(op)
   end
 
   # @overload lag(n = 1)
@@ -1137,33 +1140,35 @@ class CASegmentIterator < CAIterator
         (op == :count && (args.empty? || args[0].equal?(UNDEF)))
     end
 
-    REDUCTIONS.each do |op|
-      define_method(op, &Ractor.make_shareable(proc do |*args, min_count: nil, fill_value: nil, **kw|
-        # The segment reduction already leaves an empty segment as the core
-        # does, so only a min_count asking for more is applied here.
-        need = CArray.__present_cells_needed_per_result_cell__(op, min_count, 0)
-        # an error from the core reductions a member is made of names the member
-        result = CArray.__name_errors_after_method__(op) { super(*args, **kw) }
-        return result if need == 0 && fill_value.nil?
-        if need > 0
-          present = if op == :wsum || op == :wmean
-                      present_pair_count(args[0], kw[:axis])
-                    elsif ReductionCountAndFill.mask_count?(op, args)
-                      if kw[:axis]
-                        raise NotImplementedError,
-                              "#{self.class}##{op}(axis:, min_count:) is not implemented"
-                      end
-                      elements
-                    else
-                      count_not_masked(**kw)
+    CArray.send(:define_named_methods, self, REDUCTIONS, :reduce_counted, super_block: true)
+
+    # The segment reduction already leaves an empty segment as the core does,
+    # so only a min_count asking for more is applied here.  The reduction the
+    # member is made of is the block (super).
+    private def reduce_counted (op, args, kw)
+      min_count  = kw.delete(:min_count)
+      fill_value = kw.delete(:fill_value)
+      need = CArray.__present_cells_needed_per_result_cell__(op, min_count, 0)
+      result = yield(*args, **kw)
+      return result if need == 0 && fill_value.nil?
+      if need > 0
+        present = if op == :wsum || op == :wmean
+                    present_pair_count(args[0], kw[:axis])
+                  elsif ReductionCountAndFill.mask_count?(op, args)
+                    if kw[:axis]
+                      raise NotImplementedError,
+                            "#{self.class}##{op}(axis:, min_count:) is not implemented"
                     end
-          short = present.lt(need)
-        end
-        if short
-          (result.is_a?(Array) ? result : [result]).each { |r| r[short] = UNDEF }
-        end
-        CArray.__fill_undefined_result_cells__(result, fill_value)
-      end))
+                    elements
+                  else
+                    count_not_masked(**kw)
+                  end
+        short = present.lt(need)
+      end
+      if short
+        (result.is_a?(Array) ? result : [result]).each { |r| r[short] = UNDEF }
+      end
+      CArray.__fill_undefined_result_cells__(result, fill_value)
     end
   end
   prepend ReductionCountAndFill

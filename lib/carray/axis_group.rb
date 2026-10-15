@@ -415,16 +415,22 @@ class CAGroupIterator
   # is reduced group by group by the core, through the composite categorical,
   # so the data type, the Face and a refusal are the core's: a boolean's sum
   # is uint64, a time column's minimum a time, its sum refused.
-  [:sum, :accumulate, :prod, :mean, :min, :max,
-   :variance, :stddev, :variancep, :stddevp].each do |op|
-    ComposedFolds.send(:define_method, op, &Ractor.make_shareable(proc do |**kw|
-      has_group, = AxisGroup.parse_axis(kw[:axis])
-      if ! has_group || kernel_reads_value?
-        super(**kw)
-      else
-        reduce_by_core(op, kw)
-      end
-    end))
+  CArray.send(:define_named_methods, ComposedFolds,
+              [:sum, :accumulate, :prod, :mean, :min, :max,
+               :variance, :stddev, :variancep, :stddevp],
+              :scatter_or_core, super_block: true)
+
+  # The scatter kernel is the block (super).
+  private def scatter_or_core (op, args, kw)
+    unless args.empty?
+      raise ArgumentError, "wrong number of arguments (given #{args.size}, expected 0)"
+    end
+    has_group, = AxisGroup.parse_axis(kw[:axis])
+    if ! has_group || kernel_reads_value?
+      yield(**kw)
+    else
+      reduce_by_core(op, kw)
+    end
   end
 
   # Per-group [min, max] pair (matching CArray#minmax).
@@ -652,23 +658,23 @@ class CAGroupIterator
   # These take no `min_count:` or `fill_value:`, as the core ones do not. A
   # group is gathered whole, so folding a band into one (axis: [:group, k]) is
   # not supported, as for the order statistics.
-  [:first, :last, :nunique].each do |op|
-    define_method(op, &Ractor.make_shareable(proc do |**kw|
-      has_group, fused = AxisGroup.parse_axis(kw[:axis])
-      return value.public_send(op, **kw) unless has_group
-      unless fused.empty?
-        raise NotImplementedError,
-              "axis_group: folding a band into #{op} (axis: [:group, k]) is not " \
-              "supported; #{op} gathers every member of a group"
-      end
-      unknown = kw.keys - [:axis]
-      unless unknown.empty?
-        raise ArgumentError,
-              "#{op}: unknown keyword#{unknown.size > 1 ? "s" : ""}: " +
-              unknown.map(&:inspect).join(", ")
-      end
-      composite_order(op, [])
-    end))
+  CArray.send(:define_named_methods, self, [:first, :last, :nunique], :group_position)
+
+  private def group_position (op, **kw)
+    has_group, fused = AxisGroup.parse_axis(kw[:axis])
+    return value.public_send(op, **kw) unless has_group
+    unless fused.empty?
+      raise NotImplementedError,
+            "axis_group: folding a band into #{op} (axis: [:group, k]) is not " \
+            "supported; #{op} gathers every member of a group"
+    end
+    unknown = kw.keys - [:axis]
+    unless unknown.empty?
+      raise ArgumentError,
+            "#{op}: unknown keyword#{unknown.size > 1 ? "s" : ""}: " +
+            unknown.map(&:inspect).join(", ")
+    end
+    composite_order(op, [])
   end
 
   # @overload sort_addr

@@ -201,13 +201,14 @@ class CAKeyWindowIterator < CAIterator
 
   # @!group Reductions
 
-  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev,
-   :variancep, :stddevp, :median, :first, :last, :nunique,
-   :count, :count_not_masked, :count_masked, :all, :any,
-   :min_index, :max_index].each do |op|
-    define_method(op, &Ractor.make_shareable(proc do |*args, **kw|
-      in_rows(@segments.public_send(op, *args, **kw))
-    end))
+  CArray.send(:define_named_methods, self,
+              [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev,
+               :variancep, :stddevp, :median, :first, :last, :nunique,
+               :count, :count_not_masked, :count_masked, :all, :any,
+               :min_index, :max_index], :segments_in_rows)
+
+  private def segments_in_rows (op, *args, **kw)
+    in_rows(@segments.public_send(op, *args, **kw))
   end
 
   # @overload percentile(p)

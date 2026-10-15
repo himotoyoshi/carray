@@ -302,21 +302,24 @@ class CABlockIterator < CAIterator
   #   @param fill_value [Object, nil] value to put in place of a masked
   #     result instead of leaving it masked.
   #   @return [CArray] tile-grid shaped
-  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev,
-   :variancep, :stddevp].each do |op|
-    define_method(op, &Ractor.make_shareable(proc do |min_count: nil, fill_value: nil|
-      if FACE_WINNER_INDEX.key?(op) && @source.face?
-        return face_winner(FACE_WINNER_INDEX[op], min_count, fill_value)
-      end
-      kw = {}
-      kw[:min_count]  = min_count  unless min_count.nil?
-      kw[:fill_value] = fill_value unless fill_value.nil?
-      fold(op, **kw)
-    end))
+  CArray.send(:define_named_methods, self,
+              [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev,
+               :variancep, :stddevp], :fold_reduction)
+
+  private def fold_reduction (op, min_count: nil, fill_value: nil)
+    if FACE_WINNER_INDEX.key?(op) && @source.face?
+      return face_winner(FACE_WINNER_INDEX[op], min_count, fill_value)
+    end
+    kw = {}
+    kw[:min_count]  = min_count  unless min_count.nil?
+    kw[:fill_value] = fill_value unless fill_value.nil?
+    fold(op, **kw)
   end
 
-  [:all, :any].each do |op|
-    define_method(op, &Ractor.make_shareable(proc { |**kw| fold(op, **CAIterator.reduce_keywords(op, kw)) }))
+  CArray.send(:define_named_methods, self, [:all, :any], :fold_with_keywords)
+
+  private def fold_with_keywords (op, **kw)
+    fold(op, **CAIterator.reduce_keywords(op, kw))
   end
 
   # @!method first
@@ -332,9 +335,7 @@ class CABlockIterator < CAIterator
   #   @return [CArray] tile-grid shaped
   #
   # These take no `min_count:` or `fill_value:`, as the core ones do not.
-  [:first, :last, :nunique].each do |op|
-    define_method(op, &Ractor.make_shareable(proc { |**kw| fold(op, **CAIterator.reduce_keywords(op, kw)) }))
-  end
+  CArray.send(:define_named_methods, self, [:first, :last, :nunique], :fold_with_keywords)
 
   # A Face's minimum and maximum are cells of the Face, so they are gathered
   # from the source by the winner's address.  Assembling the per-region results
@@ -710,8 +711,15 @@ class CABlockIterator < CAIterator
   # @!method cumcount
   #   Per-tile running count of present cells (int64), source-shaped.
   #   @return [CArray]
-  [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
-    define_method(op, &Ractor.make_shareable(proc { block_scan(op) }))
+  CArray.send(:define_named_methods, self,
+              [:cumsum, :cumprod, :cummax, :cummin, :cumcount], :scan_tiles)
+
+  # A scan takes no arguments here.
+  private def scan_tiles (op, *args)
+    unless args.empty?
+      raise ArgumentError, "wrong number of arguments (given #{args.size}, expected 0)"
+    end
+    block_scan(op)
   end
 
   # @overload lag(n = 1)

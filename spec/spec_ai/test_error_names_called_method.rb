@@ -6,6 +6,11 @@
 # code is reached.  A core C method on the way (Array#map, Class#new) is
 # passed through, and the user's block ends the walk.
 #
+# A family of iterator reductions made by define_method had no name in its
+# frames and named what it called: segments(...).all and a key window's all
+# said per_segment.  They are made by CArray.define_named_methods now, one
+# `def` per name.
+#
 # Before, the name was the innermost C method's.  A Ruby method of the
 # library over a C one named the C one: value_counts said sort_index,
 # CA_INT32 and to_ca said guess_array_shape, CArray.int32 and CArray.new said
@@ -21,7 +26,7 @@ class TestErrorNamesCalledMethod < Test::Unit::TestCase
   def name_of
     yield
     flunk "no error"
-  rescue ArgumentError, TypeError => e
+  rescue StandardError => e
     e.message[/\A[\w.!?#\[\]=<>+\-*\/%]+(?=: )/]
   end
 
@@ -67,6 +72,19 @@ class TestErrorNamesCalledMethod < Test::Unit::TestCase
     out = IO.popen([RbConfig.ruby, *$LOAD_PATH.grep(/carray/).flat_map { |p| ["-I", p] },
                     "-e", script], err: File::NULL, &:read)
     assert_equal "value_counts", out.chomp
+  end
+
+  # Methods of an iterator family, each a def made by define_named_methods.
+  def test_an_iterator_family_is_named
+    o = CA_OBJECT([1, "a", 2, "b"])
+    t = CA_DOUBLE([0, 1, 2, 3])
+    assert_equal "all", name_of { o.segments(lengths: [2, 2]).all }
+    assert_equal "all", name_of { o.windows(on: t, before: 1).all }
+    assert_equal "min", name_of { o.segments(lengths: [2, 2]).min }
+    assert_equal "min", name_of { o.blocks(2).min }
+    # a scan of tiles takes no arguments, as before
+    e = assert_raise(ArgumentError) { CA_DOUBLE([1, 2, 3, 4]).blocks(2).cumsum(1) }
+    assert_equal "wrong number of arguments (given 1, expected 0)", e.message
   end
 
   # An explicit name still wins over the walk.

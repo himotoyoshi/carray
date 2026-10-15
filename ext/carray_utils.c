@@ -664,6 +664,12 @@ ca_user_called_method_id (void)
   for (i = 0; i < n; i++) {
     VALUE file = rb_profile_frame_absolute_path(frames[i]);
     VALUE name, label;
+    if ( NIL_P(file) ) {
+      /* code evaluated with a file name (class_eval in the library) and the
+         core written in Ruby ("<internal:numeric>") have a path but no
+         absolute path; -e has a path outside the library */
+      file = rb_profile_frame_path(frames[i]);
+    }
     if ( ! NIL_P(file) && strcmp(StringValueCStr(file), "<cfunc>") == 0 ) {
       name = rb_profile_frame_method_name(frames[i]);
       if ( NIL_P(name) ) {
@@ -677,7 +683,10 @@ ca_user_called_method_id (void)
       }
       continue;                               /* a core C method passes */
     }
-    if ( NIL_P(file)                          /* -e, eval: the user's code */
+    if ( ! NIL_P(file) && strncmp(StringValueCStr(file), "<internal:", 10) == 0 ) {
+      continue;                               /* core written in Ruby (Integer#times) */
+    }
+    if ( NIL_P(file)                          /* eval without a file: the user's */
          || RSTRING_LEN(file) <= ca_library_root_len
          || strncmp(RSTRING_PTR(file), ca_library_root, ca_library_root_len) != 0
          || RSTRING_PTR(file)[ca_library_root_len] != '/' ) {

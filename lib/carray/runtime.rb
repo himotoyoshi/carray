@@ -97,5 +97,38 @@ class CArray
   end
   private :wmean_object
 
+  # Define on +mod+ one method per name in +names+, each a `def` that passes
+  # its own name and its arguments to the private method +to+:
+  #
+  #   CArray.send(:define_named_methods, self, [:sum, :min], :fold_reduction)
+  #   # def sum (...) = fold_reduction(:sum, ...)
+  #
+  # A method made by define_method carries no name in its frame, so an error
+  # raised inside it cannot name the method the user called; a `def` does.
+  # With +super_block+ the method passes its arguments as an Array and a Hash,
+  # and a block that calls the method it overrides with the arguments the
+  # block is given (`yield(*args, **kw)`).
+  def self.define_named_methods (mod, names, to, super_block: false)
+    names.each do |name|
+      unless name.to_s.match?(/\A[a-z_]\w*[?!]?\z/)
+        raise ArgumentError, "define_named_methods: #{name.inspect} is not a plain method name"
+      end
+      if super_block
+        mod.class_eval(<<~RUBY, __FILE__, __LINE__ + 1)
+          def #{name} (*args, **kw, &blk)
+            #{to}(:#{name}, args, kw) { |*a, **k| super(*a, **k, &blk) }
+          end
+        RUBY
+      else
+        mod.class_eval(<<~RUBY, __FILE__, __LINE__ + 1)
+          def #{name} (...)
+            #{to}(:#{name}, ...)
+          end
+        RUBY
+      end
+    end
+  end
+  private_class_method :define_named_methods
+
 end
 

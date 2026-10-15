@@ -211,6 +211,7 @@ class CAIterator
   ].freeze
 
   REQUIRED_SURFACE.each do |name|
+    # define_method: a stub that names itself in its own message
     define_method(name, &Ractor.make_shareable(proc do |*, **, &_blk|
       raise NotImplementedError, "#{self.class} must implement ##{name}"
     end))
@@ -292,6 +293,7 @@ class CAIterator
   #     cell has no single rank.
   [:map, :sort_addr, :order, :strip_mask,
    :cumsum, :cumprod, :cummax, :cummin, :cumcount, :lag].each do |name|
+    # define_method: a stub that names itself in its own message
     define_method(name, &Ractor.make_shareable(proc do |*, **, &_blk|
       raise NotImplementedError, "#{self.class} does not provide ##{name} (optional)"
     end))

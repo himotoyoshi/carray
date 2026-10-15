@@ -1094,6 +1094,7 @@ class CAWindowIterator < CAIterator
   #   winner is well-defined).
   #   @raise [NotImplementedError]
   [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
+    # define_method: a refusal that names itself in its own message
     define_method(op, &Ractor.make_shareable(proc do |*, **|
       raise NotImplementedError,
             "#{self.class} has no #{op}: a segment scan needs each cell to " \
