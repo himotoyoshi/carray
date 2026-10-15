@@ -354,7 +354,14 @@ puts
          }
       END_CHECK
     end
-    puts <<-END_DEF.gsub(/^ {6}/, '').sub("@@NAN_CHECK@@\n", nan_check)
+    # int64 / uint64 -> float32 / cmplx64 goes through double, as a Ruby
+    # Integer stored into a float32 cell does (Integer#to_f).  Converting in
+    # one step rounds once where the compiler keeps the loop scalar and twice
+    # where it vectorises it through double, so the answer for a value past
+    # 2**53 would depend on its place in the array.
+    via = ( [CA_INT64, CA_UINT64].include?(type1) &&
+            [CA_FLOAT32, CA_CMPLX64].include?(type2) ) ? "(double) " : ""
+    puts <<-END_DEF.gsub(/^ {6}/, '').sub("@@NAN_CHECK@@\n", nan_check).gsub("@@VIA@@", via)
       static void
       ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
       {
@@ -371,7 +378,7 @@ puts
              if ( ! *pm ) { 
                p1 = q1 + k;
                p2 = q2 + k;
-               *p2 = (#{ctype2}) *p1;
+               *p2 = (#{ctype2}) @@VIA@@*p1;
              }
            }
          }
@@ -379,7 +386,7 @@ puts
            for (k=0; k<n; k++) {
              p1 = q1 + k;
              p2 = q2 + k;
-             *p2 = (#{ctype2}) *p1;
+             *p2 = (#{ctype2}) @@VIA@@*p1;
            }
          }
          return;
