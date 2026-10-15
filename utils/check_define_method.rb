@@ -20,7 +20,6 @@ COUNTS = {
   "carray/const_string.rb"   => 1,
   "carray/frame/group.rb"    => 3,
   "carray/frame/windows.rb"  => 3,
-  "carray/lazy.rb"           => 12,
   "carray/record_order.rb"   => 2,
   "carray/struct.rb"         => 1,
   "carray/struct_builder.rb" => 2,
