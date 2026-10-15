@@ -105,6 +105,11 @@ task :leak_matrix do
   ruby "-Iext", "-Ilib", "utils/leak_matrix.rb" or exit($?.exitstatus)
 end
 
+desc "Check that whether a kernel can raise on a cell is decided by one part"
+task :cell_raise_check do
+  ruby "utils/check_cell_raise.rb" or exit($?.exitstatus)
+end
+
 desc "Check that a row's code for several key columns is made by one part"
 task :key_codes_check do
   ruby "utils/check_key_codes.rb" or exit($?.exitstatus)
@@ -405,7 +410,7 @@ task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_parts_check
                   :runtime_error_check, :index_error_check, :cell_buffer_check,
                   :view_setup_mask_check, :protect_parts_check,
                   :setup_before_alloc_check, :integer_store_check, :one_sided_cast_check,
-                  :empty_walk_check, :mask_standin_check, :nan_order_check, :query_match_check, :key_codes_check,
+                  :empty_walk_check, :mask_standin_check, :nan_order_check, :query_match_check, :key_codes_check, :cell_raise_check,
                   :build_ext, :dunder_method_check,
                   :build_mv_borrower, :build_mock_unattachable,
                   :build_xfer_smoke, :build_author_surface_smoke] do
