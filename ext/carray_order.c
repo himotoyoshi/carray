@@ -921,6 +921,21 @@ ca_topk_stable (VALUE self, VALUE picked, long axis, int desc)
   return last ? pk : rb_ca_copy(rb_funcallv(pk, rb_intern("transpose"), ndim, inv));
 }
 
+/* Whether self holds a cell the order puts after the numbers: a masked
+   cell, or a NaN. */
+static int
+ca_topk_has_cells_after_numbers (VALUE self, CArray *ca)
+{
+  if ( ca_has_mask(ca) && ca_count_masked(ca) > 0 ) {
+    return 1;
+  }
+  if ( ca_is_float_type(ca) ) {
+    VALUE nan = rb_funcall(self, rb_intern("is_nan"), 0);
+    return RTEST(rb_funcall(nan, rb_intern("any"), 0));
+  }
+  return 0;
+}
+
 /* Per-axis top-k positions (cap clamped, axis normalized).
  * Called by rb_ca_topk_index below. */
 static VALUE
@@ -933,10 +948,10 @@ rb_ca_topk_positions (VALUE self, long cap, long axis_norm, int desc)
 
   /* The largest: reversing the ascending order would put the NaN and the
      masked cells first, so rank them descending (NaN, then the masked
-     cells, last) when there can be any.  An object array is ranked by
+     cells, last) when there are any.  An object array is ranked by
      `order` both ways (its cells compare in Ruby). */
   if ( ca->data_type == CA_OBJECT ||
-       ( desc && ( ca_has_mask(ca) || ca_is_float_type(ca) ) ) ) {
+       ( desc && ca_topk_has_cells_after_numbers(self, ca) ) ) {
     VALUE kw = rb_hash_new();
     rb_hash_aset(kw, ID2SYM(rb_intern("axis")), raxis_norm);
     rb_hash_aset(kw, ID2SYM(rb_intern("descending")), desc ? Qtrue : Qfalse);

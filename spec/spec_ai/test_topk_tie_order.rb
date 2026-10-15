@@ -23,6 +23,24 @@ class TestTopkTieOrder < Test::Unit::TestCase
     assert_equal a.sort_index.to_a.first(5), a.nsmallest_index(5, axis: 0).to_a
   end
 
+  # A float array with no NaN and no masked cell takes the partition, as an
+  # integer array does; ties still go by position.
+  def test_float_without_nan_or_masked_cells
+    a = CA_FLOAT64(Array.new(2000) { |i| (i * 37 % 11) * 0.5 })
+    m = a.copy
+    m[3] = UNDEF
+    m[3] = 2.0
+    m[3] = a[3]
+    [a, m].each do |x|
+      [1, 7, 300].each do |k|
+        assert_equal reference(x, k, 0, true), x.nlargest_index(k, axis: 0).to_a
+        assert_equal reference(x, k, 0, false), x.nsmallest_index(k, axis: 0).to_a
+      end
+    end
+    b = a.reshape(40, 50)
+    assert_equal reference(b, 9, 1, true), b.nlargest_index(9, axis: 1).to_a
+  end
+
   def test_random_against_order
     srand(11)
     types = [:int8, :uint8, :int32, :int64, :uint64, :float32, :float64, :boolean]
