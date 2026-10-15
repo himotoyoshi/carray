@@ -304,7 +304,11 @@ A view can show one root cell more than once: a repeated index
 same parent twice. When a kernel writes such a view, which of the values
 written to the repeated positions the root cell ends with is not
 specified. It depends on the route the walk takes, and a value equal to
-the one the kernel was given is not sent back.
+the one the kernel was given is not sent back. The same holds for a view
+that reads several root cells as one, such as the mask of a `refer` to a
+wider type (each of its cells is the OR of the cells under it): a cell
+written with the value it was given is not sent back, so what its root
+cells end with is not specified.
 
 `finish` releases everything: scratch buffers, attached parents, fiber
 caches, the K-parent ptr cache for CAStack, the per-tile cache, the

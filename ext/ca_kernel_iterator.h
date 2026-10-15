@@ -639,7 +639,11 @@ int  ca_iter_state_next_slab_axes (ca_iter_state *st,
    tile, a stack or meld holding the same parent twice): which of the
    values written to its positions the root cell ends with is not
    specified.  It depends on the route, and a value equal to the one
-   delivered is not sent back. */
+   delivered is not sent back.  The same holds for a view that reads
+   several root cells as one (the mask of a refer to a wider type, which
+   is the OR of the cells under it): a cell written with the value it
+   was delivered is not sent back, so what its root cells end with is
+   not specified. */
 void ca_iter_state_sync_slab (ca_iter_state *st);
 
 /* Release any resources held by `st` and detach parent.  On a WRITE
