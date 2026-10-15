@@ -672,14 +672,11 @@ class CArray
   #     duplicates.
   #   @raise [CArray::DataTypeError] when `sort_labels: true` discovers
   #     the labels of a complex array, which have no order.
-  # The order sort_labels: puts two labels in: as sort orders the cells of an
-  # array, a Float NaN after every other value; two labels <=> cannot order
-  # are refused, by name.
+  # The order sort_labels: puts two labels in: the order sort puts the cells
+  # of an array in (object_order_cmp); two labels <=> cannot order are
+  # refused, by name.
   private def label_order(a, b)
-    na = a.is_a?(Float) && a.nan?
-    nb = b.is_a?(Float) && b.nan?
-    return (na ? 1 : 0) - (nb ? 1 : 0) if na || nb
-    c = a <=> b
+    c = CArray.send(:object_order_cmp, a, b)
     if c.nil?
       raise ArgumentError,
             "categorize(sort_labels: true): cannot order the labels " \

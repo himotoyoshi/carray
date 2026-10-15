@@ -13,6 +13,16 @@
 
 class CArray
 
+  # The order sort puts two object values in (ca_obj_order_cmp in C): a
+  # Float NaN after every other value, NaN ties NaN, other pairs by `<=>`.
+  # nil when `<=>` cannot order the pair; the caller says what refused.
+  private_class_method def self.object_order_cmp (a, b)
+    a_nan = a.is_a?(Float) && a.nan?
+    b_nan = b.is_a?(Float) && b.nan?
+    return (a_nan ? 1 : 0) - (b_nan ? 1 : 0) if a_nan || b_nan
+    a <=> b
+  end
+
   # reshape / flatten / transpose! are defined in C
   # (ext/ca_obj_refer.c and ext/ca_obj_transpose.c).  The bare size-1
   # insertion primitive is `insert_size_one_axes` (C); `insert_axis` below

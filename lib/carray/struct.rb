@@ -514,13 +514,10 @@ class CAStruct
     end
   end
 
-  # One member of {#<=>}: NaN after every number, as a numeric array sorts.
+  # One member of {#<=>}: the order a sort puts the member's values in
+  # (NaN after every number).
   def self.compare_key (a, b)
-    a_nan = a.is_a?(Float) && a.nan?
-    b_nan = b.is_a?(Float) && b.nan?
-    return (a_nan ? 0 : -1) if b_nan
-    return 1 if a_nan
-    a <=> b
+    CArray.send(:object_order_cmp, a, b)
   end
 
   # Byte-level identity.  Two CAStruct instances are eql? iff they are
