@@ -1,6 +1,6 @@
 /* ---------------------------------------------------------------------------
 
-  CALazyMarker view + the shared lazy arena.
+  CALazyMarker view + the lazy arena.
 
   CALazyMarker is a zero-cost marker that holds a CArray entity and
   causes `.sqrt` / `.sin` / etc. on it to build a lazy CAMonOp tree
@@ -11,7 +11,7 @@
   is a pure pass-through: every CArray operation delegates to the
   parent.  Detection happens via ca_is_lazy_view().
 
-  ca_lazy_arena is the shared slot-pool arena that CAMonOp / CABinOp
+  ca_lazy_arena is the per-Ractor slot-pool arena that CAMonOp / CABinOp
   / CAMonCmp / CABinCmp use for scratch during to_ca; slot buffers
   stay alive across calls to amortise mmap into steady-state reuse.
 
@@ -358,7 +358,6 @@ ca_gc_local (void)
   return g;
 }
 
-static void ca_lazy_arena_mark_object_slots (void);
 
 /* Returns the depth to hand back to ca_gc_hold_pop_to, so nested holds
    unwind in order.  Pushing is best-effort at the ceiling: a chain
@@ -435,32 +434,6 @@ ca_gc_release_buffer (void *ptr)
   }
 }
 
-static VALUE ca_gc_guard = Qnil;
-
-/* The wrapped pointer must be non-NULL: Ruby's GC skips the mark
-   function of a TypedData whose data pointer is NULL. */
-static int ca_gc_guard_body = 0;
-
-/* The arena's object slots.  The holds are marked per Ractor above. */
-static void
-ca_gc_guard_mark (void *ptr)
-{
-  (void) ptr;
-  ca_lazy_arena_mark_object_slots();
-}
-
-static void
-ca_gc_guard_free (void *ptr)
-{
-  (void) ptr;
-}
-
-static const rb_data_type_t ca_gc_guard_data_type = {
-  "carray_object_gc_guard",
-  { ca_gc_guard_mark, ca_gc_guard_free, NULL, },
-  0, 0, RUBY_TYPED_FREE_IMMEDIATELY
-};
-
 /* ------------------------------------------------------------------- */
 /* ca_lazy_arena                                                        */
 /* ------------------------------------------------------------------- */
@@ -486,9 +459,9 @@ static const rb_data_type_t ca_gc_guard_data_type = {
    When all 32 are in use the acquire raises: this signals a programming
    error or a pathological chain rather than a graceful fallback.
 
-   CAREFUL: single-thread only -- thread-safety across concurrent access
-   is not a goal (see guides/devel/04_attach_lifecycle.md).  The arena is
-   process-global static state. */
+   One arena per Ractor (see ca_lazy_arena_get).  Within a Ractor it is
+   not guarded: thread-safety across concurrent access is not a goal (see
+   guides/devel/04_attach_lifecycle.md). */
 
 #define CA_LAZY_ARENA_SLOTS 32
 
@@ -507,29 +480,71 @@ typedef struct ca_lazy_arena {
   ca_size_t debug_reuse_count;            /* test: how many acquire = reuse */
 } ca_lazy_arena_t;
 
-static ca_lazy_arena_t ca_lazy_arena = {0};
+/* One arena per Ractor: the slots are handed out by pointer and toggled
+   without a lock, so two Ractors sharing them would hand the same buffer
+   to both.  The storage marks the object slots in use and frees the
+   buffers when the Ractor ends. */
+static rb_ractor_local_key_t ca_lazy_arena_key;
+
+static void ca_lazy_arena_mark_object_slots (ca_lazy_arena_t *arena);
+
+static void
+ca_lazy_arena_mark (void *ptr)
+{
+  if ( ptr ) ca_lazy_arena_mark_object_slots((ca_lazy_arena_t *) ptr);
+}
+
+static void
+ca_lazy_arena_free (void *ptr)
+{
+  ca_lazy_arena_t *arena = (ca_lazy_arena_t *) ptr;
+  int i;
+  if ( arena == NULL ) return;
+  for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
+    if ( arena->slots[i].ptr ) ruby_xfree(arena->slots[i].ptr);
+  }
+  ruby_xfree(arena);
+}
+
+static const struct rb_ractor_local_storage_type ca_lazy_arena_type = {
+  ca_lazy_arena_mark, ca_lazy_arena_free
+};
+
+static ca_lazy_arena_t *
+ca_lazy_arena_get (void)
+{
+  ca_lazy_arena_t *arena =
+    (ca_lazy_arena_t *) rb_ractor_local_storage_ptr(ca_lazy_arena_key);
+  if ( arena == NULL ) {
+    arena = ZALLOC(ca_lazy_arena_t);
+    rb_ractor_local_storage_ptr_set(ca_lazy_arena_key, arena);
+  }
+  return arena;
+}
 
 void
 ca_lazy_arena_enter (void)
 {
-  if ( ca_lazy_arena.depth == 0 ) {
+  ca_lazy_arena_t *arena = ca_lazy_arena_get();
+  if ( arena->depth == 0 ) {
     /* Top-level reset to recover from a prior exception that left
        slots in_use without a matching release.  Safe because
        depth==0 means no nested caller is mid-acquire. */
     int i;
     for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
-      ca_lazy_arena.slots[i].in_use = 0;
-      ca_lazy_arena.slots[i].object_elements = 0;
+      arena->slots[i].in_use = 0;
+      arena->slots[i].object_elements = 0;
     }
   }
-  ca_lazy_arena.depth++;
+  arena->depth++;
 }
 
 void
 ca_lazy_arena_exit (void)
 {
-  if ( ca_lazy_arena.depth > 0 ) {
-    ca_lazy_arena.depth--;
+  ca_lazy_arena_t *arena = ca_lazy_arena_get();
+  if ( arena->depth > 0 ) {
+    arena->depth--;
   }
   /* Keep all slot buffers, and leave in_use and the object tags alone.
      A scratch can be acquired outside any enter/exit bracket -- a lazy
@@ -597,12 +612,13 @@ ca_lazy_arena_release_held (VALUE arg)
 void *
 ca_lazy_arena_acquire (ca_size_t bytes)
 {
+  ca_lazy_arena_t *arena = ca_lazy_arena_get();
   int i, best, empty;
   ca_size_t best_bytes;
 
   if ( bytes <= 0 ) bytes = 1;
 
-  ca_lazy_arena.debug_acquire_count++;
+  arena->debug_acquire_count++;
 
   /* Pass 1: best-fit among unused warm slots (smallest >= bytes).
      CAREFUL: ca_size_t is signed int64_t, so the "no match yet"
@@ -611,7 +627,7 @@ ca_lazy_arena_acquire (ca_size_t bytes)
   best = -1;
   best_bytes = CA_LENGTH_MAX;
   for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
-    ca_lazy_arena_slot_t *s = &ca_lazy_arena.slots[i];
+    ca_lazy_arena_slot_t *s = &arena->slots[i];
     if ( s->in_use ) continue;
     if ( s->ptr == NULL ) continue;
     if ( s->bytes < bytes ) continue;
@@ -621,10 +637,10 @@ ca_lazy_arena_acquire (ca_size_t bytes)
     }
   }
   if ( best >= 0 ) {
-    ca_lazy_arena.slots[best].in_use = 1;
-    ca_lazy_arena.slots[best].object_elements = 0;
-    ca_lazy_arena.debug_reuse_count++;
-    return ca_lazy_arena.slots[best].ptr;
+    arena->slots[best].in_use = 1;
+    arena->slots[best].object_elements = 0;
+    arena->debug_reuse_count++;
+    return arena->slots[best].ptr;
   }
 
 
@@ -640,7 +656,7 @@ ca_lazy_arena_acquire (ca_size_t bytes)
   best = -1;
   best_bytes = -1;
   for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
-    ca_lazy_arena_slot_t *s = &ca_lazy_arena.slots[i];
+    ca_lazy_arena_slot_t *s = &arena->slots[i];
     if ( s->in_use || s->ptr == NULL ) continue;
     if ( s->bytes > best_bytes ) {
       best = i;
@@ -648,7 +664,7 @@ ca_lazy_arena_acquire (ca_size_t bytes)
     }
   }
   if ( best >= 0 ) {
-    ca_lazy_arena_slot_t *s = &ca_lazy_arena.slots[best];
+    ca_lazy_arena_slot_t *s = &arena->slots[best];
     void *old = s->ptr;
     s->ptr   = NULL;
     s->bytes = 0;
@@ -657,25 +673,25 @@ ca_lazy_arena_acquire (ca_size_t bytes)
     s->bytes  = bytes;
     s->in_use = 1;
     s->object_elements = 0;
-    ca_lazy_arena.debug_xmalloc_count++;
+    arena->debug_xmalloc_count++;
     return s->ptr;
   }
 
   /* Pass 3: every warm slot is in use.  Open an empty one. */
   empty = -1;
   for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
-    if ( ca_lazy_arena.slots[i].ptr == NULL ) {
+    if ( arena->slots[i].ptr == NULL ) {
       empty = i;
       break;
     }
   }
   if ( empty >= 0 ) {
-    ca_lazy_arena.slots[empty].ptr    = xmalloc(bytes);  /* cells: ca_lazy_arena_acquire_object clears object slots */
-    ca_lazy_arena.slots[empty].bytes  = bytes;
-    ca_lazy_arena.slots[empty].in_use = 1;
-    ca_lazy_arena.slots[empty].object_elements = 0;
-    ca_lazy_arena.debug_xmalloc_count++;
-    return ca_lazy_arena.slots[empty].ptr;
+    arena->slots[empty].ptr    = xmalloc(bytes);  /* cells: ca_lazy_arena_acquire_object clears object slots */
+    arena->slots[empty].bytes  = bytes;
+    arena->slots[empty].in_use = 1;
+    arena->slots[empty].object_elements = 0;
+    arena->debug_xmalloc_count++;
+    return arena->slots[empty].ptr;
   }
 
   /* Pass 4: all CA_LAZY_ARENA_SLOTS in use simultaneously.  This is
@@ -690,12 +706,13 @@ ca_lazy_arena_acquire (ca_size_t bytes)
 void
 ca_lazy_arena_release (void *ptr)
 {
+  ca_lazy_arena_t *arena = ca_lazy_arena_get();
   int i;
   if ( ptr == NULL ) return;
   for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
-    if ( ca_lazy_arena.slots[i].ptr == ptr ) {
-      ca_lazy_arena.slots[i].in_use = 0;
-      ca_lazy_arena.slots[i].object_elements = 0;
+    if ( arena->slots[i].ptr == ptr ) {
+      arena->slots[i].in_use = 0;
+      arena->slots[i].object_elements = 0;
       return;
     }
   }
@@ -714,6 +731,7 @@ ca_lazy_arena_release (void *ptr)
 void *
 ca_lazy_arena_acquire_object (ca_size_t n_elements)
 {
+  ca_lazy_arena_t *arena = ca_lazy_arena_get();
   void *ptr;
   int i;
 
@@ -723,8 +741,8 @@ ca_lazy_arena_acquire_object (ca_size_t n_elements)
   ca_object_cells_clear(ptr, n_elements);
 
   for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
-    if ( ca_lazy_arena.slots[i].ptr == ptr ) {
-      ca_lazy_arena.slots[i].object_elements = n_elements;
+    if ( arena->slots[i].ptr == ptr ) {
+      arena->slots[i].object_elements = n_elements;
       break;
     }
   }
@@ -732,11 +750,11 @@ ca_lazy_arena_acquire_object (ca_size_t n_elements)
 }
 
 static void
-ca_lazy_arena_mark_object_slots (void)
+ca_lazy_arena_mark_object_slots (ca_lazy_arena_t *arena)
 {
   int i;
   for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
-    ca_lazy_arena_slot_t *s = &ca_lazy_arena.slots[i];
+    ca_lazy_arena_slot_t *s = &arena->slots[i];
     ca_size_t n;
     VALUE *p;
     if ( ! s->in_use || s->object_elements <= 0 ) continue;
@@ -752,42 +770,48 @@ ca_lazy_arena_mark_object_slots (void)
 static VALUE
 rb_ca_lazy_arena_s_reset_counters (VALUE klass)
 {
-  ca_lazy_arena.debug_acquire_count = 0;
-  ca_lazy_arena.debug_xmalloc_count = 0;
-  ca_lazy_arena.debug_reuse_count   = 0;
+  ca_lazy_arena_t *arena = ca_lazy_arena_get();
+  arena->debug_acquire_count = 0;
+  arena->debug_xmalloc_count = 0;
+  arena->debug_reuse_count   = 0;
   return Qnil;
 }
 
 static VALUE
 rb_ca_lazy_arena_s_acquire_count (VALUE klass)
 {
-  return SIZE2NUM(ca_lazy_arena.debug_acquire_count);
+  ca_lazy_arena_t *arena = ca_lazy_arena_get();
+  return SIZE2NUM(arena->debug_acquire_count);
 }
 
 static VALUE
 rb_ca_lazy_arena_s_xmalloc_count (VALUE klass)
 {
-  return SIZE2NUM(ca_lazy_arena.debug_xmalloc_count);
+  ca_lazy_arena_t *arena = ca_lazy_arena_get();
+  return SIZE2NUM(arena->debug_xmalloc_count);
 }
 
 static VALUE
 rb_ca_lazy_arena_s_reuse_count (VALUE klass)
 {
-  return SIZE2NUM(ca_lazy_arena.debug_reuse_count);
+  ca_lazy_arena_t *arena = ca_lazy_arena_get();
+  return SIZE2NUM(arena->debug_reuse_count);
 }
 
 static VALUE
 rb_ca_lazy_arena_s_depth (VALUE klass)
 {
-  return INT2NUM(ca_lazy_arena.depth);
+  ca_lazy_arena_t *arena = ca_lazy_arena_get();
+  return INT2NUM(arena->depth);
 }
 
 static VALUE
 rb_ca_lazy_arena_s_slot_in_use_count (VALUE klass)
 {
+  ca_lazy_arena_t *arena = ca_lazy_arena_get();
   int i, n = 0;
   for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
-    if ( ca_lazy_arena.slots[i].in_use ) n++;
+    if ( arena->slots[i].in_use ) n++;
   }
   return INT2NUM(n);
 }
@@ -801,12 +825,13 @@ rb_ca_lazy_arena_s_slot_in_use_count (VALUE klass)
 static VALUE
 rb_ca_lazy_arena_s_slot_capacities (VALUE klass)
 {
+  ca_lazy_arena_t *arena = ca_lazy_arena_get();
   int i;
   VALUE arr = rb_ary_new();
   (void) klass;
   for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
-    if ( ca_lazy_arena.slots[i].ptr != NULL ) {
-      rb_ary_push(arr, SIZE2NUM(ca_lazy_arena.slots[i].bytes));
+    if ( arena->slots[i].ptr != NULL ) {
+      rb_ary_push(arr, SIZE2NUM(arena->slots[i].bytes));
     }
   }
   return arr;
@@ -854,11 +879,7 @@ Init_carray_lazy (void)
 
   ca_gc_local_key = rb_ractor_local_storage_ptr_newkey(&ca_gc_local_type);
 
-  /* Hidden, never collected: its mark function is what keeps the
-     arena's CA_OBJECT slots reachable. */
-  ca_gc_guard = TypedData_Wrap_Struct(rb_cObject, &ca_gc_guard_data_type,
-                                      &ca_gc_guard_body);
-  rb_gc_register_mark_object(ca_gc_guard);
+  ca_lazy_arena_key = rb_ractor_local_storage_ptr_newkey(&ca_lazy_arena_type);
 
   rb_define_alloc_func(rb_cCALazyMarker, rb_ca_lazy_marker_s_allocate);
   rb_define_method(rb_cCALazyMarker, "initialize_copy",
