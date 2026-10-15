@@ -95,6 +95,11 @@ task :frame_column_verbs_check do
   ruby "utils/check_frame_column_verbs.rb" or exit($?.exitstatus)
 end
 
+desc "Check that a repeated column name is refused by CAFrame.refuse_repeated_names"
+task :frame_repeated_names_check do
+  ruby "utils/check_frame_repeated_names.rb" or exit($?.exitstatus)
+end
+
 desc "Check that no file gains a hand-written IndexError"
 task :index_error_check do
   ruby "utils/check_index_errors.rb" or exit($?.exitstatus)
@@ -442,7 +447,7 @@ end
 
 desc "Run spec_ai tests (ruby -I ext -I lib, SPEC_JOBS processes at once)"
 task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_parts_check,
-                  :runtime_error_check, :index_error_check, :axis_normalize_check, :rank_limit_check, :method_naming_check, :define_method_check, :unnamed_raise_check, :read_only_refusal_check, :frame_column_verbs_check, :cell_buffer_check,
+                  :runtime_error_check, :index_error_check, :axis_normalize_check, :rank_limit_check, :method_naming_check, :define_method_check, :unnamed_raise_check, :read_only_refusal_check, :frame_column_verbs_check, :frame_repeated_names_check, :cell_buffer_check,
                   :view_setup_mask_check, :protect_parts_check,
                   :setup_before_alloc_check, :integer_store_check, :one_sided_cast_check,
                   :empty_walk_check, :mask_standin_check, :nan_order_check, :query_match_check, :key_codes_check, :cell_raise_check,
