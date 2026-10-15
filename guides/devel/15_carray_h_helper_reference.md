@@ -470,6 +470,18 @@ anything else raises `TypeError`. `rb_ca_normalize_axis_for_ndim` takes a
 axis_normalize_check` refuses `ca_axis_integer` and a hand-written range
 message outside `carray_utils.c`.
 
+Every `dim[]` in the library is `CA_RANK_MAX` long, so a rank given or
+computed is held to it by one part, `ca_check_rank_fits(ndim, name)`
+(`carray_internal.h`), before a single dim is written; it raises
+`ArgumentError` "<method>: ndim <n> exceeds CA_RANK_MAX 16". A constructor
+inside the library uses `CA_CHECK_RANK_GIVEN`, which also refuses no axes
+at all and calls the part; the public `CA_CHECK_RANK` is for extensions.
+`ca_normalize_axis_arg` asks the part first, so an axis read against
+`ndim + 1` (an insertion position) refuses a result over the limit. `rake
+rank_limit_check` refuses a rank compared with `CA_RANK_MAX` by hand; a
+count that is not a rank (bundles, indices, a list of axes) says so with
+`rank-check:`.
+
 ## High-level method-binding helpers
 
 When you implement a Ruby method by hand (rather than via the DSL), these
