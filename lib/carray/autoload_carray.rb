@@ -20,21 +20,6 @@
 # (1) Top-level feature files
 # ============================================================================
 
-# ---- Inspection (#inspect / #source_code) ----------------------------------
-#
-# CArray::Inspector (:nodoc:) and #inspect / #source_code live in carray/inspect.rb.
-# #inspect is an implicit method (p / pp / irb / error interpolation), so the
-# stub loads the file the first time any CArray is displayed. Nothing in the
-# eager core references it at load time; #desc is private (code-internal) and
-# Inspector is internal, so only the two public methods need stubs.
-
-class CArray
-  inspect_rb = "carray/inspect"
-  autoload_method "inspect",      inspect_rb
-  autoload_method "inspect_full", inspect_rb
-  autoload_method "source_code",  inspect_rb
-end
-
 # ---- Serializer / Marshal / dump / load ------------------------------------
 
 class CArray

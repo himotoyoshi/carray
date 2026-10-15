@@ -49,6 +49,9 @@ require 'carray/string_operation_extension'  # shared StringOperationMixin (must
 require 'carray/const_string'   # CAConstString construction surface
 require 'carray/string'         # CAString construction surface
 require 'carray/fixlen_string'  # CAFixlenString construction surface
+# Loaded here, not on first use: Ruby's own error messages call #inspect, and
+# a Ractor other than the main one cannot load a file.
+require 'carray/inspect'
 # CArray.format lives in carray/methods/string_format.rb, autoloaded on first call
 
 # carray/frame is loaded lazily via autoload_carray (CAFrame / GroupedFrame
