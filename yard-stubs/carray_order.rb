@@ -163,8 +163,9 @@ class CArray
   #
   #   `val` is compared in the type both share, as `self.eq(val)`
   #   compares: an integer array searched with a Float is compared in
-  #   float64 (so `3.9` does not match `3`, and `eps` applies), and an
-  #   Integer that does not fit an integer array raises `RangeError`.
+  #   float64 (so `3.9` does not match `3`, and `eps` applies), a pair of
+  #   mixed sign is compared by value (`-1` does not find `255`), and an
+  #   Integer an integer array cannot hold matches nothing.
   #   The same holds for {#bsearch} and {#search_nearest}. On an
   #   `:object` array a cell matches when it is `==` to `val`, as {#eq}
   #   compares (so `1` matches `1.0`, which {#is_in} does not).

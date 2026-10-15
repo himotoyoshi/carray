@@ -244,7 +244,9 @@ class CArray
   #   In-place equivalent: `ca[:eq, v] = UNDEF`.
   #
   #   Replaces the removed `maskout(v)` from 2.x.
-  #   @param v [Object] value to mask. Cast to `self.data_type`.
+  #   `v` is compared as {#eq} compares it, by value: `1.5` masks nothing
+  #   in an integer array, and `-1` does not mask `255` in a `uint8` one.
+  #   @param v [Object] value to mask.
   #   @return [CArray]
   def mask_eq(v); end
 
