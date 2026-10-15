@@ -1633,7 +1633,7 @@ trailing options Hash:
 - Integer (= `axis: 0`)                        → single axis (negative normalised)
 - Array of Integer (= `axis: [0, 2]`)          → multi-axis in input order
 - Range / Float / String / etc.                → raises TypeError
-- out-of-range / duplicate / overflow          → raises ArgumentError / IndexError
+- out-of-range (an Integer of any width) / duplicate → raises ArgumentError
 
 The returned `naxes` is the count; `slab_axes[]` is filled in input
 order (canonicalisation to ascending happens inside `init_l2`).

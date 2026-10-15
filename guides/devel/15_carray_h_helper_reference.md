@@ -458,6 +458,18 @@ int   rb_ca_normalize_axis_for_ndim(long raw, int ndim, const char *name);
 combined with `rb_scan_options` it's how mkkernel-generated dispatchers
 read `axis:` / `keepdims:` / similar kwargs.
 
+An axis taken from Ruby is read by one part. Inside the library that is
+`ca_normalize_axis_arg(raxis, ndim, name)` (`carray_internal.h`); an
+extension calls `rb_ca_normalize_axis_value`, which goes through it. It
+takes the argument as Ruby gave it, so the range is checked before the
+value is narrowed to a C type: an Integer in `[-ndim, ndim)` counts a
+negative axis from the end, any other Integer, however wide, raises
+`ArgumentError` ("<method>: axis <value> out of range for ndim D"), and
+anything else raises `TypeError`. `rb_ca_normalize_axis_for_ndim` takes a
+`long` that is already narrowed and is for a C caller. `rake
+axis_normalize_check` refuses `ca_axis_integer` and a hand-written range
+message outside `carray_utils.c`.
+
 ## High-level method-binding helpers
 
 When you implement a Ruby method by hand (rather than via the DSL), these

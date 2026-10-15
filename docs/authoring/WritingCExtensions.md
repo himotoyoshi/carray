@@ -2389,17 +2389,18 @@ bad argument fails cleanly with nothing to unwind:
 static VALUE
 rb_ca_scale (VALUE self, VALUE vfactor, VALUE vaxis)
 {
-  /* 1. Convert scalars first — NUM2DBL/NUM2INT raise TypeError on
+  /* 1. Convert scalars first — NUM2DBL raises TypeError on
    *    non-numeric input, before any CArray work.                 */
   double factor = NUM2DBL(vfactor);
-  int    axis   = NUM2INT(vaxis);
 
-  /* 2. Extract and check the array.                               */
+  /* 2. Extract the array and read the axis against it.  The axis
+   *    goes to rb_ca_normalize_axis_value as Ruby gave it: it counts
+   *    a negative axis from the end and raises for the rest (TypeError
+   *    for a non-Integer, ArgumentError naming the method otherwise).
+   *    Reading it with NUM2INT first would narrow it before the check,
+   *    and 2**32 + 1 would pass as 1.                               */
   CArray *ca; GetCArray(self, ca);
-  if (axis < 0 || axis >= ca->ndim) {
-    rb_raise(rb_eArgError, "axis %d out of range for %d-D array",
-             axis, ca->ndim);
-  }
+  int axis = rb_ca_normalize_axis_value(self, vaxis, NULL);
 
   /* 3. Only now coerce / allocate / attach.                       */
   volatile VALUE vin = rb_ca_wrap_readonly(self, INT2FIX(CA_FLOAT64));
@@ -2419,10 +2420,10 @@ Conventions worth keeping consistent with the rest of CArray:
 - **Coerce before you reject.** As in §7.2, prefer `ca_wrap_readonly`
   over a hard data_type check when the input can reasonably be seen as
   your compute type; raise only for the genuinely unusable.
-- **Negative-axis normalisation.** If you accept Python-style negative
-  axes, normalise (`if (axis < 0) axis += ca->ndim;`) and then
-  range-check; `rb_ca_parse_reduce_axes` does this for the multi-axis
-  reduction case.
+- **Axis arguments.** Read an axis with `rb_ca_normalize_axis_value`
+  (or `rb_ca_normalize_axis_for_ndim` for a `long` you already hold)
+  rather than normalising it yourself; `rb_ca_parse_reduce_axes_kw`
+  does the same for the multi-axis reduction case.
 
 Front-loading validation keeps the interior of the method
 raise-light, which in turn keeps the §17.2 cleanup burden small: the
