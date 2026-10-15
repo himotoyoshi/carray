@@ -166,14 +166,9 @@ rb_ca_partition_copy_c (VALUE self, VALUE vkth, VALUE vaxis)
    * but the cost is the per-pair rb_funcall, not an architectural
    * penalty. */
   if ( cat->data_type == CA_OBJECT ) {
-    static ID id_partition_index_ki = 0;
-    static ID id_take_along_axis    = 0;
-    static ID id_axis_sym           = 0;
-    if ( !id_partition_index_ki ) {
-      id_partition_index_ki = rb_intern("partition_index_ki");
-      id_take_along_axis    = rb_intern("take_along_axis");
-      id_axis_sym           = rb_intern("axis");
-    }
+    ID id_partition_index_ki = rb_intern("partition_index_ki");
+    ID id_take_along_axis    = rb_intern("take_along_axis");
+    ID id_axis_sym           = rb_intern("axis");
     VALUE idx = rb_funcall(target, id_partition_index_ki, 2,
                            INT2NUM(axis), SIZET2NUM(kth));
     VALUE kw = rb_hash_new();

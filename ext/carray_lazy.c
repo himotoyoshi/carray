@@ -1115,13 +1115,12 @@ ca_lazy_req_pull (void *operand, const ca_lazy_req_t *req, void *buf, int dir)
 VALUE
 ca_lazy_evaluated (VALUE self)
 {
-  static ID id_evaluator = 0, id_fusion, id_evaluate;
+  /* rb_intern caches each literal by itself; a shared guard over several
+     IDs would let a second Ractor read one not yet set. */
+  ID id_evaluator = rb_intern("@expression_evaluator");
+  ID id_fusion    = rb_intern("Fusion");
+  ID id_evaluate  = rb_intern("evaluate");
   CArray *ca;
-  if ( ! id_evaluator ) {
-    id_evaluator = rb_intern("@expression_evaluator");
-    id_fusion    = rb_intern("Fusion");
-    id_evaluate  = rb_intern("evaluate");
-  }
   GetCArray(self, ca);
   if ( ! ca_is_lazy_view(ca) ) {
     return Qnil;

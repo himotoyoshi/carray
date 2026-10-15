@@ -555,15 +555,10 @@ ca_face_register_state_compatible (int obj_type, ca_face_state_compatible_fn fn)
 static int
 ca_face_has_ruby_state_check (VALUE va)
 {
-  static ID id_face_state_compatible_p = 0;
-  static ID id_method = 0;
-  static ID id_owner  = 0;
+  ID id_face_state_compatible_p = rb_intern("face_state_compatible?");
+  ID id_method                  = rb_intern("method");
+  ID id_owner                   = rb_intern("owner");
   VALUE m, owner;
-  if ( id_face_state_compatible_p == 0 ) {
-    id_face_state_compatible_p = rb_intern("face_state_compatible?");
-    id_method                  = rb_intern("method");
-    id_owner                   = rb_intern("owner");
-  }
   m = rb_funcall(va, id_method, 1, ID2SYM(id_face_state_compatible_p));
   owner = rb_funcall(m, id_owner, 0);
   return ( owner != rb_cCArray ) ? 1 : 0;
@@ -683,16 +678,11 @@ ca_face_register_state_portable (int obj_type, int portable)
 static int
 ca_face_class_has_portable_method (VALUE klass)
 {
-  static ID id_face_state_portable_p = 0;
-  static ID id_method = 0;
-  static ID id_owner  = 0;
+  ID id_face_state_portable_p = rb_intern("face_state_portable?");
+  ID id_method                = rb_intern("method");
+  ID id_owner                 = rb_intern("owner");
   VALUE m, owner;
   if ( NIL_P(klass) ) return 0;
-  if ( id_face_state_portable_p == 0 ) {
-    id_face_state_portable_p = rb_intern("face_state_portable?");
-    id_method                = rb_intern("method");
-    id_owner                 = rb_intern("owner");
-  }
   if ( !rb_respond_to(klass, id_face_state_portable_p) ) return 0;
   m = rb_funcall(klass, id_method, 1, ID2SYM(id_face_state_portable_p));
   owner = rb_funcall(m, id_owner, 0);
