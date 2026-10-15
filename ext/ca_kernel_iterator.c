@@ -122,7 +122,8 @@ ki_kept_slot (void)
    around each walk. */
 #ifdef CARRAY_DEV_BUILD
 static long ki_buffers_out = 0;
-#define KI_BUFFERS_OUT(d) ( ki_buffers_out += (d) )
+/* atomic: walks run in several Ractors at once */
+#define KI_BUFFERS_OUT(d) ( (void) __atomic_add_fetch(&ki_buffers_out, (d), __ATOMIC_RELAXED) )
 #else
 #define KI_BUFFERS_OUT(d) ((void) 0)
 #endif
@@ -4214,7 +4215,7 @@ static VALUE
 rb_ki_buffers_out (VALUE klass)
 {
   (void) klass;
-  return LONG2NUM(ki_buffers_out);
+  return LONG2NUM(__atomic_load_n(&ki_buffers_out, __ATOMIC_RELAXED));
 }
 
 #endif /* CARRAY_DEV_BUILD — end smoke surface fence */

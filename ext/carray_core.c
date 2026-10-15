@@ -1672,13 +1672,15 @@ static long ca_attached_views = 0;
 #define CA_VIEW_ATTACH_STEP(ca, d) do {                                       \
     uint32_t attach_before_ = CAVIEW(ca)->attach;                             \
     CAVIEW(ca)->attach += (d);                                                \
-    ca_attached_views += ( CAVIEW(ca)->attach > 0 ) - ( attach_before_ > 0 ); \
+    __atomic_add_fetch(&ca_attached_views,                                   \
+                       ( CAVIEW(ca)->attach > 0 ) - ( attach_before_ > 0 ),     \
+                       __ATOMIC_RELAXED);                                        \
   } while (0)
 
 static VALUE
 rb_ca_s_attached_views (VALUE klass)
 {
-  return LONG2NUM(ca_attached_views);
+  return LONG2NUM(__atomic_load_n(&ca_attached_views, __ATOMIC_RELAXED));
 }
 
 /* Set once at load from CARRAY_GENERAL_PATH; see carray_internal.h. */
