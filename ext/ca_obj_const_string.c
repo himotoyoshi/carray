@@ -1068,6 +1068,7 @@ rb_ca_const_string_factorize_appearance (VALUE self)
   size_t cap = 16, mask_bits;
   ca_size_t n, i, k = 0;
   int8_t code_dt;
+  VALUE  slot_holder = 0, start_holder = 0, len_holder = 0;
 
   TypedData_Get_Struct(self, CAConstString, &catext_data_type, ca);
   n = ca->elements;
@@ -1078,13 +1079,16 @@ rb_ca_const_string_factorize_appearance (VALUE self)
     cap <<= 1;
   }
   mask_bits = cap - 1;
-  /* Everything the scan writes is allocated before its window opens. */
+  /* Everything the scan writes is allocated before its window opens, and
+     held by the collector: opening the window reads the offsets, which
+     can raise for a parent that answers in Ruby. */
   vcodes    = rb_carray_new(CA_UINT32, ca->ndim, ca->dim, 0, NULL);
   TypedData_Get_Struct(vcodes, CArray, &carray_data_type, co);
   codes     = (uint32_t *) co->ptr;
-  slot      = ZALLOC_N(uint32_t, cap);              /* code + 1; 0 is empty */
-  lev_start = ALLOC_N(int64_t, n > 0 ? n : 1);
-  lev_len   = ALLOC_N(int64_t, n > 0 ? n : 1);
+  slot      = ALLOCV_N(uint32_t, slot_holder, cap);  /* code + 1; 0 is empty */
+  MEMZERO(slot, uint32_t, cap);
+  lev_start = ALLOCV_N(int64_t, start_holder, n > 0 ? n : 1);
+  lev_len   = ALLOCV_N(int64_t, len_holder, n > 0 ? n : 1);
 
   ca_const_string_scan_begin(self, &s);
   for ( i = 0; i < s.n; i++ ) {
@@ -1114,7 +1118,7 @@ rb_ca_const_string_factorize_appearance (VALUE self)
     }
   }
   ca_const_string_scan_end(&s);
-  xfree(slot);
+  ALLOCV_END(slot_holder);
 
   /* The buffer is the column's frozen String, alive past the window. */
   levels = rb_ary_new_capa(k);
@@ -1125,8 +1129,8 @@ rb_ca_const_string_factorize_appearance (VALUE self)
       rb_ary_push(levels, rb_enc_str_new(buf + lev_start[i], lev_len[i], enc));
     }
   }
-  xfree(lev_start);
-  xfree(lev_len);
+  ALLOCV_END(start_holder);
+  ALLOCV_END(len_holder);
 
   if      ( k <= 0xFF )   { code_dt = CA_UINT8;  }
   else if ( k <= 0xFFFF ) { code_dt = CA_UINT16; }
