@@ -3975,11 +3975,7 @@ module MkKernel
     io.puts "  if ( TYPE(raxis) == T_ARRAY ) {"
     io.puts %Q[    rb_raise(rb_eArgError, "%s: axis must be a single Integer (got Array); a scan over several axes is ambiguous, chain explicitly: a.#{name}(axis: 0).#{name}(axis: 1)", ca_calling_method_name());]
     io.puts "  }"
-    io.puts "  int axis = (int) ca_axis_integer(raxis, NULL);"
-    io.puts "  if ( axis < 0 ) axis += src->ndim;"
-    io.puts "  if ( axis < 0 || axis >= src->ndim ) {"
-    io.puts %Q[    rb_raise(rb_eArgError, "%s: axis %d out of range for ndim %d", ca_calling_method_name(), NUM2INT(raxis), src->ndim);]
-    io.puts "  }"
+    io.puts "  int axis = ca_normalize_axis_arg(raxis, src->ndim, NULL);"
     io.puts "  switch ( src->data_type ) {"
     k[:source].each do |s|
       si = DTYPES[s]
@@ -4724,11 +4720,7 @@ module MkKernel
         io.puts %Q[    rb_raise(rb_eArgError, "%s: masked input not supported (use ca.value or ca.strip_mask(fill))", ca_calling_method_name());]
         io.puts "  }"
       end
-      io.puts "  int axis = (int) ca_axis_integer(vaxis, NULL);"
-      io.puts "  if ( axis < 0 ) axis += src->ndim;"
-      io.puts "  if ( axis < 0 || axis >= src->ndim ) {"
-      io.puts %Q[    rb_raise(rb_eArgError, "%s: axis %d out of range for ndim %d", ca_calling_method_name(), NUM2INT(vaxis), src->ndim);]
-      io.puts "  }"
+      io.puts "  int axis = ca_normalize_axis_arg(vaxis, src->ndim, NULL);"
       io.puts "  switch ( src->data_type ) {"
       k[:source].each do |s|
         si = DTYPES[s]
@@ -4833,11 +4825,7 @@ module MkKernel
         io.puts %Q[    rb_raise(rb_eArgError, "%s: masked input not supported (use ca.value or ca.strip_mask(fill))", ca_calling_method_name());]
         io.puts "  }"
       end
-      io.puts "  int axis = (int) ca_axis_integer(vaxis, NULL);"
-      io.puts "  if ( axis < 0 ) axis += src->ndim;"
-      io.puts "  if ( axis < 0 || axis >= src->ndim ) {"
-      io.puts %Q[    rb_raise(rb_eArgError, "%s: axis %d out of range for ndim %d", ca_calling_method_name(), NUM2INT(vaxis), src->ndim);]
-      io.puts "  }"
+      io.puts "  int axis = ca_normalize_axis_arg(vaxis, src->ndim, NULL);"
       io.puts "  ca_size_t kth_raw = (ca_size_t) ca_integer_arg(vkth, \"kth\", NULL);"
       io.puts "  ca_size_t kth = kth_raw;"
       io.puts "  ca_size_t axis_n = src->dim[axis];"
@@ -5678,11 +5666,7 @@ module MkKernel
       # body handles mask_in or ignores it
     end
 
-    io.puts "  int axis = (int) ca_axis_integer(raxis, NULL);"
-    io.puts "  if ( axis < 0 ) axis += src->ndim;"
-    io.puts "  if ( axis < 0 || axis >= src->ndim ) {"
-    io.puts %Q[    rb_raise(rb_eArgError, "%s: axis %d out of range for ndim %d", ca_calling_method_name(), NUM2INT(raxis), src->ndim);]
-    io.puts "  }"
+    io.puts "  int axis = ca_normalize_axis_arg(raxis, src->ndim, NULL);"
     io.puts "  switch ( src->data_type ) {"
     k[:source].each do |s|
       si = DTYPES[s]

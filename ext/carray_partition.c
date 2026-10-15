@@ -14,7 +14,7 @@
 
 #include "ruby.h"
 #include "carray.h"
-#include "carray_internal.h"   /* ca_axis_integer */
+#include "carray_internal.h"   /* ca_normalize_axis_arg */
 #include "ca_kernel_iterator.h"   /* CA_FOR_EACH_FIBER_INOUT */
 #include "ca_obj_face.h"          /* CA_FACE_LIFT_IF_FACE */
 #include "ca_sort_kernels.h"      /* ca_partition_quick_* / ca_partition_nan_* */
@@ -155,7 +155,7 @@ rb_ca_partition_copy_c (VALUE self, VALUE vkth, VALUE vaxis)
   }
 
   /* Normalize axis. */
-  int axis = rb_ca_normalize_axis_for_ndim(ca_axis_integer(vaxis, NULL), cat->ndim, NULL);
+  int axis = ca_normalize_axis_arg(vaxis, cat->ndim, NULL);
 
   ca_size_t fiber_n = cat->dim[axis];
   ca_size_t kth = partition_kth(fiber_n, vkth);
@@ -292,8 +292,7 @@ rb_ca_partition_copy_c_mp (VALUE self, VALUE vkth, VALUE vaxis, int masked_last)
   /* Check axis and kth here, so a bad one is reported as partition_copy's
      rather than as the partition this delegates to. */
   {
-    int axis = rb_ca_normalize_axis_for_ndim(ca_axis_integer(vaxis, NULL),
-                                             ca->ndim, NULL);
+    int axis = ca_normalize_axis_arg(vaxis, ca->ndim, NULL);
     partition_kth(ca->dim[axis], vkth);
   }
   /* rb_ca_partitioned_view's rb_scan_args "1:" pattern needs call-frame

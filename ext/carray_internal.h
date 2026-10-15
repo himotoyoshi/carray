@@ -390,6 +390,9 @@ int         ca_bincmp_integer_prepare (volatile VALUE *self, volatile VALUE *oth
                                        int op_id, int *signed_side);
 int         ca_bincmp_answer_when_negative (int op_id, int signed_side);
 long        ca_axis_integer (VALUE raxis, const char *name);
+/* An `axis` argument as an axis in [0, ndim): the rule every entry taking
+   an axis from Ruby calls (carray_utils.c). */
+int         ca_normalize_axis_arg (VALUE raxis, int ndim, const char *name);
 VALUE       ca_fill_as (VALUE fill, int8_t data_type);
 /* ---- Face MemoryView export (ca_obj_face.c) -------------------------------
 

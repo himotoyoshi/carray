@@ -20,7 +20,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
-#include "carray_internal.h"   /* ca_axis_integer */
+#include "carray_internal.h"   /* ca_normalize_axis_arg */
 #include "ca_iter_substrate.h"
 #include "ca_obj_face.h"  /* ca_is_face, used by the compose-fold walk */
 
@@ -2543,7 +2543,7 @@ rb_ca_dim_view (int argc, VALUE *argv, VALUE self)
                (int) n_iter, (int) ndim);
     }
     for (i = 0; i < n_iter; i++) {
-      iter_axes[i] = ca_axis_integer(RARRAY_AREF(aary, i), NULL);
+      iter_axes[i] = ca_normalize_axis_arg(RARRAY_AREF(aary, i), ndim, NULL);
     }
   }
   else if (nargs >= 1) {
@@ -2554,7 +2554,7 @@ rb_ca_dim_view (int argc, VALUE *argv, VALUE self)
     }
     n_iter = (int8_t) nargs;
     for (i = 0; i < n_iter; i++) {
-      iter_axes[i] = ca_axis_integer(RARRAY_AREF(rposary, i), NULL);
+      iter_axes[i] = ca_normalize_axis_arg(RARRAY_AREF(rposary, i), ndim, NULL);
     }
   }
   else {
@@ -2562,23 +2562,16 @@ rb_ca_dim_view (int argc, VALUE *argv, VALUE self)
              "dim_view: at least one iteration axis required");
   }
 
-  /* Normalize negative indices and validate range / distinctness. */
+  /* The axes are normalized as they are read; check distinctness. */
   for (i = 0; i < ndim; i++) seen[i] = 0;
   for (i = 0; i < n_iter; i++) {
     ca_size_t a = iter_axes[i];
-    if (a < 0) a += ndim;
-    if (a < 0 || a >= ndim) {
-      rb_raise(rb_eArgError,
-               "dim_view: axis %lld out of range for ndim %d",
-               (long long) iter_axes[i], (int) ndim);
-    }
     if (seen[a]) {
       rb_raise(rb_eArgError,
                "dim_view: duplicate iteration axis %lld",
                (long long) a);
     }
     seen[a] = 1;
-    iter_axes[i] = a;
   }
 
   /* imap: iter axes first (in given order), then remaining axes
@@ -2650,12 +2643,8 @@ rb_ca_flip_axis (VALUE self, long axis)
   rb_check_carray_object(self);
   TypedData_Get_Struct(self, CArray, &carray_data_type, parent);
   int8_t ndim = parent->ndim;
-  long a = (axis < 0) ? (axis + ndim) : axis;
-  if (a < 0 || a >= ndim) {
-    rb_raise(rb_eArgError,
-             "flip_axis: axis %ld out of range for ndim %d",
-             axis, (int) ndim);
-  }
+  long a = rb_ca_normalize_axis_for_ndim(axis, ndim,   /* axis-check: a long from a C caller */
+                                         "flip_axis");
   int8_t flip[CA_RANK_MAX] = {0};
   flip[a] = 1;
   return rb_ca_flip_build_view(self, parent, flip);
@@ -2697,7 +2686,7 @@ rb_ca_flip (int argc, VALUE *argv, VALUE self)
                  (int) n_axes, (int) ndim);
       }
       for (i = 0; i < n_axes; i++) {
-        axes[i] = ca_axis_integer(RARRAY_AREF(aary, i), NULL);
+        axes[i] = ca_normalize_axis_arg(RARRAY_AREF(aary, i), ndim, NULL);
       }
     }
     else {
@@ -2708,18 +2697,12 @@ rb_ca_flip (int argc, VALUE *argv, VALUE self)
       }
       n_axes = (int8_t) nargs;
       for (i = 0; i < n_axes; i++) {
-        axes[i] = ca_axis_integer(RARRAY_AREF(rposary, i), NULL);
+        axes[i] = ca_normalize_axis_arg(RARRAY_AREF(rposary, i), ndim, NULL);
       }
     }
 
     for (i = 0; i < n_axes; i++) {
       ca_size_t a = axes[i];
-      if (a < 0) a += ndim;
-      if (a < 0 || a >= ndim) {
-        rb_raise(rb_eArgError,
-                 "flip: axis %lld out of range for ndim %d",
-                 (long long) axes[i], (int) ndim);
-      }
       if (flip[a]) {
         rb_raise(rb_eArgError,
                  "flip: duplicate axis %lld",
@@ -2793,18 +2776,8 @@ rb_ca_diagonal (int argc, VALUE *argv, VALUE self)
       rb_raise(rb_eArgError,
                "diagonal: axis: must be an Array of 2 integers");
     }
-    ai = ca_axis_integer(RARRAY_AREF(raxis, 0), NULL);
-    aj = ca_axis_integer(RARRAY_AREF(raxis, 1), NULL);
-    if (ai < 0) ai += ndim;
-    if (aj < 0) aj += ndim;
-    if (ai < 0 || ai >= ndim) {
-      rb_raise(rb_eArgError, "diagonal: axis[0] out of range for ndim %d",
-               (int) ndim);
-    }
-    if (aj < 0 || aj >= ndim) {
-      rb_raise(rb_eArgError, "diagonal: axis[1] out of range for ndim %d",
-               (int) ndim);
-    }
+    ai = ca_normalize_axis_arg(RARRAY_AREF(raxis, 0), ndim, NULL);
+    aj = ca_normalize_axis_arg(RARRAY_AREF(raxis, 1), ndim, NULL);
     if (ai == aj) {
       rb_raise(rb_eArgError, "diagonal: axis[0] and axis[1] must be distinct");
     }

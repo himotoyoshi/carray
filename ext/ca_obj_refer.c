@@ -810,12 +810,7 @@ rb_ca_insert_axis (int argc, VALUE *argv, VALUE self)
     gap_count[i] = 0;
   }
   for (i = 0; i < argc; i++) {
-    int raw = (int) ca_axis_integer(argv[i], "insert_axis");
-    int g   = (raw < 0) ? raw + ngap : raw;
-    if (g < 0 || g >= ngap) {
-      rb_raise(rb_eArgError,
-               "insert_axis: axis %d out of range for ndim %d", raw, ndim);
-    }
+    int g = ca_normalize_axis_arg(argv[i], ngap, "insert_axis");
     gap_count[g]++;
   }
 

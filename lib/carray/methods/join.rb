@@ -46,12 +46,7 @@ class CArray
       return sep.nil? ? to_a.join : to_a.join(sep)
     end
 
-    ax = Integer(axis)
-    ax += ndim if ax < 0
-    if ax < 0 || ax >= ndim
-      raise ArgumentError,
-            "axis #{axis.inspect} out of range for ndim=#{ndim}"
-    end
+    ax = normalize_axis(axis, "join")
 
     sep_str = sep || ""
 

@@ -9,7 +9,7 @@
 
 #include "ruby.h"
 #include "carray.h"
-#include "carray_internal.h"   /* ca_attach_window, ca_axis_integer */
+#include "carray_internal.h"   /* ca_attach_window, ca_normalize_axis_arg */
 
 /* ----------------------------------------------------------------- */
 
@@ -192,7 +192,7 @@ ca_seq_resolve_axis (CArray *ca, VALUE raxis)
              "%s: axis must be a single Integer (a seq over several axes is not supported)",
              ca_calling_method_name());
   }
-  axis = rb_ca_normalize_axis_for_ndim(ca_axis_integer(raxis, NULL), ca->ndim, NULL);
+  axis = ca_normalize_axis_arg(raxis, ca->ndim, NULL);
   return axis;
 }
 

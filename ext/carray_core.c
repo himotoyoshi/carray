@@ -619,13 +619,7 @@ parse_axes_items (const VALUE *items, int count, CArray *ca,
 
   for ( i = 0; i < CA_RANK_MAX; i++ ) seen[i] = 0;
   for ( i = 0; i < count; i++ ) {
-    ca_size_t raw = ca_axis_integer(items[i], NULL);
-    ca_size_t a   = ( raw < 0 ) ? raw + ca->ndim : raw;
-    if ( a < 0 || a >= ca->ndim ) {
-      rb_raise(rb_eArgError,
-               "%s: axis %ld out of range for ndim %d",
-               ctx, (long) raw, (int) ca->ndim);
-    }
+    ca_size_t a = ca_normalize_axis_arg(items[i], (int) ca->ndim, ctx);
     if ( seen[a] ) {
       rb_raise(rb_eArgError,
                "%s: duplicate axis %ld", ctx, (long) a);

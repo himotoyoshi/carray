@@ -1289,8 +1289,8 @@ rb_ca_stack_initialize (int argc, VALUE *argv, VALUE self)
     VALUE first = rb_ary_entry(list, 0);
     rb_check_carray_object(first);
     TypedData_Get_Struct(first, CArray, &carray_data_type, ref);
-    k_axis = (int8_t) rb_ca_normalize_axis_for_ndim(
-        NUM2LONG(axis_val), (int) ref->ndim + 1, "CAStack.new");
+    k_axis = (int8_t) ca_normalize_axis_arg(
+        axis_val, (int) ref->ndim + 1, "CAStack.new");
   }
   TypedData_Get_Struct(self, CAStack, &castack_data_type, ca);
   ca_check_uninitialized(ca);

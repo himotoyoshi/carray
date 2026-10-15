@@ -1234,8 +1234,8 @@ rb_ca_meld_initialize (int argc, VALUE *argv, VALUE self)
     VALUE first = rb_ary_entry(list, 0);
     rb_check_carray_object(first);
     TypedData_Get_Struct(first, CArray, &carray_data_type, ref);
-    meld_axis = (int8_t) rb_ca_normalize_axis_for_ndim(
-        NUM2LONG(axis_val), (int) ref->ndim, "CAMeld.new");
+    meld_axis = (int8_t) ca_normalize_axis_arg(
+        axis_val, (int) ref->ndim, "CAMeld.new");
   }
   TypedData_Get_Struct(self, CAMeld, &cameld_data_type, ca);
   ca_check_uninitialized(ca);

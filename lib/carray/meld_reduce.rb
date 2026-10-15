@@ -163,7 +163,7 @@ class CAMeld
   private
 
   def meld_axis_normalized?(axis)
-    (axis < 0 ? axis + ndim : axis) == meld_axis
+    normalize_axis(axis) == meld_axis
   end
 
   # Fast path fires when: no mask anywhere, no non-:axis kwargs, and axis
@@ -177,9 +177,7 @@ class CAMeld
     return false unless (kw.keys - [:axis]).empty?
     axis = kw[:axis]
     unless axis.nil?
-      return false unless axis.is_a?(Integer)
-      norm = axis < 0 ? axis + ndim : axis
-      return false unless norm >= 0 && norm < ndim
+      return false unless axis.is_a?(Integer) && axis >= -ndim && axis < ndim   # axis-check: a gate only; super normalizes
     end
     return false if has_mask?
     parents.each { |p| return false if p.has_mask? }
@@ -218,7 +216,7 @@ class CAMeld
   # meld_axis branch and never reaches here.)
   def non_meld_axis_decompose(op, axis)
     parts = parents.map { |p| p.public_send(op, axis: axis) }
-    axis_norm = axis < 0 ? axis + ndim : axis
+    axis_norm = normalize_axis(axis)
     new_meld_axis = axis_norm < meld_axis ? meld_axis - 1 : meld_axis
     CArray.meld(parts, axis: new_meld_axis).copy
   end

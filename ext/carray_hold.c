@@ -20,6 +20,7 @@
 #include "carray.h"
 #include "ca_kernel_iterator.h"
 #include "ca_obj_face.h"
+#include "carray_internal.h"   /* ca_normalize_axis_arg */
 
 /* Forward hold along `axis`.  Per fiber along the scan axis:
      - present cell         -> output = cell value, becomes the held value;
@@ -114,13 +115,7 @@ rb_ca_hold_method (VALUE self, VALUE raxis)
 {
   CArray *ca;
   GetCArray(self, ca);
-  int axis = NUM2INT(raxis);
-  if ( axis < 0 ) axis += ca->ndim;
-  if ( axis < 0 || axis >= ca->ndim ) {
-    rb_raise(rb_eArgError, "hold_forward: axis %d out of range for ndim %d",
-             NUM2INT(raxis), ca->ndim);
-  }
-  return rb_ca_hold_forward(self, axis);
+  return rb_ca_hold_forward(self, ca_normalize_axis_arg(raxis, ca->ndim, NULL));
 }
 
 /* first / last: the reduction sibling of hold.  Reduce each fiber to its

@@ -28,7 +28,7 @@
   --------------------------------------------------------------------------- */
 
 #include "carray.h"
-#include "carray_internal.h"   /* ca_attach_window, ca_calling_method_name, ca_axis_integer */
+#include "carray_internal.h"   /* ca_attach_window, ca_calling_method_name, ca_normalize_axis_arg */
 #include "carray_slab.h"
 #include "ca_obj_face.h"
 
@@ -85,14 +85,7 @@ ca_slab_parse_axes (ca_slab_iter_state_t *st, VALUE axis_arg, int8_t src_ndim)
   }
 
   for ( i = 0; i < n; i++ ) {
-    int k = (int) ca_axis_integer(rb_ary_entry(arr, i), NULL);
-    if ( k < 0 ) k += src_ndim;
-    if ( k < 0 || k >= src_ndim ) {
-      rb_raise(rb_eArgError,
-               "%s: axis %d out of range for ndim %d",
-               ca_calling_method_name(), NUM2INT(rb_ary_entry(arr, i)),
-               src_ndim);
-    }
+    int k = ca_normalize_axis_arg(rb_ary_entry(arr, i), src_ndim, NULL);
     for ( j = 0; j < i; j++ ) {
       if ( st->slab_axes[j] == (int8_t) k ) {
         rb_raise(rb_eArgError,

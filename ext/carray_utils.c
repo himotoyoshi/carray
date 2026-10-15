@@ -853,6 +853,23 @@ rb_ca_normalize_axis_for_ndim (long raw, int ndim, const char *name)
   return (int) axis;
 }
 
+/* The axis an `axis` argument names among `ndim` axes: the one rule every
+   entry that takes an axis from Ruby keeps.  An Integer, negative counting
+   from the end; anything else raises TypeError, and an Integer outside
+   [-ndim, ndim) raises ArgumentError naming the value given -- a Bignum
+   too, since no ndim reaches it.  `name` and the insertion-position use of
+   `ndim` are as for rb_ca_normalize_axis_for_ndim. */
+int
+ca_normalize_axis_arg (VALUE raxis, int ndim, const char *name)
+{
+  if ( RB_INTEGER_TYPE_P(raxis) && ! RB_FIXNUM_P(raxis) ) {
+    rb_raise(rb_eArgError,
+             "%s: axis %"PRIsVALUE" out of range for ndim %d",
+             name ? name : ca_calling_method_name(), raxis, ndim);
+  }
+  return rb_ca_normalize_axis_for_ndim(ca_axis_integer(raxis, name), ndim, name);
+}
+
 /* Self-bound wrapper: delegate to the kernel using self.ndim.  Kept
    for backward compatibility with the existing instance method
    `CArray#normalize_axis`. */
@@ -861,7 +878,7 @@ rb_ca_normalize_axis_value (VALUE self, VALUE raxis, const char *name)
 {
   CArray *ca;
   GetCArray(self, ca);
-  return rb_ca_normalize_axis_for_ndim(ca_axis_integer(raxis, name), (int) ca->ndim, name);
+  return ca_normalize_axis_arg(raxis, (int) ca->ndim, name);
 }
 
 /* Ruby-facing `CArray#normalize_axis(axis, name=nil)` — returns the
@@ -896,7 +913,7 @@ rb_ca_s_normalize_axis (int argc, VALUE *argv, VALUE klass)
   int k;
   rb_scan_args(argc, argv, "21", &raxis, &rndim, &rname);
   name = NIL_P(rname) ? NULL : StringValueCStr(rname);
-  k = rb_ca_normalize_axis_for_ndim(ca_axis_integer(raxis, name), NUM2INT(rndim), name);
+  k = ca_normalize_axis_arg(raxis, NUM2INT(rndim), name);
   return INT2NUM(k);
 }
 

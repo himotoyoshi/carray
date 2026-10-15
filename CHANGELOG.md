@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Fix: an axis is out of range whatever the width of the Integer given.
+  `cumsum`, `sort_addr`, `bsearch`, `insert_axis` and the slab iterators
+  took an axis past 32 bits, such as `2**32 + 1`, as a small one and
+  answered on that axis; they now raise `ArgumentError`. A Bignum axis
+  raises `ArgumentError` naming the method instead of `RangeError`.
+  `join(axis:)` raises `TypeError` for a Float or a String, as every other
+  `axis:` does.
+
 - Fix: `CACategorical#eq` and `#ne` compare a CArray operand cell by cell,
   by label. Another categorical is matched whatever order its labels are
   in, and a masked cell on either side gives UNDEF. Before, any array was
