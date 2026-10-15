@@ -207,6 +207,18 @@ class TestExpressionEvaluator < Test::Unit::TestCase
     assert_equal want, z.to_a
   end
 
+  # The same memory reached from another root: an array and a MemoryView
+  # wrap of it.
+  def test_a_destination_sharing_memory_through_another_root_is_left_to_the_walk
+    o = CArray.float64(150, 150) { |i| i.to_f }
+    w = CArray.wrap_memory_view(o)
+    want = o.transpose.to_a
+    CArray.expression_evaluator = answering(-1.0)
+    o[] = CArray.fuse { w.transpose + 0 }
+    assert_empty @asked
+    assert_equal want, o.to_a
+  end
+
   def test_the_destination_as_a_leaf_read_in_place_is_asked
     out = @a.copy
     CArray.expression_evaluator = answering(-1.0)

@@ -171,13 +171,15 @@ class CArray
         if leaf.equal?(out)
           shifted.include?(index)
         else
-          storages(leaf).any? { |r| mine.any? { |m| m.equal?(r) } }
+          storages(leaf).any? { |r| mine.any? { |m| m.send(:storage_overlaps?, r) } }
         end
       end
     end
 
     # The arrays that hold an array's cells: its root, or each parent's
-    # where a view stands over several.
+    # where a view stands over several.  Two of them share storage when
+    # they are one array, or entities whose memory overlaps (an array and a
+    # wrap_memory_view of it).
     def self.storages (array, found = [])
       root = array.root_array
       if ! root.entity? && root.respond_to?(:parents)

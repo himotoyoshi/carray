@@ -596,12 +596,35 @@ ca_root_array (void *ap)
 }
 
 /* Whether two arrays may share memory: their cells live in the same
-   root.  An operation that writes one while reading the other must read
-   from a copy taken before it writes. */
+   root, or in two entities whose memory overlaps (one wraps the other's
+   memory, as wrap_memory_view does).  An operation that writes one while
+   reading the other must read from a copy taken before it writes. */
 int
 ca_shares_root (void *ap, void *aq)
 {
-  return ca_root_array(ap) == ca_root_array(aq);
+  CArray *ra = ca_root_array(ap);
+  CArray *rb = ca_root_array(aq);
+  if ( ra == rb ) {
+    return 1;
+  }
+  if ( ca_is_entity(ra) && ca_is_entity(rb) && ra->ptr && rb->ptr ) {
+    char *a0 = ra->ptr, *a1 = ra->ptr + ca_length(ra);
+    char *b0 = rb->ptr, *b1 = rb->ptr + ca_length(rb);
+    return a0 < b1 && b0 < a1;
+  }
+  return 0;
+}
+
+/* Whether self and other may share memory (ca_shares_root), for the plan
+   reader that keeps an evaluator off a store reading what it writes. */
+static VALUE
+rb_ca_storage_overlaps (VALUE self, VALUE other)
+{
+  CArray *ca, *cb;
+  rb_check_carray_object(other);
+  TypedData_Get_Struct(self,  CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(other, CArray, &carray_data_type, cb);
+  return ca_shares_root(ca, cb) ? Qtrue : Qfalse;
 }
 
 static VALUE
@@ -718,6 +741,7 @@ Init_carray_attribute (void)
   rb_define_method(rb_cCArray, "object?",   rb_ca_is_object_type, 0);
 
   rb_define_method(rb_cCArray, "root_array", rb_ca_root_array, 0);
+  rb_define_private_method(rb_cCArray, "storage_overlaps?", rb_ca_storage_overlaps, 1);
   rb_define_method(rb_cCArray, "ancestors", rb_ca_ancestors, 0);
 }
 
