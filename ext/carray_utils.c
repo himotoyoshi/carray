@@ -546,23 +546,40 @@ ca_stable_id_name (ID id)
 /* The method a delegating method answers for.  A method that does its work
    by calling others (median calls partition_index, mode calls sort) runs
    them under ca_answer_as_caller, so an error they raise names the method
-   the user called.  The outermost one wins. */
-static _Thread_local const char *ca_answering_name = NULL;
+   the user called.  The outermost one wins.  The name is kept with the
+   Ruby thread (Thread#[], so per fiber): Ractors share native threads under
+   the M:N scheduler, and a native-thread-local variable leaks one Ractor's
+   name into another's message. */
+static ID id_answering;
+
+static const char *
+ca_answering_name (void)
+{
+  VALUE name = rb_thread_local_aref(rb_thread_current(), id_answering);
+  return NIL_P(name) ? NULL : ca_stable_id_name(SYM2ID(name));
+}
+
+static void
+ca_set_answering_name (const char *name)
+{
+  rb_thread_local_aset(rb_thread_current(), id_answering,
+                       name ? ID2SYM(rb_intern(name)) : Qnil);
+}
 
 static VALUE
 ca_answer_restore (VALUE unused)
 {
-  ca_answering_name = NULL;
+  ca_set_answering_name(NULL);
   return Qnil;
 }
 
 VALUE
 ca_answer_as_caller (VALUE (*body)(VALUE), VALUE arg)
 {
-  if ( ca_answering_name ) {
+  if ( ca_answering_name() ) {
     return body(arg);
   }
-  ca_answering_name = ca_calling_method_name();
+  ca_set_answering_name(ca_calling_method_name());
   return rb_ensure(body, arg, ca_answer_restore, Qnil);
 }
 
@@ -576,10 +593,10 @@ rb_ca_s_answer_as_body (VALUE unused)
 static VALUE
 rb_ca_s_answer_as (VALUE klass, VALUE name)
 {
-  if ( ca_answering_name ) {
+  if ( ca_answering_name() ) {
     return rb_yield(Qnil);
   }
-  ca_answering_name = ca_stable_id_name(rb_to_id(name));
+  ca_set_answering_name(ca_stable_id_name(rb_to_id(name)));
   return rb_ensure(rb_ca_s_answer_as_body, Qnil, ca_answer_restore, Qnil);
 }
 
@@ -589,8 +606,8 @@ ca_calling_method_name (void)
   ID id;
   const char *s;
   size_t n;
-  if ( ca_answering_name ) {
-    return ca_answering_name;
+  if ( (s = ca_answering_name()) ) {
+    return s;
   }
   id = rb_frame_this_func();
   if ( ! id ) {
@@ -1210,6 +1227,7 @@ Init_carray_utils (void)
 {
   ca_id_names = st_init_numtable();
   rb_nativethread_lock_initialize(&ca_id_names_lock);
+  id_answering = rb_intern("__carray_answering_method__");
   id_begin    = rb_intern("begin");
   id_end      = rb_intern("end");
   id_excl_end = rb_intern("exclude_end?");
