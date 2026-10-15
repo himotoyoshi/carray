@@ -218,7 +218,7 @@ group_iter_shape_output (VALUE result, VALUE group_dims, VALUE perm, VALUE squee
 static VALUE
 group_iter_reduce (int argc, VALUE *argv, VALUE self)
 {
-  ID    op_id  = rb_frame_this_func();
+  ID    op_id  = rb_frame_this_func();   /* frame-name: picks the op, names no error */
   VALUE op_sym = ID2SYM(op_id);
   VALUE value  = rb_ivar_get(self, id_value);
   VALUE spec   = rb_ivar_get(self, id_spec);

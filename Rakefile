@@ -70,6 +70,11 @@ task :rank_limit_check do
   ruby "utils/check_rank_limit.rb" or exit($?.exitstatus)
 end
 
+desc "Check that an error's method name comes from ca_calling_method_name"
+task :method_naming_check do
+  ruby "utils/check_method_naming.rb" or exit($?.exitstatus)
+end
+
 desc "Check that no file gains a hand-written IndexError"
 task :index_error_check do
   ruby "utils/check_index_errors.rb" or exit($?.exitstatus)
@@ -417,7 +422,7 @@ end
 
 desc "Run spec_ai tests (ruby -I ext -I lib, SPEC_JOBS processes at once)"
 task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_parts_check,
-                  :runtime_error_check, :index_error_check, :axis_normalize_check, :rank_limit_check, :cell_buffer_check,
+                  :runtime_error_check, :index_error_check, :axis_normalize_check, :rank_limit_check, :method_naming_check, :cell_buffer_check,
                   :view_setup_mask_check, :protect_parts_check,
                   :setup_before_alloc_check, :integer_store_check, :one_sided_cast_check,
                   :empty_walk_check, :mask_standin_check, :nan_order_check, :query_match_check, :key_codes_check, :cell_raise_check,
