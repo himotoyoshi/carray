@@ -36,7 +36,8 @@ class CArray
   #     evenly, when `offset` is negative, or when the requested
   #     view extends past the parent's data.
   #   @raise [CArray::DataTypeError] when reinterpreting a CA_OBJECT parent
-  #     with a non-object `data_type`.
+  #     with a non-object `data_type`, or a parent of another data type as
+  #     `:boolean` (a boolean cell holds 0 or 1; compare instead, `ne(0)`).
   def refer(*argv); end
 
   # Returns a view of `self` with the requested shape.  Element

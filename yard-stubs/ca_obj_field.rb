@@ -20,6 +20,10 @@ class CArray
   #   @return [CAField]
   #   @raise [ArgumentError] when `offset` is negative or the
   #     `offset + bytes` window falls outside one parent record.
+  #   @raise [CArray::DataTypeError] when a field of a numeric array is
+  #     asked for as `:boolean` (a boolean cell holds 0 or 1; compare
+  #     instead, `ne(0)`). A record's boolean member is a field of a
+  #     fixlen array and is allowed.
   # @overload field(offset, template)
   #   Returns a CARefer over a {CAField}: takes `template.elements *
   #   template.bytes` bytes at `offset` and exposes them with

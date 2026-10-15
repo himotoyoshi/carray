@@ -89,6 +89,14 @@ ca_refer_setup (CARefer *ca, CArray *parent,
     rb_raise(rb_eCADataTypeError,
              "non-object array can't be referred as object data type");
   }
+  /* A boolean cell holds 0 or 1, and a view that reads other bytes as
+     boolean cannot keep them so: the parent is written as what it is. */
+  if (data_type == CA_BOOLEAN && parent->data_type != CA_BOOLEAN) {
+    rb_raise(rb_eCADataTypeError,
+             "%s: a %s array can't be referred as boolean (its bytes need not "
+             "be 0 or 1); compare it instead, e.g. ne(0)",
+             ca_calling_method_name(), ca_type_name[parent->data_type]);
+  }
   if (parent->elements && bytes > parent_bytes * parent->elements) {
     rb_raise(rb_eArgError, "bytes exceeds the data size of referent");
   }

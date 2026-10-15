@@ -1,6 +1,7 @@
-# A boolean cell holds 0 or 1.  A copy that brings bytes in from outside
-# (load_binary, CArray.load, Marshal, a MemoryView copy) reads a non-zero
-# byte as true.  A byte
+# A boolean cell holds 0 or 1.  Every way bytes get into a boolean array
+# from outside keeps it so: a copy (load_binary, CArray.load, Marshal, a
+# MemoryView copy) reads a non-zero byte as true, and a view that would
+# read another type's bytes as boolean (refer, field) is refused.  A byte
 # of 2 used to read as true in to_a, as 2 in to_type(:int32) and sum, and
 # as neither true nor false in count.
 
@@ -79,4 +80,13 @@ class TestBooleanBytes < Test::Unit::TestCase
     assert_raise(ArgumentError) { CArray.wrap_memory_view(m) }
   end
 
+  def test_views_of_other_bytes_are_refused
+    u = CArray.uint8(2) { |i| [2, 0][i] }
+    assert_raise(CArray::DataTypeError) { u.refer(:boolean) }
+    assert_raise(CArray::DataTypeError) { u.field(0, :boolean) }
+    assert_raise(CArray::DataTypeError) { CArray.int32(2).refer(:boolean, [8]) }
+    # a boolean array refers to itself as boolean, as a mask does
+    assert_equal [true, false], CArray.boolean(2) { |i| 1 - i }.refer(:boolean).to_a
+    assert_equal [2, 0], u.ne(0).to_type(:int32).to_a.map { |x| x * 2 }
+  end
 end

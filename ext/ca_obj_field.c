@@ -46,6 +46,16 @@ ca_field_setup (CAStride *ca, CArray *parent,
     rb_raise(rb_eCADataTypeError,
              "a field can not be taken from an object array");
   }
+  /* A boolean cell holds 0 or 1, and a field of a numeric array is
+     written as that number.  A record's boolean member is a field of a
+     fixlen array, whose member stores keep it 0 or 1. */
+  if ( data_type == CA_BOOLEAN && parent->data_type != CA_BOOLEAN
+       && parent->data_type != CA_FIXLEN ) {
+    rb_raise(rb_eCADataTypeError,
+             "%s: a field of a %s array can't be read as boolean (its bytes "
+             "need not be 0 or 1); compare it instead, e.g. ne(0)",
+             ca_calling_method_name(), ca_type_name[parent->data_type]);
+  }
   if ( parent->bytes < offset + bytes ) {
     rb_raise(rb_eArgError, "offset or bytes out of range");
   }
