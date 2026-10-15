@@ -81,13 +81,11 @@ class CArray
       a, b = fixlen_widened_with(ref)
       return a.locate_addr(b) unless a.equal?(self) && b.equal?(ref)
     end
-    # Put self and ref in a common lane via the single-source promotion rule
-    # (CArray.result_type), so a fractional query against an int ref is compared
-    # at the promoted type instead of truncating (1.5 no longer matches 1).
-    # to_type is elementwise and order-preserving, so the addresses stay valid
-    # indices into ref. result_type raises for cross-family input; an integer
-    # pair of mixed sign is matched by value (see value_match_type).
-    t = value_match_type(CArray.result_type(self, ref), ref.data_type)
+    # Put self and ref in the type they match in (query_match_type), so a
+    # fractional query against an int ref is compared as a float (1.5 does
+    # not match 1) and a pair of mixed sign by value.  to_type is elementwise
+    # and order-preserving, so the addresses stay valid indices into ref.
+    t = ref.send(:query_match_type, self)
     q = (data_type     == t) ? self : to_type(t)
     r = (ref.data_type == t) ? ref  : ref.to_type(t)
     q.send(:__locate_addr__, r)
@@ -215,7 +213,7 @@ class CArray
       q  = rs.__send__(:reconcile_operand, q, "locate_nearest_addr")
       rs = rs.__send__(:face_storage)
     end
-    t = value_match_type(CArray.result_type(q, rs), rs.data_type)
+    t = rs.send(:query_match_type, q)
     rk = (rs.data_type == t) ? rs : rs.to_type(t)
     qk = (q.data_type  == t) ? q  : q.to_type(t)
     [rk, qk.flatten]

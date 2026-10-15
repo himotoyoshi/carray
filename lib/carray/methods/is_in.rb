@@ -209,7 +209,7 @@ class CArray
     end
     set = values.is_a?(CArray) ? values : CArray.wrap_readonly(values)
     return [self, set] if set.data_type == data_type   # common fast path
-    t = value_match_type(CArray.result_type(self, set), set.data_type)
+    t = query_match_type(set)
     [coerce_self(t), set.to_type(t)]
   end
 
@@ -237,7 +237,6 @@ class CArray
       [to_type(CA_OBJECT), elems.to_ca.to_type(CA_OBJECT)]
     else
       t = CArray.result_type(self, *elems)
-      t = value_match_type(t, CA_INT64) if elems.any? { |v| v.is_a?(Integer) && v < 0 }
       [coerce_self(t), elems.to_ca.to_type(t)]
     end
   end
