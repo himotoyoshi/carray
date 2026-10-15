@@ -597,8 +597,10 @@ ca_root_array (void *ap)
 
 /* Whether two arrays may share memory: their cells live in the same
    root, or in two entities whose memory overlaps (one wraps the other's
-   memory, as wrap_memory_view does).  An operation that writes one while
-   reading the other must read from a copy taken before it writes. */
+   memory, as wrap_memory_view does).  A view with several parents (a
+   stack, a meld, a lazy expression) is the end of its own chain, so its
+   parents are asked in turn.  An operation that writes one while reading
+   the other must read from a copy taken before it writes. */
 int
 ca_shares_root (void *ap, void *aq)
 {
@@ -606,6 +608,19 @@ ca_shares_root (void *ap, void *aq)
   CArray *rb = ca_root_array(aq);
   if ( ra == rb ) {
     return 1;
+  }
+  if ( ca_test_flag(ra, CA_FLAG_MULTI_PARENTS) ) {
+    CAMultiParent *mp = (CAMultiParent *) ra;
+    int32_t k;
+    for ( k = 0; k < mp->n_parents; k++ ) {
+      if ( mp->parents[k] && ca_shares_root(mp->parents[k], rb) ) {
+        return 1;
+      }
+    }
+    return 0;
+  }
+  if ( ca_test_flag(rb, CA_FLAG_MULTI_PARENTS) ) {
+    return ca_shares_root(rb, ra);
   }
   if ( ca_is_entity(ra) && ca_is_entity(rb) && ra->ptr && rb->ptr ) {
     char *a0 = ra->ptr, *a1 = ra->ptr + ca_length(ra);
