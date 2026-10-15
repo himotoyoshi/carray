@@ -78,8 +78,8 @@ ca_fake_setup (CAFake *ca, CArray *parent, int8_t data_type, ca_size_t bytes)
 
   /* check arguments */
 
-  CA_CHECK_DATA_TYPE(data_type);
-  CA_CHECK_BYTES(data_type, bytes);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
+  CA_CHECK_BYTES_GIVEN(data_type, bytes);
 
   /* ca == NULL asks for the checks above only, so that a constructor can
      run them before it allocates. */

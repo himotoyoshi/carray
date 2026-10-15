@@ -590,11 +590,11 @@ ca_decimal_string_store (VALUE str, int8_t data_type, void *out)
   case CA_DECIMAL_OK:
     return;
   case CA_DECIMAL_OUT_OF_RANGE:
-    rb_raise(rb_eRangeError, "%+"PRIsVALUE" is out of range for %s",
-             str, ca_type_name[data_type]);
+    rb_raise(rb_eRangeError, "%s: %+"PRIsVALUE" is out of range for %s",
+             ca_calling_method_name(), str, ca_type_name[data_type]);
   default:
-    rb_raise(rb_eArgError, "%+"PRIsVALUE" cannot be read as %s",
-             str, ca_type_name[data_type]);
+    rb_raise(rb_eArgError, "%s: %+"PRIsVALUE" cannot be read as %s",
+             ca_calling_method_name(), str, ca_type_name[data_type]);
   }
 }
 
@@ -1056,7 +1056,7 @@ ca_ptr2val (void *ap1, void *ptr1, int8_t data_type, void *ptr2)
 {
   CArray *ca1 = (CArray *)ap1;
   static CArray dummy;
-  CA_CHECK_DATA_TYPE(data_type);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
   dummy.data_type = data_type;
   ca_cast_func_table[ca1->data_type][data_type](1, ca1, ptr1, &dummy, ptr2, NULL);
   return;
@@ -1067,7 +1067,7 @@ ca_val2ptr (int8_t data_type, void *ptr1, void *ap2, void *ptr2)
 {
   CArray *ca2 = (CArray *)ap2;
   static CArray dummy;
-  CA_CHECK_DATA_TYPE(data_type);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
   dummy.data_type = data_type;
   ca_cast_func_table[data_type][ca2->data_type](1, &dummy, ptr1, ca2, ptr2, NULL);
   return;
@@ -1077,8 +1077,8 @@ void
 ca_val2val (int8_t data_type1, void *ptr1, int8_t data_type2, void *ptr2)
 {
   static CArray dummy1, dummy2;
-  CA_CHECK_DATA_TYPE(data_type1);
-  CA_CHECK_DATA_TYPE(data_type2);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type1);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type2);
   dummy1.data_type = data_type1;
   dummy2.data_type = data_type2;
   ca_cast_func_table[data_type1][data_type2](1, &dummy1, ptr1, &dummy2, ptr2, NULL);
@@ -2474,7 +2474,7 @@ ca_arg_to_data_type (VALUE obj)
   else {
     data_type = ca_value_to_data_type(obj);
   }
-  CA_CHECK_DATA_TYPE(data_type);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
   if ( ! ca_valid[data_type] ) {
     rb_raise(rb_eArgError,
              "data type '%s' is not valid in this build",

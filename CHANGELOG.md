@@ -36,6 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: the common refusals open with the method you called, as the
+  others do: a shape mismatch between operands or in a store, a negative
+  size, a data type that is not one, a fixlen without `bytes:`, an index
+  that is not one, a value that cannot be read as the cell's type, and a
+  `load_binary` of the wrong size. "shape mismatch between operands ..."
+  now reads "+: shape mismatch between operands ...". The exception
+  classes are unchanged.
+
 - Change: an error names the method you called rather than one it calls
   inside. `value_counts` no longer says `sort_index`, `CA_INT32` and
   `to_ca` no longer say `guess_array_shape`, and `CArray.int32` and

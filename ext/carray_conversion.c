@@ -480,8 +480,8 @@ rb_ca_load_binary (VALUE self, VALUE io)
   case T_STRING:
     if ( ca_length(ca) != RSTRING_LEN(io) ) {
       rb_raise(rb_eArgError,
-               "data size mismatch (got %" PRId64 " bytes, expected %" PRId64 ")",
-               (ca_size_t) RSTRING_LEN(io), (ca_size_t) ca_length(ca));
+               "%s: data size mismatch (got %" PRId64 " bytes, expected %" PRId64 ")",
+               ca_calling_method_name(), (ca_size_t) RSTRING_LEN(io), (ca_size_t) ca_length(ca));
     }
     ca_sync_data(ca, RSTRING_PTR(io));
     return self;

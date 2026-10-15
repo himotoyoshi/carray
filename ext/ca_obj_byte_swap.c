@@ -193,7 +193,7 @@ VALUE rb_cCAByteSwap;
 int
 ca_byte_swap_setup (CAByteSwap *ca, CArray *parent, VALUE data_class)
 {
-  CA_CHECK_DATA_TYPE(parent->data_type);
+  CA_CHECK_DATA_TYPE_GIVEN(parent->data_type);
 
   if ( parent->data_type == CA_OBJECT ) {
     rb_raise(rb_eCADataTypeError, "object array can't be byte-swapped");

@@ -392,6 +392,49 @@ int         ca_bincmp_answer_when_negative (int op_id, int signed_side);
 long        ca_axis_integer (VALUE raxis, const char *name);
 /* Refuse a rank above CA_RANK_MAX before any dim is written (carray_utils.c). */
 void        ca_check_rank_fits (long ndim, const char *name);
+/* The checks of carray.h inside the library, each naming the method the
+   user called; the public ones stay as they are for extensions. */
+#define CA_CHECK_DATA_TYPE_GIVEN(data_type) \
+  do { \
+    int ca_dt_ = (data_type); \
+    if ( ca_dt_ <= CA_NONE || ca_dt_ >= CA_NTYPE ) { \
+      rb_raise(rb_eArgError, "%s: invalid data_type id %i", \
+               ca_calling_method_name(), ca_dt_); \
+    } \
+    if ( ! ca_valid[ca_dt_] ) { \
+      rb_raise(rb_eCADataTypeError, "%s: data_type %s is disabled", \
+               ca_calling_method_name(), ca_type_name[ca_dt_]); \
+    } \
+  } while (0)
+
+#define CA_CHECK_DIM_GIVEN(ndim, dim) \
+  do { \
+    int8_t i_; \
+    for (i_ = 0; i_ < (ndim); i_++) { \
+      if ( (dim)[i_] < 0 ) { \
+        rb_raise(rb_eArgError, "%s: negative size dimension at %i-dim", \
+                 ca_calling_method_name(), i_); \
+      } \
+    } \
+  } while (0)
+
+#define CA_CHECK_BYTES_GIVEN(data_type, bytes) \
+  do { \
+    if ( (data_type) == CA_FIXLEN ) { \
+      if ( (bytes) <= 0 ) { \
+        rb_raise(rb_eArgError, \
+                 "%s: invalid bytes (a fixlen needs bytes: of 1 or more)", \
+                 ca_calling_method_name()); \
+      } \
+    } \
+    else { \
+      (bytes) = ca_sizeof[(data_type)]; \
+      if ( (bytes) <= 0 ) { \
+        rb_raise(rb_eArgError, "%s: invalid bytes", ca_calling_method_name()); \
+      } \
+    } \
+  } while (0)
+
 /* CA_CHECK_RANK inside the library: no axes at all is no shape, and above
    CA_RANK_MAX goes to the part, which names the method.  The public macro
    stays as it is for extensions. */

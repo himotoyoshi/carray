@@ -141,8 +141,8 @@ ca_classifier_invalid_key (VALUE v, int axis)
 {
   volatile VALUE s = rb_inspect(v);
   rb_raise(rb_eIndexError,
-           "object '%s' is invalid for the index for reference at %i-dim",
-           StringValueCStr(s), axis);
+           "%s: object '%s' is invalid for the index for reference at %i-dim",
+           ca_calling_method_name(), StringValueCStr(s), axis);
 }
 
 /* An Integer past int64 is past the end of any axis, but has no ca_size_t
@@ -1088,7 +1088,7 @@ rb_ca_s_scan_index_v2 (VALUE self, VALUE rdim, VALUE ridx)
   }
 
   CA_CHECK_RANK_GIVEN(ndim);
-  CA_CHECK_DIM(ndim, dim);
+  CA_CHECK_DIM_GIVEN(ndim, dim);
 
   info.range_check = 1;
   rb_ca_scan_index_v2(ndim, dim, elements,

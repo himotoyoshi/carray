@@ -42,9 +42,9 @@ ca_sweep_refuse_shapes (CArray *a, CArray *b)
   volatile VALUE sa = ca_sweep_shape_str(a);
   volatile VALUE sb = ca_sweep_shape_str(b);
   rb_raise(rb_eArgError,
-           "shape mismatch between operands (%s and %s); a scalar pairs "
+           "%s: shape mismatch between operands (%s and %s); a scalar pairs "
            "with any array, two arrays only when their shapes agree",
-           StringValueCStr(sa), StringValueCStr(sb));
+           ca_calling_method_name(), StringValueCStr(sa), StringValueCStr(sb));
 }
 
 int

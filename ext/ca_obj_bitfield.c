@@ -205,7 +205,7 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
     data_type = CA_UINT64;
   }
 
-  CA_CHECK_BYTES(data_type, bytes);
+  CA_CHECK_BYTES_GIVEN(data_type, bytes);
 
   if ( bitlen > bytes * 8 ||
        ( ( data_type == CA_BOOLEAN ) && ( bitlen > 1 ) ) ) {

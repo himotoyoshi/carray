@@ -58,7 +58,8 @@ ca_set_iterator (int n, ...)
         max = ca->elements;
       }
       else if ( max != ca->elements ) {
-        rb_raise(rb_eArgError, "data size mismatch in operation");
+        rb_raise(rb_eArgError, "%s: data size mismatch in operation",
+                 ca_calling_method_name());
       }
     }
   }
@@ -1123,7 +1124,8 @@ rb_ca_guess_type (VALUE obj)
     /* Check before narrowing to int8_t, so the message names the id given. */
     long id = FIX2LONG(obj);
     if ( id <= CA_NONE || id >= CA_NTYPE ) {
-      rb_raise(rb_eArgError, "invalid data_type id %ld", id);
+      rb_raise(rb_eArgError, "%s: invalid data_type id %ld",
+               ca_calling_method_name(), id);
     }
     return (int8_t) id;
   }
@@ -1150,7 +1152,8 @@ rb_ca_guess_type (VALUE obj)
 
   inspect = rb_inspect(obj);
   rb_raise(rb_eArgError,
-           "<%s> is unknown data_type representation", StringValuePtr(inspect));
+           "%s: <%s> is unknown data_type representation",
+           ca_calling_method_name(), StringValuePtr(inspect));
 }
 
 void
@@ -1173,7 +1176,7 @@ rb_ca_guess_type_and_bytes (VALUE rtype, VALUE rbytes,
     }
   }
   else {
-    CA_CHECK_DATA_TYPE(*data_type);
+    CA_CHECK_DATA_TYPE_GIVEN(*data_type);
     *bytes = ca_sizeof[*data_type];
   }
 }

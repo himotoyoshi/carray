@@ -74,10 +74,10 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   ca_size_t s;
   int8_t i;
 
-  CA_CHECK_DATA_TYPE(data_type);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
   CA_CHECK_RANK_GIVEN(ndim);
-  CA_CHECK_DIM(ndim, dim);
-  CA_CHECK_BYTES(data_type, bytes);
+  CA_CHECK_DIM_GIVEN(ndim, dim);
+  CA_CHECK_BYTES_GIVEN(data_type, bytes);
 
   /* An object cell is a VALUE the GC marks: reading other bytes as one
      marks garbage, and reading one as bytes exposes an address. */

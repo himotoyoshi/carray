@@ -1894,7 +1894,7 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   for (i=0; i<ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
   }
-  CA_CHECK_DIM(ndim, dim);
+  CA_CHECK_DIM_GIVEN(ndim, dim);
   elements = ca_shape_elements(ndim, dim, 1);
 
   info.range_check = 1;

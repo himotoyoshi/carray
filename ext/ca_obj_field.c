@@ -32,8 +32,8 @@ ca_field_setup (CAStride *ca, CArray *parent,
   ca_size_t strides[CA_RANK_MAX];
   int8_t i;
 
-  CA_CHECK_DATA_TYPE(data_type);
-  CA_CHECK_BYTES(data_type, bytes);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
+  CA_CHECK_BYTES_GIVEN(data_type, bytes);
 
   if ( offset < 0 ) {
     rb_raise(rb_eArgError, "negative offset");

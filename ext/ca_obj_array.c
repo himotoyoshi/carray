@@ -148,10 +148,10 @@ carray_setup_i (CArray *ca,
   ca_size_t k;
 
   /* check arguments */
-  CA_CHECK_DATA_TYPE(data_type);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
   CA_CHECK_RANK_GIVEN(ndim);
-  CA_CHECK_DIM(ndim, dim);
-  CA_CHECK_BYTES(data_type, bytes);
+  CA_CHECK_DIM_GIVEN(ndim, dim);
+  CA_CHECK_BYTES_GIVEN(data_type, bytes);
 
   elements = ca_shape_elements(ndim, dim, bytes);
 
@@ -398,8 +398,8 @@ static int
 cscalar_setup (CScalar *ca,
                int8_t data_type, ca_size_t bytes, CArray *mask)
 {
-  CA_CHECK_DATA_TYPE(data_type);
-  CA_CHECK_BYTES(data_type, bytes);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
+  CA_CHECK_BYTES_GIVEN(data_type, bytes);
 
   /* ca == NULL asks for the checks above only, so that a constructor can
      run them before it allocates. */

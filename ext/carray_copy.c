@@ -256,7 +256,7 @@ CArray *
 ca_template_safe2 (void *ap, int8_t data_type, ca_size_t bytes)
 {
   CArray *ca = (CArray *) ap;
-  CA_CHECK_DATA_TYPE(data_type);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
   if ( ca_is_scalar(ca) ) {
     return (CArray*) cscalar_new(data_type, bytes, NULL);
   }
