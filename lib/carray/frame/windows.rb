@@ -33,6 +33,7 @@ end
 # The windows of a CAFrame (CAFrame#windows): the reductions over each row's
 # window, one answer per row, and what each window covered.
 class WindowedFrame
+  include CAFrame::ColumnVerbs
 
   def initialize (frame, plan, key_names)
     @frame     = frame
@@ -64,49 +65,31 @@ class WindowedFrame
   # type has the reduction (the on: and by: columns left out), on the
   # frame's rows and index; given names, the CArray (one) or the Array of
   # them (several), as +df[...]+ returns columns.
-  [:sum, :mean, :min, :max, :prod, :accumulate, :median,
-   :variance, :stddev, :variancep, :stddevp].each do |red|
-    define_method(red, &Ractor.make_shareable(proc do |*names, min_count: nil, fill_value: nil|
-      window_reduce(red, names, min_count: min_count, fill_value: fill_value)
-    end))
-  end
+  CArray.send(:define_named_methods, self,
+              [:sum, :mean, :min, :max, :prod, :accumulate, :median,
+               :variance, :stddev, :variancep, :stddevp], :window_reduction)
 
-  [:first, :last, :nunique, :count, :all, :any].each do |red|
-    define_method(red, &Ractor.make_shareable(proc { |*names| window_reduce(red, names) }))
-  end
+  CArray.send(:define_named_methods, self,
+              [:first, :last, :nunique, :count, :all, :any], :window_value)
 
   private
 
-  def window_reduce (reduction, names, **keywords)
-    keywords = keywords.compact
-    if names.empty?
-      cols = {}
-      @frame.column_names.each do |name|
-        next if @key_names.include?(name)
-        col = @frame[name]
-        next unless col.ndim == 1 && answers?(col, reduction)
-        cols[name] = @plan.for_value(col).public_send(reduction, **keywords)
-      end
-      return CAFrame.new(cols, axis_name: @frame.axis_name, index: @frame.index)
-    end
-    results = names.map do |name|
-      col = @frame[@frame.__send__(:column_key, name, reduction)]
-      unless col.ndim == 1 && answers?(col, reduction)
-        raise ArgumentError,
-              "#{reduction}: column #{name.inspect} " \
-              "(#{col.face? ? col.class : col.data_type}) has no windowed #{reduction}"
-      end
-      @plan.for_value(col).public_send(reduction, **keywords)
-    end
-    results.size == 1 ? results.first : results
+  def window_reduction (reduction, *names, min_count: nil, fill_value: nil)
+    window_reduce(reduction, names, min_count: min_count, fill_value: fill_value)
   end
 
-  # Whether the column's type defines the reduction, asked of the core on
-  # one cell of it, as a group asks.
-  def answers? (col, reduction)
-    (col.elements > 0 ? col[0..0] : col).public_send(reduction)
-    true
-  rescue CArray::DataTypeError, TypeError, ArgumentError
-    false
+  def window_value (reduction, *names)
+    window_reduce(reduction, names)
+  end
+
+  # An N-D column (each row a profile) is reduced along the rows, each
+  # window keeping the trailing shape, as a group reduces it.
+  def window_reduce (reduction, names, **keywords)
+    keywords = keywords.compact
+    out = over_named_columns(reduction, names, @key_names) do |col|
+      @plan.for_value(col).public_send(reduction, **keywords)
+    end
+    return out unless names.empty?
+    CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index)
   end
 end

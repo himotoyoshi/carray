@@ -223,7 +223,7 @@ class TestCAFrameWindows < Test::Unit::TestCase
 
   def test_a_column_without_the_reduction_is_refused_by_name
     w = @df.windows(on: "time", before: "30 minutes")
-    assert_raise(ArgumentError) { w.mean("name") }
+    assert_raise(CArray::DataTypeError) { w.mean("name") }
     assert_raise(TypeError) { @df.windows(on: :time, before: "1 hour") }
   end
 end

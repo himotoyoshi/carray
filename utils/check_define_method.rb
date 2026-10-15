@@ -18,8 +18,8 @@ ROOT = File.expand_path("..", __dir__)
 COUNTS = {
   "carray/autoload_method_extension.rb" => 1,   # the stub; a block of the library, passed by the walk
   "carray/const_string.rb"   => 1,
-  "carray/frame/group.rb"    => 3,
-  "carray/frame/windows.rb"  => 3,
+
+  "carray/frame/windows.rb"  => 1,
   "carray/record_order.rb"   => 2,
   "carray/struct.rb"         => 1,
   "carray/struct_builder.rb" => 2,

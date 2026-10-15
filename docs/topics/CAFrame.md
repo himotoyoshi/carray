@@ -957,7 +957,7 @@ Each answers as the core reduction of the same name does over the group's rows; 
 df.group_by("station").mean       # => frame of per-station means
 ```
 
-Given column names, they reduce only those and return them as `df[...]` returns columns: one name gives the `CArray`, several an `Array` of them. A named column whose type lacks the reduction raises.
+Given column names, they reduce only those and return them as `df[...]` returns columns: one name gives the `CArray`, several an `Array` of them. A named column whose type lacks the reduction raises `CArray::DataTypeError`, as the transforms below and the windowed reductions do.
 
 ```ruby
 df.group_by("station").mean("temp")          # => CArray, one value per group
@@ -1713,6 +1713,7 @@ s.unstack(axis: 1)  # => [day1's frame, day2's frame, day3's frame]
 | `sort_by_key` / `sort_by` | a key must be one value per row; an N-D key raises |
 | keys of `group_by`, `join`, `join_asof`, `align` | must be one value per row; an N-D column is refused — take a component |
 | `group_by` / `resample` reductions, `aggregate` with a Symbol | reduced along the rows, so each group keeps the shape: a `(N, 20)` profile gives `(groups, 20)`, each station's mean profile |
+| `windows` reductions | reduced along the rows over each row's window, keeping the shape: a `(N, 20)` profile gives `(N, 20)` |
 | `aggregate` with a Proc | the Proc receives each group's slice, shaped `(rows in the group, ...)` |
 | `fill` | filled down the rows: each position is a series of its own, filled only from the rows above and below it, never from a neighbouring component |
 | `join` / `join_asof` / `align` (columns brought in) | gathered correctly; a row with no match comes back fully masked |

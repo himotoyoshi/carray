@@ -83,6 +83,6 @@ class TestCAFrameGroupReductions < Test::Unit::TestCase
     assert_equal [1.3333333333, UNDEF], grp.variance("temp", min_count: 3).to_a.map { |v| v.is_a?(Float) ? v.round(10) : v }
     assert_equal [10.0, -1.0], grp.median("temp", min_count: 2, fill_value: -1.0).to_a
     assert_raise(ArgumentError) { grp.first("temp", min_count: 1) }
-    assert_raise(ArgumentError) { grp.all("temp") }       # a float column has no all
+    assert_raise(CArray::DataTypeError) { grp.all("temp") }   # a float column has no all
   end
 end

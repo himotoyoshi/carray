@@ -185,6 +185,7 @@ end
 #   aggregate    -> declarative per-column reductions into a new frame
 #   table { |g| }-> cross-column Ruby escape, g is a per-group view-frame
 class GroupedFrame
+  include CAFrame::ColumnVerbs
   # +key_names+ are the frame columns the grouping was keyed on. They become
   # the result's index, so the reduction shortcuts must not also return them as
   # reduced columns; an external CArray key contributes no name.
@@ -338,13 +339,12 @@ class GroupedFrame
   # @!method stddevp(*names, min_count: nil, fill_value: nil, keep_rows: false)
   #   Returns the per-group population standard deviation, as {#sum} does.
   #   @return [CAFrame] one row per group.
-  [:sum, :mean, :min, :max, :prod, :accumulate, :median,
-   :variance, :stddev, :variancep, :stddevp].each do |red|
-    define_method(red, &Ractor.make_shareable(proc do |*names, min_count: nil, fill_value: nil, keep_rows: false|
-      keywords = { min_count: min_count, fill_value: fill_value }
-      return reduce_columns(red, keep_rows, **keywords) if names.empty?
-      reduce_named_columns(red, names, keep_rows, **keywords)
-    end))
+  CArray.send(:define_named_methods, self,
+              [:sum, :mean, :min, :max, :prod, :accumulate, :median,
+               :variance, :stddev, :variancep, :stddevp], :group_reduction)
+
+  private def group_reduction (red, *names, min_count: nil, fill_value: nil, keep_rows: false)
+    reduce_columns(red, names, keep_rows, min_count: min_count, fill_value: fill_value)
   end
 
   # The same convenience for the reductions that take no min_count: or
@@ -373,11 +373,11 @@ class GroupedFrame
   #   Returns whether any present value of the group is true, for the
   #   boolean columns.
   #   @return [CAFrame] one row per group.
-  [:first, :last, :nunique, :count, :all, :any].each do |red|
-    define_method(red, &Ractor.make_shareable(proc do |*names, keep_rows: false|
-      return reduce_columns(red, keep_rows) if names.empty?
-      reduce_named_columns(red, names, keep_rows)
-    end))
+  CArray.send(:define_named_methods, self,
+              [:first, :last, :nunique, :count, :all, :any], :group_value)
+
+  private def group_value (red, *names, keep_rows: false)
+    reduce_columns(red, names, keep_rows)
   end
 
   # Values computed within each group and kept on the frame's rows, in row
@@ -426,8 +426,11 @@ class GroupedFrame
     transform_columns(:order, names, [], { descending: descending, method: method, kind: kind })
   end
 
-  [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
-    define_method(op, &Ractor.make_shareable(proc { |*names| transform_columns(op, names, [], {}) }))
+  CArray.send(:define_named_methods, self,
+              [:cumsum, :cumprod, :cummax, :cummin, :cumcount], :group_scan)
+
+  private def group_scan (op, *names)
+    transform_columns(op, names, [], {})
   end
 
   # Fill the masked cells of a column from the rows of the same group, in
@@ -534,21 +537,11 @@ class GroupedFrame
   # would otherwise leave every column out without a word.
   private def transform_columns(op, names, args, keywords)
     CArray.float64(1).public_send(op, *args, **keywords)
-    unless names.empty?
-      results = names.map do |name|
-        col = @frame[@frame.__send__(:column_key, name, op)]
-        group_transform(col, op, args, keywords)
-      end
-      return results.size == 1 ? results.first : results
+    out = over_named_columns(op, names, @key_names, args, keywords) do |col|
+      group_transform(col, op, args, keywords)
     end
-    cols = {}
-    @frame.column_names.each do |name|
-      next if @key_names.include?(name)
-      col = @frame[name]
-      next unless transforms?(col, op, args, keywords)
-      cols[name] = group_transform(col, op, args, keywords)
-    end
-    CAFrame.new(cols, axis_name: @frame.axis_name, index: @frame.index)
+    return out unless names.empty?
+    CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index)
   end
 
   # A column's within-group transform: an N-D column runs along the rows.
@@ -558,49 +551,23 @@ class GroupedFrame
     it.public_send(op, *args, **keywords)
   end
 
-  # Whether the column's type has the transform, asked of the core on its
-  # first row, as answers? asks for a reduction.
-  private def transforms?(col, op, args, keywords)
-    probe = col.elements > 0 ? col[0..0, *[nil] * (col.ndim - 1)] : col
-    keywords = keywords.merge(axis: 0) if col.ndim > 1
-    probe.public_send(op, *args, **keywords)
-    true
-  rescue CArray::DataTypeError, TypeError, ArgumentError
-    false
-  end
-
   # Each result gets its own index.
   private def label_index
     return @index.copy if @index
     CArray.object(@labels.size) { |i| @labels[i] }
   end
 
-  private def reduce_columns(reduction, keep_rows, **keywords)
-    cols = {}
-    @frame.column_names.each do |name|
-      # A key column is the index here, not a result column.
-      next if @key_names.include?(name)
-      col = @frame[name]
-      next unless answers?(col, reduction)
-      cols[name] = group_reduce(col, reduction, **keywords)
-    end
-    result_frame(cols, keep_rows)
-  end
-
-  # The named columns only, returned as df[...] returns columns. A column
-  # whose type lacks the reduction raises, since it was asked for.
-  private def reduce_named_columns(reduction, names, keep_rows, **keywords)
-    results = names.map do |name|
-      col = @frame[@frame.__send__(:column_key, name, reduction)]
-      unless answers?(col, reduction)
-        raise ArgumentError,
-              "#{reduction}: column #{name.inspect} " \
-              "(#{col.face? ? col.class : col.data_type}) has no #{reduction}"
-      end
+  # A key column is the index here, not a result column.  Named columns
+  # come back as df[...] returns them, each on the frame's rows with
+  # +keep_rows+.
+  private def reduce_columns(reduction, names, keep_rows, **keywords)
+    keywords = keywords.compact
+    out = over_named_columns(reduction, names, @key_names) do |col|
       col = group_reduce(col, reduction, **keywords)
-      keep_rows ? spread_to_rows(col) : col
+      keep_rows && !names.empty? ? spread_to_rows(col) : col
     end
-    results.size == 1 ? results.first : results
+    return out unless names.empty?
+    result_frame(out, keep_rows)
   end
 
   # One row per group, indexed by the labels; or, with +keep_rows+, the
@@ -638,18 +605,6 @@ class GroupedFrame
     else
       it.public_send(reduction, *args, **keywords)
     end
-  end
-
-  # Whether the column's type defines the reduction, asked of the core on one
-  # cell of it so that the answer is about the type and not the data: a
-  # refusal there is the core saying the reduction does not apply, while an
-  # error in the grouped reduction itself is left to raise. A column with no
-  # rows is asked as it is: the refusal does not depend on the cells.
-  private def answers?(col, reduction)
-    (col.elements > 0 ? col[0..0] : col).public_send(reduction)
-    true
-  rescue CArray::DataTypeError, TypeError, ArgumentError
-    false
   end
 
   private def per_group_column(in_name, proc)

@@ -36,6 +36,19 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: windows on a key take a value of several columns (each row a
+  profile, shape `(N, ...)`): every reduction is taken column by column
+  over the same windows and keeps the trailing shape, and `each` yields
+  the rows of a window. In a CAFrame, `windows` reductions now include an
+  N-D column, reduced along the rows as `group_by` reduces it, where they
+  left it out of the frame and refused it by name. A block `reduce` still
+  takes a one-column value.
+
+- Change: a CAFrame group or window verb given a column whose type lacks
+  it raises `CArray::DataTypeError` for every verb ("sum: column "name"
+  (object) has no sum"); the group and window reductions raised
+  `ArgumentError`, the group transforms `DataTypeError`.
+
 - Change: a store that cannot convert a cell names the method, as the
   other refusals do: "[]=: NaN cannot be converted to int32" and "[]=:
   out of range to cast to boolean (0 or 1)". The exception classes are
