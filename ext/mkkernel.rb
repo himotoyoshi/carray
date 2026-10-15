@@ -6547,7 +6547,8 @@ module MkKernel
   # the source's data type.  Left out: a boolean target, which checks its
   # input and raises, and a float or complex source to an integer target,
   # where an out-of-range value or NaN has no defined C result for a
-  # second compilation to agree on.
+  # second compilation to agree on.  An int64 or uint64 source to float32
+  # or cmplx64 goes through double, as ca_cast_block does.
   CAST_SOURCES = %i[bool i8 u8 i16 u16 i32 u32 i64 u64 f32 f64
                     cmplx64 cmplx128].freeze
   CAST_TARGETS = %i[i8 u8 i16 u16 i32 u32 i64 u64 f32 f64
@@ -6558,8 +6559,9 @@ module MkKernel
     CAST_SOURCES.product(CAST_TARGETS).filter_map { |src, dst|
       next if CAST_INEXACT.include?(src) && !CAST_INEXACT.include?(dst)
       name = DTYPES[dst][:ca].sub(/\ACA_/, "").downcase
+      via  = ( %i[i64 u64].include?(src) && %i[f32 cmplx64].include?(dst) ) ? "(double)" : ""
       ["monop", "cast_#{name}", DTYPES[src][:ca].sub(/\ACA_/, "").downcase,
-       "(#2) = (#{DTYPES[dst][:c]})(#1);"]
+       "(#2) = (#{DTYPES[dst][:c]})#{via}(#1);"]
     }
   end
 
