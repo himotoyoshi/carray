@@ -571,7 +571,7 @@ class CASegmentIterator < CAIterator
   #   Per-segment 1-based within-segment ordinal (int64), source-shaped.
   #   @return [CArray]
   [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
-    define_method(op) { |axis: nil| axis ? axis_scan(op, axis) : scan(op) }
+    define_method(op, &Ractor.make_shareable(proc { |axis: nil| axis ? axis_scan(op, axis) : scan(op) }))
   end
 
   # @overload lag(n = 1)
@@ -1138,7 +1138,7 @@ class CASegmentIterator < CAIterator
     end
 
     REDUCTIONS.each do |op|
-      define_method(op) do |*args, min_count: nil, fill_value: nil, **kw|
+      define_method(op, &Ractor.make_shareable(proc do |*args, min_count: nil, fill_value: nil, **kw|
         # The segment reduction already leaves an empty segment as the core
         # does, so only a min_count asking for more is applied here.
         need = CArray.__present_cells_needed_per_result_cell__(op, min_count, 0)
@@ -1163,7 +1163,7 @@ class CASegmentIterator < CAIterator
           (result.is_a?(Array) ? result : [result]).each { |r| r[short] = UNDEF }
         end
         CArray.__fill_undefined_result_cells__(result, fill_value)
-      end
+      end))
     end
   end
   prepend ReductionCountAndFill

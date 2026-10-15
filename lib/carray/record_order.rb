@@ -49,7 +49,7 @@ class CARecord
   #   @return [CArray] the indices that partition about the `kth` record.
   [:sort_addr, :sort_index, :rank_index, :order,
    :min_index, :max_index, :partition_index].each do |op|
-    define_method(op) { |*args, **kw| record_rank.public_send(op, *args, **kw) }
+    define_method(op, &Ractor.make_shareable(proc { |*args, **kw| record_rank.public_send(op, *args, **kw) }))
   end
 
   # @overload min(axis: nil, keep_axis: false)
@@ -93,10 +93,10 @@ class CARecord
   # @!method gt(other)
   # @!method ge(other)
   [:lt, :le, :gt, :ge].each do |op|
-    define_method(op) do |other|
+    define_method(op, &Ractor.make_shareable(proc do |other|
       mine, theirs = record_rank_with(other)
       mine.public_send(op, theirs)
-    end
+    end))
   end
 
   alias <  lt

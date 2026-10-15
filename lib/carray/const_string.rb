@@ -349,7 +349,7 @@ class CAConstString
   # @!method ge(other)
   #   @return [CArray] boolean, true where self sorts after or equals `other`.
   [:ne, :lt, :le, :gt, :ge].each do |op|
-    define_method(op) { |other| to_string.public_send(op, string_operand(other)) }
+    define_method(op, &Ractor.make_shareable(proc { |other| to_string.public_send(op, string_operand(other)) }))
   end
 
   alias <  lt

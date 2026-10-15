@@ -1094,13 +1094,13 @@ class CAWindowIterator < CAIterator
   #   winner is well-defined).
   #   @raise [NotImplementedError]
   [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
-    define_method(op) do |*, **|
+    define_method(op, &Ractor.make_shareable(proc do |*, **|
       raise NotImplementedError,
             "#{self.class} has no #{op}: a segment scan needs each cell to " \
             "belong to exactly one piece, but overlapping windows share cells, " \
             "so a per-cell running value is ill-defined; use reduce for a " \
             "custom per-window fold."
-    end
+    end))
   end
 
   # @!method lag(n = 1)

@@ -49,7 +49,7 @@ class WindowedFrame
 
   # What each window covered, one value per row: see CAKeyWindowIterator.
   [:first_addr, :last_addr, :first_key, :last_key, :elements, :is_complete].each do |m|
-    define_method(m) { @plan.public_send(m) }
+    define_method(m, &Ractor.make_shareable(proc { @plan.public_send(m) }))
   end
 
   # @overload bounds
@@ -66,13 +66,13 @@ class WindowedFrame
   # them (several), as +df[...]+ returns columns.
   [:sum, :mean, :min, :max, :prod, :accumulate, :median,
    :variance, :stddev, :variancep, :stddevp].each do |red|
-    define_method(red) do |*names, min_count: nil, fill_value: nil|
+    define_method(red, &Ractor.make_shareable(proc do |*names, min_count: nil, fill_value: nil|
       window_reduce(red, names, min_count: min_count, fill_value: fill_value)
-    end
+    end))
   end
 
   [:first, :last, :nunique, :count, :all, :any].each do |red|
-    define_method(red) { |*names| window_reduce(red, names) }
+    define_method(red, &Ractor.make_shareable(proc { |*names| window_reduce(red, names) }))
   end
 
   private

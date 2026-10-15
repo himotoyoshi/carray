@@ -211,9 +211,9 @@ class CAIterator
   ].freeze
 
   REQUIRED_SURFACE.each do |name|
-    define_method(name) do |*, **, &_blk|
+    define_method(name, &Ractor.make_shareable(proc do |*, **, &_blk|
       raise NotImplementedError, "#{self.class} must implement ##{name}"
-    end
+    end))
   end
 
   # Recommended (should) surface -- template methods.  These are well-defined
@@ -292,9 +292,9 @@ class CAIterator
   #     cell has no single rank.
   [:map, :sort_addr, :order, :strip_mask,
    :cumsum, :cumprod, :cummax, :cummin, :cumcount, :lag].each do |name|
-    define_method(name) do |*, **, &_blk|
+    define_method(name, &Ractor.make_shareable(proc do |*, **, &_blk|
       raise NotImplementedError, "#{self.class} does not provide ##{name} (optional)"
-    end
+    end))
   end
 
 end

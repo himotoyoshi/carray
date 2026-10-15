@@ -340,11 +340,11 @@ class GroupedFrame
   #   @return [CAFrame] one row per group.
   [:sum, :mean, :min, :max, :prod, :accumulate, :median,
    :variance, :stddev, :variancep, :stddevp].each do |red|
-    define_method(red) do |*names, min_count: nil, fill_value: nil, keep_rows: false|
+    define_method(red, &Ractor.make_shareable(proc do |*names, min_count: nil, fill_value: nil, keep_rows: false|
       keywords = { min_count: min_count, fill_value: fill_value }
       return reduce_columns(red, keep_rows, **keywords) if names.empty?
       reduce_named_columns(red, names, keep_rows, **keywords)
-    end
+    end))
   end
 
   # The same convenience for the reductions that take no min_count: or
@@ -374,10 +374,10 @@ class GroupedFrame
   #   boolean columns.
   #   @return [CAFrame] one row per group.
   [:first, :last, :nunique, :count, :all, :any].each do |red|
-    define_method(red) do |*names, keep_rows: false|
+    define_method(red, &Ractor.make_shareable(proc do |*names, keep_rows: false|
       return reduce_columns(red, keep_rows) if names.empty?
       reduce_named_columns(red, names, keep_rows)
-    end
+    end))
   end
 
   # Values computed within each group and kept on the frame's rows, in row
@@ -427,7 +427,7 @@ class GroupedFrame
   end
 
   [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
-    define_method(op) { |*names| transform_columns(op, names, [], {}) }
+    define_method(op, &Ractor.make_shareable(proc { |*names| transform_columns(op, names, [], {}) }))
   end
 
   # Fill the masked cells of a column from the rows of the same group, in

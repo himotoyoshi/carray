@@ -29,50 +29,50 @@
 
 class CArray
 
-  # The C constant-fill primitives, taken before the Ruby wrappers below
-  # replace them, so the wrappers delegate the non-method path unchanged.
-  UNMASK_WITH_VALUE      = instance_method(:unmask)
-  STRIP_MASK_WITH_VALUE  = instance_method(:strip_mask)
-  private_constant :UNMASK_WITH_VALUE, :STRIP_MASK_WITH_VALUE
-
   # Sentinel for "no positional fill value given" (distinct from any real
   # fill value, including nil / false / a Symbol).
   MASK_FILL_UNSET = ::Object.new
+  Ractor.make_shareable(MASK_FILL_UNSET)
   private_constant :MASK_FILL_UNSET
 
-  def unmask (fill = MASK_FILL_UNSET, method: nil, axis: nil)
-    if method
-      unless fill.equal?(MASK_FILL_UNSET)
-        raise ArgumentError,
-              "unmask: pass either a constant fill value or method:, not both"
+  # unmask / strip_mask with method:, in front of the C constant-fill
+  # primitives, which they reach with super.
+  module GapFill
+    def unmask (fill = MASK_FILL_UNSET, method: nil, axis: nil)
+      if method
+        unless fill.equal?(MASK_FILL_UNSET)
+          raise ArgumentError,
+                "unmask: pass either a constant fill value or method:, not both"
+        end
+        held = gap_fill(method, axis, "unmask")
+        # Copy the filled values in place (a Face takes a Face of its own kind
+        # as it is).
+        value[] = held.value
+        if held.has_mask?
+          self.mask = held.mask              # residual leading/trailing mask
+        else
+          super()                   # fully filled: drop the mask
+        end
+        return self
       end
-      held = gap_fill(method, axis, "unmask")
-      # Copy the filled values in place (a Face takes a Face of its own kind
-      # as it is).
-      value[] = held.value
-      if held.has_mask?
-        self.mask = held.mask              # residual leading/trailing mask
-      else
-        UNMASK_WITH_VALUE.bind_call(self)                   # fully filled: drop the mask
-      end
-      return self
+      fill.equal?(MASK_FILL_UNSET) ? super() : super(fill)
     end
-    fill.equal?(MASK_FILL_UNSET) ? UNMASK_WITH_VALUE.bind_call(self) : UNMASK_WITH_VALUE.bind_call(self, fill)
-  end
 
-  def strip_mask (fill = MASK_FILL_UNSET, method: nil, axis: nil)
-    if method
-      unless fill.equal?(MASK_FILL_UNSET)
-        raise ArgumentError,
-              "strip_mask: pass either a constant fill value or method:, not both"
+    def strip_mask (fill = MASK_FILL_UNSET, method: nil, axis: nil)
+      if method
+        unless fill.equal?(MASK_FILL_UNSET)
+          raise ArgumentError,
+                "strip_mask: pass either a constant fill value or method:, not both"
+        end
+        return carry_attrs(gap_fill(method, axis, "strip_mask"))
       end
-      return carry_attrs(gap_fill(method, axis, "strip_mask"))
+      if fill.equal?(MASK_FILL_UNSET)
+        raise ArgumentError, "strip_mask: a fill value is required (or method:)"
+      end
+      carry_attrs(super(fill))
     end
-    if fill.equal?(MASK_FILL_UNSET)
-      raise ArgumentError, "strip_mask: a fill value is required (or method:)"
-    end
-    carry_attrs(STRIP_MASK_WITH_VALUE.bind_call(self, fill))
   end
+  prepend GapFill
 
   private
 

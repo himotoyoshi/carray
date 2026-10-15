@@ -288,6 +288,15 @@ class CAStruct::Builder  # :nodoc:
   end
 
   # @!visibility private
+  # Shared with every Ractor when it can be.  A member whose type is an
+  # array template holds a CArray, which cannot be shared, and its struct
+  # is then used in the main Ractor only.
+  def self.shareable (object)
+    Ractor.make_shareable(object)
+  rescue Ractor::Error
+    object.freeze
+  end
+
   ALIGN_TABLE = {
     CA_FIXLEN   => CA_ALIGN_FIXLEN,
     CA_BOOLEAN  => CA_ALIGN_INT8,
@@ -304,6 +313,7 @@ class CAStruct::Builder  # :nodoc:
     CA_CMPLX64  => CA_ALIGN_FLOAT32,
     CA_CMPLX128 => CA_ALIGN_FLOAT64,
   }
+  Ractor.make_shareable(ALIGN_TABLE)
 
   # Raises ArgumentError when `opt` names a key outside `allowed`.  The
   # options are read one key at a time, so a misspelt key would otherwise
@@ -463,9 +473,9 @@ class CAStruct::Builder  # :nodoc:
     end
     table.freeze
     names.freeze
-    klass.const_set(:MEMBER_TABLE, table)   ### required element as data class
-    klass.const_set(:MEMBERS, names)
-    klass.const_set(:ORDER_BY, order_keys(table)) if @order_by
+    klass.const_set(:MEMBER_TABLE, self.class.shareable(table))   ### required element as data class
+    klass.const_set(:MEMBERS, self.class.shareable(names))
+    klass.const_set(:ORDER_BY, self.class.shareable(order_keys(table))) if @order_by
     # ---
     # Step 3 dispatch table: precompute a per-member [reader, writer]
     # Proc pair so `record[name]` is one Hash lookup + one Proc call,
@@ -473,7 +483,7 @@ class CAStruct::Builder  # :nodoc:
     # checks and view-shape decisions happen here, once, at class
     # definition time.
     klass.const_set(:DISPATCH_TABLE,
-                    self.class.build_dispatch_table(table, @offset).freeze)
+                    self.class.shareable(self.class.build_dispatch_table(table, @offset)))
     # Also precompute FAST_PRIMITIVES, the subset of members that the
     # C-side `[]` / `[]=` can handle without
     # allocating a CAField view.  Entries are `[offset, type_code]`;
@@ -491,15 +501,16 @@ class CAStruct::Builder  # :nodoc:
     klass.module_eval {
       taken = ->(m) { method_defined?(m) || private_method_defined?(m) }
       names.each do |name|
+        Ractor.make_shareable(name)   # the accessors below capture it
         unless taken.(name)
-          define_method(name) {
+          define_method(name, &Ractor.make_shareable(proc {
             return self[name]
-          }
+          }))
         end
         unless taken.("#{name}=")
-          define_method("#{name}=") { |val|
+          define_method("#{name}=", &Ractor.make_shareable(proc { |val|
             return self[name] = val
-          }
+          }))
         end
       end
     }

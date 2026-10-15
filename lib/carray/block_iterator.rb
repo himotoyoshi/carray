@@ -304,7 +304,7 @@ class CABlockIterator < CAIterator
   #   @return [CArray] tile-grid shaped
   [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev,
    :variancep, :stddevp].each do |op|
-    define_method(op) do |min_count: nil, fill_value: nil|
+    define_method(op, &Ractor.make_shareable(proc do |min_count: nil, fill_value: nil|
       if FACE_WINNER_INDEX.key?(op) && @source.face?
         return face_winner(FACE_WINNER_INDEX[op], min_count, fill_value)
       end
@@ -312,11 +312,11 @@ class CABlockIterator < CAIterator
       kw[:min_count]  = min_count  unless min_count.nil?
       kw[:fill_value] = fill_value unless fill_value.nil?
       fold(op, **kw)
-    end
+    end))
   end
 
   [:all, :any].each do |op|
-    define_method(op) { |**kw| fold(op, **CAIterator.reduce_keywords(op, kw)) }
+    define_method(op, &Ractor.make_shareable(proc { |**kw| fold(op, **CAIterator.reduce_keywords(op, kw)) }))
   end
 
   # @!method first
@@ -333,7 +333,7 @@ class CABlockIterator < CAIterator
   #
   # These take no `min_count:` or `fill_value:`, as the core ones do not.
   [:first, :last, :nunique].each do |op|
-    define_method(op) { |**kw| fold(op, **CAIterator.reduce_keywords(op, kw)) }
+    define_method(op, &Ractor.make_shareable(proc { |**kw| fold(op, **CAIterator.reduce_keywords(op, kw)) }))
   end
 
   # A Face's minimum and maximum are cells of the Face, so they are gathered
@@ -341,6 +341,7 @@ class CABlockIterator < CAIterator
   # instead copies the Face's storage into an array that no longer knows it is
   # one: a CATime came back as 8-byte strings.
   FACE_WINNER_INDEX = { min: :min_index, max: :max_index }.freeze
+  Ractor.make_shareable(FACE_WINNER_INDEX)
   private_constant :FACE_WINNER_INDEX
 
   # ---- count family and elements ----------------------------------------
@@ -710,7 +711,7 @@ class CABlockIterator < CAIterator
   #   Per-tile running count of present cells (int64), source-shaped.
   #   @return [CArray]
   [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
-    define_method(op) { block_scan(op) }
+    define_method(op, &Ractor.make_shareable(proc { block_scan(op) }))
   end
 
   # @overload lag(n = 1)

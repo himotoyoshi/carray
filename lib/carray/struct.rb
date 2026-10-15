@@ -501,17 +501,16 @@ class CAStruct
   # @!method <=(other)
   # @!method >(other)
   # @!method >=(other)
-  { :< => ->(c) { c < 0 }, :<= => ->(c) { c <= 0 },
-    :> => ->(c) { c > 0 }, :>= => ->(c) { c >= 0 } }.each do |op, test|
-    define_method(op) do |other|
+  [:<, :<=, :>, :>=].each do |op|
+    define_method(op, &Ractor.make_shareable(proc do |other|
       c = (self <=> other)
       if c.nil?
         raise ArgumentError,
               "comparison of #{self.class.inspect} with #{other.class.inspect} failed" +
               (self.class.order_by ? "" : " (the struct declares no order_by:)")
       end
-      test.call(c)
-    end
+      c.public_send(op, 0)
+    end))
   end
 
   # One member of {#<=>}: the order a sort puts the member's values in

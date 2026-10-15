@@ -351,47 +351,47 @@ class CAGroupIterator
   # -- arrived as "wrong number of arguments", which reads as a method that
   # does not take one rather than one whose engine has no such fold. Both are
   # composed here instead, out of folds the engine does have.
-  # The engine's own count, all and any, taken before the definitions
-  # below replace them.
-  COUNT_PRESENT = instance_method(:count)
-  ALL_FOLDED    = instance_method(:all)
-  ANY_FOLDED    = instance_method(:any)
-  private_constant :COUNT_PRESENT, :ALL_FOLDED, :ANY_FOLDED
+  # They are in a module in front of the engine's own count, all and any,
+  # which they reach with super; so are the reductions below that choose
+  # between the engine and the core.
+  module ComposedFolds
 
-  # @overload count
-  #   Per-group count of present (non-masked) cells.
-  # @overload count(UNDEF)
-  #   Per-group count of masked cells, as {#count_masked}.
-  # @overload count(v)
-  #   Per-group count of cells equal to `v`.
-  #   @return [CArray]
-  def count (*args, **kw)
-    return COUNT_PRESENT.bind_call(self, **kw) if args.empty?
-    if args.size > 1
-      raise ArgumentError, "wrong number of arguments (given #{args.size}, expected 0..1)"
+    # @overload count
+    #   Per-group count of present (non-masked) cells.
+    # @overload count(UNDEF)
+    #   Per-group count of masked cells, as {#count_masked}.
+    # @overload count(v)
+    #   Per-group count of cells equal to `v`.
+    #   @return [CArray]
+    def count (*args, **kw)
+      return super(**kw) if args.empty?
+      if args.size > 1
+        raise ArgumentError, "wrong number of arguments (given #{args.size}, expected 0..1)"
+      end
+      v = args.first
+      return count_masked(**kw) if v.equal?(UNDEF)
+      # eq leaves a masked cell UNDEF, so the sum leaves it out and its
+      # min_count: counts the present cells, as the core count(v) does
+      regroup(value.eq(v).int64, spec).sum(**kw).int64
     end
-    v = args.first
-    return count_masked(**kw) if v.equal?(UNDEF)
-    # eq leaves a masked cell UNDEF, so the sum leaves it out and its
-    # min_count: counts the present cells, as the core count(v) does
-    regroup(value.eq(v).int64, spec).sum(**kw).int64
-  end
 
-  # @overload all
-  #   Per-group `all` over a boolean payload.
-  #   @return [CArray]
-  def all (**kw)
-    boolean_payload!(:all)
-    ALL_FOLDED.bind_call(self, **kw)
-  end
+    # @overload all
+    #   Per-group `all` over a boolean payload.
+    #   @return [CArray]
+    def all (**kw)
+      boolean_payload!(:all)
+      super(**kw)
+    end
 
-  # @overload any
-  #   Per-group `any` over a boolean payload.
-  #   @return [CArray]
-  def any (**kw)
-    boolean_payload!(:any)
-    ANY_FOLDED.bind_call(self, **kw)
+    # @overload any
+    #   Per-group `any` over a boolean payload.
+    #   @return [CArray]
+    def any (**kw)
+      boolean_payload!(:any)
+      super(**kw)
+    end
   end
+  prepend ComposedFolds
 
   # Per-group classified cell count (mask-independent) = count on the
   # mask-stripped value, so every classified cell is counted regardless of the
@@ -417,15 +417,14 @@ class CAGroupIterator
   # is uint64, a time column's minimum a time, its sum refused.
   [:sum, :accumulate, :prod, :mean, :min, :max,
    :variance, :stddev, :variancep, :stddevp].each do |op|
-    by_kernel = instance_method(op)
-    define_method(op) do |**kw|
+    ComposedFolds.send(:define_method, op, &Ractor.make_shareable(proc do |**kw|
       has_group, = AxisGroup.parse_axis(kw[:axis])
       if ! has_group || kernel_reads_value?
-        by_kernel.bind_call(self, **kw)
+        super(**kw)
       else
         reduce_by_core(op, kw)
       end
-    end
+    end))
   end
 
   # Per-group [min, max] pair (matching CArray#minmax).
@@ -654,7 +653,7 @@ class CAGroupIterator
   # group is gathered whole, so folding a band into one (axis: [:group, k]) is
   # not supported, as for the order statistics.
   [:first, :last, :nunique].each do |op|
-    define_method(op) do |**kw|
+    define_method(op, &Ractor.make_shareable(proc do |**kw|
       has_group, fused = AxisGroup.parse_axis(kw[:axis])
       return value.public_send(op, **kw) unless has_group
       unless fused.empty?
@@ -669,7 +668,7 @@ class CAGroupIterator
               unknown.map(&:inspect).join(", ")
       end
       composite_order(op, [])
-    end
+    end))
   end
 
   # @overload sort_addr

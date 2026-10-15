@@ -205,9 +205,9 @@ class CAKeyWindowIterator < CAIterator
    :variancep, :stddevp, :median, :first, :last, :nunique,
    :count, :count_not_masked, :count_masked, :all, :any,
    :min_index, :max_index].each do |op|
-    define_method(op) do |*args, **kw|
+    define_method(op, &Ractor.make_shareable(proc do |*args, **kw|
       in_rows(@segments.public_send(op, *args, **kw))
-    end
+    end))
   end
 
   # @overload percentile(p)
