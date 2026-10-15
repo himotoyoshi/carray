@@ -357,18 +357,24 @@ ORDERABLE plus the cast is sufficient.
 | fixlen storage read as strings (`CAFixlenString`) | ORDERABLE + COMPARABLE | not needed | ✓ | ✓ direct; a String query is padded to the cell width |
 | non-orderable numeric storage | none | — | reject | reject |
 
-**Sort-family Face gate.** The sort family descends any Face to its storage and
-then relies on the storage's `data_type`:
+**Sort-family Face gate.** The storage stands for the values only when the
+Face says so, whatever the storage's `data_type`:
 
-- **fixlen storage → memcmp**, the default order for fixlen (the same order a
-  plain fixlen array sorts by). A fixed-width string Face sorts correctly.
-  `CARecord` does not reach the gate: its ordering members are Ruby methods
-  that rank the records by the members the struct names in `order_by:`, and
-  raise when it names none — the bytes of a record are no order of its
-  values.
-- **numeric storage → requires ORDERABLE**, so the numeric order equals the
-  surface order. A non-orderable numeric Face raises (numeric-sorting it would
-  reorder the surface silently).
+- **ORDERABLE → its storage.** A fixed-width string Face (`CAFixlenString`)
+  declares ORDERABLE, so it sorts and reduces by memcmp, the order a plain
+  fixlen array sorts by. A fixlen storage that is *not* ORDERABLE is not taken
+  as ordered by its bytes: a little-endian number or a byte range would sort
+  silently wrong.
+- **not ORDERABLE, with an `#order` of its own → that order.** `CAConstString`
+  and `CARecord` define `#order` (a record ranks by the members the struct
+  names in `order_by:`, and raises when it names none), so the families that
+  order by a key (`sort_addr`, `rank_index`, `partition`, `nlargest`,
+  `max_by_key`, ...) take it. Their own `min` / `max` / comparison operators
+  are Ruby methods as well.
+- **anything else → raise**, in every family: the sort family, the
+  reductions (`min` / `max` / `minmax`), search, interpolation, the
+  value-hash family and the comparison operators. Numeric-sorting such a Face
+  would reorder the surface silently.
 
 `search` / `linear` stay numeric-only for now: they need a comparable/
 interpolatable numeric coordinate, so a fixlen Face is still rejected there.
@@ -378,8 +384,13 @@ asks the query for `#distance` and refuses, by name, anything that does not
 answer it.
 
 The reject remains the last line of defence for the cases that have no defined
-order: a non-orderable numeric Face still raises, so nothing silently
+order: a non-orderable Face still raises, numeric or fixlen, so nothing silently
 mis-compares.
+
+In C, every family asks the same two parts in `ext/ca_obj_face.c`:
+`ca_face_require_orderable` (return, or refuse naming the method) and, where a
+key will do, `ca_face_orders_by_itself`. `rake face_parts_check` refuses a flag
+test written anywhere else.
 
 ---
 
