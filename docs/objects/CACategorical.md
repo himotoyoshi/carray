@@ -637,6 +637,12 @@ cat.codes + 1         # OK — you asked for the raw integers
   category). For a huge input with a small vocabulary this is close to
   optimal in Ruby-level code; for very large vocabularies, arriving with
   pre-computed codes and using `from_codes` is faster.
+- **Grouping keeps a plan on the categorical.** The first
+  `group_by_category` over a categorical computes the order of its cells by
+  category (`sort_addr`, an int64 per cell) and the per-category counts and
+  offsets (one entry per label), and keeps them on the categorical, so every
+  later grouping by it — for any payload column — reuses them. They live as
+  long as the categorical does; drop the categorical to free them.
 - **Interoperates with [`CAConstString`](CAConstString.md).** A common
   pipeline is `ct = CArray.text(raw); cat = ct.categorize` — the text
   column keeps its bytes shared, and the categorical carries only the

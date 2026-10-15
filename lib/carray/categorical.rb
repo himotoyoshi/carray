@@ -597,7 +597,8 @@ class CACategorical < CAObject
   # `value.reshape(elements)[cat.sort_addr]` produces the contiguous blocks.
   # Memoised (see the grouping-plan note above): the counting sort is the
   # dominant grouping cost, so it is computed once and shared by every payload
-  # column and by CACategoricalIterator. Do not mutate the returned array.
+  # column and by CACategoricalIterator, and kept for the categorical's
+  # lifetime (an int64 per cell). Do not mutate the returned array.
   # @overload sort_addr
   #   Returns a length-{#elements} integer CArray of flat storage
   #   addresses that order the cells by category (excluded cells last).

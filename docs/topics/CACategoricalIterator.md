@@ -32,6 +32,11 @@ Every result is a length-`k` CArray aligned to `cat.labels` (`k` = number of
 groups, available as `#ngroups`): result cell `i` is the statistic of the cells
 whose category is `labels[i]`. The category vocabulary is `#labels`.
 
+Grouping by a categorical computes the order of its cells by category (an int64
+per cell) once and keeps it on the categorical, so grouping several payload
+columns by the same categorical pays for it once. It is freed with the
+categorical.
+
 ## The reductions
 
 Each one is the core `CArray` reduction lifted to the category, so the result
