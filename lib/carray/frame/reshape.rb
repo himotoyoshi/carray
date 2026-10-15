@@ -130,13 +130,8 @@ class CAFrame
   # sorted keys and, for each of the nr * nc cells, the address of the row
   # (or with +aggregate:+, of the reduced pair) that fills it.
   private def pivot_plan(index, columns, aggregate, verb)
-    rkey = column_or_index(index)
-    ckey = column_or_index(columns)
-    { "index" => [index, rkey], "columns" => [columns, ckey] }.each do |kw, (name, key)|
-      next if key.ndim == 1
-      raise ArgumentError,
-            "#{verb}: #{kw}: #{name.inspect} has shape #{key.shape.inspect}, not one value per row"
-    end
+    rkey = key_column(index, verb)
+    ckey = key_column(columns, verb)
     rlab = pivot_sorted_keys(rkey, "index", index, verb)
     clab = pivot_sorted_keys(ckey, "columns", columns, verb)
     nr = rlab.elements
@@ -357,10 +352,7 @@ class CAFrame
     if keys.include?(on)
       raise ArgumentError, "stack_rows: #{on.inspect} is a key; on: names another column"
     end
-    place = frame[on]
-    unless place.ndim == 1
-      raise ArgumentError, "stack_rows: on: #{on.inspect} has shape #{place.shape.inspect}, not one value per row"
-    end
+    place = frame.__send__(:key_column, on, "stack_rows")
     grouped = frame.group_by(*keys)
     bounds  = grouped.__send__(:group_bounds).to_a
     groups  = bounds.size - 1
@@ -443,10 +435,4 @@ class CAFrame
     CAFrame.new(cols, axis_name: @axis_name, index: @index && @index[repeat])
   end
 
-  # A column, or the index when +name+ is the row axis name (pivot and resample
-  # keys may be either).
-  private def column_or_index(name)
-    return @index if @index && !@columns.key?(name) && @axis_name == name
-    self[name]
-  end
 end

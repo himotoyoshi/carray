@@ -40,7 +40,7 @@ class CAFrame
     validate_sort_order(order)
     named = specs.map do |spec|
       name, dir = parse_sort_key_spec(spec, order)
-      [column_key(name, "sort_by_key"), sort_key_column(name), dir]
+      [column_key(name, "sort_by_key"), key_column(column_key(name, "sort_by_key"), "sort_by_key"), dir]
     end
     CAFrame.__send__(:refuse_repeated_names, named.map(&:first), "sort_by_key")
     keys = named.map do |name, col, dir|
@@ -119,20 +119,4 @@ class CAFrame
     raise ArgumentError, "sort order must be :asc or :desc, got #{dir.inspect}"
   end
 
-  private def sort_key_column(name)
-    key = column_key(name, "sort_by_key")
-    col = if @columns.key?(key)
-            @columns[key]
-          elsif @index && @axis_name == key
-            @index
-          else
-            raise KeyError, "no column #{key.inspect}"
-          end
-    unless col.ndim == 1
-      raise ArgumentError,
-            "sort_by_key: key column #{key.inspect} is #{col.ndim}-D; " \
-            "sort by a scalar (1-D) column"
-    end
-    col
-  end
 end

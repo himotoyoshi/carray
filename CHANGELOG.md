@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- New: CAFrame `join` and `join_asof` take the index as a key, by the row
+  axis name, as `group_by`, `sort_by_key` and `align` do; they raised
+  `KeyError`. The key is kept once: the left index stays the result's
+  index, and an unmatched right row of an `:outer` or `:right` join takes
+  its label from the right.
+
+- Change: an N-D column given as a key to any CAFrame verb is refused in
+  one wording, "<verb>: the key "p" has shape [...], not one value per
+  row; use one of its components (e.g. df[name][nil, 0])".
+
 - Change: a CAFrame verb that takes a list of columns refuses a name given
   twice, as the verbs that make columns do: `select("a", "a")` gave one
   column, `group_by`, `sort_by_key`, `is_duplicate` and `describe` took

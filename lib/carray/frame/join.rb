@@ -45,8 +45,8 @@ class CAFrame
   #   obs.join(fcst, on: ["station", "date"])
   def join(other, on:, how: :left, suffixes: DEFAULT_JOIN_SUFFIXES)
     names = join_key_names(on, "join", "on:")
-    lkeys = names.map { |name| join_key(self[name], name, "join") }
-    rkeys = names.map { |name| join_key(other[name], name, "join") }
+    lkeys = names.map { |name| key_column(name, "join") }
+    rkeys = names.map { |name| other.__send__(:key_column, name, "join") }
     join_check_key_widths(names, lkeys, rkeys, "join")
     plan  = join_name_plan(other, names, suffixes)
 
@@ -78,8 +78,8 @@ class CAFrame
       raise ArgumentError, "join_asof: #{on.inspect} is the on: key; by: names the others"
     end
     plan = join_name_plan(other, [on, *exact], suffixes)
-    lkey = join_key(self[on], on, "join_asof")
-    rkey = join_key(other[on], on, "join_asof")
+    lkey = key_column(on, "join_asof")
+    rkey = other.__send__(:key_column, on, "join_asof")
     [lkey, rkey].each do |key|
       key.__send__(:nearest_refuse_bytes, key, "join_asof: the on: key #{on.inspect}",
                    "join on it exactly with join")
@@ -87,8 +87,8 @@ class CAFrame
     addr = if exact.empty?
              lkey.locate_nearest_addr(rkey, direction: direction, tolerance: tolerance)
            else
-             lexact = exact.map { |name| join_key(self[name], name, "join_asof") }
-             rexact = exact.map { |name| join_key(other[name], name, "join_asof") }
+             lexact = exact.map { |name| key_column(name, "join_asof") }
+             rexact = exact.map { |name| other.__send__(:key_column, name, "join_asof") }
              join_check_key_widths(exact, lexact, rexact, "join_asof")
              _, lcode, rcode, k = join_codes(lexact, rexact)
              join_asof_by(lkey, rkey, lcode, rcode, k, direction, tolerance)
@@ -117,7 +117,7 @@ class CAFrame
   def align(key, reference)
     key = column_key(key, "align")
     on_index = !@columns.key?(key) && @axis_name == key && @index
-    keys = on_index ? @index : join_key(self[key], key, "align")
+    keys = key_column(key, "align")
     # An Array reference is read as values of the key's kind, as is_in reads
     # one: 1 and 2.5 against a float key are numbers, and Time or String
     # values against a time key are instants.
@@ -220,15 +220,6 @@ class CAFrame
       end
     end
     new(cols, axis_name: first.axis_name, index: first.index)
-  end
-
-  # The key column of a join, checked to give each row one value. An N-D key
-  # would be matched cell by cell rather than row by row.
-  private def join_key(col, on, verb)
-    return col if col.ndim == 1
-    raise ArgumentError,
-          "#{verb}: the key #{on.inspect} has shape #{col.shape.inspect}, not one value per row; " \
-          "#{verb} on one of its components (e.g. df[name][nil, 0])"
   end
 
   # A fixlen key holds a cell-width blob, so a left key and a right key of
@@ -371,26 +362,13 @@ class CAFrame
     every_left = how == :left || how == :inner
     identity   = every_left && li.elements == nrow &&
                  (nrow == 0 || li.eq(CArray.int64(nrow).seq).all)
+    rows = { li: li, ri: ri, extra: extra, how: how, every_left: every_left, identity: identity }
     cols = {}
     column_names.each do |name|
       j = names.index(name)
-      col = if identity          then self[name]
+      col = if j                 then joined_key(j, parts, lkeys, rkeys, rows)
+            elsif identity       then self[name]
             elsif every_left     then self[name][li, *([nil] * (self[name].ndim - 1))]
-            elsif j && how == :right then project_rows(rkeys[j], ri)
-            elsif j
-              # An unmatched right row of an outer join takes its key from
-              # the right side.
-              common, lc, rc = parts[j]
-              code = if extra
-                       nleft = li.elements - extra.elements
-                       CArray.concatenate([lc.project(li[0...nleft]), rc.project(extra)])
-                     else
-                       lc.project(li)
-                     end
-              # The key takes the attributes both sides show alike, as a
-              # concatenation of the two would.
-              shared = CArray.__send__(:attrs_shared_by, [lkeys[j], rkeys[j]])
-              common.project(code).tap { |c| c.set_attrs(shared) unless shared.empty? }
             else                      project_rows(self[name], li)
             end
       name = join_name(name, plan[:lsuf], plan) unless j
@@ -400,12 +378,38 @@ class CAFrame
       next if names.include?(name)
       put_join_column(cols, join_name(name, plan[:rsuf], plan), project_rows(other[name], ri))
     end
+    # A key that is the left index is the result's index, as a key column
+    # is a column of it.
+    ij = @index && !@columns.key?(@axis_name) ? names.index(@axis_name) : nil
     new_index = if @index.nil?  then nil
+                elsif ij        then joined_key(ij, parts, lkeys, rkeys, rows)
                 elsif identity  then @index
                 elsif every_left then @index[li]
                 else                  project_rows(@index, li)
                 end
     CAFrame.new(cols, axis_name: @axis_name, index: new_index)
+  end
+
+  # The key +j+ of each row of a key join: the left key on the rows from the
+  # left, and on an unmatched right row of a right or outer join the right
+  # key, so a key is kept once and is never UNDEF where a row has one.
+  private def joined_key(j, parts, lkeys, rkeys, rows)
+    li, ri = rows[:li], rows[:ri]
+    return lkeys[j] if rows[:identity]
+    return lkeys[j][li] if rows[:every_left]
+    return project_rows(rkeys[j], ri) if rows[:how] == :right
+    common, lc, rc = parts[j]
+    extra = rows[:extra]
+    code = if extra
+             nleft = li.elements - extra.elements
+             CArray.concatenate([lc.project(li[0...nleft]), rc.project(extra)])
+           else
+             lc.project(li)
+           end
+    # The key takes the attributes both sides show alike, as a
+    # concatenation of the two would.
+    shared = CArray.__send__(:attrs_shared_by, [lkeys[j], rkeys[j]])
+    common.project(code).tap { |c| c.set_attrs(shared) unless shared.empty? }
   end
 
   # Pairs a side's rows (codes +acode+) with the other side's (+bcode+), in

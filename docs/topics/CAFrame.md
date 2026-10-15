@@ -1179,7 +1179,7 @@ When the other frame's key is unique, `:left` gives one row per left row, in ord
 
 Two exceptions: an object column compares Ruby objects with `eql?`, as a Ruby `Hash` does, so `1` and `1.0` there are different keys (cast the column to a number first; `at` compares with `==` and does find `1` for `1.0`), and a time key refuses plain integers, which have no unit to be read in — turn them into times first with [`to_time`](#counts-since-an-epoch--to_time).
 
-The key must be one value per row; an N-D column cannot be a key for `join`, `join_asof` or `align` (take a component, `df["wind"][nil, 0]`, as a column first).
+The key must be one value per row; an N-D column cannot be a key for `join`, `join_asof` or `align` (take a component, `df["wind"][nil, 0]`, as a column first). A key may also be the index, by the row axis name, on either side: the left index stays the result's index, and an unmatched right row of an `:outer` or `:right` join takes its label from the right, as a key column takes its value.
 
 **Column-name collisions.** A non-key column present on both sides collides (the key `on` is kept once, never suffixed). By default both sides get a suffix — `temp` → `temp_left` / `temp_right`:
 

@@ -51,18 +51,7 @@ class CAFrame
     names = column_keys(names, "is_duplicate")
     names = column_names if names.empty?
     raise ArgumentError, "is_duplicate: the frame has no column to compare" if names.empty?
-    cols = names.map do |n|
-      col = @columns.fetch(n) do
-        next @index if @index && @axis_name == n      # the index, as group_by takes it
-        raise KeyError, "is_duplicate: no column #{n.inspect}"
-      end
-      unless col.ndim == 1
-        raise ArgumentError,
-              "is_duplicate: #{n.inspect} has shape #{col.shape.inspect}, not one value " \
-              "per row; compare one of its components (df[#{n.inspect}][nil, 0])"
-      end
-      col
-    end
+    cols = names.map { |n| key_column(n, "is_duplicate") }
     cat   = CACategorical.send(:from_keys, cols)
     codes = cat.codes
     out =
@@ -109,7 +98,7 @@ class CAFrame
   #   neither :left nor :right.
   def resample(name, unit, origin: nil, label: :left, fill: false)
     name = column_key(name, "resample")
-    time = column_or_index(name)
+    time = key_column(name, "resample")
     unless time.is_a?(CATime)
       raise ArgumentError, "resample: #{name.inspect} is not a time column (got #{time.class})"
     end
@@ -146,8 +135,12 @@ class CAFrame
     CACategorical.send(:from_keys, keys.map { |k| key_column(k) })
   end
 
-  # The column a group key names, checked: +verb+ is the method the caller
-  # called, for the messages.
+  # The column a key names, checked -- the one reading of a key every verb
+  # that takes one goes through (group_by, is_duplicate, sort_by_key, join,
+  # join_asof, align, pivot, resample, windows): a column of that name, or
+  # the index by the row axis name; or a CArray of one value per row.  It
+  # gives each row one value.  +verb+ is the method the caller called, for
+  # the messages.
   private def key_column(key, verb = "group_by")
     col = case key
           when String
@@ -172,7 +165,7 @@ class CAFrame
       name = key.is_a?(String) ? "#{key.inspect} " : ""
       raise ArgumentError,
             "#{verb}: the key #{name}has shape #{col.shape.inspect}, not one value per row; " \
-            "group by one of its components (e.g. df[name][nil, 0])"
+            "use one of its components (e.g. df[name][nil, 0])"
     end
     col
   end
