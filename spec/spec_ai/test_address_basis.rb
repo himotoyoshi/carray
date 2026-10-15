@@ -489,6 +489,17 @@ class TestAddressBasis < Test::Unit::TestCase
     assert_not_kind_of AB::Failure, error
   end
 
+  # tier answers what classify reports as :tier, without the Hash.
+  def test_tier_is_the_tier_classify_reports
+    lazy = (entity.lazy + 1)
+    [entity, stride_view, xfer_view, entity[1..2, 1..2], lazy,
+     CArray.float64(4).seq!.fake(:int32)].each do |a|
+      assert_equal AB.classify(a)[:tier], AB.tier(a), a.class.to_s
+    end
+    assert_equal [AB::TIER_ENTITY, AB::TIER_STRIDE, AB::TIER_XFER],
+                 [AB.tier(entity), AB.tier(stride_view), AB.tier(xfer_view)]
+  end
+
   def test_classify_reports_why_an_array_would_be_refused
     f = CArray.float64(4).seq!
     f[1] = UNDEF

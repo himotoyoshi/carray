@@ -50,12 +50,15 @@ CArray::AddressBasis.open(arrays, writable,
                           packed = false) { |...| ... }
 
 CArray::AddressBasis.classify(array)   #=> Hash
+CArray::AddressBasis.tier(array)       #=> TIER_ENTITY, TIER_STRIDE or TIER_XFER
 ```
 
 `open` opens every array, yields, and closes them all on the way out —
 **including when the block raises**, which is the whole reason it is a block
 form. `classify` reports how an array *would* be opened without opening it,
-which is what a caller uses to decide whether a fast path applies.
+which is what a caller uses to decide whether a fast path applies. `tier`
+answers what `classify` reports as `:tier`, without building the Hash, for a
+caller that asks on every call.
 
 `classify` refuses nothing; its `:refusal` is the reason `open` would refuse
 the array for reading, or nil. `open` refuses, before it opens any array:

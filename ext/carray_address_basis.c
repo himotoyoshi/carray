@@ -948,6 +948,16 @@ address_basis_classify (VALUE module, VALUE object)
   return result;
 }
 
+/* The tier alone, for a caller that only wants to know which of the three
+   an array would be opened at: classify builds a Hash to say it. */
+static VALUE
+address_basis_tier (VALUE module, VALUE object)
+{
+  CArray *ca;
+  GetCArray(object, ca);
+  return INT2NUM(tier_for(ca));
+}
+
 /* ------------------------------------------------------------------- */
 /* Init_carray_address_basis                                            */
 /* ------------------------------------------------------------------- */
@@ -960,6 +970,7 @@ Init_carray_address_basis (void)
   rb_define_singleton_method(mAddressBasis, "open", address_basis_open, -1);
   rb_define_singleton_method(mAddressBasis, "classify",
                              address_basis_classify, 1);
+  rb_define_singleton_method(mAddressBasis, "tier", address_basis_tier, 1);
 
   rb_define_const(mAddressBasis, "TIER_ENTITY", INT2NUM(TIER_ENTITY));
   rb_define_const(mAddressBasis, "TIER_STRIDE", INT2NUM(TIER_STRIDE));
