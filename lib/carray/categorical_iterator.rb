@@ -472,16 +472,21 @@ class CACategoricalIterator < CASegmentIterator
   # taken by index; otherwise its cells are kept by masking the rest of a copy.
   # A read-only Face's answers (a const string's records index a pool of
   # their own) cannot be put together, so they are collected as the surface
-  # values they are, as the flat form does.
+  # values they are, as the flat form does.  Over a 1-D value each group
+  # reduces to one cell, kept as a 1-element array so the answers stack.
   def axis_by_core (axis, op, *args)
     h    = @value
     axis = checked_axis(axis, op)
+    flat = (h.ndim == 1)
     groups  = (0...[@k, 1].max).map { |c| group_cells(h, axis, c, @k.zero?) }
-    answers = groups.map { |g| g.__send__(op, *args, axis: axis) }
+    answers = groups.map do |g|
+      flat ? g.__send__(op, *args, axis: axis, keep_axis: true)
+           : g.__send__(op, *args, axis: axis)
+    end
     if answers.first.face? && answers.first.read_only?
       answers = answers.map { |a| CArray.object(*a.shape) { a.to_a } }
     end
-    out = CArray.stack(answers, axis: 0).copy
+    out = flat ? CArray.concatenate(answers) : CArray.stack(answers, axis: 0).copy
     @k.zero? ? out[0...0, *([nil] * (out.ndim - 1))].copy : out
   end
 
