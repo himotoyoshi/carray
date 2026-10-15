@@ -51,6 +51,7 @@ class CAFrame
   end
 
   DESCRIBE_TIME_FACES = %w[CATime CATimedelta].freeze
+  Ractor.make_shareable(DESCRIBE_TIME_FACES)
   private_constant :DESCRIBE_TIME_FACES
 
   private def describe_column(col)

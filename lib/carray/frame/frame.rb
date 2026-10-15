@@ -37,10 +37,12 @@ class CAFrame
   # Integer data_types that select rows positionally when used as a df[] key.
   INTEGER_TYPES = [:int8, :int16, :int32, :int64,
                    :uint8, :uint16, :uint32, :uint64].freeze
+  Ractor.make_shareable(INTEGER_TYPES)
   private_constant :INTEGER_TYPES
 
   # @!visibility private
   DEFAULT_AXIS_NAME = "row"
+  Ractor.make_shareable(DEFAULT_AXIS_NAME)
 
   # Build a frame from a Hash of +name => column+. Columns may be CArrays or
   # anything that answers +to_ca+ (Ruby Array, lazy view). All columns must

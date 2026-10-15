@@ -542,9 +542,11 @@ class CAFrame
     0xF900..0xFAFF, 0xFE10..0xFE19, 0xFE30..0xFE6F, 0xFF00..0xFF60,
     0xFFE0..0xFFE6, 0x1F300..0x1F64F, 0x1F900..0x1F9FF, 0x20000..0x3FFFD,
   ].freeze
+  Ractor.make_shareable(WIDE_CHAR_RANGES)
   private_constant :WIDE_CHAR_RANGES
 
   COMBINING_RANGES = [0x0300..0x036F, 0x1AB0..0x1AFF, 0x20D0..0x20F0].freeze
+  Ractor.make_shareable(COMBINING_RANGES)
   private_constant :COMBINING_RANGES
 
   private def display_width(text)

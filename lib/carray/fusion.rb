@@ -66,6 +66,7 @@ class CArray
     Plan  = Struct.new(:nodes, :leaves, :data_type, :dim, :masked, :signature)
 
     LAZY_CLASSES = [CAMonOp, CABinOp, CATriOp, CAMonCmp, CABinCmp, CALazyMarker]
+    Ractor.make_shareable(LAZY_CLASSES)
 
     # A lazy node names its operation by an id and the kernels name it by a
     # symbol.  These are the same operations, spelled the way each side

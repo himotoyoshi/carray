@@ -14,6 +14,7 @@ class CAFrame
   # left gets "_left", right gets "_right". +_left+/+_right+ read clearer than
   # pandas' +_x+/+_y+ for the target audience.
   DEFAULT_JOIN_SUFFIXES = ["_left", "_right"].freeze
+  Ractor.make_shareable(DEFAULT_JOIN_SUFFIXES)
   private_constant :DEFAULT_JOIN_SUFFIXES
 
   # Join +other+ on a shared key column, as SQL joins: each pair of a left

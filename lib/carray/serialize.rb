@@ -63,6 +63,7 @@ class CArray::Serializer   # :nodoc:
 
   # @!visibility private
   MAGIC         = "_CARRAY3"
+  Ractor.make_shareable(MAGIC)
   # @!visibility private
   HEADER_BYTES  = 256
   # @!visibility private

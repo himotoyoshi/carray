@@ -382,6 +382,7 @@ class CACategoricalIterator < CASegmentIterator
   # kernel had all four from one.
   BAND_ONLY_KEYS = { sum: [:sum], mean: [:sum, :count], min: [:min],
                      max: [:max], minmax: [:min, :max] }.freeze
+  Ractor.make_shareable(BAND_ONLY_KEYS)
   private_constant :BAND_ONLY_KEYS
 
   def band_only_moments (h, axis, band, op)

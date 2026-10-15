@@ -69,6 +69,7 @@ class CACategorical < CAObject
     CA_INT32 => "l", CA_UINT32 => "L",
     CA_INT64 => "q", CA_UINT64 => "Q",
   }.freeze
+  Ractor.make_shareable(UNPACK_FORMAT)
 
   # The exclusion sentinel per codes data_type: the all-ones bit pattern, read
   # as type-max for an unsigned data type and as -1 for a signed one. Either way it

@@ -408,6 +408,7 @@ class CAFrame
   # The targets a text column is read as numbers for.
   CAST_NUMBER_TYPES = %w[int8 int16 int32 int64 uint8 uint16 uint32 uint64
                          float32 float64 cmplx64 cmplx128].freeze
+  Ractor.make_shareable(CAST_NUMBER_TYPES)
   private_constant :CAST_ON_ERROR, :CAST_NUMBER_TYPES
 
   # The types the text columns read as, as a map +cast+ takes:

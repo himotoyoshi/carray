@@ -2439,12 +2439,14 @@ module CATimeLiteral
 
   INFER_DATES = %w[%d/%m/%Y %m/%d/%Y %d-%m-%Y %m-%d-%Y %d.%m.%Y %d/%m/%y %m/%d/%y] +
                 ["%d %b %Y", "%d-%b-%Y", "%d-%b-%y", "%b %d, %Y", "%b %d %Y", "%Y%m%d"]
+  Ractor.make_shareable(INFER_DATES)
 
   # A space in a format matches any run of spaces, none included.
   INFER_CLOCKS = [
     ["%H:%M", :clock], ["%H:%M:%S", :clock], ["%H:%M:%S.%N", :fraction],
     ["%I:%M %p", :clock], ["%I:%M:%S %p", :clock],
   ].freeze
+  Ractor.make_shareable(INFER_CLOCKS)
 
   # A time after a date: none, or a clock with or without a zone. %z takes
   # an offset, Z, UTC or GMT, not a zone named for a place (some of those
@@ -2452,16 +2454,19 @@ module CATimeLiteral
   INFER_TIMES = ([["", :date]] +
     INFER_CLOCKS.flat_map { |clock, kind| [[" #{clock}", kind], [" #{clock} %z", kind]] }
   ).freeze
+  Ractor.make_shareable(INFER_TIMES)
 
   # A date written in Japanese, year first ("2024<year>1<month>2<day>"),
   # takes a time in the same markers ("3<hour>4<minute>", "...5<second>")
   # or with colons.
   JA_YEAR, JA_MONTH, JA_DAY = "年", "月", "日"
   JA_HOUR, JA_MINUTE, JA_SECOND = "時", "分", "秒"
+  [JA_YEAR, JA_MONTH, JA_DAY, JA_HOUR, JA_MINUTE, JA_SECOND].each { |s| Ractor.make_shareable(s) }
   INFER_JA_TIMES = ([["", :date]] +
     ([["%H#{JA_HOUR}%M#{JA_MINUTE}", :clock],
       ["%H#{JA_HOUR}%M#{JA_MINUTE}%S#{JA_SECOND}", :clock]] + INFER_CLOCKS)
       .map { |clock, kind| [" #{clock}", kind] }).freeze
+  Ractor.make_shareable(INFER_JA_TIMES)
 
   INFER_FORMATS = (
     INFER_DATES.product(INFER_TIMES).map { |date, (time, kind)|
@@ -2471,7 +2476,9 @@ module CATimeLiteral
       TimeFormat.new("%Y#{JA_YEAR}%m#{JA_MONTH}%d#{JA_DAY}#{time}", kind)
     }
   ).freeze
+  Ractor.make_shareable(INFER_FORMATS)
   INFER_FORMAT_STRINGS = INFER_FORMATS.map(&:format).freeze
+  Ractor.make_shareable(INFER_FORMAT_STRINGS)
 
   # The one format of INFER_FORMATS that the text of object array `x` is
   # written in, `first` being its first present cell, as
@@ -3229,6 +3236,7 @@ class CATime
              m: "minutes", s: "seconds", ms: "milliseconds",
              us: "microseconds", ns: "nanoseconds", ps: "picoseconds",
              fs: "femtoseconds", as: "attoseconds" }.freeze
+    Ractor.make_shareable(WORD)
 
     # Storage resolutions to fall back on when the unit's own tick cannot
     # hold the origin exactly (a day grid anchored at 12:00 needs seconds).
