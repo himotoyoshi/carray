@@ -247,4 +247,16 @@ class TestPercentileSO4Plus < Test::Unit::TestCase
     assert_equal Rational(999, 100), CArray.object(4) { |k| k * 10 }.percentile(33.3)
   end
 
+  # The per-fiber select read a string array through its own pointer, which
+  # a Face does not have, and a kept answer left the Face.
+  def test_string_array_answers_as_a_string_array
+    s = CArray.const_string(%w[ab cd ab ef]).to_string.reshape(2, 2)
+    r = s.percentile(50, axis: 1, min_count: 1, method: :lower)
+    assert_kind_of CAString, r
+    assert_equal %w[ab ab], r.to_a
+    x = CArray.const_string(%w[ab cd ab]).to_string
+    assert_kind_of CAString, x.median(keep_axis: true)
+    assert_kind_of CAString, x.percentile(50, keep_axis: true)
+  end
+
 end

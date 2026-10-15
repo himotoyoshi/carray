@@ -492,7 +492,8 @@ obj_kth_pair (VALUE self, long axis, long k, long n, VALUE *lo, VALUE *hi)
 }
 
 /* [object] keep_axis flat: [1,...,1] entity holding val (UNDEF assigns
-   masked).  Uses []= so UNDEF / arbitrary objects store correctly. */
+   masked), in self's Face when self is one.  Uses []= so UNDEF / arbitrary
+   objects store correctly. */
 static VALUE
 obj_keep_axis_full (VALUE self, VALUE val)
 {
@@ -507,7 +508,7 @@ obj_keep_axis_full (VALUE self, VALUE val)
   for ( int i = 0; i < ndim; i++ ) av[i] = INT2FIX(0);
   av[ndim] = val;
   rb_funcallv(out, id_aset, ndim + 1, av);
-  return out;
+  return ca_is_face(ca) ? ca_face_relift_entity(self, out) : out;
 }
 
 /* [object] per-axis median (= reduced CArray; 1-D self -> bare scalar).
@@ -685,7 +686,9 @@ pct_object_axis_masked_one (VALUE self, VALUE sorted, long axis, double p,
                             VALUE fill_value, int keep_axis)
 {
   int8_t ax = (int8_t) axis;
-  VALUE out = rb_ca_new_reduced(self, &ax, 1, CA_OBJECT, keep_axis);
+  /* `sorted` is an entity of self's shape (the storage, when self is a
+     Face); the answer is built on it and lifted back by the caller. */
+  VALUE out = rb_ca_new_reduced(sorted, &ax, 1, CA_OBJECT, keep_axis);
   CArray *co;
   GetCArray(out, co);
   CArray *cs;
@@ -747,7 +750,11 @@ percentile_object_axis_masked (VALUE self, VALUE pers, long axis, VALUE method,
     return res;
   }
 
+  /* A Face (a string array) is sorted as itself and read through its
+     storage, whose cells are the values. */
   VALUE sorted = rb_funcall(obj_call_axis(self, id_sort, LONG2NUM(axis)), id_copy, 0);
+  int is_face = ca_is_face(ca);
+  if ( is_face ) sorted = rb_ca_strip_face_value(sorted);
   CArray *cs;
   GetCArray(sorted, cs);
   const boolean8_t *sm = cs->mask ? (const boolean8_t *) cs->mask->ptr : NULL;
@@ -758,10 +765,10 @@ percentile_object_axis_masked (VALUE self, VALUE pers, long axis, VALUE method,
   VALUE result = rb_ary_new_capa(npers);
   for ( long i = 0; i < npers; i++ ) {
     double p = NUM2DBL(rb_ary_entry(pers, i));
-    rb_ary_push(result,
-      pct_object_axis_masked_one(self, sorted, axis, p, method,
-                                 OUTER, MM, INNER, sm, min_count,
-                                 fill_value, keep_axis));
+    VALUE one = pct_object_axis_masked_one(self, sorted, axis, p, method,
+                                           OUTER, MM, INNER, sm, min_count,
+                                           fill_value, keep_axis);
+    rb_ary_push(result, is_face ? ca_face_relift_entity(self, one) : one);
   }
   RB_GC_GUARD(sorted);
   return result;
