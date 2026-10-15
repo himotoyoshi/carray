@@ -38,7 +38,7 @@ class CAFrame
         unless column_has?(col, verb, args, keywords)
           raise CArray::DataTypeError,
                 "#{verb}: column #{name.inspect} " \
-                "(#{col.face? ? col.class : col.data_type}) has no #{verb}"
+                "(#{CArray::Inspector.type_label(col)}) has no #{verb}"
         end
         yield(col)
       end

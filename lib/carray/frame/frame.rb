@@ -564,7 +564,7 @@ class CAFrame
   # kernels dispatch on, not what the column holds.
   def data_types
     h = {}
-    @columns.each { |k, v| h[k] = v.face? ? v.class : v.data_type }
+    @columns.each { |k, v| h[k] = v.face? ? v.class : v.data_type }   # type-label: data_types returns the class itself, a value
     h
   end
 

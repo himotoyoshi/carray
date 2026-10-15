@@ -405,7 +405,7 @@ class CAKeyWindowIterator < CAIterator
     unless key.numeric? && !key.complex?
       raise ArgumentError,
             "windows: on: is a time, a duration or a real number key " \
-            "(got #{key.face? ? key.class : key.data_type_name})"
+            "(got #{CArray::Inspector.type_label(key)})"
     end
     widths = [before, after, interval]
     widths.each do |w|

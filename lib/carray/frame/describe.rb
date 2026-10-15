@@ -65,7 +65,7 @@ class CAFrame
       else
         :other
       end
-    type = col.face? ? col.class.name : col.data_type_name
+    type = CArray::Inspector.type_label(col)
     type += col.shape[1..].inspect if col.ndim > 1
     row = { "type" => type,
             "count" => col.count_not_masked, "masked" => col.count_masked,

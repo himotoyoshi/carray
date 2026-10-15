@@ -152,7 +152,7 @@ class CArray
   # Face that defines a linear_fetch of its own -- which is how a Face says it
   # interpolates (the core linear_fetch would read its storage).
   private def interpolable?
-    face? ? self.class.instance_method(:linear_fetch).owner != CArray : numeric?
+    face? ? self.class.instance_method(:linear_fetch).owner != CArray : numeric?   # type-label: asks what the Face can do, names nothing
   end
 
   # 1-D linear-by-index fill of a single (possibly masked) fiber.

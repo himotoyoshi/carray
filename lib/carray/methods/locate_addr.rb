@@ -192,7 +192,7 @@ class CArray
     return unless key.is_a?(CArray) && key.__send__(:orderable_storage?)
     storage = key.face? ? key.__send__(:face_storage) : key
     return unless storage.data_type == CA_FIXLEN
-    subject ||= "locate_nearest_addr: a #{key.face? ? key.class.name : 'fixlen'} key"
+    subject ||= "locate_nearest_addr: a #{CArray::Inspector.type_label(key)} key"
     raise CArray::DataTypeError,
           "#{subject} is held as fixed-length bytes, which have no nearest; #{remedy}"
   end

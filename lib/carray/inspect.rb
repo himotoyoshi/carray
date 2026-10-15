@@ -49,6 +49,14 @@ class CArray::Inspector  # :nodoc:
   # nothing to a reader, so it is named by its class: what a private
   # inspect_label gives (CATime adds its tick), or the class, with the
   # surface type only for a Face whose surface is numeric.
+  # The type of an array as a person reads it in a message or a table: a
+  # Face by its name (face_label), any other array by its data type name.
+  # Every message and listing that names a type goes through here, so a
+  # Face is never named by its storage (:fixlen for a time).
+  def self.type_label (ca)
+    ca.face? ? face_label(ca) : CArray.data_type_name(ca.data_type).to_s
+  end
+
   def self.face_label (ca)
     return ca.send(:inspect_label) if ca.respond_to?(:inspect_label, true)
     klass = ca.class

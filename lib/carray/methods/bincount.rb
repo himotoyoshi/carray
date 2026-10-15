@@ -48,7 +48,7 @@ class CArray
       unless weights.integer? || weights.float?
         raise CArray::DataTypeError,
               "bincount: weights must be numeric (got " \
-              "#{weights.face? ? weights.class : weights.data_type_name})"
+              "#{CArray::Inspector.type_label(weights)})"
       end
     end
 

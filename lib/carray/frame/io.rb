@@ -465,7 +465,7 @@ class CAFrame
   # @return [String]
   def inspect
     parts = @columns.map do |k, v|
-      type = v.face? ? CArray::Inspector.face_label(v) : v.data_type
+      type = CArray::Inspector.type_label(v)
       "#{k}:#{type}#{v.ndim > 1 ? v.shape[1..].inspect : ''}"
     end
     idx = @index ? " index=#{@axis_name.inspect}" : ""

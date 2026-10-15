@@ -36,6 +36,11 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.4 (unreleased)
 
+- Change: a Face is named one way wherever a type is read, as `p df`
+  names it: `describe`'s `type` column and the refusals of the CAFrame
+  verbs, key windows, `bincount` and `locate_nearest_addr` read
+  `CATime[D]` where some read `CATime`.
+
 - New: CAFrame `join` and `join_asof` take the index as a key, by the row
   axis name, as `group_by`, `sort_by_key` and `align` do; they raised
   `KeyError`. The key is kept once: the left index stays the result's

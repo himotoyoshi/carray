@@ -106,7 +106,7 @@ class TestLocateNearestExact < Test::Unit::TestCase
     e = assert_raise(CArray::DataTypeError) { k.locate_nearest_addr(k) }
     assert_match(/\Alocate_nearest_addr: a fixlen key is held as fixed-length bytes/, e.message)
     e = assert_raise(CArray::DataTypeError) { fs.locate_nearest_addr(fs) }
-    assert_match(/\Alocate_nearest_addr: a CAFixlenString key/, e.message)
+    assert_match(/\Alocate_nearest_addr: a CAFixlenString\[2\] key/, e.message)
     assert_raise(CArray::DataTypeError) { CA_INT32([1]).locate_nearest_addr(k) }
     [k, fs].each do |key|
       f = CAFrame.new("t" => key, "x" => CA_INT32([1, 2]))
