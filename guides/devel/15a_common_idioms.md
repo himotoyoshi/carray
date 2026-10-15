@@ -483,7 +483,12 @@ define_method_check` keeps each file of `lib/` from gaining a
 `define_method`; one that stays says why with `# define_method:`. The walk
 costs about 0.1 us, so call it where the message is built, not on entry.
 `rake method_naming_check` refuses `rb_frame_this_func` outside
-`carray_utils.c`.
+`carray_utils.c`. A new raise opens with `"%s: "` and
+`ca_calling_method_name()`, a shared part included, since the part finds
+the name itself; inside the library the checks of `carray.h` are the
+`CA_CHECK_*_GIVEN` forms in `carray_internal.h`, which do. `rake
+unnamed_raise_check` keeps each file of `ext/` from gaining a raise that
+does not.
 
 The `ArgError` / `TypeError` / `IndexError` / `RangeError` distinction
 matches Ruby convention. A data_type an operation cannot take is
