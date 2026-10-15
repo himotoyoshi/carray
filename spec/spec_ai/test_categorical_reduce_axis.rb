@@ -918,6 +918,12 @@ class TestCategoricalReduceAxis < Test::Unit::TestCase
     assert_raise(CArray::DataTypeError) { t.group_by_category(cat).sum(axis: 0) }   # the core refuses
     s = CArray.const_string(%w[a b c d e f g h]).reshape(4, 2)
     assert_equal [%w[a b], %w[c d]], s.group_by_category(cat).min(axis: 0).to_a
+    # classified cell by cell, or by the other axis: the other groups' cells
+    # are masked out of a copy, which a read-only Face takes too
+    cb = CA_INT32([[0, 1], [1, 0], [0, 0], [1, 1]]).categorize
+    assert_equal [%w[a d], %w[c b]], s.group_by_category(cb).min(axis: 0).to_a
+    band = CA_INT32([0, 1]).categorize
+    assert_equal [["a", UNDEF], [UNDEF, "b"]], s.group_by_category(band).min(axis: 0).to_a
     # classified cell by cell (the same shape as the values)
     c = CA_INT32([[0, 1], [1, 1], [0, 0]]).categorize
     assert_equal [[1, 0], [1, 1]], CA_BOOLEAN([[1, 0], [1, 1], [0, 0]]).group_by_category(c).sum(axis: 0).to_a

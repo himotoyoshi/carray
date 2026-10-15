@@ -449,14 +449,13 @@ class CACategoricalIterator < CASegmentIterator
     slot_idx  = [nil] + [nil] * band.size    # placeholder; c fills slot 0
     codes_bad = full_c.has_mask? ? full_c.is_masked : nil
     @k.times do |c|
-      h_local = h.copy
       # Boolean of cells that DO belong to group c (with codes present).  On
       # any masked codes cell the codes.eq(c) result carries UNDEF, which
       # naturally reads as "not in group c" for our exclusion purpose.
       in_c = full_c.eq(c)
       exclude = in_c.not
       exclude = exclude | codes_bad if codes_bad
-      h_local[exclude] = UNDEF
+      h_local = h.mask_where(exclude)
       slice = h_local.__send__(op, axis: axis)   # band shape, mask carries n<contract
       slot_idx[0] = c
       out[*slot_idx] = slice
@@ -504,9 +503,8 @@ class CACategoricalIterator < CASegmentIterator
       full_c  = resolve_axis_codes(codes, h.shape, axis)
       exclude = none ? CArray.boolean(*h.shape) { true } : full_c.eq(c).not
       exclude = exclude | full_c.is_masked if full_c.has_mask?
-      local = h.copy
-      local[exclude] = UNDEF
-      local
+      # a copy with the rest masked, which a read-only Face also gives
+      h.mask_where(exclude)
     end
   end
   private :axis_by_core, :axis_moments_by_core, :group_cells
