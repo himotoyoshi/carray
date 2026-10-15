@@ -61,7 +61,10 @@ const rb_data_type_t carray_data_type = {
         .dsize = ca_dsize,
         .dcompact = NULL
     },
-    .flags = RUBY_TYPED_FREE_IMMEDIATELY,
+    /* A frozen entity is shared between Ractors: reading it writes nothing
+       to its struct (an entity takes no attach count), so each Ractor makes
+       its own views of it. */
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY | RUBY_TYPED_FROZEN_SHAREABLE,
 };
 
 const rb_data_type_t cawrap_data_type = {
@@ -85,7 +88,10 @@ const rb_data_type_t cscalar_data_type = {
         .dsize = ca_dsize,
         .dcompact = NULL
     },
-    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+    /* A frozen entity is shared between Ractors: reading it writes nothing
+       to its struct (an entity takes no attach count), so each Ractor makes
+       its own views of it. */
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY | RUBY_TYPED_FROZEN_SHAREABLE
 };
 
 const rb_data_type_t caview_data_type = {
