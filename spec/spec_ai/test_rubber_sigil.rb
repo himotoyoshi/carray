@@ -24,9 +24,9 @@ class TestRubberSigilIndexer < Test::Unit::TestCase
   # AC2: :~ composes with :> slab (ndim-agnostic rest+slab)
   def test_ellipsis_plus_slab
     got = []
-    @a[:~, :>, :>].each { |s| got << s.dim }
+    @a[:~, :>, :>].each { |s| got << s.shape }
     ref = []
-    @a.each_slab(axis: [-2, -1]) { |s| ref << s.dim }
+    @a.each_slab(axis: [-2, -1]) { |s| ref << s.shape }
     assert_equal ref, got
   end
 
@@ -53,7 +53,7 @@ class TestRubberSigilReshape < Test::Unit::TestCase
   def test_infer_equals_minus_one
     assert_equal @a.reshape(-1, 3, 2).dim, @a.reshape(:~, 3, 2).dim
     assert_equal @a.reshape(4, -1).dim,    @a.reshape(4, :~).dim
-    assert_equal [4, 3, 2], @a.reshape(:~, 3, 2).dim
+    assert_equal [4, 3, 2], @a.reshape(:~, 3, 2).shape
   end
 
   # AC6: two infer placeholders -> ArgumentError (same as two -1)
@@ -81,12 +81,12 @@ class TestRubberSigilNonBreaking < Test::Unit::TestCase
   def test_false_still_works
     a = CArray.int32(2, 3, 4).seq
     got = []
-    a[false, :>].each { |s| got << s.dim }
+    a[false, :>].each { |s| got << s.shape }
     assert_equal 6, got.size   # 2*3 outer positions
   end
 
   def test_minus_one_still_works
     a = CArray.int32(2, 3, 4).seq
-    assert_equal [4, 3, 2], a.reshape(-1, 3, 2).dim
+    assert_equal [4, 3, 2], a.reshape(-1, 3, 2).shape
   end
 end

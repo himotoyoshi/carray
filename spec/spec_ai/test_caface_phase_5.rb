@@ -110,7 +110,7 @@ class TestCAFacePhase5 < Test::Unit::TestCase
     klass = Class.new(CAObject) do
       def initialize(parent, tag:)
         @tag = tag
-        super(CA_FLOAT64, parent.dim, parent: parent, face: true)
+        super(CA_FLOAT64, parent.shape, parent: parent, face: true)
       end
       attr_reader :tag
       def copy_state(src); @tag = src.tag; end
@@ -134,7 +134,7 @@ class TestCAFacePhase5 < Test::Unit::TestCase
     # C hook registration → default true.
     klass = Class.new(CAObject) do
       def initialize(parent)
-        super(CA_FLOAT64, parent.dim, parent: parent, face: true)
+        super(CA_FLOAT64, parent.shape, parent: parent, face: true)
       end
     end
     p1 = CArray.float64(3) { 0.0 }

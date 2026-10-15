@@ -22,7 +22,7 @@ class TestCABlock < Test::Unit::TestCase
   end
 
   def test_shape
-    assert_equal [2, 2], @blk.dim.to_a
+    assert_equal [2, 2], @blk.shape.to_a
   end
 
   def test_read
@@ -36,7 +36,7 @@ class TestCABlock < Test::Unit::TestCase
     a  = CArray.int(10).tap { |__a| __a[] = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90] }
     b  = a[2..5]
     assert_equal CABlock, b.class
-    assert_equal [4], b.dim.to_a
+    assert_equal [4], b.shape.to_a
     assert_equal 20, b[0]
     assert_equal 50, b[3]
   end

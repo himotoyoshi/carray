@@ -65,7 +65,7 @@ class TestFaceOrderingGate < Test::Unit::TestCase
   # family rejects it (unlike a fixlen Face, which has memcmp as a default).
   class NonOrderableNumFace < CAObject
     def initialize (parent)
-      super(CA_INT64, parent.dim, parent: parent, face: true)  # no orderable_storage
+      super(CA_INT64, parent.shape, parent: parent, face: true)  # no orderable_storage
     end
   end
 
@@ -432,14 +432,14 @@ class TestFaceOrderingGate < Test::Unit::TestCase
 
   class RelabelFace < CAObject          # ORDERABLE + COMPARABLE
     def initialize (parent)
-      super(CA_INT64, parent.dim, parent: parent, face: true,
+      super(CA_INT64, parent.shape, parent: parent, face: true,
             orderable_storage: true, comparable_storage: true)
     end
   end
 
   class OrderOnlyFace < CAObject         # ORDERABLE only
     def initialize (parent)
-      super(CA_INT64, parent.dim, parent: parent, face: true,
+      super(CA_INT64, parent.shape, parent: parent, face: true,
             orderable_storage: true)
     end
   end

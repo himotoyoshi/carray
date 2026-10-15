@@ -48,7 +48,7 @@ class TestEachSlabBeta4 < Test::Unit::TestCase
   def test_yields_each_fiber_3d
     a = CArray.int32(2, 3, 4).seq!
     seen_lens = []
-    a.each_slab(axis: -1) { |fiber| seen_lens << fiber.dim[0] }
+    a.each_slab(axis: -1) { |fiber| seen_lens << fiber.shape[0] }
     assert_equal [4] * 6, seen_lens   # 2 * 3 outer iters, each fiber length 4
   end
 

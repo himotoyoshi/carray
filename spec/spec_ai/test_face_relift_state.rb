@@ -10,7 +10,7 @@ class TestFaceRelifState < Test::Unit::TestCase
   class TaggedTicks < CAObject
     def initialize (parent, tag: :default)
       @tag = tag
-      super(CA_FIXLEN, parent.dim, bytes: 8, storage: CA_INT64, parent: parent,
+      super(CA_FIXLEN, parent.shape, bytes: 8, storage: CA_INT64, parent: parent,
             face: true, orderable_storage: true)
     end
     attr_reader :tag

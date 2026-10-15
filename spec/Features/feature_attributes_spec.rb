@@ -12,7 +12,7 @@ describe "TestCArrayAttribute " do
     is_asserted_by {  4 == a.ndim }
     is_asserted_by {  CArray.sizeof(CA_INT32) == a.bytes }
     is_asserted_by {  24 == a.elements }
-    is_asserted_by {  [4, 3, 2, 1] == a.dim }
+    is_asserted_by {  [4, 3, 2, 1] == a.shape }
     is_asserted_by {  4 == a.dim0 }
     is_asserted_by {  3 == a.dim1 }
     is_asserted_by {  2 == a.dim2 }

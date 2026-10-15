@@ -61,7 +61,7 @@ describe "TestCArrayOrder " do
                     [3,4,5],
                     [6,7,8]])
     b = a.to_ca
-    b[] = b.sort.reshape(*b.dim)
+    b[] = b.sort.reshape(*b.shape)
     is_asserted_by { s2d == b }
   end
 

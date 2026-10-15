@@ -172,7 +172,7 @@ class TestReshapeStrideRewrite < Test::Unit::TestCase
     a = CArray.float64(2, 3, 4).seq
     r = a.reshape(1, 2, 12)
     assert_equal CAStride, r.class
-    assert_equal [1, 2, 12], r.dim
+    assert_equal [1, 2, 12], r.shape
     assert_equal a.to_a.flatten, r.to_ca.to_a.flatten
   end
 

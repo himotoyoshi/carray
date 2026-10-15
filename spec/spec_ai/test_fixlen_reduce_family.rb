@@ -74,7 +74,7 @@ class TestFixlenReduceFamily < Test::Unit::TestCase
   # ---- per-axis ----------------------------------------------------------
 
   def rows(g)
-    (0...g.dim[0]).map { |i| g[i, nil].copy }
+    (0...g.shape[0]).map { |i| g[i, nil].copy }
   end
 
   def test_per_axis_min_max
@@ -92,7 +92,7 @@ class TestFixlenReduceFamily < Test::Unit::TestCase
   # min over axis 0 keeps axis 1 (columnwise memcmp min).
   def test_per_axis_min_axis0
     g = grid
-    cols = (0...g.dim[1]).map { |j| g[nil, j].copy.min }
+    cols = (0...g.shape[1]).map { |j| g[nil, j].copy.min }
     assert_equal(cols, g.min(axis: 0).to_a)
   end
 

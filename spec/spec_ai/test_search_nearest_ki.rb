@@ -59,7 +59,7 @@ class TestSearchNearestKi < Test::Unit::TestCase
     # row 1 = [10,11,12,13], nearest to 11.4 -> 11 (= dist 0.4)
     # row 2 = [20,21,22,23], nearest to 11.4 -> 20 (= dist 8.6)
     r = c.search_nearest_ki(11.4, 1)
-    assert_equal [3],         r.dim
+    assert_equal [3],         r.shape
     assert_equal [3, 1, 0],   r.to_a
   end
 
@@ -73,7 +73,7 @@ class TestSearchNearestKi < Test::Unit::TestCase
     #   col 2: [2,12,22] -> 12 (dist 3) at row 1; or 2 (dist 7)? 12 wins
     #   col 3: [3,13,23] -> 13 (dist 4) at row 1
     r = c.search_nearest_ki(9.0, 0)
-    assert_equal [4],          r.dim
+    assert_equal [4],          r.shape
     assert_equal [1, 1, 1, 1], r.to_a
   end
 
@@ -137,7 +137,7 @@ class TestSearchNearestKi < Test::Unit::TestCase
     val = CArray.float64(3)
     val[0] = 1.4; val[1] = 11.4; val[2] = 21.4
     r = c.search_nearest_ki(val, 1)
-    assert_equal [3, 3], r.dim
+    assert_equal [3, 3], r.shape
   end
 
   def test_case_b_append
@@ -146,7 +146,7 @@ class TestSearchNearestKi < Test::Unit::TestCase
     val = CArray.float64(2)
     val[0] = 1.4; val[1] = 99.0
     r = c.search_nearest_ki(val, 1)
-    assert_equal [3, 2], r.dim
+    assert_equal [3, 2], r.shape
     # row 0 = [0,1,2,3]: nearest to 1.4 -> 1; to 99 -> 3
     # row 1 = [10,11,12,13]: nearest to 1.4 -> 0 (= 10, dist 8.6); to 99 -> 3 (= 13)
     # row 2 = [20,21,22,23]: nearest to 1.4 -> 0 (= 20, dist 18.6); to 99 -> 3 (= 23)

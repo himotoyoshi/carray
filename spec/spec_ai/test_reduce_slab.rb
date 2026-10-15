@@ -22,14 +22,14 @@ class TestReduceSlabBeta3 < Test::Unit::TestCase
   def test_per_slab_sum_axis_inner
     a = CArray.float64(3, 4).seq!
     r = a.reduce_slab(axis: 1) { |row| row.sum }
-    assert_equal [3],            r.dim.to_a
+    assert_equal [3],            r.shape.to_a
     assert_equal [6.0, 22.0, 38.0], r.to_a
   end
 
   def test_per_slab_sum_axis_outer_SCRATCH
     a = CArray.float64(3, 4).seq!
     r = a.reduce_slab(axis: 0) { |col| col.sum }
-    assert_equal [4],                       r.dim.to_a
+    assert_equal [4],                       r.shape.to_a
     assert_equal [12.0, 15.0, 18.0, 21.0],  r.to_a
   end
 
@@ -42,20 +42,20 @@ class TestReduceSlabBeta3 < Test::Unit::TestCase
   def test_per_slab_3d_axis_inner
     a = CArray.int32(2, 3, 4).seq!
     r = a.reduce_slab(axis: -1) { |row| row.sum }
-    assert_equal [2, 3],                  r.dim.to_a
+    assert_equal [2, 3],                  r.shape.to_a
     assert_equal [[6, 22, 38], [54, 70, 86]], r.to_a
   end
 
   def test_per_slab_3d_axis_middle
     a = CArray.int32(2, 3, 4).seq!
     r = a.reduce_slab(axis: 1) { |fiber| fiber.sum }
-    assert_equal [2, 4], r.dim.to_a
+    assert_equal [2, 4], r.shape.to_a
   end
 
   def test_per_slab_1d_collapses_to_length_one
     a = CArray.float64(5).seq!
     r = a.reduce_slab(axis: 0) { |row| row.sum }
-    assert_equal [1],     r.dim.to_a
+    assert_equal [1],     r.shape.to_a
     assert_equal [10.0],  r.to_a
   end
 
@@ -153,7 +153,7 @@ class TestReduceSlabBeta3 < Test::Unit::TestCase
   def test_non_contig_multi_axis_works_via_own_scratch
     a = CArray.float64(2, 3, 4).seq!
     r = a.reduce_slab(axis: [0, 1]) { |slab| slab.sum }
-    assert_equal [4],                       r.dim.to_a
+    assert_equal [4],                       r.shape.to_a
     assert_equal [60.0, 66.0, 72.0, 78.0],  r.to_a
   end
 

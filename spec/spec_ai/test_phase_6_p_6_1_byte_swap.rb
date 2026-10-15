@@ -133,7 +133,7 @@ class TestPhase6P61ByteSwap < Test::Unit::TestCase
     a = CArray.uint32(4).seq!(0)
     v = CAMonOp.__build__(a, BYTE_SWAP_OP_ID)
     v.fill(0x11223344)
-    a.dim[0].times do |i|
+    a.shape[0].times do |i|
       assert_equal 0x44332211, a[i]
       assert_equal 0x11223344, v[i]
     end

@@ -30,7 +30,7 @@ class TestPhase6P62aMonopCastHelper < Test::Unit::TestCase
     a = CArray.int32(8).seq!(1)
     lazy_result  = a.lazy.sqrt.to_a
     eager_result = a.sqrt.to_a
-    a.dim[0].times do |i|
+    a.shape[0].times do |i|
       assert_in_delta eager_result[i], lazy_result[i], 1e-12,
                       "lazy chain cast+sqrt mismatch at i=#{i}"
     end
@@ -82,7 +82,7 @@ class TestPhase6P62aMonopCastHelper < Test::Unit::TestCase
     a = CArray.float64(n, n).seq!(0.0)
     v = a.as_int32       # CAMonOp(cast)
     sum_axis = v.sum(axis: 1)
-    assert_equal [n], sum_axis.dim
+    assert_equal [n], sum_axis.shape
     # 各 row の sum は予測可能: row i は i*n .. i*n+n-1 の int32 cast sum.
     # (= 各 cell は float64 を int32 cast、行 i の cell は i*n+j as float = i*n+j (整数))
     expected_row_0 = (0...n).sum

@@ -66,7 +66,7 @@ class TestXferStrideTransposedRequest < Test::Unit::TestCase
   # Column-major request over a 2-D view: axes reversed, cells packed in
   # that order.  Returns [request_starts, request_counts, request_steps].
   def column_major_request (view)
-    dim    = view.dim
+    dim    = view.shape
     native = [dim[1], 1]                       # cells per step along each axis
     [[0, 0], [dim[1], dim[0]], [native[1], native[0]]]
   end
@@ -74,7 +74,7 @@ class TestXferStrideTransposedRequest < Test::Unit::TestCase
   # What the view itself says the request selects: walk the request on the
   # view's addresses, read each cell through the view's own indexing.
   def expected_cells (view, starts, counts, steps)
-    dim  = view.dim
+    dim  = view.shape
     base = starts[0] * dim[1] + starts[1]
     out  = []
     counts[0].times do |i|
@@ -91,7 +91,7 @@ class TestXferStrideTransposedRequest < Test::Unit::TestCase
     got = CArray.bench_xfer_stride_region_get(view, starts, counts, steps)
                 .unpack("d*")
     assert_equal(expected_cells(view, starts, counts, steps), got,
-                 "#{label} (#{view.class}, dim=#{view.dim.inspect}) " \
+                 "#{label} (#{view.class}, dim=#{view.shape.inspect}) " \
                  "delivered the wrong cells for a column-major request")
   end
 

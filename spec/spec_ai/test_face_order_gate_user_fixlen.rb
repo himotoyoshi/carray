@@ -23,7 +23,7 @@ class TestFaceOrderGateUserFixlen < Test::Unit::TestCase
 
   class LE16 < CAObject
     def initialize (parent)
-      super(CA_FIXLEN, parent.dim, bytes: 2, parent: parent, face: true)
+      super(CA_FIXLEN, parent.shape, bytes: 2, parent: parent, face: true)
     end
 
     def storage_to_element (raw)

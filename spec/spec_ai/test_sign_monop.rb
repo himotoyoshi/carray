@@ -166,7 +166,7 @@ class TestSignMonop < Test::Unit::TestCase
   def test_2d_shape_preserved
     a = CArray.int32(3, 4) { |i, j| (i * 4 + j) - 6 }
     r = a.sign
-    assert_equal [3, 4], r.dim
+    assert_equal [3, 4], r.shape
     assert_equal CA_INT32, r.data_type
     a.elements.times do |k|
       i, j = k.divmod(4)
@@ -186,7 +186,7 @@ class TestSignMonop < Test::Unit::TestCase
   def test_through_transpose
     a = CArray.cmplx128(2, 2) { |i, j| Complex(i + 1, j + 1) }
     r = a.transpose.sign
-    assert_equal [2, 2], r.dim
+    assert_equal [2, 2], r.shape
     assert_equal CA_CMPLX128, r.data_type
     # |sign(z)| == 1 invariant
     2.times { |i| 2.times { |j| assert_in_delta 1.0, r[i, j].abs, 1e-12 } }

@@ -28,7 +28,7 @@ class TestLazyMonopP11 < Test::Unit::TestCase
     m = a.lazy
     assert_equal CALazyMarker, m.class
     # marker is a transparent pass-through over a
-    assert_equal [5], m.dim
+    assert_equal [5], m.shape
     assert_equal CA_FLOAT64, m.data_type
     assert_equal a.to_a, m.to_ca.to_a
   end
@@ -87,7 +87,7 @@ class TestLazyMonopP11 < Test::Unit::TestCase
     result = nil
     assert_nothing_raised { result = chain.to_ca }
     refute_nil result
-    assert_equal [3], result.dim
+    assert_equal [3], result.shape
   end
 
   def test_eager_fallback_non_lazy

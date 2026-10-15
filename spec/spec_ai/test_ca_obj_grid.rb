@@ -38,7 +38,7 @@ class TestCAGrid < Test::Unit::TestCase
     ci = CArray.int(2).tap { |__a| __a[] = [1, 2] }
     g  = a.grid(ri, ci)
     assert_equal CAGrid, g.class
-    assert_equal [2, 2], g.dim.to_a
+    assert_equal [2, 2], g.shape.to_a
     assert_equal 2, g[0, 0]   # a[0,1]
     assert_equal 3, g[0, 1]   # a[0,2]
     assert_equal 8, g[1, 0]   # a[2,1]

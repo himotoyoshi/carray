@@ -36,7 +36,7 @@ class TestCASelectAxis < Test::Unit::TestCase
     m = CArray.boolean(4).tap { |__a| __a[] = [1, 0, 1, 1] }
     v = a[m, nil]
     assert_equal CASelectAxis, v.class
-    assert_equal [3, 3], v.dim.to_a
+    assert_equal [3, 3], v.shape.to_a
     assert_equal [[0, 1, 2], [6, 7, 8], [9, 10, 11]], v.to_a
   end
 
@@ -45,7 +45,7 @@ class TestCASelectAxis < Test::Unit::TestCase
     m = CArray.boolean(4).tap { |__a| __a[] = [1, 0, 1, 1] }
     v = a[m, 0..1]
     assert_equal CASelectAxis, v.class
-    assert_equal [3, 2], v.dim.to_a
+    assert_equal [3, 2], v.shape.to_a
     assert_equal [[0, 1], [6, 7], [9, 10]], v.to_a
   end
 
@@ -79,7 +79,7 @@ class TestCASelectAxis < Test::Unit::TestCase
     m = CArray.boolean(3).tap { |__a| __a[] = [1, 0, 1] }
     v = a[m, nil, nil]
     assert_equal CASelectAxis, v.class
-    assert_equal [2, 2, 2], v.dim.to_a
+    assert_equal [2, 2, 2], v.shape.to_a
     assert_equal [[[0, 1], [2, 3]], [[8, 9], [10, 11]]], v.to_a
   end
 
@@ -321,7 +321,7 @@ class TestCASelectAxis < Test::Unit::TestCase
     mz = CArray.boolean(4).fill(0)
     v = a[mz, nil]
     assert_equal CASelectAxis, v.class
-    assert_equal [0, 3], v.dim.to_a
+    assert_equal [0, 3], v.shape.to_a
     assert_equal 0, v.elements
   end
 
@@ -330,7 +330,7 @@ class TestCASelectAxis < Test::Unit::TestCase
     ma = CArray.boolean(4).fill(1)
     v = a[ma, nil]
     assert_equal CASelectAxis, v.class
-    assert_equal [4, 3], v.dim.to_a
+    assert_equal [4, 3], v.shape.to_a
     assert_equal a.to_a, v.to_a
   end
 
@@ -339,7 +339,7 @@ class TestCASelectAxis < Test::Unit::TestCase
     m = CArray.boolean(1).tap { |__a| __a[] = [1] }
     v = a[m, nil]
     assert_equal CASelectAxis, v.class
-    assert_equal [1, 3], v.dim.to_a
+    assert_equal [1, 3], v.shape.to_a
     assert_equal [[0, 1, 2]], v.to_a
   end
 
@@ -348,7 +348,7 @@ class TestCASelectAxis < Test::Unit::TestCase
     m = CArray.boolean(4).tap { |__a| __a[] = [1, 0, 1, 0] }
     v = a[m, nil]
     assert_equal CASelectAxis, v.class
-    assert_equal [2, 1], v.dim.to_a
+    assert_equal [2, 1], v.shape.to_a
     assert_equal [[0], [2]], v.to_a
   end
 
@@ -357,7 +357,7 @@ class TestCASelectAxis < Test::Unit::TestCase
     m = CArray.boolean(4).tap { |__a| __a[] = [0, 0, 1, 0] }
     v = a[m, nil]
     assert_equal CASelectAxis, v.class
-    assert_equal [1, 3], v.dim.to_a
+    assert_equal [1, 3], v.shape.to_a
     assert_equal [[6, 7, 8]], v.to_a
   end
 

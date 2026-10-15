@@ -81,7 +81,7 @@ class TestMkKernelTriop < Test::Unit::TestCase
   def test_fma_2d_shape_preserved
     a = CArray.float64(2, 3) { |i, j| i * 3 + j + 1.0 }
     r = a.fma(2.0, 0.5)
-    assert_equal [2, 3], r.dim
+    assert_equal [2, 3], r.shape
     a.elements.times do |k|
       i, j = k.divmod(3)
       assert_in_delta a[i, j] * 2.0 + 0.5, r[i, j], 1e-12
@@ -91,7 +91,7 @@ class TestMkKernelTriop < Test::Unit::TestCase
   def test_fma_through_transpose
     a = CArray.float64(2, 3).seq
     r = a.transpose.fma(2.0, 1.0)
-    assert_equal [3, 2], r.dim
+    assert_equal [3, 2], r.shape
   end
 
   # =================================================================
@@ -199,7 +199,7 @@ class TestMkKernelTriop < Test::Unit::TestCase
   def test_clip_2d
     a = CArray.float64(2, 3) { |i, j| (i * 3 + j) - 2.5 }
     r = a.clip(0.0, 1.5)
-    assert_equal [2, 3], r.dim
+    assert_equal [2, 3], r.shape
     r.elements.times do |k|
       i, j = k.divmod(3)
       v = a[i, j]

@@ -16,7 +16,7 @@ class TestBroadcastImplicit < Test::Unit::TestCase
     a = CArray.int32(3, 1).seq           # (3, 1) -> [[0],[1],[2]]
     b = CArray.int32(3, 4).seq           # (3, 4) -> 0..11
     c = a + b
-    assert_equal [3, 4], c.dim
+    assert_equal [3, 4], c.shape
     # Row i adds i to every column of b's row i
     4.times do |j|
       3.times do |i|
@@ -29,7 +29,7 @@ class TestBroadcastImplicit < Test::Unit::TestCase
     a = CArray.int32(1, 4).seq           # (1, 4) -> [[0,1,2,3]]
     b = CArray.int32(3, 4).seq           # (3, 4)
     c = a + b
-    assert_equal [3, 4], c.dim
+    assert_equal [3, 4], c.shape
     3.times do |i|
       4.times do |j|
         assert_equal j + b[i, j], c[i, j]
@@ -41,7 +41,7 @@ class TestBroadcastImplicit < Test::Unit::TestCase
     a = CArray.int32(3, 1).seq           # column [[0],[1],[2]]
     b = CArray.int32(1, 4).seq           # row    [[0,1,2,3]]
     c = a + b                             # outer sum (3, 4)
-    assert_equal [3, 4], c.dim
+    assert_equal [3, 4], c.shape
     3.times do |i|
       4.times do |j|
         assert_equal i + j, c[i, j]
@@ -68,7 +68,7 @@ class TestBroadcastImplicit < Test::Unit::TestCase
     a = CArray.int32(3, 4).seq
     s = CA_INT32(10)
     c = a + s
-    assert_equal [3, 4], c.dim
+    assert_equal [3, 4], c.shape
     12.times { |k| assert_equal a[k / 4, k % 4] + 10, c[k / 4, k % 4] }
   end
 
@@ -76,7 +76,7 @@ class TestBroadcastImplicit < Test::Unit::TestCase
     a = CArray.int32(3, 4).seq
     b = CArray.int32(3, 4).seq + 1
     c = a + b
-    assert_equal [3, 4], c.dim
+    assert_equal [3, 4], c.shape
     assert_equal a.to_ca + b.to_ca, c
   end
 
@@ -84,7 +84,7 @@ class TestBroadcastImplicit < Test::Unit::TestCase
     a = CArray.int32(1, 1).seq + 5        # [[5]]
     b = CArray.int32(3, 4).seq
     c = a + b
-    assert_equal [3, 4], c.dim
+    assert_equal [3, 4], c.shape
     3.times do |i|
       4.times do |j|
         assert_equal 5 + b[i, j], c[i, j]
@@ -96,7 +96,7 @@ class TestBroadcastImplicit < Test::Unit::TestCase
     a = CArray.float64(3, 1).seq
     b = CArray.float64(1, 4).seq + 1.0
     c = (a + b) * b
-    assert_equal [3, 4], c.dim
+    assert_equal [3, 4], c.shape
     3.times do |i|
       4.times do |j|
         assert_in_delta (i.to_f + (j + 1)) * (j + 1), c[i, j], 1e-12

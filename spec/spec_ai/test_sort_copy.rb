@@ -30,7 +30,7 @@ class TestSortCopy < Test::Unit::TestCase
     s = a.sort_copy(axis: 1)
     # Eager entity, not a CARemap view (= main contrast with `sort`).
     assert_equal CArray, s.class
-    assert_equal [2, 5], s.dim
+    assert_equal [2, 5], s.shape
     assert_equal CA_INT32, s.data_type
   end
 
@@ -48,7 +48,7 @@ class TestSortCopy < Test::Unit::TestCase
   def test_no_arg_flatten
     a = CArray.int32(2, 3) { |i, j| [[3, 1, 4], [1, 5, 9]][i][j] }
     s = a.sort_copy
-    assert_equal [6], s.dim                              # flattened
+    assert_equal [6], s.shape                              # flattened
     assert_equal [1, 1, 3, 4, 5, 9], s.to_a
     # Should match `sort.to_ca` (no-arg) for 1-D parity.
     assert_equal a.sort.to_ca.to_a, s.to_a

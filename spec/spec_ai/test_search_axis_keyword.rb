@@ -127,7 +127,7 @@ class TestSearchAxisKeyword < Test::Unit::TestCase
     val = CArray.float64(3)
     val[0] = 1.0; val[1] = 11.0; val[2] = 21.0
     r = b.search(val, axis: 1)
-    assert_equal [3, 3], r.dim
+    assert_equal [3, 3], r.shape
     assert_equal [[1, UNDEF, UNDEF], [UNDEF, 1, UNDEF], [UNDEF, UNDEF, 1]], r.to_a
   end
 
@@ -139,7 +139,7 @@ class TestSearchAxisKeyword < Test::Unit::TestCase
     val_pf = CArray.float64(3, 1)
     val_pf[0, 0] = 1.0; val_pf[1, 0] = 11.0; val_pf[2, 0] = 21.0
     r = b.search(val_pf, axis: 1)
-    assert_equal [3, 1], r.dim
+    assert_equal [3, 1], r.shape
     assert_equal [[1], [1], [1]], r.to_a
   end
 
@@ -150,6 +150,6 @@ class TestSearchAxisKeyword < Test::Unit::TestCase
     val = CArray.float64(2)
     val[0] = 1.0; val[1] = 99.0
     r = b.search_nearest(val, axis: 1)
-    assert_equal [3, 2], r.dim
+    assert_equal [3, 2], r.shape
   end
 end

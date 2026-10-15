@@ -128,7 +128,7 @@ class TestReduceFaceGate < Test::Unit::TestCase
 
   class NonOrderableNumFace < CAObject
     def initialize (parent)
-      super(CA_INT64, parent.dim, parent: parent, face: true)
+      super(CA_INT64, parent.shape, parent: parent, face: true)
     end
   end
 

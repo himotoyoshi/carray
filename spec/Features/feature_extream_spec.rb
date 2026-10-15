@@ -9,14 +9,14 @@ describe "TestCArrayExtream " do
     a = CArray.int(0)
     is_asserted_by { 1 == a.ndim }
     is_asserted_by { 0 == a.elements }
-    is_asserted_by { [0] == a.dim }
+    is_asserted_by { [0] == a.shape }
     is_asserted_by { 0 == a.dim0 }
 
     # ---
     a = CArray.int(0, 3)
     is_asserted_by { 2 == a.ndim }
     is_asserted_by { 0 == a.elements }
-    is_asserted_by { [0, 3] == a.dim }
+    is_asserted_by { [0, 3] == a.shape }
     is_asserted_by { 0 == a.dim0 }
     is_asserted_by { 3 == a.dim1 }
 
@@ -24,7 +24,7 @@ describe "TestCArrayExtream " do
     a = CArray.int(3, 0)
     is_asserted_by { 2 == a.ndim }
     is_asserted_by { 0 == a.elements }
-    is_asserted_by { [3, 0] == a.dim }
+    is_asserted_by { [3, 0] == a.shape }
     is_asserted_by { 3 == a.dim0 }
     is_asserted_by { 0 == a.dim1 }
   end

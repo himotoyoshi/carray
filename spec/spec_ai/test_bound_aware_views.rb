@@ -264,7 +264,7 @@ class TestBoundAwareViews < Test::Unit::TestCase
     a = CArray.float64(7).seq
     n = 2
     assert_equal a.shift(n).to_a,
-                 a.window(-n..(a.dim[0] - n - 1), bounds: "fill").to_a
+                 a.window(-n..(a.shape[0] - n - 1), bounds: "fill").to_a
   end
 
   # Phase 2 T.6: bounds=>'periodic' removed; the equivalence test no

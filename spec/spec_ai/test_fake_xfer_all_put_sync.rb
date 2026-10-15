@@ -21,7 +21,7 @@ class TestFakeXferAllPutSync < Test::Unit::TestCase
     fake = a[mask].fake(:int32)
     assert_equal 4, fake.elements
 
-    src = CArray.int32(*fake.dim).seq + 100   # [100,101,102,103]
+    src = CArray.int32(*fake.shape).seq + 100   # [100,101,102,103]
     fake[] = src
 
     # Expected: entity cells at masked positions updated to cast-back values.
@@ -33,7 +33,7 @@ class TestFakeXferAllPutSync < Test::Unit::TestCase
     a = CArray.float64(2, 5).seq         # 0..9
     idx = CArray.int32(3).tap { |x| x[] = x.seq }  # [0,1,2]
     grid = a.grid(nil, idx).fake(:int32) # (2, 3) int32 view via CAGrid
-    src = CArray.int32(*grid.dim).tap { |x| x[] = x.seq + 200 }
+    src = CArray.int32(*grid.shape).tap { |x| x[] = x.seq + 200 }
     grid[] = src
     # Entity cols 0..2 of each row should be 200..205 (cast back).
     expected = [[200.0, 201.0, 202.0, 3.0, 4.0],

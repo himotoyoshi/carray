@@ -84,7 +84,7 @@ class TestPercentileMedianAxis < Test::Unit::TestCase
   def test_median_3d_axis_middle
     a = CArray.float64(2, 5, 3).seq
     m = a.median(axis: 1)
-    assert_equal([2, 3], m.dim.to_a)
+    assert_equal([2, 3], m.shape.to_a)
     # Each (i, *, k) fiber has 5 consecutive values (because seq is row-major
     # in (2,5,3), the axis-1 fiber values jump by dim[2]=3 each step)
     # so median is the middle (= 3rd) element

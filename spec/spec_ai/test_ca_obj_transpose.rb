@@ -22,7 +22,7 @@ class TestCATranspose < Test::Unit::TestCase
   end
 
   def test_shape
-    assert_equal [3, 2], @tr.dim.to_a
+    assert_equal [3, 2], @tr.shape.to_a
   end
 
   def test_read
@@ -38,7 +38,7 @@ class TestCATranspose < Test::Unit::TestCase
     b  = CArray.int(2, 3, 4).tap { |i| i[] = i }
     tr = b.transpose(2, 0, 1)   # [4, 2, 3]
     assert_equal CATranspose, tr.class
-    assert_equal [4, 2, 3], tr.dim.to_a
+    assert_equal [4, 2, 3], tr.shape.to_a
   end
 
   def test_roundtrip

@@ -902,7 +902,7 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
   class ScaledInt < CAObject
     def initialize(parent, scale: 100)
       @scale = scale
-      super(CA_FIXLEN, parent.dim, bytes: 8, storage: CA_INT64,
+      super(CA_FIXLEN, parent.shape, bytes: 8, storage: CA_INT64,
             parent: parent, face: true)
     end
     attr_reader :scale

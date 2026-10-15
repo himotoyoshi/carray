@@ -9,7 +9,7 @@ describe "TestCArrayCARefer " do
     a = CArray.int(3,2).seq!
     r = a.reshape(2,3)
     is_asserted_by { a.data_type == r.data_type }
-    is_asserted_by { [2, 3] == r.dim }
+    is_asserted_by { [2, 3] == r.shape }
     is_asserted_by { CA_INT([[0,1,2],
                          [3,4,5]]) == r }
 

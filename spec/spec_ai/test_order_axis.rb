@@ -117,7 +117,7 @@ class TestOrderAxis < Test::Unit::TestCase
       end
     end
     o = a.order(axis: 1)
-    assert_equal([2, 5, 3], o.dim.to_a)
+    assert_equal([2, 5, 3], o.shape.to_a)
     2.times do |i|
       3.times do |k|
         fiber = (0...5).map { |j| a[i, j, k] }

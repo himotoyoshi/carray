@@ -14,25 +14,25 @@ class TestNewaxisSigil < Test::Unit::TestCase
 
   def test_column_vector
     a = CArray.int32(5).seq
-    assert_equal [5, 1], a[nil, :_].dim
+    assert_equal [5, 1], a[nil, :_].shape
   end
 
   def test_row_vector
     a = CArray.int32(5).seq
-    assert_equal [1, 5], a[:_, nil].dim
+    assert_equal [1, 5], a[:_, nil].shape
   end
 
   def test_multiple_newaxis_2d
     a = CArray.int32(3, 4).seq
-    assert_equal [3, 1, 4],    a[nil, :_, nil].dim
-    assert_equal [1, 3, 4, 1], a[:_, nil, nil, :_].dim
-    assert_equal [3, 4, 1, 1], a[nil, nil, :_, :_].dim
+    assert_equal [3, 1, 4],    a[nil, :_, nil].shape
+    assert_equal [1, 3, 4, 1], a[:_, nil, nil, :_].shape
+    assert_equal [3, 4, 1, 1], a[nil, nil, :_, :_].shape
   end
 
   def test_newaxis_with_scalar_axis_dropped
     a = CArray.int32(3, 4).seq
     # axis 0 scalar -> dropped; axis 1 ALL -> kept; :_ -> size-1
-    assert_equal [4, 1], a[2, nil, :_].dim
+    assert_equal [4, 1], a[2, nil, :_].shape
   end
 
   # --- view semantics: zero-copy alias, write propagates ---
@@ -54,7 +54,7 @@ class TestNewaxisSigil < Test::Unit::TestCase
   def test_outer_product_via_newaxis
     a = CArray.int32(4).seq   # [0,1,2,3]
     m = a[nil, :_] * a[:_, nil]
-    assert_equal [4, 4], m.dim
+    assert_equal [4, 4], m.shape
     assert_equal 6, m[2, 3]   # 2*3
   end
 
@@ -62,9 +62,9 @@ class TestNewaxisSigil < Test::Unit::TestCase
 
   def test_all_scalar_newaxis_keeps_only_the_requested_axes
     a = CArray.int32(3, 4).seq
-    assert_equal [1],       a[2, 3, :_].dim
-    assert_equal [1, 1],    a[2, :_, 3, :_].dim
-    assert_equal [1, 1, 1], a[:_, 2, :_, 3, :_].dim
+    assert_equal [1],       a[2, 3, :_].shape
+    assert_equal [1, 1],    a[2, :_, 3, :_].shape
+    assert_equal [1, 1, 1], a[:_, 2, :_, 3, :_].shape
     assert_equal 11, a[2, 3, :_][0]
   end
 
@@ -97,8 +97,8 @@ class TestNewaxisSigil < Test::Unit::TestCase
   def test_all_scalar_newaxis_states_its_rank
     a = CArray.int32(5).seq(1)
     b = CArray.int32(4).seq(1)
-    assert_equal [4],    (a[1, :_] * b).dim            # same ndim, size-1
-    assert_equal [1, 4], (a[1, :_, :_] * b[:_, nil]).dim
+    assert_equal [4],    (a[1, :_] * b).shape            # same ndim, size-1
+    assert_equal [1, 4], (a[1, :_, :_] * b[:_, nil]).shape
     assert_raise(ArgumentError) { a[1, :_] * b[:_, nil] }   # rank 1 vs 2
   end
 
@@ -250,7 +250,7 @@ class TestSlabSigil < Test::Unit::TestCase
   def test_multi_axis_slab
     b = CArray.int32(2, 3, 4).seq
     shapes = []
-    b[nil, :>, :>].each { |s| shapes << s.dim }
+    b[nil, :>, :>].each { |s| shapes << s.shape }
     assert_equal [[3, 4], [3, 4]], shapes
   end
 
@@ -276,16 +276,16 @@ class TestSlabSigil < Test::Unit::TestCase
   def test_scalar_plus_slab
     b = CArray.int32(2, 3, 4).seq   # seq: b[1,0,0] = 1*12 = 12
     got = []
-    b[1, :>, :>].each { |s| got << [s.dim, s[0, 0]] }
+    b[1, :>, :>].each { |s| got << [s.shape, s[0, 0]] }
     assert_equal [[[3, 4], 12]], got
   end
 
   def test_non_trailing_slab
     b = CArray.int32(2, 3, 4).seq
     got = []
-    b[nil, :>, nil].each { |s| got << s.dim }
+    b[nil, :>, nil].each { |s| got << s.shape }
     ref = []
-    b.each_slab(axis: 1) { |s| ref << s.dim }
+    b.each_slab(axis: 1) { |s| ref << s.shape }
     assert_equal ref, got
   end
 
@@ -294,7 +294,7 @@ class TestSlabSigil < Test::Unit::TestCase
   def test_all_axis_slab
     n = 0
     shape = nil
-    @a[:>, :>].each { |s| n += 1; shape = s.dim }
+    @a[:>, :>].each { |s| n += 1; shape = s.shape }
     assert_equal 1, n
     assert_equal [3, 4], shape
   end
@@ -348,9 +348,9 @@ class TestSlabSigil < Test::Unit::TestCase
   def test_rubber_plus_slab_trailing
     a = CArray.int32(2, 3, 4, 5).seq
     got = []
-    a[false, :>, :>].each { |s| got << s.dim }
+    a[false, :>, :>].each { |s| got << s.shape }
     ref = []
-    a.each_slab(axis: [-2, -1]) { |s| ref << s.dim }
+    a.each_slab(axis: [-2, -1]) { |s| ref << s.shape }
     assert_equal ref, got
   end
 

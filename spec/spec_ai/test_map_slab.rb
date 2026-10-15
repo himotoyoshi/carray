@@ -24,7 +24,7 @@ class TestMapSlabBeta2 < Test::Unit::TestCase
     a = CArray.float64(3, 4).seq!
     b = a.map_slab(axis: 1) { |row| row }
     assert_equal a.to_a, b.to_a
-    assert_equal [3, 4], b.dim.to_a
+    assert_equal [3, 4], b.shape.to_a
   end
 
   def test_identity_axis_outer
@@ -226,7 +226,7 @@ class TestMapSlabBeta2 < Test::Unit::TestCase
   def test_block_receives_correct_length
     a = CArray.float64(3, 4).seq!
     seen_lengths = []
-    a.map_slab(axis: 1) { |row| seen_lengths << row.dim[0]; row }
+    a.map_slab(axis: 1) { |row| seen_lengths << row.shape[0]; row }
     assert_equal [4, 4, 4], seen_lengths
   end
 

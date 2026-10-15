@@ -29,7 +29,7 @@ class TestSlabMultiAxisBetaXc < Test::Unit::TestCase
   def test_each_slab_innermost_two_axes_shape_and_ndim
     a = CArray.float64(2, 3, 4).seq!
     seen_dims = []
-    a.each_slab(axis: [1, 2]) { |slab| seen_dims << [slab.ndim, slab.dim.to_a] }
+    a.each_slab(axis: [1, 2]) { |slab| seen_dims << [slab.ndim, slab.shape.to_a] }
     assert_equal [[2, [3, 4]], [2, [3, 4]]], seen_dims
   end
 
@@ -60,7 +60,7 @@ class TestSlabMultiAxisBetaXc < Test::Unit::TestCase
   def test_reduce_slab_per_slab_innermost_two_axes
     a = CArray.float64(2, 3, 4).seq!
     r = a.reduce_slab(axis: [1, 2]) { |slab| slab.sum }
-    assert_equal [2],            r.dim.to_a
+    assert_equal [2],            r.shape.to_a
     assert_equal [66.0, 210.0], r.to_a
   end
 
@@ -73,7 +73,7 @@ class TestSlabMultiAxisBetaXc < Test::Unit::TestCase
   def test_reduce_slab_per_slab_flatten_all_axes_to_length_one
     a = CArray.float64(2, 3, 4).seq!
     r = a.reduce_slab(axis: [0, 1, 2]) { |slab| slab.sum }
-    assert_equal [1],     r.dim.to_a
+    assert_equal [1],     r.shape.to_a
     assert_equal [276.0], r.to_a
   end
 
@@ -81,7 +81,7 @@ class TestSlabMultiAxisBetaXc < Test::Unit::TestCase
     a = CArray.float64(2, 2, 3, 4).seq!
     r = a.reduce_slab(axis: [2, 3]) { |slab| slab.sum }
     # Output shape (2, 2); each slab is shape (3, 4) summed
-    assert_equal [2, 2], r.dim.to_a
+    assert_equal [2, 2], r.shape.to_a
     # First slab a[0,0,:,:] sum = 0..11 → 66
     # Last slab a[1,1,:,:] sum = 36..47 → 498
     assert_equal 66.0,  r[0, 0]

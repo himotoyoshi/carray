@@ -10,7 +10,7 @@ class TestFaceFillValue < Test::Unit::TestCase
   # ORDERABLE, not COMPARABLE, no to_comparable.
   class OrderedTicks < CAObject
     def initialize (parent)
-      super(CA_FIXLEN, parent.dim, bytes: 8, storage: CA_INT64, parent: parent,
+      super(CA_FIXLEN, parent.shape, bytes: 8, storage: CA_INT64, parent: parent,
             face: true, orderable_storage: true)
     end
     def storage_to_element (raw)
@@ -92,7 +92,7 @@ class TestFaceInterpolates < Test::Unit::TestCase
   # A Face that says it interpolates by defining its own linear_fetch.
   class Ticks < CAObject
     def initialize (parent)
-      super(CA_FIXLEN, parent.dim, bytes: 8, storage: CA_INT64, parent: parent,
+      super(CA_FIXLEN, parent.shape, bytes: 8, storage: CA_INT64, parent: parent,
             face: true, orderable_storage: true, comparable_storage: true)
     end
     def storage_to_element (raw)

@@ -94,7 +94,7 @@ class TestCAWindowUnification < Test::Unit::TestCase
     a = CArray.float64(7).seq
     n = 2
     v_shift  = a.shift(n)                                       # = [0,0, 0,1,2,3,4]
-    v_window = a.window(-n..(a.dim[0] - n - 1), bounds: "fill") # = same
+    v_window = a.window(-n..(a.shape[0] - n - 1), bounds: "fill") # = same
     assert_equal v_shift.to_a, v_window.to_a
   end
 
@@ -108,8 +108,8 @@ class TestCAWindowUnification < Test::Unit::TestCase
     s0, s1 = 1, 2
     v_shift = a.shift(s0, s1)
     # Equivalent CAWindow: per-axis start = -s, count = full
-    v_window = a.window(-s0..(a.dim[0] - s0 - 1),
-                        -s1..(a.dim[1] - s1 - 1),
+    v_window = a.window(-s0..(a.shape[0] - s0 - 1),
+                        -s1..(a.shape[1] - s1 - 1),
                         bounds: "fill")
     assert_equal v_shift.to_a, v_window.to_a
   end

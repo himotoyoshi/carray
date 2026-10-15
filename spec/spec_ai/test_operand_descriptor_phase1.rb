@@ -51,7 +51,7 @@ class TestOperandDescriptorPhase1 < Test::Unit::TestCase
 
   def mask_to_idx (m)
     out = []
-    m.dim[0].times { |i| out << i if m[i] }
+    m.shape[0].times { |i| out << i if m[i] }
     out
   end
 

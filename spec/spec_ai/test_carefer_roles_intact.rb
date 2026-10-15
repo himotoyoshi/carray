@@ -23,7 +23,7 @@ class TestCAReferRolesIntact < Test::Unit::TestCase
   def test_role1_reshape_on_entity
     a = CArray.float64(2, 3, 4).seq
     r = a.reshape(6, 4)
-    assert_equal [6, 4], r.dim
+    assert_equal [6, 4], r.shape
     assert_equal a.to_a.flatten, r.to_ca.to_a.flatten
   end
 
@@ -31,7 +31,7 @@ class TestCAReferRolesIntact < Test::Unit::TestCase
     a = CArray.float64(4, 6).seq
     sub = a[1..2, nil]   # contig sub
     r = sub.reshape(2, 6)
-    assert_equal [2, 6], r.dim
+    assert_equal [2, 6], r.shape
     assert_equal sub.to_ca.to_a.flatten, r.to_ca.to_a.flatten
   end
 
@@ -39,7 +39,7 @@ class TestCAReferRolesIntact < Test::Unit::TestCase
     a = CArray.float64(2, 3, 4).seq
     sub = a[nil, 1..2, nil]   # non-contig in axis 1
     r = sub.reshape(2, 8)
-    assert_equal [2, 8], r.dim
+    assert_equal [2, 8], r.shape
     assert_equal sub.to_ca.to_a.flatten, r.to_ca.to_a.flatten
   end
 
@@ -55,14 +55,14 @@ class TestCAReferRolesIntact < Test::Unit::TestCase
   def test_role2_flatten_on_entity
     a = CArray.float64(2, 3, 4).seq
     f = a.flatten
-    assert_equal [24], f.dim
+    assert_equal [24], f.shape
     assert_equal (0..23).map(&:to_f), f.to_a
   end
 
   def test_role2_flatten_on_block
     a = CArray.float64(2, 3, 4).seq
     f = a[nil, 1..2, nil].flatten
-    assert_equal [16], f.dim
+    assert_equal [16], f.shape
     assert_equal a[nil, 1..2, nil].to_ca.to_a.flatten, f.to_a
   end
 
@@ -81,7 +81,7 @@ class TestCAReferRolesIntact < Test::Unit::TestCase
     a = CArray.int32(4, 5).seq
     r = a.refer(:int32, [5, 4])
     assert_equal "CARefer", r.class.name
-    assert_equal [5, 4], r.dim
+    assert_equal [5, 4], r.shape
     assert_equal a.to_a.flatten, r.to_a.flatten
   end
 
@@ -90,7 +90,7 @@ class TestCAReferRolesIntact < Test::Unit::TestCase
     a = CArray.int32(2, 3).seq
     r = a.refer(:int8, [2, 12])   # 4-byte int32 -> 4 int8 per element
     assert_equal "CARefer", r.class.name
-    assert_equal [2, 12], r.dim
+    assert_equal [2, 12], r.shape
     # value at position [i, 4*j+0] should be low byte of a[i,j] (little-endian assumed)
     # Just check round-trip via byte length
     assert_equal a.elements * 4, r.elements
@@ -101,7 +101,7 @@ class TestCAReferRolesIntact < Test::Unit::TestCase
     a = CArray.int8(2, 12).seq
     r = a.refer(:int32, [2, 3])
     assert_equal "CARefer", r.class.name
-    assert_equal [2, 3], r.dim
+    assert_equal [2, 3], r.shape
     assert_equal 6, r.elements
   end
 
@@ -308,14 +308,14 @@ class TestCAReferRolesIntact < Test::Unit::TestCase
   def test_combined_chained_reshape
     a = CArray.float64(2, 3, 4).seq
     r = a.reshape(6, 4).reshape(3, 8)
-    assert_equal [3, 8], r.dim
+    assert_equal [3, 8], r.shape
     assert_equal a.to_a.flatten, r.to_ca.to_a.flatten
   end
 
   def test_combined_reshape_then_block
     a = CArray.float64(2, 3, 4).seq
     sub = a.reshape(6, 4)[1..3, nil]
-    assert_equal [3, 4], sub.dim
+    assert_equal [3, 4], sub.shape
     expected = a.to_a.flatten[4...16]
     assert_equal expected, sub.to_ca.to_a.flatten
   end

@@ -12,7 +12,7 @@ class TestFaceNumericRefusalNames < Test::Unit::TestCase
 
   class Plain < CAObject
     def initialize(parent)
-      super(parent.data_type, parent.dim, parent: parent, face: true)
+      super(parent.data_type, parent.shape, parent: parent, face: true)
     end
   end
 
@@ -57,7 +57,7 @@ class TestFaceNumericRefusalNames < Test::Unit::TestCase
 
   def test_a_numeric_face_still_computes
     n = Class.new(CAObject) do
-      def initialize(p) = super(p.data_type, p.dim, parent: p, face: true, numeric: true)
+      def initialize(p) = super(p.data_type, p.shape, parent: p, face: true, numeric: true)
     end.new(CA_FLOAT64([1.0, 4.0]))
     assert_equal [1.0, 2.0], n.sqrt.to_a
     assert_equal 5.0, n.sum

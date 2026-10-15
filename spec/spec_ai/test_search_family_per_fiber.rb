@@ -25,21 +25,21 @@ class TestSearchFamilyPerFiber < Test::Unit::TestCase
   def test_A1_scalar_linear_fetch_innermost
     self_3d = CArray.float64(4, 5, 6) { |i, j, k| k.to_f }
     r = self_3d.linear_fetch(2.5, axis: -1)
-    assert_equal [4, 5], r.dim
+    assert_equal [4, 5], r.shape
     assert_in_delta 2.5, r[0, 0], 1e-12
   end
 
   def test_A1_scalar_linear_section_mid_axis
     self_3d = CArray.float64(4, 5, 6) { |i, j, k| j.to_f }
     r = self_3d.linear_section(2.5, axis: 1)
-    assert_equal [4, 6], r.dim
+    assert_equal [4, 6], r.shape
     assert_in_delta 2.5, r[0, 0], 1e-12
   end
 
   def test_A1_zerodim_carray_search
     self_3d = CArray.float64(3, 4) { |i, j| (i * 10 + j).to_f }
     r = self_3d.search(CA_FLOAT64(11.0), axis: 1)
-    assert_equal [3], r.dim
+    assert_equal [3], r.shape
   end
 
   # ----------------------------------------------------------------
@@ -50,7 +50,7 @@ class TestSearchFamilyPerFiber < Test::Unit::TestCase
     self_3d = CArray.float64(4, 5, 6) { |i, j, k| k.to_f }
     val = CArray.float64(3) { |i| [1.5, 3.0, 4.5][i] }
     r = self_3d.linear_section(val, axis: -1)
-    assert_equal [4, 5, 3], r.dim
+    assert_equal [4, 5, 3], r.shape
   end
 
   def test_A2_1d_shared_search_M_not_equal_target
@@ -59,7 +59,7 @@ class TestSearchFamilyPerFiber < Test::Unit::TestCase
     b = CArray.float64(3, 4) { |i, j| (i * 10 + j).to_f }
     val = CArray.float64(2) { |i| [1.0, 99.0][i] }
     r = b.search_nearest(val, axis: 1)
-    assert_equal [3, 2], r.dim
+    assert_equal [3, 2], r.shape
   end
 
   # ----------------------------------------------------------------
@@ -73,7 +73,7 @@ class TestSearchFamilyPerFiber < Test::Unit::TestCase
     self_3d = CArray.float64(4, 5, 6) { |i, j, k| k.to_f }
     val = CArray.float64(4, 5) { |i, j| ((i + j) % 6).to_f }
     r = self_3d.linear_fetch(val, axis: -1)
-    assert_equal [4, 5], r.dim
+    assert_equal [4, 5], r.shape
     4.times do |i|
       5.times do |j|
         assert_in_delta ((i + j) % 6).to_f, r[i, j], 1e-12,
@@ -87,7 +87,7 @@ class TestSearchFamilyPerFiber < Test::Unit::TestCase
     self_3d = CArray.float64(4, 5, 6) { |i, j, k| j.to_f }
     val = CArray.float64(4, 6) { |i, k| 2.5 }
     r = self_3d.linear_fetch(val, axis: 1)
-    assert_equal [4, 6], r.dim
+    assert_equal [4, 6], r.shape
   end
 
   def test_A25_per_fiber_scalar_2d_self_via_explicit_reshape
@@ -96,11 +96,11 @@ class TestSearchFamilyPerFiber < Test::Unit::TestCase
     b = CArray.float64(3, 4) { |i, j| (i * 10 + j).to_f }
     val_pf = CArray.float64(3, 1) { |i, _| [1.0, 11.0, 21.0][i] }   # A3 with M=1
     r = b.search(val_pf, axis: 1)
-    assert_equal [3, 1], r.dim
+    assert_equal [3, 1], r.shape
     assert_equal [[1], [1], [1]], r.to_a
     # squeeze で [N] にできる:
     r_flat = r.flatten
-    assert_equal [3], r_flat.dim
+    assert_equal [3], r_flat.shape
     assert_equal [1, 1, 1], r_flat.to_a
   end
 
@@ -113,7 +113,7 @@ class TestSearchFamilyPerFiber < Test::Unit::TestCase
     self_3d = CArray.float64(4, 5, 6) { |i, j, k| k.to_f }
     val = CArray.float64(4, 5, 3) { |i, j, m| (m * 2 + 0.5).to_f }
     r = self_3d.linear_fetch(val, axis: -1)
-    assert_equal [4, 5, 3], r.dim
+    assert_equal [4, 5, 3], r.shape
     4.times do |i|
       5.times do |j|
         3.times do |m|
@@ -129,7 +129,7 @@ class TestSearchFamilyPerFiber < Test::Unit::TestCase
     self_3d = CArray.float64(4, 5, 6) { |i, j, k| j.to_f }
     val = CArray.float64(4, 7, 6) { |i, m, k| (m * 0.5).to_f }
     r = self_3d.linear_fetch(val, axis: 1)
-    assert_equal [4, 7, 6], r.dim
+    assert_equal [4, 7, 6], r.shape
   end
 
   def test_A3_per_fiber_M_query_2d
@@ -137,7 +137,7 @@ class TestSearchFamilyPerFiber < Test::Unit::TestCase
     b = CArray.float64(3, 4) { |i, j| j.to_f }
     val = CArray.float64(3, 5) { |i, m| m * 0.5 }
     r = b.linear_fetch(val, axis: 1)
-    assert_equal [3, 5], r.dim
+    assert_equal [3, 5], r.shape
   end
 
   def test_A3_per_fiber_M_query_search_family
@@ -145,7 +145,7 @@ class TestSearchFamilyPerFiber < Test::Unit::TestCase
     self_3d = CArray.float64(3, 4, 5) { |i, j, k| (i * 100 + j * 10 + k).to_f }
     val = CArray.float64(3, 4, 2) { |i, j, m| (i * 100 + j * 10 + m).to_f }
     r = self_3d.bsearch(val, axis: -1)
-    assert_equal [3, 4, 2], r.dim
+    assert_equal [3, 4, 2], r.shape
     3.times { |i| 4.times { |j| 2.times { |m|
       assert_equal m, r[i, j, m]
     }}}
@@ -228,7 +228,7 @@ class TestSearchFamilyPerFiber < Test::Unit::TestCase
     b = CArray.float64(3, 4) { |i, j| (i * 10 + j).to_f }
     val = CArray.float64(3) { |i| (i * 10).to_f }
     r = b.search(val, axis: 1)
-    assert_equal [3, 3], r.dim   # A2 shared (rev5)
+    assert_equal [3, 3], r.shape   # A2 shared (rev5)
     # S1: no-match -> UNDEF
     # b[0]=[0,1,2,3] vs query [0, 10, 20] -> [0, x, x]
     # b[1]=[10,11,12,13] vs query [0, 10, 20] -> [x, 0, x]
@@ -241,7 +241,7 @@ class TestSearchFamilyPerFiber < Test::Unit::TestCase
     b = CArray.float64(3, 4) { |i, j| (i * 10 + j).to_f }
     val = CArray.float64(2) { |i| [1.0, 99.0][i] }
     r = b.search_nearest(val, axis: 1)
-    assert_equal [3, 2], r.dim   # A2 (shared M=2)
+    assert_equal [3, 2], r.shape   # A2 (shared M=2)
   end
 
   # ----------------------------------------------------------------
@@ -253,7 +253,7 @@ class TestSearchFamilyPerFiber < Test::Unit::TestCase
     self_1d = CArray.float64(6).seq!(0.0, 1.0)
     val = CArray.float64(3) { |i| [1.5, 3.0, 4.5][i] }
     r = self_1d.linear_fetch(val, axis: 0)
-    assert_equal [3], r.dim
+    assert_equal [3], r.shape
   end
 
   # ----------------------------------------------------------------
@@ -265,6 +265,6 @@ class TestSearchFamilyPerFiber < Test::Unit::TestCase
     self_3d_view = self_4d[0..3, nil, nil]   # CABlock view shape [4, 5, 6]
     val = CArray.float64(4, 5, 3) { |i, j, m| m.to_f }
     r = self_3d_view.linear_fetch(val, axis: -1)
-    assert_equal [4, 5, 3], r.dim
+    assert_equal [4, 5, 3], r.shape
   end
 end

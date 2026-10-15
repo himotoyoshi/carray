@@ -23,20 +23,20 @@ class TestInsertAxis < Test::Unit::TestCase
   def test_insert_head
     a = CArray.int32(2, 3).seq!
     v = a.insert_axis(0)
-    assert_equal [1, 2, 3], v.dim
+    assert_equal [1, 2, 3], v.shape
     assert_equal 3, v.ndim
   end
 
   def test_insert_tail
     a = CArray.int32(2, 3).seq!
     v = a.insert_axis(-1)
-    assert_equal [2, 3, 1], v.dim
+    assert_equal [2, 3, 1], v.shape
   end
 
   def test_insert_middle
     a = CArray.int32(2, 3).seq!
     v = a.insert_axis(1)
-    assert_equal [2, 1, 3], v.dim
+    assert_equal [2, 1, 3], v.shape
   end
 
   def test_insert_zero_arg_raises
@@ -51,35 +51,35 @@ class TestInsertAxis < Test::Unit::TestCase
     a = CArray.int32(2, 3).seq!
     # before axis 0 and at the end (gap 2 == -1)
     v = a.insert_axis(0, -1)
-    assert_equal [1, 2, 3, 1], v.dim
+    assert_equal [1, 2, 3, 1], v.shape
   end
 
   def test_insert_two_axes_middle_and_tail
     a = CArray.int32(2, 3).seq!
     # before axis 1 and at the end (gap 2)
     v = a.insert_axis(1, 2)
-    assert_equal [2, 1, 3, 1], v.dim
+    assert_equal [2, 1, 3, 1], v.shape
   end
 
   def test_insert_three_axes
     a = CArray.int32(2, 3).seq!
     # before each source axis and at the end -> [1, 2, 1, 3, 1]
     v = a.insert_axis(0, 1, 2)
-    assert_equal [1, 2, 1, 3, 1], v.dim
+    assert_equal [1, 2, 1, 3, 1], v.shape
   end
 
   def test_insert_stacked_at_one_gap
     a = CArray.int32(2, 3).seq!
     # two axes before axis 0 (duplicate position = stack)
     v = a.insert_axis(0, 0)
-    assert_equal [1, 1, 2, 3], v.dim
+    assert_equal [1, 1, 2, 3], v.shape
   end
 
   def test_insert_two_negative_axes
     a = CArray.int32(2, 3).seq!
     # -1 -> gap 2 (end), -2 -> gap 1 (before last axis) -> [2, 1, 3, 1]
     v = a.insert_axis(-1, -2)
-    assert_equal [2, 1, 3, 1], v.dim
+    assert_equal [2, 1, 3, 1], v.shape
   end
 
   # ---- semantics: zero-copy + data preservation -------------------------
@@ -117,7 +117,7 @@ class TestInsertAxis < Test::Unit::TestCase
     bcasted  = col_sums.insert_axis(1)   # shape [2, 1]
     # bcasted broadcasts cleanly against a: a - bcasted is shape [2, 4]
     centered = a - bcasted
-    assert_equal [2, 4], centered.dim
+    assert_equal [2, 4], centered.shape
   end
 
 end

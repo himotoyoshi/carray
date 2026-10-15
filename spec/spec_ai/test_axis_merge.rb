@@ -28,7 +28,7 @@ class TestAxisMergeBehavior < Test::Unit::TestCase
     view = a[nil, 5..14, nil]
     # Expected: each "row" of inner 100 elements is contig in entity
     mat = view.to_ca
-    assert_equal [20, 10, 10], mat.dim
+    assert_equal [20, 10, 10], mat.shape
     assert_equal view.elements, mat.elements
     # Spot check a few cells
     assert_equal a[0, 5, 0], mat[0, 0, 0]
@@ -103,7 +103,7 @@ class TestAxisMergeBehavior < Test::Unit::TestCase
     a = CArray.float64(10, 20).seq
     view = a[(0..-1).step(2), nil]
     mat = view.to_ca
-    assert_equal 5, view.dim[0]
+    assert_equal 5, view.shape[0]
     expected = [0, 2, 4, 6, 8].flat_map { |i| (i*20...(i+1)*20).map(&:to_f) }
     assert_equal expected, mat.to_a.flatten
   end
@@ -112,7 +112,7 @@ class TestAxisMergeBehavior < Test::Unit::TestCase
     a = CArray.float64(10, 20).seq
     view = a[nil, 5..9]
     mat = view.to_ca
-    assert_equal [10, 5], view.dim
+    assert_equal [10, 5], view.shape
     expected = (0..9).flat_map { |i| (5..9).map { |j| i*20 + j }.map(&:to_f) }
     assert_equal expected, mat.to_a.flatten
   end
@@ -121,7 +121,7 @@ class TestAxisMergeBehavior < Test::Unit::TestCase
     a = CArray.float64(5, 7).seq
     t = a.transpose
     mat = t.to_ca
-    assert_equal [7, 5], t.dim
+    assert_equal [7, 5], t.shape
     (0..6).each do |i|
       (0..4).each do |j|
         assert_equal a[j, i], mat[i, j]
@@ -142,7 +142,7 @@ class TestAxisMergeBehavior < Test::Unit::TestCase
     a = CArray.float64(4, 1, 5).seq
     view = a[nil, nil, 1..3]   # dim (4, 1, 3)
     mat = view.to_ca
-    assert_equal [4, 1, 3], mat.dim
+    assert_equal [4, 1, 3], mat.shape
     (0..3).each do |i|
       (1..3).each do |j|
         assert_equal a[i, 0, j], mat[i, 0, j-1]
@@ -155,7 +155,7 @@ class TestAxisMergeBehavior < Test::Unit::TestCase
     a = CArray.int(1, 4).tap { |__a| __a[] = [10, 20, 30, 40] }
     rep = a.broadcast_to(3, 4)
     mat = rep.to_ca
-    assert_equal [3, 4], mat.dim
+    assert_equal [3, 4], mat.shape
     (0..2).each do |i|
       assert_equal [10, 20, 30, 40], mat[i, nil].to_a
     end
@@ -225,7 +225,7 @@ class TestAxisMergeBehavior < Test::Unit::TestCase
     outer = a[2..7, nil]      # (6, 20)
     inner = outer[1..4, 5..14]  # (4, 10)
     mat = inner.to_ca
-    assert_equal [4, 10], mat.dim
+    assert_equal [4, 10], mat.shape
     (0..3).each do |i|
       (0..9).each do |j|
         assert_equal a[3 + i, 5 + j], mat[i, j]
@@ -241,7 +241,7 @@ class TestAxisMergeBehavior < Test::Unit::TestCase
     view = a[nil, 5..14, nil]
     flat = view.reshape(200, 10)   # representable: inner 100 axis
     mat = flat.to_ca
-    assert_equal [200, 10], mat.dim
+    assert_equal [200, 10], mat.shape
     assert_equal view.elements, mat.elements
     # Verify first row corresponds to a[0, 5, *]
     assert_equal a[0, 5, nil].to_a, mat[0, nil].to_a

@@ -14,25 +14,25 @@ class TestReshapeMinusOnePlaceholder < Test::Unit::TestCase
   def test_minus_one_at_end
     a = CArray.int32(2, 6).seq
     b = a.reshape(3, -1)
-    assert_equal [3, 4], b.dim.to_a
+    assert_equal [3, 4], b.shape.to_a
   end
 
   def test_minus_one_at_start
     a = CArray.int32(2, 6).seq
     b = a.reshape(-1, 4)
-    assert_equal [3, 4], b.dim.to_a
+    assert_equal [3, 4], b.shape.to_a
   end
 
   def test_minus_one_middle_three_dim
     a = CArray.int32(2, 3, 4).seq
     b = a.reshape(2, -1, 4)
-    assert_equal [2, 3, 4], b.dim.to_a
+    assert_equal [2, 3, 4], b.shape.to_a
   end
 
   def test_flatten_via_minus_one
     a = CArray.int32(2, 3, 4).seq
     b = a.reshape(-1)
-    assert_equal [24], b.dim.to_a
+    assert_equal [24], b.shape.to_a
     assert_equal a.to_a.flatten, b.to_a
   end
 
@@ -40,7 +40,7 @@ class TestReshapeMinusOnePlaceholder < Test::Unit::TestCase
     a = CArray.int32(3, 4, 5).seq
     b = a.reshape(nil, -1)
     # nil mirrors source axis 0 (=3), -1 absorbs the rest (4*5=20).
-    assert_equal [3, 20], b.dim.to_a
+    assert_equal [3, 20], b.shape.to_a
   end
 
   # ---- errors ----

@@ -31,7 +31,7 @@ class TestSortAxis < Test::Unit::TestCase
     end
     s = a.sort
     assert_equal(CARemap, s.class)
-    assert_equal([9], s.dim.to_a)
+    assert_equal([9], s.shape.to_a)
     assert_equal([0,1,2,3,4,5,6,7,8], s.to_a)
   end
 
@@ -49,8 +49,8 @@ class TestSortAxis < Test::Unit::TestCase
       row.each_with_index { |v, j| a[i, j] = v }
     end
     # Flatten-then-sort + reshape back to original
-    reshaped = a.sort.reshape(*a.dim)
-    assert_equal([2, 3], reshaped.dim.to_a)
+    reshaped = a.sort.reshape(*a.shape)
+    assert_equal([2, 3], reshaped.shape.to_a)
     assert_equal([[1, 2, 3], [4, 5, 6]], reshaped.to_a)
   end
 
@@ -63,7 +63,7 @@ class TestSortAxis < Test::Unit::TestCase
     end
     s = a.sort(axis: 0)
     assert_equal(CARemap, s.class)
-    assert_equal([3, 3], s.dim.to_a)
+    assert_equal([3, 3], s.shape.to_a)
     # Per column:
     #   col 0 = [5,0,8] sorted = [0,5,8]
     #   col 1 = [4,1,7] sorted = [1,4,7]
@@ -77,7 +77,7 @@ class TestSortAxis < Test::Unit::TestCase
       row.each_with_index { |v, j| a[i, j] = v }
     end
     s = a.sort(axis: 1)
-    assert_equal([3, 3], s.dim.to_a)
+    assert_equal([3, 3], s.shape.to_a)
     assert_equal([[3, 4, 5], [0, 1, 2], [6, 7, 8]], s.to_a)
   end
 
@@ -93,12 +93,12 @@ class TestSortAxis < Test::Unit::TestCase
   def test_3d_axis_middle
     a = CArray.int32(2, 3, 2).seq
     s = a.sort(axis: 1)
-    assert_equal([2, 3, 2], s.dim.to_a)
+    assert_equal([2, 3, 2], s.shape.to_a)
     # Per-(i, *, k) fiber along axis 1: a has seq values so already sorted
-    a.dim[0].times do |i|
-      a.dim[2].times do |k|
-        fiber_orig = (0...a.dim[1]).map { |j| a[i, j, k] }
-        fiber_sort = (0...a.dim[1]).map { |j| s[i, j, k] }
+    a.shape[0].times do |i|
+      a.shape[2].times do |k|
+        fiber_orig = (0...a.shape[1]).map { |j| a[i, j, k] }
+        fiber_sort = (0...a.shape[1]).map { |j| s[i, j, k] }
         assert_equal(fiber_orig.sort, fiber_sort,
                      "fiber (i=#{i}, k=#{k}): orig=#{fiber_orig}")
       end
@@ -113,7 +113,7 @@ class TestSortAxis < Test::Unit::TestCase
       row.each_with_index { |v, j| b[i, j] = v }
     end
     # Canonical idiom: ca[] = ca.sort.reshape(*ca.dim)
-    b[] = b.sort.reshape(*b.dim)
+    b[] = b.sort.reshape(*b.shape)
     assert_equal([[0, 1, 2], [3, 4, 5], [6, 7, 8]], b.to_a)
   end
 
@@ -186,10 +186,10 @@ class TestSortAxis < Test::Unit::TestCase
     a = CArray.int32(3, 4).seq
     tv = a.transpose                # shape (4, 3)
     s = tv.sort(axis: 0)             # sort each column of transposed view
-    assert_equal([4, 3], s.dim.to_a)
-    s.dim[1].times do |j|
-      column = (0...s.dim[0]).map { |i| tv[i, j] }
-      assert_equal(column.sort, (0...s.dim[0]).map { |i| s[i, j] },
+    assert_equal([4, 3], s.shape.to_a)
+    s.shape[1].times do |j|
+      column = (0...s.shape[0]).map { |i| tv[i, j] }
+      assert_equal(column.sort, (0...s.shape[0]).map { |i| s[i, j] },
                    "column j=#{j}: tv values=#{column}")
     end
   end
@@ -198,10 +198,10 @@ class TestSortAxis < Test::Unit::TestCase
     a = CArray.int32(10, 10).seq
     bv = a[3..7, 2..6]               # shape (5, 5)
     s = bv.sort(axis: 1)
-    assert_equal([5, 5], s.dim.to_a)
-    bv.dim[0].times do |i|
-      row = (0...bv.dim[1]).map { |j| bv[i, j] }
-      assert_equal(row.sort, (0...bv.dim[1]).map { |j| s[i, j] },
+    assert_equal([5, 5], s.shape.to_a)
+    bv.shape[0].times do |i|
+      row = (0...bv.shape[1]).map { |j| bv[i, j] }
+      assert_equal(row.sort, (0...bv.shape[1]).map { |j| s[i, j] },
                    "row i=#{i}: bv values=#{row}")
     end
   end

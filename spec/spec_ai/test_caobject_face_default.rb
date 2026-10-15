@@ -11,14 +11,14 @@ class TestCAObjectFaceDefault < Test::Unit::TestCase
 
   class Plain < CAObject
     def initialize(parent, **opts)
-      super(parent.data_type, parent.dim, bytes: parent.bytes, parent: parent,
+      super(parent.data_type, parent.shape, bytes: parent.bytes, parent: parent,
             face: true, **opts)
     end
   end
 
   class Doubled < CAObject
     def initialize(parent)
-      super(parent.data_type, parent.dim, parent: parent, face: true)
+      super(parent.data_type, parent.shape, parent: parent, face: true)
     end
     def storage_to_element(raw)
       [raw.class, raw * 2]

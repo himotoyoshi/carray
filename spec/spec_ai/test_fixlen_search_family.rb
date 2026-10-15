@@ -108,7 +108,7 @@ class TestFixlenSearchFamily < Test::Unit::TestCase
     g = grid_sorted
     q = CA_FIXLEN(%w[bee xyz], bytes: 3)
     r = g.bsearch(q, axis: 1)
-    assert_equal [2, 2], r.dim
+    assert_equal [2, 2], r.shape
     # row0 [ant,bee,cat] vs [bee,xyz] -> [1, x]; row1 [dog,elk,fig] -> [x, x]
     assert_equal [[1, UNDEF], [UNDEF, UNDEF]], r.to_a
     assert_equal [[false, true], [true, true]],             r.is_masked.to_a
@@ -119,7 +119,7 @@ class TestFixlenSearchFamily < Test::Unit::TestCase
     g = grid_sorted
     q = CA_FIXLEN(%w[ant cat  elk zzz], bytes: 3).reshape(2, 2)
     r = g.bsearch(q, axis: 1)
-    assert_equal [2, 2], r.dim
+    assert_equal [2, 2], r.shape
     # row0 vs [ant,cat] -> [0,2]; row1 [dog,elk,fig] vs [elk,zzz] -> [1, x]
     assert_equal [[0, 2], [1, UNDEF]], r.to_a
   end

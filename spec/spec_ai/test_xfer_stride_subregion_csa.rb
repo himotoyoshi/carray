@@ -57,7 +57,7 @@ class TestXferStrideSubregionCSA < Test::Unit::TestCase
   # sub-region GET: byte parity vs cell-by-cell expected
   def test_subregion_axis0_interior_byte_parity
     view = @entity[@mask, nil, nil]
-    vd = view.dim
+    vd = view.shape
     starts = [1, 2, 3]; counts = [2, 5, 4]
     actual = CArray.bench_xfer_stride_subregion_get(view, starts, counts, 1)
     expected = expected_subregion(view, starts, counts)
@@ -82,7 +82,7 @@ class TestXferStrideSubregionCSA < Test::Unit::TestCase
 
   def test_subregion_edge_axis0
     view = @entity[@mask, nil, nil]
-    starts = [0, 0, 0]; counts = [view.dim[0]/2, @n/2, @n/2]
+    starts = [0, 0, 0]; counts = [view.shape[0]/2, @n/2, @n/2]
     actual = CArray.bench_xfer_stride_subregion_get(view, starts, counts, 1)
     expected = expected_subregion(view, starts, counts)
     assert_equal expected.dump_binary, actual

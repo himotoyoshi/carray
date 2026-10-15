@@ -30,14 +30,14 @@ class TestCATile < Test::Unit::TestCase
   def test_shape_1d
     a = CArray.int32(5).seq
     v = a.tile(3)
-    assert_equal [15], v.dim
+    assert_equal [15], v.shape
     assert_equal 15, v.elements
   end
 
   def test_shape_2d
     a = CArray.int32(2, 3).seq
     v = a.tile(2, 4)
-    assert_equal [4, 12], v.dim
+    assert_equal [4, 12], v.shape
     assert_equal 48, v.elements
   end
 
@@ -48,25 +48,25 @@ class TestCATile < Test::Unit::TestCase
   def test_multi_arg_1d
     a = CArray.int32(5).seq
     v = a.tile(2)
-    assert_equal [10], v.dim
+    assert_equal [10], v.shape
   end
 
   def test_multi_arg_2d
     a = CArray.int32(2, 3).seq
     v = a.tile(3, 2)
-    assert_equal [6, 6], v.dim
+    assert_equal [6, 6], v.shape
   end
 
   def test_array_arg_1d
     a = CArray.int32(5).seq
     v = a.tile([3])
-    assert_equal [15], v.dim
+    assert_equal [15], v.shape
   end
 
   def test_array_arg_2d
     a = CArray.int32(2, 3).seq
     v = a.tile([3, 2])
-    assert_equal [6, 6], v.dim
+    assert_equal [6, 6], v.shape
   end
 
   def test_multi_arg_and_array_equivalent

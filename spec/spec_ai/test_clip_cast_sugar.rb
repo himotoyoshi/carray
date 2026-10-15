@@ -185,7 +185,7 @@ class TestClipCastSugar < Test::Unit::TestCase
   def test_shape_preserved_for_ndim_2
     a = CArray.float64(2, 3) { |i, j| (i * 3 + j) * 100.0 - 200.0 }
     out = a.clip_uint8
-    assert_equal [2, 3], out.dim.to_a
+    assert_equal [2, 3], out.shape.to_a
     assert_equal CA_UINT8, out.data_type
   end
 

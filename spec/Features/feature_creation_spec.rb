@@ -9,19 +9,19 @@ describe "TestCArrayCreation " do
     ca = CArray.new(CA_UINT8, [3, 2, 1]) 
     is_asserted_by { ca.class == CArray }
     is_asserted_by { CA_UINT8 == ca.data_type }
-    is_asserted_by { [3, 2, 1] == ca.dim }
+    is_asserted_by { [3, 2, 1] == ca.shape }
 
     # ---
     ca = CArray.new(:uint8, [3, 2, 1]) 
     is_asserted_by { ca.class == CArray }
     is_asserted_by { CA_UINT8 == ca.data_type }
-    is_asserted_by { [3, 2, 1] == ca.dim }
+    is_asserted_by { [3, 2, 1] == ca.shape }
 
     # ---
     ca = CArray.uint8(3, 2, 1) 
     is_asserted_by { ca.class == CArray }
     is_asserted_by { CA_UINT8 == ca.data_type }
-    is_asserted_by { [3, 2, 1] == ca.dim }
+    is_asserted_by { [3, 2, 1] == ca.shape }
   end
 
   example "s_new_fixlen" do
@@ -30,21 +30,21 @@ describe "TestCArrayCreation " do
     is_asserted_by { ca.class == CArray }
     is_asserted_by { CA_FIXLEN == ca.data_type }
     is_asserted_by { 10 == ca.bytes }
-    is_asserted_by { [3, 2, 1] == ca.dim }
+    is_asserted_by { [3, 2, 1] == ca.shape }
 
     # ---
     ca = CArray.new(:fixlen, [3, 2, 1], :bytes=>10) 
     is_asserted_by { ca.class == CArray }
     is_asserted_by { CA_FIXLEN == ca.data_type }
     is_asserted_by { 10 == ca.bytes }
-    is_asserted_by { [3, 2, 1] == ca.dim }
+    is_asserted_by { [3, 2, 1] == ca.shape }
 
     # ---
     ca = CArray.fixlen(3, 2, 1, :bytes=>10) 
     is_asserted_by { ca.class == CArray }
     is_asserted_by { CA_FIXLEN == ca.data_type }
     is_asserted_by { 10 == ca.bytes }
-    is_asserted_by { [3, 2, 1] == ca.dim }
+    is_asserted_by { [3, 2, 1] == ca.shape }
   end
 
   example "s_new_various_types" do

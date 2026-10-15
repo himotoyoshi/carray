@@ -50,7 +50,7 @@ class TestSearchFormDemo < Test::Unit::TestCase
     # a = [[0,1,2,3], [4,5,6,7], [8,9,10,11]]
     # axis=0 search for 6.0: col 2, row 1
     r = a.find_value_index_ki(6.0, 0)
-    assert_equal [4],            r.dim
+    assert_equal [4],            r.shape
     assert_equal [UNDEF, UNDEF, 1, UNDEF], r.to_a   # S1: no-match -> UNDEF
   end
 
@@ -58,7 +58,7 @@ class TestSearchFormDemo < Test::Unit::TestCase
     a = CArray.float64(3, 4).seq!(0, 1)
     # axis=1 search for 6.0: row 1 at col 2
     r = a.find_value_index_ki(6.0, 1)
-    assert_equal [3],          r.dim
+    assert_equal [3],          r.shape
     assert_equal [UNDEF, 2, UNDEF],  r.to_a
   end
 
@@ -68,7 +68,7 @@ class TestSearchFormDemo < Test::Unit::TestCase
     # axis=1 search for 14.0: at (i=1, k=2), j=0 gives 12, j=1 gives 16, j=2 gives 20
     # Actually 14 = 1*12 + j*4 + 2 -> j = 0 → 14? 12+0+2=14. Yes j=0 for (1,_,2)
     r = a.find_value_index_ki(14.0, 1)
-    assert_equal [2, 4], r.dim
+    assert_equal [2, 4], r.shape
     # i=0, k=*: a[0, j, k] = j*4 + k, search 14 -> 14 - k = 4*j -> j must be int
     #   k=0: 14 = 4*j -> j=3.5 no
     #   k=1: 13 = 4*j -> no
@@ -115,7 +115,7 @@ class TestSearchFormDemo < Test::Unit::TestCase
     val = CArray.float64(3)
     val[0] = 1.0; val[1] = 5.0; val[2] = 9.0
     r = a.find_value_index_ki(val, 1)
-    assert_equal [3, 3], r.dim
+    assert_equal [3, 3], r.shape
   end
 
   def test_2d_self_1d_val_axis_0
@@ -124,7 +124,7 @@ class TestSearchFormDemo < Test::Unit::TestCase
     val = CArray.float64(4)
     val[0] = 0.0; val[1] = 5.0; val[2] = 10.0; val[3] = 11.0
     r = a.find_value_index_ki(val, 0)
-    assert_equal [4, 4], r.dim
+    assert_equal [4, 4], r.shape
   end
 
   def test_2d_per_fiber_scalar_via_reshape
@@ -134,7 +134,7 @@ class TestSearchFormDemo < Test::Unit::TestCase
     val_pf = CArray.float64(3, 1)
     val_pf[0, 0] = 1.0; val_pf[1, 0] = 5.0; val_pf[2, 0] = 9.0
     r = a.find_value_index_ki(val_pf, 1)
-    assert_equal [3, 1], r.dim
+    assert_equal [3, 1], r.shape
     assert_equal [[1], [1], [1]], r.to_a
   end
 
@@ -165,7 +165,7 @@ class TestSearchFormDemo < Test::Unit::TestCase
     # base_shape = (3,), val = (5,) -- can't broadcast (3 vs 5)
     # -> output = (3, 5), per (i, k) search a[i, :] for val[k]
     r = a.find_value_index_ki(val, 1)
-    assert_equal [3, 5], r.dim
+    assert_equal [3, 5], r.shape
     # i=0: a[0]=[0,1,2,3], val=[0,1,2,3,4]
     #   k=0: 0 -> idx 0; k=1: 1 -> 1; k=2: 2 -> 2; k=3: 3 -> 3; k=4: 4 -> no -> -1
     assert_equal [0, 1, 2, 3, UNDEF], r[0, nil].to_a
@@ -198,7 +198,7 @@ class TestSearchFormDemo < Test::Unit::TestCase
     val = CArray.float64(3).seq!(0, 2)  # [0, 2, 4]
     # base_ndim = 0, val.ndim = 1 -> broadcast OK -> output = (3,)
     r = a.find_value_index_ki(val, 0)
-    assert_equal [3],       r.dim
+    assert_equal [3],       r.shape
     assert_equal [0, 2, 4], r.to_a
   end
 
@@ -210,7 +210,7 @@ class TestSearchFormDemo < Test::Unit::TestCase
     a = CArray.float64(5).seq!(0, 1)
     val = CArray.int32(3).seq!(1, 1)   # [1, 2, 3]
     r = a.find_value_index_ki(val, 0)
-    assert_equal [3],       r.dim
+    assert_equal [3],       r.shape
     assert_equal [1, 2, 3], r.to_a
   end
 
@@ -218,7 +218,7 @@ class TestSearchFormDemo < Test::Unit::TestCase
     a = CArray.int32(5).seq!(0, 1)
     val = CArray.float64(3).seq!(2.0, 1.0)  # [2.0, 3.0, 4.0] -> cast to int32 [2,3,4]
     r = a.find_value_index_ki(val, 0)
-    assert_equal [3],       r.dim
+    assert_equal [3],       r.shape
     assert_equal [2, 3, 4], r.to_a
   end
 

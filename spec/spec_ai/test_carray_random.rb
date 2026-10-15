@@ -139,7 +139,7 @@ class TestRandomBang < Test::Unit::TestCase
 
   def test_random_multidim
     a = CArray.float64(3, 4).random!
-    assert_equal([3, 4], a.dim.to_a)
+    assert_equal([3, 4], a.shape.to_a)
     a.flatten.to_a.each { |v| assert(v >= 0.0 && v < 1.0) }
   end
 

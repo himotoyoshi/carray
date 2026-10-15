@@ -85,8 +85,8 @@ class TestBroadcastStrictNdim < Test::Unit::TestCase
     a = CArray.int(4, 3).seq
     b = CArray.int(3).seq
     aa, bb = CArray.broadcast(a, b[:_, nil])
-    assert_equal [4, 3], aa.dim
-    assert_equal [4, 3], bb.dim
+    assert_equal [4, 3], aa.shape
+    assert_equal [4, 3], bb.shape
   end
 
   # Edge: single CArray arg works (no ndim comparison needed)
@@ -102,8 +102,8 @@ class TestBroadcastStrictNdim < Test::Unit::TestCase
     a = CArray.int(5).seq
     b = CArray.int(5).seq
     aa, bb = CArray.broadcast(a, b)
-    assert_equal [5], aa.dim
-    assert_equal [5], bb.dim
+    assert_equal [5], aa.shape
+    assert_equal [5], bb.shape
   end
 
   # Edge: 3 args mixing same-ndim CArrays + Float
@@ -111,8 +111,8 @@ class TestBroadcastStrictNdim < Test::Unit::TestCase
     a = CArray.int(2, 2).seq
     b = CArray.int(1, 2).seq
     aa, bb, cc = CArray.broadcast(a, b, 3.14)
-    assert_equal [2, 2], aa.dim
-    assert_equal [2, 2], bb.dim
+    assert_equal [2, 2], aa.shape
+    assert_equal [2, 2], bb.shape
     assert_equal 3.14, cc
   end
 

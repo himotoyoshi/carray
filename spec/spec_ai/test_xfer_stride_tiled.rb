@@ -98,7 +98,7 @@ class TestXferStrideTiled < Test::Unit::TestCase
     # Non-square trigger: tile loop must handle Ti != Tj at all boundary cells.
     a = CArray.float64(36, 20).seq
     b = a.transpose.to_ca     # shape (20, 36)
-    assert_equal [20, 36], b.dim
+    assert_equal [20, 36], b.shape
     (0...20).each do |i|
       (0...36).each do |j|
         assert_equal a[j, i], b[i, j], "[#{i},#{j}]"
@@ -112,7 +112,7 @@ class TestXferStrideTiled < Test::Unit::TestCase
   # ndim == 2 cases above remain byte-equivalent via outer_n == 0 degenerate.
 
   def naive_transpose_to_a(a, perm)
-    out_dim = perm.map { |k| a.dim[k] }
+    out_dim = perm.map { |k| a.shape[k] }
     out = CArray.float64(*out_dim)
     out.elements.times do |flat|
       out_idx = []
@@ -136,7 +136,7 @@ class TestXferStrideTiled < Test::Unit::TestCase
   def test_get_transpose_ndim3_int32
     a = CArray.int32(3, 40, 25).tap { |x| x[] = x.seq }
     b = a.transpose(0, 2, 1).to_ca
-    assert_equal b.dim, [3, 25, 40]
+    assert_equal b.shape, [3, 25, 40]
     3.times { |i| 25.times { |j| 40.times { |k|
       assert_equal a[i, k, j], b[i, j, k]
     }}}
@@ -146,7 +146,7 @@ class TestXferStrideTiled < Test::Unit::TestCase
     # (time=2, level=3, lat=20, lon=15) -> (2, 3, 15, 20)
     a = CArray.float64(2, 3, 20, 15).seq
     b = a.transpose(0, 1, 3, 2).to_ca
-    assert_equal [2, 3, 15, 20], b.dim
+    assert_equal [2, 3, 15, 20], b.shape
     2.times { |t| 3.times { |l| 15.times { |lo| 20.times { |la|
       assert_equal a[t, l, la, lo], b[t, l, lo, la], "[#{t},#{l},#{lo},#{la}]"
     }}}}
@@ -157,7 +157,7 @@ class TestXferStrideTiled < Test::Unit::TestCase
     # crash and returns correct values at a few sample points.
     a = CArray.float64(2, 2, 3, 8, 6).seq
     b = a.transpose(0, 1, 2, 4, 3).to_ca
-    assert_equal [2, 2, 3, 6, 8], b.dim
+    assert_equal [2, 2, 3, 6, 8], b.shape
     # idx for source (2,2,3,8,6): axes 0..4 with sizes 2,2,3,8,6
     [[0,0,0,0,0], [1,1,2,7,5], [0,1,1,3,4]].each do |idx|
       out_idx = [idx[0], idx[1], idx[2], idx[4], idx[3]]
@@ -195,7 +195,7 @@ class TestXferStrideTiled < Test::Unit::TestCase
     # The tile branch should still produce correct results (or fall through).
     a = CArray.float64(4, 8, 1).seq
     b = a.transpose(0, 2, 1).to_ca
-    assert_equal [4, 1, 8], b.dim
+    assert_equal [4, 1, 8], b.shape
     4.times { |i| 8.times { |k|
       assert_equal a[i, k, 0], b[i, 0, k]
     }}

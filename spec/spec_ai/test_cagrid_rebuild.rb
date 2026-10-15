@@ -36,7 +36,7 @@ class TestCAGridRebuild < Test::Unit::TestCase
     a = CArray.int(5).seq
     v = a.grid(nil)
     assert_equal CAGrid, v.class
-    assert_equal [5], v.dim.to_a
+    assert_equal [5], v.shape.to_a
     assert_equal [0, 1, 2, 3, 4], v.to_a
   end
 
@@ -181,7 +181,7 @@ class TestCAGridRebuild < Test::Unit::TestCase
     a = CArray.int(4, 5).seq
     v = a.grid(nil, 0..2)
     v[] = -1
-    a.dim[0].times do |i|
+    a.shape[0].times do |i|
       3.times { |j| assert_equal(-1, a[i, j]) }
       (3...5).each { |j| assert_equal i * 5 + j, a[i, j] }
     end

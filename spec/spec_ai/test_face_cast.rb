@@ -100,7 +100,7 @@ class TestFaceObjectCast < Test::Unit::TestCase
   # pinned on a Face defined here -- which is also the shape an out-of-tree
   # Numeric Face takes.
   class Halved < CAObject
-    def initialize(parent); super(CA_FLOAT64, parent.dim, parent: parent, face: true, numeric: true); end
+    def initialize(parent); super(CA_FLOAT64, parent.shape, parent: parent, face: true, numeric: true); end
     def storage_to_element(raw); raw / 2.0; end
   end
 
@@ -136,7 +136,7 @@ class TestFaceNumericCast < Test::Unit::TestCase
   class ScaledInt < CAObject
     def initialize(parent, scale: 100)
       @scale = scale
-      super(CA_FIXLEN, parent.dim, bytes: 8, storage: CA_INT64,
+      super(CA_FIXLEN, parent.shape, bytes: 8, storage: CA_INT64,
             parent: parent, face: true)
     end
     attr_reader :scale
@@ -154,7 +154,7 @@ class TestFaceNumericCast < Test::Unit::TestCase
 
   # A Numeric Face: its surface *is* its storage, so casts need no declaration.
   class Radians < CAObject
-    def initialize(parent); super(CA_FLOAT64, parent.dim, parent: parent, face: true, numeric: true); end
+    def initialize(parent); super(CA_FLOAT64, parent.shape, parent: parent, face: true, numeric: true); end
   end
 
   def setup

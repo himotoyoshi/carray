@@ -7,7 +7,7 @@ module TestCAViewMixin
 
   def test_fetch_index
     10.times do 
-      idx = @ref.dim.map{|x| rand(x)}
+      idx = @ref.shape.map{|x| rand(x)}
       assert_equal(@ref[*idx], @obj[*idx])
     end
   end
@@ -22,7 +22,7 @@ module TestCAViewMixin
   def test_store_index
     unless @obj.read_only?
       10.times do 
-        idx = @ref.dim.map{|x| rand(x)}
+        idx = @ref.shape.map{|x| rand(x)}
         v = rand(10)
         @ref[*idx] = v
         @obj[*idx] = v

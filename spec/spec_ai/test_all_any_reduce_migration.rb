@@ -47,7 +47,7 @@ class TestAllAnyReduceMigration < Test::Unit::TestCase
     m = CArray.boolean(3, 4) { |i, j| (i + j).even? }
     r = m.all(axis: 1)
     assert_equal(CA_BOOLEAN, r.data_type)
-    assert_equal([3], r.dim)
+    assert_equal([3], r.shape)
   end
 
   def test_all_empty_returns_identity_true

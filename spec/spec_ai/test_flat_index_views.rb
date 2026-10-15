@@ -37,11 +37,11 @@ class TestFlatIndexViews < Test::Unit::TestCase
 
   def gt_mapping_gather (parent, mapper)
     flat = parent.flatten
-    out = CArray.new(parent.data_type, mapper.dim.to_a)
+    out = CArray.new(parent.data_type, mapper.shape.to_a)
     mapper.each_with_addr do |idx, vi|
       pos = []
       addr = vi
-      mapper.dim.to_a.reverse.each do |d|
+      mapper.shape.to_a.reverse.each do |d|
         pos.unshift(addr % d); addr /= d
       end
       out[*pos] = flat[idx]
@@ -67,7 +67,7 @@ class TestFlatIndexViews < Test::Unit::TestCase
     v = a[m]
     # CASelect treats parent as flat — view.ndim == 1.
     assert_equal CASelect, v.class
-    assert_equal [6], v.dim.to_a
+    assert_equal [6], v.shape.to_a
     assert_equal gt_select_gather(a, m).to_a, v.to_a
   end
 
@@ -144,7 +144,7 @@ class TestFlatIndexViews < Test::Unit::TestCase
     # directly via CA_REG_GRID; with N-D mapper it builds a normalize chain
     # (CAStride flatten <- CAGrid <- CAStride reshape).  Class identity is
     # an internal detail of the chain; semantic assertions follow.
-    assert_equal [4], v.dim.to_a
+    assert_equal [4], v.shape.to_a
     assert_equal [100, 102, 105, 109], v.to_a
   end
 
@@ -153,7 +153,7 @@ class TestFlatIndexViews < Test::Unit::TestCase
     bt = CArray.float64(256).seq * 0.5
     ir = CArray.int(3, 4).tap { |__a| __a[] = Array.new(12) { |i| i * 10 } }
     img = bt[ir]
-    assert_equal [3, 4], img.dim.to_a
+    assert_equal [3, 4], img.shape.to_a
     # value at (i,j) = bt[i*4+j*10... wait the mapper is i*10] = (i*10) * 0.5
     expected = Array.new(3) { |i| Array.new(4) { |j| ((i * 4 + j) * 10) * 0.5 } }
     assert_equal expected, img.to_a
@@ -163,7 +163,7 @@ class TestFlatIndexViews < Test::Unit::TestCase
     a = CArray.int(100).seq
     m = CArray.int(2, 3, 4).tap { |__a| __a[] = Array.new(24) { |i| i * 4 } }
     v = a[m]
-    assert_equal [2, 3, 4], v.dim.to_a
+    assert_equal [2, 3, 4], v.shape.to_a
     assert_equal gt_mapping_gather(a, m).to_a, v.to_a
   end
 
@@ -266,7 +266,7 @@ class TestFlatIndexViews < Test::Unit::TestCase
     a = CArray.float64(1000).seq
     m = CArray.int(20, 25).tap { |__a| __a[] = Array.new(500) { |i| (i * 2) % 1000 } }
     v = a[m]
-    assert_equal [20, 25], v.dim.to_a
+    assert_equal [20, 25], v.shape.to_a
     # Spot-check a few cells
     assert_equal 0.0, v[0, 0]
     assert_equal 2.0, v[0, 1]

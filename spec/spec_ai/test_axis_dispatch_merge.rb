@@ -62,7 +62,7 @@ class TestAxisDispatchMerge < Test::Unit::TestCase
 
   def csa_3axis_gt (parent, mask, arg1, arg2)
     idx0 = []
-    mask.dim[0].times { |i| idx0 << i if mask[i] }
+    mask.shape[0].times { |i| idx0 << i if mask[i] }
     norm = ->(arg, dim) {
       case arg
       when nil    then (0...dim).to_a
@@ -76,8 +76,8 @@ class TestAxisDispatchMerge < Test::Unit::TestCase
         [i]
       end
     }
-    i1 = norm.call(arg1, parent.dim[1])
-    i2 = norm.call(arg2, parent.dim[2])
+    i1 = norm.call(arg1, parent.shape[1])
+    i2 = norm.call(arg2, parent.shape[2])
     out = CArray.new(parent.data_type, [idx0.size, i1.size, i2.size])
     idx0.each_with_index do |i, vi|
       i1.each_with_index do |j, vj|
@@ -154,7 +154,7 @@ class TestAxisDispatchMerge < Test::Unit::TestCase
     v = a[m, nil, nil, nil]
     # Build 4D ground truth manually
     idx0 = []
-    m.dim[0].times { |i| idx0 << i if m[i] }
+    m.shape[0].times { |i| idx0 << i if m[i] }
     expected = CArray.int(idx0.size, 2, 4, 5)
     idx0.each_with_index do |i, vi|
       2.times do |j|
@@ -182,8 +182,8 @@ class TestAxisDispatchMerge < Test::Unit::TestCase
     m2 = CArray.boolean(5).tap { |__a| __a[] = [0, 1, 0, 1, 1] }
     v = a[m0, nil, m2]
     # Ground truth
-    idx0 = []; m0.dim[0].times { |i| idx0 << i if m0[i] }
-    idx2 = []; m2.dim[0].times { |i| idx2 << i if m2[i] }
+    idx0 = []; m0.shape[0].times { |i| idx0 << i if m0[i] }
+    idx2 = []; m2.shape[0].times { |i| idx2 << i if m2[i] }
     expected = CArray.int(idx0.size, 4, idx2.size)
     idx0.each_with_index do |i, vi|
       4.times do |j|
@@ -207,7 +207,7 @@ class TestAxisDispatchMerge < Test::Unit::TestCase
     src = CArray.int(3, 3, 5).seq + 1000
     v[] = src
     # Verify every selected parent cell received the right value.
-    idx0 = []; m.dim[0].times { |i| idx0 << i if m[i] }
+    idx0 = []; m.shape[0].times { |i| idx0 << i if m[i] }
     idx0.each_with_index do |i, vi|
       3.times do |j|
         5.times do |k|
@@ -238,7 +238,7 @@ class TestAxisDispatchMerge < Test::Unit::TestCase
     m = CArray.boolean(4).tap { |__a| __a[] = [1, 0, 1, 1] }
     v = a[m, nil, nil]
     v[] = -7
-    idx0 = []; m.dim[0].times { |i| idx0 << i if m[i] }
+    idx0 = []; m.shape[0].times { |i| idx0 << i if m[i] }
     idx0.each_with_index do |i, _vi|
       3.times do |j|
         5.times do |k|
