@@ -803,6 +803,19 @@ ca_object_mask_bytes (CAObject *ca)
   return (boolean8_t *) ca->mask->ptr;
 }
 
+/* Whether the mask of this object comes from its mask_* hooks.  Then a
+   fetched value says nothing about the mask: a cell the hooks mask stays
+   masked when its value is read, and only a fetcher answering UNDEF marks
+   one.  Without hooks the mask is what the fetches have answered, so a
+   value fetched clears the cell. */
+static int
+ca_object_mask_from_hooks (CAObject *ca)
+{
+  return rb_obj_respond_to(ca->self, rb_intern("mask_fetch_addr"), Qtrue)
+      || rb_obj_respond_to(ca->self, rb_intern("mask_fetch_index"), Qtrue)
+      || rb_obj_respond_to(ca->self, rb_intern("mask_copy_data"), Qtrue);
+}
+
 /* per-cell cores: the addr- and index-primary Ruby-callback bridge logic,
    direction-unified.  The fetch_* / store_* slots below are thin
    forwarders onto these. */
@@ -823,7 +836,7 @@ ca_object_xfer_addr_one (CAObject *ca, ca_size_t addr, void *ptr, int dir)
         }
       }
       else {
-        if ( ca_has_mask(ca) ) {
+        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
           ca_object_mask_bytes(ca)[addr] = 0;
         }
         rb_ca_obj2ptr(ca->self, rval, ptr);
@@ -845,7 +858,7 @@ ca_object_xfer_addr_one (CAObject *ca, ca_size_t addr, void *ptr, int dir)
         }
       }
       else {
-        if ( ca_has_mask(ca) ) {
+        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
           ca_object_mask_bytes(ca)[ca_index2addr(ca->mask, idx)] = 0;
         }
         rb_ca_obj2ptr(ca->self, rval, ptr);
@@ -891,7 +904,7 @@ ca_object_xfer_index_one (CAObject *ca, ca_size_t *idx, void *ptr, int dir)
         }
       }
       else {
-        if ( ca_has_mask(ca) ) {
+        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
           ca_object_mask_bytes(ca)[ca_index2addr(ca->mask, idx)] = 0;
         }
         rb_ca_obj2ptr(ca->self, rval, ptr);
@@ -909,7 +922,7 @@ ca_object_xfer_index_one (CAObject *ca, ca_size_t *idx, void *ptr, int dir)
         }
       }
       else {
-        if ( ca_has_mask(ca) ) {
+        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
           ca_object_mask_bytes(ca)[addr] = 0;
         }
         rb_ca_obj2ptr(ca->self, rval, ptr);
@@ -965,10 +978,51 @@ ca_object_func_allocate (void *ap)
    arithmetic all work via the slow per-element fallback. The fast bulk
    path is opt-in by defining copy_data / sync_data / fill_data. */
 
+/* copy_data of an object whose mask comes from its hooks: the array it is
+   handed must not carry the mask's cache, or a store of its values into it
+   (d[] = src) would clear the cells the hooks mask.  It is handed without a
+   mask, and a mask the call makes on it is dropped. */
+typedef struct {
+  CAObject *ca;
+  void     *ptr;
+  CArray   *mask;
+} ca_object_copy_bare_t;
+
+static VALUE
+ca_object_copy_bare_body (VALUE arg)
+{
+  ca_object_copy_bare_t *c = (ca_object_copy_bare_t *) arg;
+  ca_object_call_lending(&c->ca->data->ptr, c->ptr, c->ca->self, "copy_data",
+                         ca_object_data_of, c->ca);
+  return Qnil;
+}
+
+static VALUE
+ca_object_copy_bare_restore (VALUE arg)
+{
+  ca_object_copy_bare_t *c = (ca_object_copy_bare_t *) arg;
+  CArray *made = c->ca->data->mask;
+  if ( made != NULL && made != c->mask ) {
+    ca_free(made);
+  }
+  c->ca->data->mask = c->mask;
+  return Qnil;
+}
+
 static void
 ca_object_dispatch_copy (CAObject *ca, void *ptr)
 {
   if ( rb_obj_respond_to(ca->self, rb_intern("copy_data"), Qtrue) ) {
+    if ( ca->data->mask != NULL && ca_object_mask_from_hooks(ca) ) {
+      ca_object_copy_bare_t c;
+      c.ca   = ca;
+      c.ptr  = ptr;
+      c.mask = ca->data->mask;
+      ca->data->mask = NULL;
+      rb_ensure(ca_object_copy_bare_body, (VALUE) &c,
+                ca_object_copy_bare_restore, (VALUE) &c);
+      return;
+    }
     ca_object_call_lending(&ca->data->ptr, ptr, ca->self, "copy_data",
                            ca_object_data_of, ca);
   }
