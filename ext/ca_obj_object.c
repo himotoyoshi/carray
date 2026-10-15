@@ -136,50 +136,74 @@ ca_objmask_mask_data (void *ap)
                     rb_intern("mask"), 0);
 }
 
-/* Calls recv.mid(arg(ap)) with *slot pointing at a caller's buffer for
-   the duration, and puts *slot back however the call leaves.  The bulk
-   bridge lends the buffer this way so that copy_data / sync_data write
-   straight into it; a raise that skipped the restore would leave the
-   array pointing at a buffer its caller is about to free. */
+/* A wrap handed to a hook points at a buffer the caller frees once the
+   hook returns.  Taking it back leaves an array of no cells: a hook that
+   kept it holds something that raises when read, not a pointer into freed
+   memory. */
+static char ca_object_no_cells[16];
+
+static void
+ca_object_empty_wrap (CArray *w)
+{
+  int8_t k;
+  /* Not NULL: an entity whose pointer is NULL reads as detached. */
+  w->ptr      = ca_object_no_cells;
+  w->elements = 0;
+  for ( k = 0; k < w->ndim; k++ ) {
+    w->dim[k] = 0;
+  }
+}
+
+/* Calls copy_data / sync_data with a wrap of a caller's buffer, shaped as
+   the object, and takes the buffer back however the call leaves.  The wrap
+   shares the object's mask (the data's), and whatever mask it holds after
+   the call becomes the data's: a hook that writes masked values masks the
+   object's cells.  The data points at the buffer for the duration too, for
+   a hook that reads the object back while it runs. */
 
 typedef struct {
-  char  **slot;
-  char   *saved;
-  VALUE   recv;
-  ID      mid;
-  VALUE (*arg)(void *);
-  void   *ap;
+  CAObject *ca;
+  char     *saved;
+  ID        mid;
+  VALUE     wrap;
 } ca_object_lend_t;
 
 static VALUE
 ca_object_lend_body (VALUE varg)
 {
   ca_object_lend_t *l = (ca_object_lend_t *) varg;
-  return rb_funcall(l->recv, l->mid, 1, l->arg(l->ap));
+  return rb_funcall(l->ca->self, l->mid, 1, l->wrap);
 }
 
 static VALUE
 ca_object_lend_restore (VALUE varg)
 {
   ca_object_lend_t *l = (ca_object_lend_t *) varg;
-  *l->slot = l->saved;
+  CArray *w = (CArray *) DATA_PTR(l->wrap);
+  l->ca->data->mask = w->mask;
+  w->mask = NULL;
+  ca_object_empty_wrap(w);
+  l->ca->data->ptr = l->saved;
   return Qnil;
 }
 
 static void
-ca_object_call_lending (char **slot, void *ptr, VALUE recv, const char *mid,
-                        VALUE (*arg)(void *), void *ap)
+ca_object_call_lending (CAObject *ca, void *ptr, const char *mid)
 {
   ca_object_lend_t l;
-  l.slot  = slot;
-  l.saved = *slot;
-  l.recv  = recv;
+  CArray *data = ca->data;
+  CAWrap *w;
+  w = ca_wrap_new(data->data_type, data->ndim, data->dim, data->bytes,
+                  NULL, (char *) ptr);
+  l.wrap  = ca_wrap_struct(w);
+  w->mask = data->mask;
+  l.ca    = ca;
+  l.saved = data->ptr;
   l.mid   = rb_intern(mid);
-  l.arg   = arg;
-  l.ap    = ap;
-  *slot = (char *) ptr;
+  data->ptr = (char *) ptr;
   rb_ensure(ca_object_lend_body, (VALUE) &l,
             ca_object_lend_restore, (VALUE) &l);
+  RB_GC_GUARD(l.wrap);
 }
 
 /* Calls recv.mid(*argv), where some of argv are transient wraps of a
@@ -188,8 +212,7 @@ ca_object_call_lending (char **slot, void *ptr, VALUE recv, const char *mid,
    when it returns, and a wrap outlives the call: the collector scans the
    machine stack conservatively and still finds it there, and an object
    wrap is marked cell by cell -- through a buffer that is gone.  A wrap
-   taken back points at nothing; a hook that kept it holds an empty
-   handle, not a stale one. */
+   taken back has no cells (ca_object_empty_wrap). */
 
 typedef struct {
   VALUE        recv;
@@ -213,7 +236,7 @@ ca_object_hook_release (VALUE varg)
   ca_object_hook_t *h = (ca_object_hook_t *) varg;
   int i;
   for ( i = 0; i < h->ntrans; i++ ) {
-    ((CArray *) DATA_PTR(h->trans[i]))->ptr = NULL;
+    ca_object_empty_wrap((CArray *) DATA_PTR(h->trans[i]));
   }
   return Qnil;
 }
@@ -234,11 +257,6 @@ ca_object_call_transient (VALUE recv, const char *mid,
             ca_object_hook_release, (VALUE) &h);
 }
 
-static VALUE
-ca_object_data_of (void *ap)
-{
-  return rb_ivar_get(((CAObject *) ap)->self, rb_intern("__data__"));
-}
 
 
 /* Forward declaration: ca_object_wrap_transient (defined further down,
@@ -992,8 +1010,7 @@ static VALUE
 ca_object_copy_bare_body (VALUE arg)
 {
   ca_object_copy_bare_t *c = (ca_object_copy_bare_t *) arg;
-  ca_object_call_lending(&c->ca->data->ptr, c->ptr, c->ca->self, "copy_data",
-                         ca_object_data_of, c->ca);
+  ca_object_call_lending(c->ca, c->ptr, "copy_data");
   return Qnil;
 }
 
@@ -1023,8 +1040,7 @@ ca_object_dispatch_copy (CAObject *ca, void *ptr)
                 ca_object_copy_bare_restore, (VALUE) &c);
       return;
     }
-    ca_object_call_lending(&ca->data->ptr, ptr, ca->self, "copy_data",
-                           ca_object_data_of, ca);
+    ca_object_call_lending(ca, ptr, "copy_data");
   }
   else {
     ca_size_t addr;
@@ -1039,8 +1055,7 @@ static void
 ca_object_dispatch_sync (CAObject *ca, void *ptr)
 {
   if ( rb_obj_respond_to(ca->self, rb_intern("sync_data"), Qtrue) ) {
-    ca_object_call_lending(&ca->data->ptr, ptr, ca->self, "sync_data",
-                           ca_object_data_of, ca);
+    ca_object_call_lending(ca, ptr, "sync_data");
   }
   else {
     ca_size_t addr;

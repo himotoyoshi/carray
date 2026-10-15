@@ -123,6 +123,11 @@ delegating to a vectorised CArray operation. The bulk path then
 bypasses the Ruby dispatch overhead. The contract is the same as for
 `fetch_addr`: both must yield the same value for the same address.
 
+The `data` a bulk hook receives (`copy_data`, `sync_data`, and the
+`copy_block` / `copy_addrs` family below) is the caller's buffer, lent for
+the call only. Once the hook returns it has no cells: an array a hook kept
+reads as empty and raises `IndexError` on `[]`. Copy what you need to keep.
+
 ### Optional: partial-region fast paths (`copy_block` / `copy_addrs`)
 
 Between per-cell `fetch_addr` and whole-view `copy_data` there is a
