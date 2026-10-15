@@ -396,11 +396,16 @@ mp_first_non_numeric (VALUE v)
    the elements' own arithmetic and an exact weight, so a Rational or a
    BigDecimal stays exact and a Float stays a Float. */
 
-/* The interpolation weight r (0 <= r < 1) as a Rational. */
+/* [object] the weight of the upper element at p, exact: (n-1)*p/100 - k as
+   a Rational, with p read as the decimal it was written as.  The double r
+   carries the rounding of (n-1)*p/100 (p = 30 over five elements is
+   0.19999999999999996 there, not 1/5), so it is not used for the weight. */
 static VALUE
-obj_weight (double r)
+obj_weight (long n, double p, long k)
 {
-  return rb_funcall(DBL2NUM(r), id_rationalize, 0);
+  VALUE pr = rb_funcall(DBL2NUM(p), id_rationalize, 0);
+  VALUE f  = rb_funcall(rb_funcall(pr, id_mul, 1, LONG2NUM(n - 1)), rb_intern("quo"), 1, INT2FIX(100));
+  return rb_funcall(f, rb_intern("-"), 1, LONG2NUM(k));
 }
 
 /* The midpoint of lo and hi, (lo + hi) * (1/2): exact for an Integer or a
@@ -572,7 +577,7 @@ median_object_flat (VALUE self, long min_count, VALUE fill_value, int keep_axis)
    The :linear / :midpoint interpolation funcalls are irreducible for
    arbitrary objects; the pick methods return the element itself. */
 static VALUE
-pct_compute_object (VALUE method, long k, double r, long n, VALUE lo, VALUE hi)
+pct_compute_object (VALUE method, double p, long k, double r, long n, VALUE lo, VALUE hi)
 {
   if ( method == sym_lower )  return lo;
   if ( method == sym_higher ) return (r == 0.0) ? lo : hi;
@@ -583,7 +588,7 @@ pct_compute_object (VALUE method, long k, double r, long n, VALUE lo, VALUE hi)
   if ( method == sym_linear ) {
     if ( r == 0.0 || k + 1 >= n ) return lo;
     mp_require_interpolable("percentile", method, lo);
-    VALUE w = obj_weight(r);
+    VALUE w = obj_weight(n, p, k);
     VALUE a = rb_funcall(lo, id_mul, 1, rb_funcall(INT2FIX(1), rb_intern("-"), 1, w));
     VALUE b = rb_funcall(hi, id_mul, 1, w);
     return rb_funcall(a, id_plus, 1, b);
@@ -609,7 +614,7 @@ pct_object_one_partition (VALUE self, long axis, long n, double p, VALUE method)
   VALUE lo = Qnil, hi = Qnil;
   if ( need == PCT_LOWER_ONLY ) lo = obj_kth_one(self, axis, k);
   else                          obj_kth_pair(self, axis, k, n, &lo, &hi);
-  return pct_compute_object(method, k, r, n, lo, hi);
+  return pct_compute_object(method, p, k, r, n, lo, hi);
 }
 
 /* [object] single p from a fully sorted entity (multi-p shared sort). */
@@ -628,7 +633,7 @@ pct_object_one_sorted (VALUE sorted, long axis, long n, double p, VALUE method)
   VALUE lo = Qnil, hi = Qnil;
   if ( need != PCT_UPPER_ONLY ) lo = obj_slice(sorted, axis, k);
   if ( need != PCT_LOWER_ONLY ) hi = obj_slice(sorted, axis, kup);
-  return pct_compute_object(method, k, r, n, lo, hi);
+  return pct_compute_object(method, p, k, r, n, lo, hi);
 }
 
 /* [object] per-axis percentile -> array of (reduced CArray | scalar),
@@ -717,7 +722,7 @@ pct_object_axis_masked_one (VALUE self, VALUE sorted, long axis, double p,
       VALUE lo = Qnil, hi = Qnil;
       if ( need != PCT_UPPER_ONLY ) lo = sb[f0 + (ca_size_t)(k * INNER)];
       if ( need != PCT_LOWER_ONLY ) hi = sb[f0 + (ca_size_t)(kup * INNER)];
-      op[oc] = pct_compute_object(method, k, r, np, lo, hi);
+      op[oc] = pct_compute_object(method, p, k, r, np, lo, hi);
     }
   }
   return out;

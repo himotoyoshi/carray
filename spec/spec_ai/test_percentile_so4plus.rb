@@ -238,4 +238,13 @@ class TestPercentileSO4Plus < Test::Unit::TestCase
     assert_equal([5.0, 16.0, 27.0], r.to_a)
   end
 
+  # An object array's interpolation weight is (n-1)*p/100 - k, exactly.
+  def test_object_weight_is_exact
+    o = CArray.object(5) { |i| Rational(i, 3) }
+    assert_equal Rational(2, 5), o.percentile(30)
+    assert_equal [Rational(2, 5)], o.reshape(1, 5).percentile(30, axis: 1).to_a
+    assert_equal [Rational(2, 5)], o.reshape(1, 5).percentile(30, axis: 1, min_count: 1).to_a
+    assert_equal Rational(999, 100), CArray.object(4) { |k| k * 10 }.percentile(33.3)
+  end
+
 end
