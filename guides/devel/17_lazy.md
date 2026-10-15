@@ -219,6 +219,9 @@ is what lets CArray add to the plan without a new evaluator being released at
 the same time — when the integer power became the node `ipow`, an older
 carray-jit declined it and the walk answered.
 
+A decline may come after the evaluator has written part of the destination (it
+met a zero divisor half way), and the walk that follows may then raise. A store that raises may leave part of the destination written: its values and its mask after the raise are not specified.
+
 Adding a lazy op therefore has one more step on this side: give it a spelling
 the plan reads (the `*_BY_ID` tables in `fusion.rb`) and a body in
 `__kernel_body__`. An op the plan cannot read is refused, and the expression is

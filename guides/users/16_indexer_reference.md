@@ -449,6 +449,10 @@ b[:gt, 3]  = UNDEF       #  same idea through the predicate key
 
 See [Masks and missing values](05_masks.md) for the full story.
 
+### 7.5 An assignment that raises
+
+A store that raises may leave part of the destination written: its values and its mask after the raise are not specified.
+
 ---
 
 ## 8. Quick lookup
