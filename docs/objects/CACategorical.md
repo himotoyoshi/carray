@@ -593,6 +593,26 @@ cat.codes.value.refer(CA_INT8).to_a
                             # => [0, -1, 2, 0, -1]
 ```
 
+## Numeric columns for a model — `contrast`
+
+A regression or a learner takes numbers, and numbering the categories (sun = 0, cloud = 1, rain = 2) puts an order and equal steps on them that they do not have. `contrast` gives one column per category instead, with 1 in the column of the cell's category and 0 elsewhere:
+
+```ruby
+cat = CA_OBJECT(%w[sun cloud rain sun]).categorize(labels: %w[sun cloud rain])
+cat.contrast              # => int8 (4, 2): columns cloud, rain
+# [[0, 0], [1, 0], [0, 1], [0, 0]]
+cat.contrast(base: "rain")  # columns sun, cloud
+cat.contrast(full: true)    # columns sun, cloud, rain
+```
+
+- With an intercept in the model, the k columns would add up to the intercept's column, so by default the column of the base category is left out. Each coefficient then reads as that category minus the base. The base is the first label unless `base:` names another.
+- `full: true` keeps all k columns, for a model without an intercept or the input to a learner.
+- The columns follow the labels, not the data. A category with no cells is a column of zeros, so two categoricals with the same labels give the same columns.
+- A masked cell gives a row of `UNDEF`.
+- The result is int8. Only the `:dummy` scheme is defined, and the categorical has to be one-dimensional.
+
+In a frame, [`CAFrame#contrast_columns`](../topics/CAFrame.md#numeric-columns-from-a-categorical--contrast_columns) does the same and puts the columns in the frame.
+
 ## Numeric gate
 
 `CACategorical`'s surface is `CA_FIXLEN`, so raw arithmetic is refused:
@@ -623,6 +643,7 @@ cat.codes + 1         # OK — you asked for the raw integers
 | `cat.eq(label)` / `cat.ne(label)`        | boolean `CArray` (unknown label → all-false) |
 | `cat.count(label)`                       | `Integer` — count of one category (unknown label → 0) |
 | `cat.category_sizes`                           | length-`k` `CArray` — counts per label, aligned to `labels` |
+| `cat.contrast(base: nil, full: false)`  | int8 `CArray` (n, k − 1) — one column per category, the base left out |
 
 ## Notes
 

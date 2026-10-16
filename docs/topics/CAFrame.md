@@ -685,6 +685,22 @@ df.cast("num" => :int32)                                  # the pieces are text
 - The new columns are `CAString`; follow with `cast` for numbers.
 - Only a 1-D text column can be split. `into:` takes two or more distinct names, none of them an existing column.
 
+### Numeric columns from a categorical — `contrast_columns`
+
+`contrast_columns(name, base: nil, full: false, into: nil)` replaces a categorical column by numeric columns, one per category, for a model that takes numbers (see `CACategorical#contrast`):
+
+```ruby
+df.contrast_columns("weather")               # "weather_cloud", "weather_rain"
+df.contrast_columns("weather", base: "rain")
+df.contrast_columns("weather", full: true)   # every category kept
+```
+
+- It returns a new frame. The new columns take the place of the old one and are named after it and the label; `into:` names them instead.
+- By default the column of the base category is left out, so a model with an intercept can take them. The base is the first label unless `base:` names another. `full: true` keeps every column.
+- A column that is not a `CACategorical` is categorized first with its labels in ascending order, so the base does not depend on the order of the rows. A `CACategorical` column keeps its own label order.
+- The new columns are int8. A masked cell is `UNDEF` in every new column.
+- Only a 1-D column can be expanded. A new name that is already a column is refused; name the columns with `into:`.
+
 ### Time columns
 
 Two verbs turn a column into a [time](CATime.md) column, one per kind of input. Each rebinds the column and returns `self`; make it the index with `set_index` afterward.
@@ -1459,6 +1475,7 @@ snapshot = df.copy         # independent; later edits to df don't touch it
 | `df.dup` / `clone` | every column and the index | — (adding or dropping a name affects only the new frame) | — |
 | `df.join(..., how: :left / :inner)` / `df.join_asof(...)` | this frame's columns and index (picked by row when a row repeats) | the other frame's columns, gathered | [join](#join--match-rows-by-key) |
 | `df.split_column(...)` | the other columns | text columns built from the split one | [split_column](#splitting-a-text-column--split_column) |
+| `df.contrast_columns(...)` | the other columns | int8 columns built from the expanded one | [contrast_columns](#numeric-columns-from-a-categorical--contrast_columns) |
 | `df.stack_columns(...)` / `unstack_column(...)` | the other columns | a view of the stacked or split columns | [From columns side by side](#from-columns-side-by-side--stack_columns--unstack_column) |
 
 **Results that share nothing:**
@@ -1772,6 +1789,7 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | be told when a cell does not read as a number, instead of getting `UNDEF` | [`cast(..., on_error: :raise)`](#changing-a-columns-type) |
 | bring every column to one type, e.g. to make a matrix | [`promote`](#changing-a-columns-type) |
 | split a code like `"A-12"` into two columns | [`split_column`](#splitting-a-text-column--split_column) |
+| turn a categorical column into numeric columns for a regression | [`contrast_columns`](#numeric-columns-from-a-categorical--contrast_columns) |
 | turn date strings into times | [`parse_to_time`](#text--parse_to_time) |
 | find which format a column of dates is written in | [`infer_time_format`](#text--parse_to_time) |
 | turn "hours since 1990-01-01" into times | [`to_time`](#counts-since-an-epoch--to_time) |

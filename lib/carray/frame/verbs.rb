@@ -101,6 +101,73 @@ class CAFrame
     rebuild(rebuilt)
   end
 
+  # Replace a categorical column by numeric columns, one per category, for a
+  # model that takes numbers (see CACategorical#contrast):
+  #
+  #   df.contrast_columns("weather")              # "weather_cloud", "weather_rain"
+  #   df.contrast_columns("weather", base: "rain")
+  #   df.contrast_columns("weather", full: true)  # every category kept
+  #
+  # The new columns take the column's place and are named after it and the
+  # label, "weather_cloud"; +into:+ names them instead.  A column that is not
+  # a CACategorical is categorized first with its labels in ascending order,
+  # so the base -- the first label unless +base:+ says otherwise -- does not
+  # depend on the order of the rows.  A masked cell is UNDEF in every new
+  # column.
+  #
+  # @param name [String] the column to expand.
+  # @param scheme [Symbol] the coding; only :dummy is defined.
+  # @param base [Object] the label whose column is left out.
+  # @param full [Boolean] keep every column.
+  # @param into [Array<String>, nil] the names of the new columns.
+  # @return [CAFrame] a new frame; the other columns are shared.
+  # @raise [ArgumentError] when the column is not one-dimensional, +into:+
+  #   names a different number of columns or one twice, or a new name is
+  #   already a column; and as CACategorical#contrast raises.
+  def contrast_columns(name, scheme = :dummy, base: nil, full: false, into: nil)
+    key = column_key(name, "contrast_columns")
+    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    unless col.ndim == 1
+      raise ArgumentError, "contrast_columns: #{key.inspect} is not a one-dimensional column"
+    end
+    cat = col.is_a?(CACategorical) ? col : col.categorize(sort_labels: true)
+    coded = cat.contrast(scheme, base: base, full: full)
+    m = coded.shape[1]
+    labels = full ? cat.labels : cat.labels - [base.nil? ? cat.labels.first : base]
+    names =
+      if into
+        Array(into).map { |n| column_name_arg(n, "contrast_columns") }
+      else
+        labels.map { |label| "#{key}_#{label}" }
+      end
+    unless names.size == m
+      raise ArgumentError,
+            "contrast_columns: into: names #{names.size} columns for #{m} (got #{names.inspect})"
+    end
+    if into
+      CAFrame.__send__(:refuse_repeated_names, names, "contrast_columns", "into: names")
+    else
+      CAFrame.__send__(:refuse_repeated_names, names, "contrast_columns", "column names",
+                       hint: "name them with into:")
+    end
+    taken = names & (@columns.keys - [key])
+    unless taken.empty?
+      message = "contrast_columns: #{taken.inspect} already a column"
+      message += "; name them with into:" unless into
+      raise ArgumentError, message
+    end
+
+    rebuilt = {}
+    @columns.each do |k, v|
+      if k == key
+        names.each_with_index { |nm, j| rebuilt[nm] = coded[nil, j] }
+      else
+        rebuilt[k] = v
+      end
+    end
+    rebuild(rebuilt)
+  end
+
   # Stack several columns into one N-D column: the columns side by side in a
   # file -- a value per month, say -- become one column whose trailing axis
   # (or axes, with +shape:+) runs over them.  The columns are given in the

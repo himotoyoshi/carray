@@ -687,6 +687,68 @@ class CACategorical < CAObject
     CACategorical.from_codes(recoded.codes, recoded.labels.map { |c| label_at(c) })
   end
 
+  # The categorical as numeric columns, one per category, for a model that
+  # takes numbers: row i holds 1 in the column of its category and 0
+  # elsewhere.  With an intercept in the model the k columns would sum to the
+  # intercept's column, so by default the column of the base category is
+  # left out and k - 1 remain; each coefficient then reads as that category
+  # minus the base.  +full: true+ keeps all k (a model without an intercept,
+  # or an input to a learner).
+  #
+  # The columns follow the labels, not the data: a category with no cells
+  # gives a column of zeros, so two categoricals with the same labels give
+  # the same columns.  A masked cell gives a masked row.
+  #
+  # @overload contrast(scheme = :dummy, base: nil, full: false)
+  #   Returns an int8 CArray of shape (n, k - 1), or (n, k) with
+  #   `full: true`, whose columns are the labels in order with the base
+  #   left out.
+  #   @param scheme [Symbol] the coding; only `:dummy` is defined.
+  #   @param base [Object] the label whose column is left out; the first
+  #     label when omitted.
+  #   @param full [Boolean] keep every column.
+  #   @return [CArray]
+  #   @raise [ArgumentError] when `scheme` is not `:dummy`, when `base` is
+  #     not a label, when `base:` and `full: true` are both given, when
+  #     there are no labels to leave one out of, or when the categorical is
+  #     not one-dimensional.
+  def contrast (scheme = :dummy, base: nil, full: false)
+    unless scheme == :dummy
+      raise ArgumentError, "contrast: unknown scheme #{scheme.inspect} (only :dummy is defined)"
+    end
+    unless ndim == 1
+      raise ArgumentError, "contrast: the categorical is #{ndim}-dimensional, not one-dimensional"
+    end
+    k = @labels.size
+    if full
+      raise ArgumentError, "contrast: base: and full: true contradict (full keeps every column)" unless base.nil?
+      kept = (0...k).to_a
+    else
+      raise ArgumentError, "contrast: there are no labels, so no base column to leave out" if k == 0
+      dropped = base.nil? ? 0 : @labels.index(base)
+      raise ArgumentError, "contrast: #{base.inspect} is not one of the labels #{@labels.inspect}" unless dropped
+      kept = (0...k).to_a - [dropped]
+    end
+    n   = elements
+    m   = kept.size
+    out = CArray.int8(n, m).zero
+    return out if n == 0 || m == 0
+
+    # One pass: each cell's code picks its column through colmap (-1 for the
+    # base), and a 1 is written at row * m + column.
+    colmap = CArray.int64(k) { -1 }
+    kept.each_with_index { |code, j| colmap[code] = j }
+    excluded = codes.has_mask? ? codes.is_masked : CArray.boolean(n) { false }
+    code = codes.value.to_type(CA_INT64)
+    code[excluded] = 0 if excluded.any
+    col  = colmap[code]
+    hit  = col.ge(0) & excluded.not
+    addr = CArray.int64(n).seq! * m + col
+    out.reshape(n * m)[addr[hit]] = 1 if hit.any
+    out[excluded, nil] = UNDEF if excluded.any
+    out
+  end
+
   # @overload inspect
   #   Returns a short summary showing element count, category count,
   #   and vocabulary.
