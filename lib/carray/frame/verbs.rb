@@ -9,10 +9,41 @@ class CAFrame
   # Add (or replace) a column, returning a new frame — the column set changes,
   # so the result is a different table (memo §3.8). The column is shared by
   # reference; the envelope is cheap. Chain or reassign: +df = df.append(...)+.
-  def append(name, col)
+  #
+  # The column goes at the end, or where a column of that name already is.
+  # +before:+ / +after:+ name a column to put it next to instead; a column
+  # of that name already in the frame is moved there.
+  #
+  #   df.append("id", ids, before: df.column_names.first)   # leftmost
+  def append(name, col, before: nil, after: nil)
     key = column_name_arg(name, "append")
     ca  = coerce_column(col)
-    rebuild(@columns.merge(key => ca))
+    if before && after
+      raise ArgumentError, "append: give before: or after:, not both"
+    end
+    anchor = before || after
+    return rebuild(@columns.merge(key => ca)) if anchor.nil?
+
+    anchor = column_key(anchor, "append")
+    unless @columns.key?(anchor)
+      raise KeyError, "append: no column #{anchor.inspect} to put #{key.inspect} #{before ? "before" : "after"}"
+    end
+    return rebuild(@columns.merge(key => ca)) if anchor == key
+
+    # Checked here: the new frame would take N from whichever column comes
+    # first, and blame the frame's own column for the new one's length.
+    if ca.shape[0] != @nrow
+      raise ArgumentError,
+            "column #{key.inspect} has axis-0 length #{ca.shape[0]}, expected #{@nrow}"
+    end
+    cols = {}
+    @columns.each do |k, v|
+      next if k == key
+      cols[key] = ca if before && k == anchor
+      cols[k] = v
+      cols[key] = ca if after && k == anchor
+    end
+    rebuild(cols)
   end
 
   # Remove one or more columns, returning a new frame (column set changes,

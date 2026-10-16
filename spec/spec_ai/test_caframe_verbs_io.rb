@@ -744,6 +744,32 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
     assert_raise(ArgumentError) { @df.append("bad", CA_INT32([1, 2])) }
   end
 
+  def test_append_before_and_after
+    x = CA_FLOAT64([7, 8, 9])
+    assert_equal ["c", "a", "b"], @df.append("c", x, before: "a").column_names
+    assert_equal ["a", "c", "b"], @df.append("c", x, after: "a").column_names
+    assert_equal ["a", "b", "c"], @df.append("c", x, after: "b").column_names
+    assert_equal [7.0, 8.0, 9.0], @df.append("c", x, before: "a")["c"].to_a
+  end
+
+  def test_append_moves_an_existing_column_to_the_position
+    x = CA_FLOAT64([7, 8, 9])
+    r = @df.append("b", x, before: "a")
+    assert_equal ["b", "a"], r.column_names
+    assert_equal [7.0, 8.0, 9.0], r["b"].to_a
+    assert_equal ["a", "b"], @df.append("b", x, before: "b").column_names
+  end
+
+  def test_append_position_refusals
+    x = CA_FLOAT64([7, 8, 9])
+    e = assert_raise(ArgumentError) { @df.append("c", x, before: "a", after: "b") }
+    assert_match(/give before: or after:, not both/, e.message)
+    e = assert_raise(KeyError) { @df.append("c", x, after: "zz") }
+    assert_match(/no column "zz" to put "c" after/, e.message)
+    e = assert_raise(ArgumentError) { @df.append("c", CA_FLOAT64([1]), before: "a") }
+    assert_match(/column "c" has axis-0 length 1, expected 3/, e.message)
+  end
+
   def test_append_to_empty_frame_adopts_length
     df = CAFrame.new
     r = df.append("x", CA_INT32([1, 2, 3, 4]))

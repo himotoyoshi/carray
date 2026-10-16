@@ -612,7 +612,7 @@ df.fill("temp", :linear)                            # fill masked cells
 
 ### Adding, removing and renaming columns
 
-- **`append(name, col)`** returns a new frame with the column added at the end, or replacing an existing column of that name in place. Its length must be `N`. Only a frame with **no columns and no index** takes `N` from the column appended to it; a frame of zero rows that still has a column or an index requires length 0 (see [A frame with only an index](#a-frame-with-only-an-index)).
+- **`append(name, col)`** returns a new frame with the column added at the end, or replacing an existing column of that name in place. With `before: "temp"` or `after: "station"` it goes next to that column instead, and an existing column of that name is moved there: `df.append("id", ids, before: df.column_names.first)` puts it leftmost. Its length must be `N`. Only a frame with **no columns and no index** takes `N` from the column appended to it; a frame of zero rows that still has a column or an index requires length 0 (see [A frame with only an index](#a-frame-with-only-an-index)).
 - **`drop(*names)`** returns a new frame without those columns. The data is not touched.
 - **`rename(old => new, ...)`** returns a new frame with the columns renamed, in the same order.
 
