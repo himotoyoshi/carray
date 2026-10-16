@@ -657,7 +657,6 @@ in memory.
 | `spec_ai/test_memory_view_borrower.rb` | end-to-end via the C borrower test ext |
 | `spec_ai/test_memory_view_import.rb` | from / wrap import path matrix |
 | `spec_ai/test_memory_view_typeless.rb` | typeless producer + data_type-class factory |
-| `spec_ai/test_numo_interop.rb` | cross-library tests against Numo (omitted if not installed) |
 | `spec_ai/test_ca_obj_stride.rb` | CAStride + as_strided |
 | `spec_ai/test_ca_obj_stride_bmv.rb` | strided BMV imports |
 | `spec_ai/test_bmv_interop.rb` | CArray-side BMV producer/consumer matrix |
