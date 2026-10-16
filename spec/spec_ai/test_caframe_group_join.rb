@@ -1255,3 +1255,56 @@ class TestCAFrameJoinAsofTimeTolerance < Test::Unit::TestCase
     assert_equal [0], a.locate_nearest_addr(ref, direction: :floor, tolerance: "10 minutes").to_a
   end
 end
+
+# how: :semi / :anti keep this frame's rows by whether +other+ has their key.
+class TestCAFrameJoinSemiAnti < Test::Unit::TestCase
+  def setup
+    @left  = CAFrame.new("k" => CA_INT64([1, 2, UNDEF, 3, 2]),
+                         "v" => CA_OBJECT(%w[a b c d e]))
+    @right = CAFrame.new("k" => CA_FLOAT64([2, UNDEF, 4, 2]),
+                         "v" => CA_INT32([10, 20, 30, 40]))
+  end
+
+  def test_semi_keeps_matched_rows_once_in_left_order
+    s = @left.join(@right, on: "k", how: :semi)
+    assert_equal ["k", "v"], s.column_names
+    assert_equal [2, 2], s["k"].to_a
+    assert_equal ["b", "e"], s["v"].to_a
+  end
+
+  def test_anti_keeps_unmatched_rows_and_masked_keys
+    n = @left.join(@right, on: "k", how: :anti)
+    assert_equal [1, UNDEF, 3], n["k"].to_a
+    assert_equal ["a", "c", "d"], n["v"].to_a
+  end
+
+  def test_several_keys
+    x = CAFrame.new("p" => CA_INT32([1, 1, 2]), "q" => CA_OBJECT(%w[a b a]), "r" => CA_INT32([7, 8, 9]))
+    y = CAFrame.new("p" => CA_INT32([1, 2]), "q" => CA_OBJECT(%w[b a]))
+    assert_equal [8, 9], x.join(y, on: ["p", "q"], how: :semi)["r"].to_a
+    assert_equal [7], x.join(y, on: ["p", "q"], how: :anti)["r"].to_a
+  end
+
+  def test_other_with_no_rows
+    e = CAFrame.new("k" => CA_INT64([]), "v" => CA_INT32([]))
+    assert_equal 0, @left.join(e, on: "k", how: :semi).nrow
+    assert_equal 5, @left.join(e, on: "k", how: :anti).nrow
+    assert_equal 0, e.join(@left, on: "k", how: :anti).nrow
+  end
+
+  def test_shares_columns_and_index_as_filter
+    df = CAFrame.new("k" => CA_INT64([1, 2, 3]), "v" => CA_INT32([4, 5, 6]))
+    df.set_index("k")
+    s = df.join(CAFrame.new("k" => CA_INT64([2, 3])), on: "k", how: :semi)
+    assert_equal [2, 3], s.index.to_a
+    s["v"][0] = 50
+    assert_equal [4, 50, 6], df["v"].to_a
+  end
+
+  def test_refuses_suffixes
+    [["_l", "_r"], false].each do |suffixes|
+      e = assert_raise(ArgumentError) { @left.join(@right, on: "k", how: :semi, suffixes: suffixes) }
+      assert_match(/how: :semi adds no column of the other frame/, e.message)
+    end
+  end
+end

@@ -1210,6 +1210,18 @@ The key stays a column, and the result keeps the left frame's index:
 
 When the other frame's key is unique, `:left` gives one row per left row, in order: the left columns and index are this frame's own. When a left row matches several right rows, it repeats, and the left columns are views of this frame's picked by row, so a write still reaches this frame.
 
+**Keeping rows by whether the other frame has their key.** Two more modes do not pair rows. They pick this frame's rows:
+
+```ruby
+obs.join(stations, on: "station", how: :semi)   # observations of a listed station
+obs.join(stations, on: "station", how: :anti)   # observations of an unlisted one
+```
+
+- **`:semi`** — the rows whose key some row of the other frame has.
+- **`:anti`** — the rows whose key no row of the other frame has.
+
+Each row appears at most once, in this frame's order, however many rows of the other frame share its key. No column of the other frame is added, so no name collides, and passing `suffixes:` raises `ArgumentError`. A row with a masked key matches nothing, so `:semi` leaves it out and `:anti` keeps it. Keys are compared as the other modes compare them, including several key columns. The result is a sub-frame of this frame, as `filter` returns: its columns and index are views of the selected rows.
+
 **How keys are compared.** The two key columns need not have the same type; values are matched as values:
 
 - numbers of different types: an `int64` key `2` matches a `float64` key `2.0`, and a negative signed value never matches a large unsigned one;
@@ -1482,6 +1494,7 @@ snapshot = df.copy         # independent; later edits to df don't touch it
 |---|---|
 | `df.select(...)` — the same column CArrays | [select](#a-frame-of-some-columns--select) |
 | `df[0..1]` / `df[bool]` / `df[ints]` / `df.filter { }` — views of the selected rows | [Rows as a sub-frame](#rows-as-a-sub-frame), [filter](#filter--rows-matching-a-condition) |
+| `df.join(..., how: :semi / :anti)` — views of the rows kept | [join](#join--match-rows-by-key) |
 | `df.head(n)` / `df.tail(n)` | [head, tail](#first-and-last-rows--head-tail) |
 | `df.sort_by_key(...)` / `df.sort_by { }` — views in the sorted order | [sort_by_key](#sort_by_key--reorder-rows-by-key-columns) |
 | `CAFrame.meld(...)` — writes reach the input frames | [meld](#caframemeld--caframeconcatenate--rows-after-rows) |

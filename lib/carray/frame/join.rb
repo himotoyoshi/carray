@@ -43,16 +43,32 @@ class CAFrame
   # key column matches, and a row with any key cell masked matches nothing.
   #
   #   obs.join(fcst, on: ["station", "date"])
+  #
+  # Two modes filter this frame's rows by +other+ instead of pairing them:
+  #
+  #   how: :semi — the rows whose key some row of +other+ has.
+  #   how: :anti — the rows whose key no row of +other+ has.
+  #
+  # Each row appears at most once, in this frame's order, and no column of
+  # +other+ is added, so no name collides and +suffixes:+ is refused.  A row
+  # with a masked key matches nothing: :semi drops it and :anti keeps it.
+  # The result shares this frame's columns and index, as +filter+'s does.
+  #
+  #   obs.join(stations, on: "station", how: :anti)   # stations not listed
   def join(other, on:, how: :left, suffixes: DEFAULT_JOIN_SUFFIXES)
+    unless %i[left inner outer right semi anti].include?(how)
+      raise ArgumentError, "unknown join mode #{how.inspect}"
+    end
+    if (how == :semi || how == :anti) && !suffixes.equal?(DEFAULT_JOIN_SUFFIXES)
+      raise ArgumentError, "join: how: #{how.inspect} adds no column of the other frame, so suffixes: does not apply"
+    end
     names = join_key_names(on, "join", "on:")
     lkeys = names.map { |name| key_column(name, "join") }
     rkeys = names.map { |name| other.__send__(:key_column, name, "join") }
     join_check_key_widths(names, lkeys, rkeys, "join")
-    plan  = join_name_plan(other, names, suffixes)
+    return join_filter(lkeys, rkeys, how) if how == :semi || how == :anti
 
-    unless %i[left inner outer right].include?(how)
-      raise ArgumentError, "unknown join mode #{how.inspect}"
-    end
+    plan = join_name_plan(other, names, suffixes)
     join_pairs(other, names, lkeys, rkeys, how, plan)
   end
 
@@ -268,6 +284,19 @@ class CAFrame
       lcode, rcode, k = lt.locate_addr(tuples), rt.locate_addr(tuples), tuples.elements
     end
     [parts, lcode, rcode, k]
+  end
+
+  # The rows of a :semi or :anti join: whether each row's key code occurs
+  # among the other side's codes.  A row without a code (a masked key cell)
+  # has no match.
+  private def join_filter(lkeys, rkeys, how)
+    _, lcode, rcode, k = join_codes(lkeys, rkeys)
+    matched = if k == 0
+                CArray.boolean(nrow).fill(false)
+              else
+                rcode.bincount(length: k).project(lcode).strip_mask(0).gt(0)
+              end
+    select_rows(how == :semi ? matched : matched.not)
   end
 
   # The other side's row for each left row of an as-of join with exact
