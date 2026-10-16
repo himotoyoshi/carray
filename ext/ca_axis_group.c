@@ -362,7 +362,8 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   int       bundle_slot[CA_RANK_MAX][CA_RANK_MAX];
   ca_size_t bundle_cstride[CA_RANK_MAX][CA_RANK_MAX];
   CArray   *bundle_ca[CA_RANK_MAX];
-  volatile VALUE keep = rb_ary_new();   /* GC-pin int32 code views */
+  volatile VALUE keep = rb_ary_new();   /* keeps the int32 code views alive */
+  volatile VALUE h_codes[CA_RANK_MAX];  /* holders of the copied code tables */
 
   ca_size_t K_total = 1;
   long consumed_total = 0;
@@ -385,18 +386,16 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
        and the end of the walk can raise -- a validation just below, a gather
        that cannot convert a cell, an object-lane callback into Ruby -- and a
        raise jumps over every detach, leaving the source materialised with
-       nothing left to release it. The copy rides a temporary buffer that the
-       unwind collects. */
+       nothing left to release it. The copy rides ALLOCV, a temporary buffer
+       that the unwind collects. Not a String: a String held only by `keep`
+       can be moved by compaction, taking the bytes under bundle_codes with
+       it. */
     VALUE v32 = rb_ca_wrap_readonly(vcodes, INT2NUM(CA_INT32));
     rb_ary_push((VALUE) keep, v32);
     GetCArray(v32, bundle_ca[bi]);
-    {
-      size_t nbytes = (size_t) bundle_ca[bi]->elements * sizeof(int32_t);
-      VALUE  vbuf   = rb_str_tmp_new((long) nbytes);
-      rb_ary_push((VALUE) keep, vbuf);
-      ca_copy_data(bundle_ca[bi], RSTRING_PTR(vbuf));
-      bundle_codes[bi] = (int32_t *) RSTRING_PTR(vbuf);
-    }
+    h_codes[bi] = 0;
+    bundle_codes[bi] = ALLOCV_N(int32_t, h_codes[bi], bundle_ca[bi]->elements);
+    ca_copy_data(bundle_ca[bi], (char *) bundle_codes[bi]);
 
     int nb = (int) RARRAY_LEN(vbaxes);
     if ( nb <= 0 || nb > src->ndim ) {
@@ -682,6 +681,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   ALLOCV_END(h_prod);   ALLOCV_END(h_seen);   ALLOCV_END(h_xbuf);
   ALLOCV_END(h_nz);     ALLOCV_END(h_mnaddr); ALLOCV_END(h_mxaddr);
   ALLOCV_END(h_band);
+  for ( int bi = 0; bi < n_bundles; bi++ ) ALLOCV_END(h_codes[bi]);
 
   RB_GC_GUARD(keep);
   return vout;
@@ -1198,6 +1198,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   ca_size_t bundle_cstride[CA_RANK_MAX][CA_RANK_MAX];
   CArray   *bundle_ca[CA_RANK_MAX];
   volatile VALUE keep = rb_ary_new();
+  volatile VALUE h_codes[CA_RANK_MAX];
 
   ca_size_t K_total = 1;
   long consumed_total = 0;
@@ -1220,18 +1221,16 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
        and the end of the walk can raise -- a validation just below, a gather
        that cannot convert a cell, an object-lane callback into Ruby -- and a
        raise jumps over every detach, leaving the source materialised with
-       nothing left to release it. The copy rides a temporary buffer that the
-       unwind collects. */
+       nothing left to release it. The copy rides ALLOCV, a temporary buffer
+       that the unwind collects. Not a String: a String held only by `keep`
+       can be moved by compaction, taking the bytes under bundle_codes with
+       it. */
     VALUE v32 = rb_ca_wrap_readonly(vcodes, INT2NUM(CA_INT32));
     rb_ary_push((VALUE) keep, v32);
     GetCArray(v32, bundle_ca[bi]);
-    {
-      size_t nbytes = (size_t) bundle_ca[bi]->elements * sizeof(int32_t);
-      VALUE  vbuf   = rb_str_tmp_new((long) nbytes);
-      rb_ary_push((VALUE) keep, vbuf);
-      ca_copy_data(bundle_ca[bi], RSTRING_PTR(vbuf));
-      bundle_codes[bi] = (int32_t *) RSTRING_PTR(vbuf);
-    }
+    h_codes[bi] = 0;
+    bundle_codes[bi] = ALLOCV_N(int32_t, h_codes[bi], bundle_ca[bi]->elements);
+    ca_copy_data(bundle_ca[bi], (char *) bundle_codes[bi]);
 
     int nb = (int) RARRAY_LEN(vbaxes);
     if ( nb <= 0 || nb > src->ndim ) {
@@ -1413,6 +1412,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   ALLOCV_END(h_band2); ALLOCV_END(h_code);  ALLOCV_END(h_doff);
   ALLOCV_END(h_moff);  ALLOCV_END(h_addr);  ALLOCV_END(h_accd);
   ALLOCV_END(h_accn);  ALLOCV_END(h_seen);  ALLOCV_END(h_acco);
+  for ( int bi = 0; bi < n_bundles; bi++ ) ALLOCV_END(h_codes[bi]);
 
   RB_GC_GUARD(keep);
   return vout;

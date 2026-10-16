@@ -60,6 +60,15 @@ ca_object_pool_init (void *ap, int8_t ndim)
   ca->dim = (ca_size_t *) ca->_pool;
 }
 
+/* ca->self is the CAObject's own VALUE, which compaction can move; the
+   hooks call back through it, so follow the object to its new slot. */
+static void
+ca_object_compact (void *ap)
+{
+  CAObject *ca = (CAObject *) ap;
+  ca->self = rb_gc_location(ca->self);
+}
+
 const rb_data_type_t caobject_data_type = {
     .parent = &caview_data_type,
     .wrap_struct_name = "CAObject",
@@ -67,7 +76,7 @@ const rb_data_type_t caobject_data_type = {
         .dmark = ca_mark,
         .dfree = ca_free,
         .dsize = ca_object_dsize,
-        .dcompact = NULL
+        .dcompact = ca_object_compact
     },
     .flags = RUBY_TYPED_FREE_IMMEDIATELY
 };
@@ -84,13 +93,21 @@ ca_objectmask_dsize (const void *ap)
 }
 
 /* The mask reads and writes through its CAObject, and its cache is the
-   CAObject's; it keeps the CAObject alive. */
+   CAObject's; it keeps the CAObject alive, and follows it when compaction
+   moves it. */
 static void
 ca_objmask_mark (void *ap)
 {
   CAObjectMask *ca = (CAObjectMask *) ap;
-  rb_gc_mark(ca->array);
+  rb_gc_mark_movable(ca->array);
   ca_mark(ap);
+}
+
+static void
+ca_objmask_compact (void *ap)
+{
+  CAObjectMask *ca = (CAObjectMask *) ap;
+  ca->array = rb_gc_location(ca->array);
 }
 
 const rb_data_type_t caobjectmask_data_type = {
@@ -100,7 +117,7 @@ const rb_data_type_t caobjectmask_data_type = {
         .dmark = ca_objmask_mark,
         .dfree = ca_free,
         .dsize = ca_objectmask_dsize,
-        .dcompact = NULL
+        .dcompact = ca_objmask_compact
     },
     .flags = RUBY_TYPED_FREE_IMMEDIATELY
 };

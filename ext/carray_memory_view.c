@@ -36,8 +36,9 @@
 #include <ctype.h>
 #include <string.h>
 
-/* private_data is not used: ca_mv_get is alias-only and ca_mv_release
-   needs no per-view state.  Kept as a NULL field for API compatibility. */
+/* private_data holds the view's own copy of a record format (see ca_mv_get)
+   and is NULL otherwise; ca_mv_release frees it.  No other per-view state:
+   ca_mv_get is alias-only. */
 
 /* ---------------- forward declarations for non-public structs ----------------
    CABlock, CARefer, CARepeat are declared in carray.h.  CAFarray
@@ -203,8 +204,9 @@ ca_mv_record_member_spec (VALUE info, char *out, size_t outlen,
    a member it has no item for (see above), or members that overlap or come
    out of offset order (a union).
 
-   The result is frozen and cached on the data_class, so the pointer
-   handed to a view stays valid while the class lives. */
+   The result is frozen and cached on the data_class.  It is an ordinary
+   String that compaction can move, so a view takes a copy of its bytes
+   rather than its pointer (ca_mv_get). */
 static VALUE
 ca_mv_struct_format_for_data_class (VALUE data_class)
 {
@@ -731,6 +733,7 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
   ssize_t *strides = NULL;
   void *data_ptr = NULL;
   const char *format;
+  char *record_format = NULL;
   int writable_request;
 
   if (! ca_mv_extract(obj, &ca)) return false;
@@ -773,12 +776,18 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
 
   /* Format string, resolved before shape / strides are allocated since
      building it can raise.  Primitive types use the top-level table;
-     CA_FIXLEN + data_class emits the record's format, cached on the class,
-     so the pointer is stable until the class is GC'd. */
+     CA_FIXLEN + data_class emits the record's format, cached on the class
+     as a String.  The String can move, so the view carries its own copy in
+     private_data, freed by ca_mv_release. */
   if (ca->data_type == CA_FIXLEN && RTEST(rb_ca_has_data_class(obj))) {
     VALUE klass = rb_ca_data_class(obj);
     VALUE fmt   = ca_mv_struct_format_for_data_class(klass);
-    format = RSTRING_PTR(fmt);
+    long  len   = RSTRING_LEN(fmt);
+    record_format = ALLOC_N(char, len + 1);
+    memcpy(record_format, RSTRING_PTR(fmt), len);
+    record_format[len] = '\0';
+    RB_GC_GUARD(fmt);
+    format = record_format;
   }
   else if (ca->data_type == CA_FIXLEN) {
     /* Plain CA_FIXLEN (no data_class): PEP 3118 "Ns" fixed-bytes. */
@@ -836,7 +845,7 @@ ca_mv_get (VALUE obj, rb_memory_view_t *view, int flags)
   view->shape = (view->ndim == 0) ? NULL : shape;
   view->strides = (view->ndim == 0) ? NULL : strides;
   view->sub_offsets = NULL;
-  view->private_data = NULL;
+  view->private_data = record_format;
 
   /* Enforce caller's layout request. */
   {
@@ -859,6 +868,11 @@ reject:
      return false; there is no attach state to unwind. */
   if (shape)   { xfree(shape);   view->shape   = NULL; }
   if (strides) { xfree(strides); view->strides = NULL; }
+  if (record_format) {
+    xfree(record_format);
+    view->format = NULL;
+    view->private_data = NULL;
+  }
   return false;
 }
 
@@ -880,7 +894,10 @@ ca_mv_release (VALUE obj, rb_memory_view_t *view)
      ca_sync(ca->mask) recursion and raise; raising from a release
      callback is fatal during GC sweep.  See ca_mv_get's CAStride-family
      case comment for the full rationale. */
-  view->private_data = NULL;
+  if (view->private_data) {
+    xfree(view->private_data);
+    view->private_data = NULL;
+  }
   return true;
 }
 
