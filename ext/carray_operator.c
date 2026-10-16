@@ -812,6 +812,8 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
     }
   }
 
+  /* the INT64 view of a boolean operand is reached only through ca1 */
+  RB_GC_GUARD(self);
   return out;
 }
 
@@ -1648,6 +1650,8 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
 
   ca_sync_detach(ca1);
 
+  /* a cast or broadcast view of other is reached only through ca2 */
+  RB_GC_GUARD(other);
   return self;
 }
 
@@ -1914,6 +1918,10 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
     }
   }
 
+  /* the INT64 views of a boolean triop are reached only through ca1..ca3 */
+  RB_GC_GUARD(self);
+  RB_GC_GUARD(other2);
+  RB_GC_GUARD(other3);
   return out;
 }
 
@@ -2077,6 +2085,10 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
 
   ca_sync_detach(ca1);
 
+  /* cast or broadcast views of the operands are reached only through
+     ca2 and ca3 */
+  RB_GC_GUARD(other2);
+  RB_GC_GUARD(other3);
   return self;
 }
 

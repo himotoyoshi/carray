@@ -1860,7 +1860,9 @@ rb_ca_store (VALUE self, VALUE index, VALUE rval)
   case T_ARRAY:
     index = rb_obj_clone(index);
     rb_ary_push(index, rval);
-    return rb_ca_store_method((int)RARRAY_LEN(index), (VALUE *)RARRAY_CONST_PTR(index), self);
+    rval = rb_ca_store_method((int)RARRAY_LEN(index), (VALUE *)RARRAY_CONST_PTR(index), self);
+    RB_GC_GUARD(index);   /* the store reads its arguments out of index */
+    return rval;
   default: {
     VALUE rindex[2] = { index, rval };
     return rb_ca_store_method(2, rindex, self);
@@ -1873,7 +1875,9 @@ rb_ca_store2 (VALUE self, int n, VALUE *rindex, VALUE rval)
 {
   volatile VALUE index = rb_ary_new4(n, rindex);
   rb_ary_push(index, rval);
-  return rb_ca_store_method((int)RARRAY_LEN(index), (VALUE *)RARRAY_CONST_PTR(index), self);
+  rval = rb_ca_store_method((int)RARRAY_LEN(index), (VALUE *)RARRAY_CONST_PTR(index), self);
+  RB_GC_GUARD(index);   /* the store reads its arguments out of index */
+  return rval;
 }
 
 static VALUE
@@ -2151,6 +2155,7 @@ addr2index_do (int ndim, ca_size_t *dim, ca_size_t elements, VALUE raddr)
     }
 
     ca_detach(cin);
+    RB_GC_GUARD(raddr);   /* the CA_SIZE view is reached only through cin */
     return out;
   }
 }
@@ -2354,7 +2359,7 @@ rb_ca_s_addr2index (int argc, VALUE *argv, VALUE klass)
 static VALUE
 rb_ca_s_index2addr (int argc, VALUE *argv, VALUE klass)
 {
-  VALUE rest, opts;
+  VALUE rest, opts, out;
   ID kw_ids[1];
   VALUE kw_vals[1];
   int ndim;
@@ -2368,7 +2373,10 @@ rb_ca_s_index2addr (int argc, VALUE *argv, VALUE klass)
   }
   rb_get_kwargs(opts, kw_ids, 1, 0, kw_vals);
   parse_shape_kwarg(kw_vals[0], &ndim, dim, &elements);
-  return index2addr_do(ndim, dim, (int) RARRAY_LEN(rest), RARRAY_PTR(rest));
+  /* index2addr_do reads, and replaces, its arguments in rest */
+  out = index2addr_do(ndim, dim, (int) RARRAY_LEN(rest), RARRAY_PTR(rest));
+  RB_GC_GUARD(rest);
+  return out;
 }
 
 

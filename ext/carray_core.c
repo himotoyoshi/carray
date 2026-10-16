@@ -1982,6 +1982,9 @@ ca_attach_window_restore_masks (ca_window_ctx_t *w)
       ca_create_mask(ca);
     }
     ca_xfer_all(ca->mask, RSTRING_PTR(buf), CA_XFER_PUT);
+    /* held only by w->masks, where compaction can move it; the write may
+       call into Ruby (a CAObject's mask hooks) */
+    RB_GC_GUARD(buf);
   }
 }
 

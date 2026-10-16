@@ -661,6 +661,12 @@ packed_body (VALUE argument)
       for ( k = 0; k < ca->ndim; k++ ) *mask_stride_slot++ = 0;
     }
   }
+  /* The slots point into the four Strings, and acquire_basis allocates:
+     a String the stack holds is pinned, so compaction leaves it be. */
+  RB_GC_GUARD(pointers);
+  RB_GC_GUARD(strides);
+  RB_GC_GUARD(mask_pointers);
+  RB_GC_GUARD(mask_strides);
 
   {
     VALUE result;

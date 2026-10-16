@@ -52,11 +52,12 @@ histbin_check_edge_order (const double *ep, ca_size_t n, const char *name)
   }
 }
 
-/* Resolve `redges` to a 1-D float64 CArray of at least two edges.  The
-   caller copies the edges out (ca_xfer_all into its own buffer) rather
-   than attaching them: the walk that follows reads the caller's array,
-   and a raise there must not leave the edges attached. */
-static CArray *
+/* Resolve `redges` to a 1-D float64 CArray of at least two edges, and
+   return it: it may be a view made here, which only the caller can keep
+   alive.  The caller copies the edges out (ca_xfer_all into its own
+   buffer) rather than attaching them: the walk that follows reads the
+   caller's array, and a raise there must not leave the edges attached. */
+static VALUE
 histbin_resolve_edges (VALUE self, VALUE redges)
 {
   CArray *ce;
@@ -78,7 +79,7 @@ histbin_resolve_edges (VALUE self, VALUE redges)
   }
   histbin_check_edge_mask(ce, "bin_to");
 
-  return ce;
+  return redges;
 }
 
 /* ---- shared binning helpers (used by histbin_ki + the fused kernel) ---- */
@@ -171,11 +172,13 @@ rb_ca_histbin_ki (VALUE self, VALUE redges, VALUE rinclude_max)
              ca_type_name[ca->data_type]);
   }
 
-  ce = histbin_resolve_edges(self, redges);
+  redges = histbin_resolve_edges(self, redges);
+  GetCArray(redges, ce);
   ep = ALLOCV_N(double, hedges, ce->elements);
   ca_xfer_all(ce, ep, CA_XFER_GET);
   histbin_check_edge_order(ep, ce->elements, "bin_to");
   histbin_axis_setup(&ax, ep, ce->elements, RTEST(rinclude_max));
+  RB_GC_GUARD(redges);   /* a view made by histbin_resolve_edges is read through ce */
 
   /* output: fresh contiguous int64, same shape as self. */
   vout = rb_carray_new(CA_INT64, ca->ndim, ca->dim, 0, NULL);

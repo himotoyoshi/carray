@@ -215,7 +215,9 @@ rb_ca_repeat (int argc, VALUE *argv, VALUE self)
         self = rb_ca_refer_new(self, ca->data_type, ndim, dim, ca->bytes, 0);
       }
     }
-    return rb_ca_repeat((int)RARRAY_LEN(args), (VALUE *)RARRAY_CONST_PTR(args), self);
+    self = rb_ca_repeat((int)RARRAY_LEN(args), (VALUE *)RARRAY_CONST_PTR(args), self);
+    RB_GC_GUARD(args);   /* the repeat reads its arguments out of args */
+    return self;
   }
 
   ca_check_rank_fits(argc, NULL);     /* count[] and dim[] hold CA_RANK_MAX */

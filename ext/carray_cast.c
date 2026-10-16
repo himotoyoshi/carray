@@ -2711,6 +2711,8 @@ rb_ca_s_result_type (int argc, VALUE *argv, VALUE klass)
       cur = ( cur < 0 ) ? t : ca_promote_scalar_type(cur, argv[i], t);
     }
   }
+  /* argv points into rest, and classifying an argument can allocate */
+  RB_GC_GUARD(rest);
   /* Return Symbol for family consistency with
      CArray.value_to_data_type and ca.data_type. */
   return rb_ca_data_type_to_sym(cur);

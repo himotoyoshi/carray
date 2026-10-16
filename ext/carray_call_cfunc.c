@@ -226,6 +226,8 @@ ca_call_cfunc_2 (void (*func)(void *p0, void *p1), const char *fsync,
   ctx.userdata = NULL;
   ca_sweep_run(&state, ca_call_cfunc_2_walk, (VALUE) &ctx);
 
+  RB_GC_GUARD(rcx1);
+
   return rcx0;
 }
 
@@ -297,6 +299,9 @@ ca_call_cfunc_3 (void (*func)(void *p0, void *p1, void *p2), const char *fsync,
   ctx.func     = func;
   ctx.userdata = NULL;
   ca_sweep_run(&state, ca_call_cfunc_3_walk, (VALUE) &ctx);
+
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
 
   return rcx0;
 }
@@ -371,6 +376,10 @@ ca_call_cfunc_4 (void (*func)(void *p0, void *p1, void *p2, void *p3), const cha
   ctx.userdata = NULL;
   ca_sweep_run(&state, ca_call_cfunc_4_walk, (VALUE) &ctx);
 
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+
   return rcx0;
 }
 
@@ -444,6 +453,11 @@ ca_call_cfunc_5 (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4),
   ctx.func     = func;
   ctx.userdata = NULL;
   ca_sweep_run(&state, ca_call_cfunc_5_walk, (VALUE) &ctx);
+
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+  RB_GC_GUARD(rcx4);
 
   return rcx0;
 }
@@ -520,6 +534,12 @@ ca_call_cfunc_6 (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4, 
   ctx.userdata = NULL;
   ca_sweep_run(&state, ca_call_cfunc_6_walk, (VALUE) &ctx);
 
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+  RB_GC_GUARD(rcx4);
+  RB_GC_GUARD(rcx5);
+
   return rcx0;
 }
 
@@ -595,6 +615,13 @@ ca_call_cfunc_7 (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4, 
   ctx.func     = func;
   ctx.userdata = NULL;
   ca_sweep_run(&state, ca_call_cfunc_7_walk, (VALUE) &ctx);
+
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+  RB_GC_GUARD(rcx4);
+  RB_GC_GUARD(rcx5);
+  RB_GC_GUARD(rcx6);
 
   return rcx0;
 }
@@ -1128,6 +1155,8 @@ ca_call_cfunc_2_r (void (*func)(void *p0, void *p1, void *userdata), const char 
   ctx.userdata = userdata;
   ca_sweep_run(&state, ca_call_cfunc_2_r_walk, (VALUE) &ctx);
 
+  RB_GC_GUARD(rcx1);
+
   return rcx0;
 }
 
@@ -1200,6 +1229,9 @@ ca_call_cfunc_3_r (void (*func)(void *p0, void *p1, void *p2, void *userdata), c
   ctx.func     = func;
   ctx.userdata = userdata;
   ca_sweep_run(&state, ca_call_cfunc_3_r_walk, (VALUE) &ctx);
+
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
 
   return rcx0;
 }
@@ -1275,6 +1307,10 @@ ca_call_cfunc_4_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *us
   ctx.userdata = userdata;
   ca_sweep_run(&state, ca_call_cfunc_4_r_walk, (VALUE) &ctx);
 
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+
   return rcx0;
 }
 
@@ -1349,6 +1385,11 @@ ca_call_cfunc_5_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4
   ctx.func     = func;
   ctx.userdata = userdata;
   ca_sweep_run(&state, ca_call_cfunc_5_r_walk, (VALUE) &ctx);
+
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+  RB_GC_GUARD(rcx4);
 
   return rcx0;
 }
@@ -1426,6 +1467,12 @@ ca_call_cfunc_6_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4
   ctx.userdata = userdata;
   ca_sweep_run(&state, ca_call_cfunc_6_r_walk, (VALUE) &ctx);
 
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+  RB_GC_GUARD(rcx4);
+  RB_GC_GUARD(rcx5);
+
   return rcx0;
 }
 
@@ -1502,6 +1549,13 @@ ca_call_cfunc_7_r (void (*func)(void *p0, void *p1, void *p2, void *p3, void *p4
   ctx.func     = func;
   ctx.userdata = userdata;
   ca_sweep_run(&state, ca_call_cfunc_7_r_walk, (VALUE) &ctx);
+
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+  RB_GC_GUARD(rcx4);
+  RB_GC_GUARD(rcx5);
+  RB_GC_GUARD(rcx6);
 
   return rcx0;
 }
@@ -1973,6 +2027,8 @@ ca_call_cslab_2 (ca_cslab_t func, const char *fsync,
   ctx.userdata = NULL;
   ca_sweep_run_chunked(&state, ca_cslab_walk, (VALUE) &ctx);
 
+  RB_GC_GUARD(rcx1);
+
   return rcx0;
 }
 
@@ -2016,6 +2072,9 @@ ca_call_cslab_3 (ca_cslab_t func, const char *fsync,
   ctx.func_r   = NULL;
   ctx.userdata = NULL;
   ca_sweep_run_chunked(&state, ca_cslab_walk, (VALUE) &ctx);
+
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
 
   return rcx0;
 }
@@ -2062,6 +2121,10 @@ ca_call_cslab_4 (ca_cslab_t func, const char *fsync,
   ctx.userdata = NULL;
   ca_sweep_run_chunked(&state, ca_cslab_walk, (VALUE) &ctx);
 
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+
   return rcx0;
 }
 
@@ -2107,6 +2170,11 @@ ca_call_cslab_5 (ca_cslab_t func, const char *fsync,
   ctx.func_r   = NULL;
   ctx.userdata = NULL;
   ca_sweep_run_chunked(&state, ca_cslab_walk, (VALUE) &ctx);
+
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+  RB_GC_GUARD(rcx4);
 
   return rcx0;
 }
@@ -2155,6 +2223,12 @@ ca_call_cslab_6 (ca_cslab_t func, const char *fsync,
   ctx.userdata = NULL;
   ca_sweep_run_chunked(&state, ca_cslab_walk, (VALUE) &ctx);
 
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+  RB_GC_GUARD(rcx4);
+  RB_GC_GUARD(rcx5);
+
   return rcx0;
 }
 
@@ -2202,6 +2276,13 @@ ca_call_cslab_7 (ca_cslab_t func, const char *fsync,
   ctx.func_r   = NULL;
   ctx.userdata = NULL;
   ca_sweep_run_chunked(&state, ca_cslab_walk, (VALUE) &ctx);
+
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+  RB_GC_GUARD(rcx4);
+  RB_GC_GUARD(rcx5);
+  RB_GC_GUARD(rcx6);
 
   return rcx0;
 }
@@ -2290,6 +2371,8 @@ ca_call_cslab_2_r (ca_cslab_r_t func, const char *fsync,
   ctx.userdata = userdata;
   ca_sweep_run_chunked(&state, ca_cslab_r_walk, (VALUE) &ctx);
 
+  RB_GC_GUARD(rcx1);
+
   return rcx0;
 }
 
@@ -2334,6 +2417,9 @@ ca_call_cslab_3_r (ca_cslab_r_t func, const char *fsync,
   ctx.func_r   = func;
   ctx.userdata = userdata;
   ca_sweep_run_chunked(&state, ca_cslab_r_walk, (VALUE) &ctx);
+
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
 
   return rcx0;
 }
@@ -2381,6 +2467,10 @@ ca_call_cslab_4_r (ca_cslab_r_t func, const char *fsync,
   ctx.userdata = userdata;
   ca_sweep_run_chunked(&state, ca_cslab_r_walk, (VALUE) &ctx);
 
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+
   return rcx0;
 }
 
@@ -2427,6 +2517,11 @@ ca_call_cslab_5_r (ca_cslab_r_t func, const char *fsync,
   ctx.func_r   = func;
   ctx.userdata = userdata;
   ca_sweep_run_chunked(&state, ca_cslab_r_walk, (VALUE) &ctx);
+
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+  RB_GC_GUARD(rcx4);
 
   return rcx0;
 }
@@ -2476,6 +2571,12 @@ ca_call_cslab_6_r (ca_cslab_r_t func, const char *fsync,
   ctx.userdata = userdata;
   ca_sweep_run_chunked(&state, ca_cslab_r_walk, (VALUE) &ctx);
 
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+  RB_GC_GUARD(rcx4);
+  RB_GC_GUARD(rcx5);
+
   return rcx0;
 }
 
@@ -2524,6 +2625,13 @@ ca_call_cslab_7_r (ca_cslab_r_t func, const char *fsync,
   ctx.func_r   = func;
   ctx.userdata = userdata;
   ca_sweep_run_chunked(&state, ca_cslab_r_walk, (VALUE) &ctx);
+
+  RB_GC_GUARD(rcx1);
+  RB_GC_GUARD(rcx2);
+  RB_GC_GUARD(rcx3);
+  RB_GC_GUARD(rcx4);
+  RB_GC_GUARD(rcx5);
+  RB_GC_GUARD(rcx6);
 
   return rcx0;
 }

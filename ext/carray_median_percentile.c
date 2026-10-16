@@ -919,8 +919,10 @@ rb_ca_median_m_body (int argc, VALUE *argv, VALUE self)
                    : median_axis(self, axis, n, keep_axis);
     return mp_axis_answer(self, res, keep_axis);
   }
-  return is_obj ? median_object_flat(self, min_count, fill_value, keep_axis)
-                : median_flat(self, min_count, fill_value, keep_axis);
+  /* self may be the float64 view made above, read through its CArray */
+  CA_RETURN_KEEPING(self,
+                    is_obj ? median_object_flat(self, min_count, fill_value, keep_axis)
+                           : median_flat(self, min_count, fill_value, keep_axis));
 }
 
 /* =====================================================================
@@ -1400,6 +1402,8 @@ rb_ca_percentile_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
       result = w;
     }
   }
+  /* self may be the float64 view made above, read through its CArray */
+  RB_GC_GUARD(self);
 
   if ( single_p ) return rb_ary_entry(result, 0);
   return result;

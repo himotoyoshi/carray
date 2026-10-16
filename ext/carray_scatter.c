@@ -497,6 +497,9 @@ ca_scatter_region_body (VALUE varg)
     ca_attach_window(vals_scalar ? 1 : 2, list_, "rr", \
                      ca_scatter_region_body, (VALUE) &ra_); \
   } \
+  /* the views AT_SETUP_BODY made are reached only through ci and cv */ \
+  RB_GC_GUARD(raddrs); \
+  RB_GC_GUARD(rvals); \
 } while (0)
 
 /* --------------------------------------------------------------- */
