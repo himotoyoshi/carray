@@ -943,7 +943,20 @@ ca_mv_imported_holder_free (void *p)
   ca_mv_imported_holder_t *h = (ca_mv_imported_holder_t *) p;
   if (h->valid) {
     h->valid = false;
-    rb_memory_view_release(&h->view);
+    /* While a view is exported Ruby keeps the producer alive, so in an
+       ordinary sweep it is still here.  At exit, though, the objects
+       left are freed in heap order and the producer may have gone first
+       (its slot is T_NONE with the class still set).  Its release
+       callback would then get a dead object, and one that checks the
+       type raises, which is fatal during GC.  Skip the release there:
+       the process is ending, so only the components are freed. */
+    if (! RB_SPECIAL_CONST_P(h->view.obj) &&
+        RB_BUILTIN_TYPE(h->view.obj) == RUBY_T_NONE) {
+      xfree((void *) h->view.item_desc.components);
+    }
+    else {
+      rb_memory_view_release(&h->view);
+    }
   }
   xfree(h);
 }

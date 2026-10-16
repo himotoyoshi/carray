@@ -339,7 +339,11 @@ static bool
 crafted_release (VALUE obj, rb_memory_view_t *view)
 {
   (void) view;
-  crafted_get_struct(obj)->releases++;
+  /* A consumer freed at exit may release after this object is gone, and
+     raising here is fatal during GC, so check without raising. */
+  if (rb_typeddata_is_kind_of(obj, &crafted_type)) {
+    ((crafted_t *) RTYPEDDATA_DATA(obj))->releases++;
+  }
   return true;
 }
 
