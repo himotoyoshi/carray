@@ -499,6 +499,31 @@ The surviving undetermined rows arrive with their **data cells masked** and thei
 
 **`keep_masked: true` returns a new frame, not a sub-frame**: a view could not show those rows masked without masking them in the original frame too. It is a new frame even when no cell of the condition is masked.
 
+### Checking rows against rules — `verify`
+
+`verify(rules)` judges every row against named rules and returns the verdicts as a frame, one boolean column per rule:
+
+```ruby
+report = df.verify(
+  "age is not negative" => ->(f) { f["age"] >= 0 },
+  "end after start"     => ->(f) { f["end"] > f["start"] },
+)
+df.filter { |f| report["end after start"].not }   # the rows that break the rule
+report["end after start"].count(false)            # how many break it
+```
+
+- A rule is a name and anything that responds to `call`. It receives the frame, as a `filter` block does, and returns a boolean `CArray` with one entry per row on its first axis. `true` means the rule holds.
+- The result's columns are named after the rules, and it has this frame's index and row axis name.
+- A row whose rule read a masked value is `UNDEF` in the verdict, not `false`: `count(false)` counts the rows that break the rule, `count_masked` the rows it could not judge.
+- A rule over an N-D column may answer per cell, in the column's shape. The failing cells can then be masked directly, and `.all(axis: 1)` gives one verdict per row for `filter`:
+
+```ruby
+report = df.verify("precip is not negative" => ->(f) { f["precip"] >= 0 })   # (n, 12)
+df["precip"][report["precip is not negative"].not] = UNDEF
+```
+
+- A rule that returns anything but a boolean `CArray` with this frame's number of rows raises `ArgumentError` naming the rule. An error inside a rule passes through.
+
 ### `sort_by_key` — reorder rows by key columns
 
 `sort_by_key(*keys, order:, masked_position:)` sorts rows by one or more key columns, the first key deciding first and the next breaking its ties. It returns a sub-frame.
@@ -1727,6 +1752,7 @@ s.unstack(axis: 1)  # => [day1's frame, day2's frame, day3's frame]
 | row selection (`df[...]`, `filter`, `head`, `sort_by_key`, …) | the axes after the row axis are carried along |
 | `df[i]` / `each_row` | the cell is a view of that row's slice; writing it reaches the frame |
 | `filter` | the condition must be one value per row; an N-D condition raises — take a component |
+| `verify` | a rule may answer per cell in the column's shape; reduce with `.all(axis: 1)` for one verdict per row |
 | `sort_by_key` / `sort_by` | a key must be one value per row; an N-D key raises |
 | keys of `group_by`, `join`, `join_asof`, `align` | must be one value per row; an N-D column is refused — take a component |
 | `group_by` / `resample` reductions, `aggregate` with a Symbol | reduced along the rows, so each group keeps the shape: a `(N, 20)` profile gives `(groups, 20)`, each station's mean profile |
@@ -1774,6 +1800,7 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | see the first or last few rows | [`head` / `tail`](#first-and-last-rows--head-tail) |
 | keep the rows where a condition holds | [`filter`](#filter--rows-matching-a-condition) |
 | keep the rows whose condition could not be judged, for a later pass | [`filter(keep_masked: true)`](#rows-whose-condition-is-undetermined--keep_masked) |
+| check every row against named rules and find the ones that break them | [`verify`](#checking-rows-against-rules--verify) |
 | keep only the stations with enough readings | [`group_by(...).filter`](#keeping-whole-groups--filter) |
 | keep the rows in a range of times | [`filter { \|f\| (f.index >= lo) & (f.index <= hi) }`](#filter--rows-matching-a-condition) |
 | sort by one or more columns | [`sort_by_key`](#sort_by_key--reorder-rows-by-key-columns) |

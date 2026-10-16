@@ -408,6 +408,56 @@ class CAFrame
     select_rows(mask, keep_masked: keep_masked)
   end
 
+  # Judge every row against named rules, and return the verdicts as a frame:
+  #
+  #   report = df.verify(
+  #     "age is not negative" => ->(f) { f["age"] >= 0 },
+  #     "end after start"     => ->(f) { f["end"] > f["start"] },
+  #   )
+  #   df.filter { |f| report["end after start"].not }   # the rows that break it
+  #
+  # A rule is called with the frame, as a +filter+ block is, and returns a
+  # boolean CArray with one entry per row on its first axis; true means the
+  # rule holds.  A rule over an N-D column may answer per cell, in the
+  # column's own shape, so the cells that break it can be masked directly.
+  # A cell the rule could not judge -- it read a masked value -- stays
+  # UNDEF rather than becoming false.
+  #
+  # The result has one column per rule, named after it, and this frame's
+  # index and row axis name.
+  #
+  # @param rules [Hash{String => #call}] the rules by name.
+  # @return [CAFrame]
+  # @raise [ArgumentError] when there are no rules, a name is empty, or a
+  #   rule does not return a boolean CArray of this frame's length.
+  # @raise [TypeError] when a name is not a String.
+  def verify(rules)
+    unless rules.is_a?(Hash)
+      raise ArgumentError, "verify: the rules are a Hash of name => rule (got #{rules.class})"
+    end
+    raise ArgumentError, "verify: there are no rules" if rules.empty?
+    verdicts = {}
+    rules.each do |name, rule|
+      key = column_name_arg(name, "verify")
+      unless rule.respond_to?(:call)
+        raise ArgumentError, "verify: rule #{key.inspect} is not callable (got #{rule.class})"
+      end
+      verdict = rule.call(self)
+      unless verdict.is_a?(CArray) && verdict.data_type == :boolean
+        raise ArgumentError,
+              "verify: rule #{key.inspect} must return a boolean CArray (got " \
+              "#{verdict.is_a?(CArray) ? "a #{verdict.data_type} CArray" : verdict.class})"
+      end
+      unless verdict.shape[0] == @nrow
+        raise ArgumentError,
+              "verify: rule #{key.inspect} returned shape #{verdict.shape.inspect}, " \
+              "expected #{@nrow} rows on the first axis"
+      end
+      verdicts[key] = verdict
+    end
+    rebuild(verdicts)
+  end
+
   # Move a column to the index and name the row axis after it (memo §3).
   # An index-role change: the data is unchanged, so this mutates self and
   # returns it (memo §3.8). Any existing index is replaced.

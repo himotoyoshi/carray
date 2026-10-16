@@ -52,6 +52,7 @@ class TestCAFrameConstruction < Test::Unit::TestCase
       "join"        => -> { df.join(df.select("a"), on: :a) },
       "split_column" => -> { df.split_column("s", "_", into: [:x, :y]) },
       "contrast_columns" => -> { df.contrast_columns(:s) },
+      "verify"      => -> { df.verify(x: ->(f) { f["a"] > 0 }) },
       "describe"    => -> { df.describe(:a) },
       "mean"        => -> { df.group_by("s").mean(:a) },
       "aggregate"   => -> { df.group_by("s").aggregate(x: ["a", :sum]) },
