@@ -1,243 +1,190 @@
 # Faces
 
-Every CArray has a [data type](01_creating_arrays.md) — `int32`, `float64`, `int64`, and so on — that says how the bytes in memory are to be read as numbers. Sometimes those numbers are not just numbers. An `int64` array might be storing the number of seconds since 1970; an `int32` array might be storing angles in degrees, or codes for categories, or amounts in cents.
+Every CArray has a [data type](01_creating_arrays.md) — `int32`, `float64`, `int64`, and so on — that says how the bytes in memory are to be read as numbers. Sometimes those numbers are not just numbers. An `int64` array might hold days since 1970; a `uint8` array might hold the codes of categories.
 
-A *Face* is a thin wrapper that sits on top of a numeric array and says: "read these elements as something". The bytes do not change. The shape does not change. What changes is the Ruby class on top, the scalar value you get back when you index, and the methods you can call.
+A *Face* is a view that sits on top of such an array and says "read these elements as something". The bytes do not change, and neither does the shape. What changes is the Ruby class, the value you get back when you index, and the methods you can call.
 
-The canonical example shipped with CArray is `CATime`, which gives an `int64` array a time interpretation.
-
-## A first look
-
-```ruby
-dt = CArray.time_series("2024-06-15", count: 7, unit: :D)
-
-dt.class                #  => CATime
-dt.unit                 #  => #<CATime::Resolution 1 D>
-dt.day.to_a             #  => [15, 16, 17, 18, 19, 20, 21]
-dt.weekday.to_a         #  => [6, 0, 1, 2, 3, 4, 5]   #  Sun=0..Sat=6
-```
-
-What is going on underneath is that `dt` is a *view* (see [Views](06_views.md)) over an ordinary `int64` array. The `int64` values are day counts since 1970-01-01; the Face is what knows that "19891" means 2024-06-17. The named accessor `ticks` exposes those raw values:
-
-```ruby
-dt.ticks.class          #  => CArray
-dt.ticks.data_type      #  => :int64
-dt.ticks.to_a           #  => [19889, 19890, 19891, 19892, 19893, 19894, 19895]
-```
-
-The Face and its underlying array share storage byte-for-byte. There is no conversion happening at the boundary; the Face is purely an interpretation.
-
-## Constructing a CATime array
-
-There are several ways to make one.
-
-### From a time series
-
-`CArray.time_series` builds an array of evenly spaced instants from a start point:
-
-```ruby
-CArray.time_series("2024-06-15", count: 7, unit: :D)
-CArray.time_series("2024-06-15T12:00:00", count: 24, unit: :h)
-```
-
-`count:` is the number of elements; `unit:` is the resolution of the grid — `:D` (day), `:h` (hour), `:m` (minute), `:s` (second), and so on. It is also the *unit* of the resulting array.
-
-### From a single literal
-
-```ruby
-CArray.time("2024-06-15", unit: :D)
-#  => 1-element CATime
-```
-
-### From an existing int64 array
-
-If you already have an `int64` CArray whose values you want to interpret as datetimes, wrap it directly:
-
-```ruby
-raw = CArray.int64(5) { |i| i * 86400 }
-dt  = raw.time(unit: :s)
-
-dt.class                     #  => CATime
-dt.unit.base                 #  => :s
-dt.ticks.to_a == raw.to_a    #  => true
-```
-
-The Face is zero-copy: `dt` shares its storage with `raw`. Writes through `dt` reach back to `raw`, and vice versa.
-
-### Empty allocation
-
-```ruby
-CATime.new(10, unit: :ns)
-#  => 10-element CATime, all zero (= 1970-01-01)
-
-CATime.new(3, 4, unit: :D)
-#  => 3x4 CATime
-```
-
-## Units
-
-The integer values in the underlying storage are interpreted as a count of units since the **1970-01-01 UTC** epoch.
-
-| unit | meaning      |
-|------|--------------|
-| `:D` | day          |
-| `:h` | hour         |
-| `:m` | minute       |
-| `:s` | second       |
-| `:ms`| millisecond  |
-| `:us`| microsecond  |
-| `:ns`| nanosecond   |
-
-A few less common units (`:Y`, `:M`, `:W`, `:ps`, `:fs`, `:as`) also exist, and a unit can be a composite resolution such as `"10 minutes"`. See [Time arrays](26_time_arrays.md) for the full table.
-
-Operations between arrays of different units are reconciled by the unit algebra — exact conversions happen automatically, and a conversion that would silently lose precision raises instead. The details are in [Time arrays](26_time_arrays.md); the point here is that the Face is what carries the unit through every operation so that the reconciliation can happen at all.
-
-## Indexing returns an Element, not a number
-
-For a plain `int64` array, `a[2]` returns an `Integer`. For a Face, indexing returns an *Element* object that carries the same interpretation as the array:
+You usually meet a Face without asking for one, as the result of a method:
 
 ```ruby
 dt = CArray.time_series("2024-06-15", count: 5, unit: :D)
-s  = dt[2]
+dt.class                #  => CATime            instants in time, over int64
 
-s.class       #  => CATime::Element
-s.value       #  => 19891       (raw int64 in the array's unit)
-s.unit        #  => #<CATime::Resolution 1 D>
-s.to_s        #  => "2024-06-17"
-s.to_time     #  => 2024-06-17 00:00:00 UTC
-s < dt[3]     #  => true
+c = CA_OBJECT(%w[low high mid low high]).categorize
+c.class                 #  => CACategorical     categories, over integer codes
+
+s = CArray.fixlen_string(%w[pear apple fig])
+s.class                 #  => CAFixlenString    Strings, over 5 bytes a cell
 ```
 
-Elements compare with each other via `Comparable`, so you can use `<`, `<=`, `<=>`, `==`, sort arrays of them, and so on.
+This chapter is about what all Faces have in common, so that a class name like these is not a surprise. Each Face has a chapter of its own for the rest (see [The Faces that come with CArray](#the-faces-that-come-with-carray)).
 
-## Calendar fields
+## Elements are values of the Face
 
-A Face is free to add its own methods. `CATime` adds accessors for the calendar fields of each element:
+Indexing a Face returns a value in its own terms, not the number underneath:
 
 ```ruby
-dt = CArray.time_series("2024-06-15", count: 7, unit: :D)
-
-dt.year.to_a        #  => [2024, 2024, 2024, 2024, 2024, 2024, 2024]
-dt.month.to_a       #  => [6, 6, 6, 6, 6, 6, 6]
-dt.day.to_a         #  => [15, 16, 17, 18, 19, 20, 21]
-dt.weekday.to_a     #  => [6, 0, 1, 2, 3, 4, 5]
+dt[0]                   #  => #<CATime::Element 2024-06-15 (19889D)>
+dt[0].to_s              #  => "2024-06-15"
+c[0]                    #  => "low"
+s[0]                    #  => "pear"
 ```
 
-These return plain numeric CArrays — `dt.year` is an `int32` array of years, not a Face. The reasoning is that a year number is no longer a time, so carrying the Face would be misleading. The Face is *stripped* when the result no longer has time semantics.
-
-`strftime` works the same way:
+Writing takes a value in the same terms:
 
 ```ruby
-dt.strftime("%Y-%m-%d").to_a
-#  => ["2024-06-15", "2024-06-16", "2024-06-17",
-#      "2024-06-18", "2024-06-19", "2024-06-20", "2024-06-21"]
+dt[0] = "2024-07-01"
+dt[1] = Time.utc(2024, 8, 1)
+dt[0].to_s              #  => "2024-07-01"
 ```
 
-The result is a `String` CArray, not a `CATime`.
+Not every Face can be written. A categorical is read-only: its codes and its labels have to agree, so a cell is not changed on its own (`c[0] = "mid"` raises `RuntimeError`).
 
-## Arithmetic that respects meaning
+## Views keep the Face
 
-The other thing a Face decides is what arithmetic means. For datetimes, the algebra is that of instants and durations: you can add a duration to an instant, you can subtract two instants to get a duration, but you cannot add two instants.
+Every operation that makes a view of a Face — a slice, `reshape`, `transpose`, `flip` — returns the same Face:
 
 ```ruby
-dt = CArray.time_series("2024-06-15", count: 7, unit: :D)
-td = CArray.int64(7) { |i| i + 1 }.timedelta(unit: :D)
-
-(dt + td).class     #  => CATime
-(dt - dt).class     #  => CATimedelta
-(dt + dt)
-#  => TypeError: CATime + CATime is ill-defined
+dt = CArray.time_series("2024-01-01", count: 6, unit: :D)
+dt[2..4].class                     #  => CATime
+dt.reshape(2, 3).transpose.class   #  => CATime
+c[1..3].class                      #  => CACategorical
 ```
 
-`CATimedelta` is the second Face shipped with CArray. It also wraps an `int64` array, but interprets it as a duration. Unlike `CATime`, ordinary arithmetic *is* meaningful on durations:
+This is what makes a Face useful: the interpretation stays with the data however you cut it.
+
+A result whose meaning is different is not that Face. The day of the month of a time is a plain number, and the difference of two times is a duration:
 
 ```ruby
-td + td             #  => CATimedelta
-td * 2              #  => CATimedelta
-td.sum.value        #  => sum as a plain integer count in the unit
+dt.day.class            #  => CArray            int64
+(dt - dt[0]).class      #  => CATimedelta
 ```
 
-## Reductions
+## Operations without a meaning are refused
 
-Reductions follow the same rule as fields: those that produce something with the same meaning keep the Face, others strip it.
+Arithmetic on a Face is the arithmetic of what it stands for. An operation that has no meaning there raises instead of computing on the numbers underneath:
 
 ```ruby
-dt.min              #  => CATime::Element  (earliest instant)
-dt.max              #  => CATime::Element  (latest instant)
-dt.mean             #  => CATime::Element  (midpoint)
-
-dt.sum
-#  => TypeError: CATime#sum is ill-defined; use mean for centroid
+dt + dt                 #  TypeError: CATime + CATime is ill-defined
+c + 1                   #  TypeError
+dt - dt[0]              #  fine: the time since the first one
 ```
 
-`min`, `max`, `mean`, `median` all return a `CATime::Element`, because each of those is still an instant. `sum` raises, because the sum of dates is nonsense.
+## Values are compared as what they mean
 
-For `CATimedelta`, `sum` and `mean` are fine — durations add.
-
-## Slicing and reshape preserve the Face
-
-Every view-creating operation preserves the Face. Whatever you do to the array — slice it, reshape it, transpose it, flip it, mask it, sort it — what comes back is still a `CATime`, still carrying its unit.
+Comparing, searching and finding distinct values work on the values of the Face:
 
 ```ruby
-dt = CArray.time_series("2024-01-01", count: 12, unit: :D)
+c.eq("low").to_a                 #  => [true, false, false, true, false]
+c.unique(sort: true).to_a        #  => ["high", "low", "mid"]     label order
+s.sort.to_a                      #  => ["apple", "fig", "pear"]
 
-dt[2..5].class                                     #  => CATime
-dt.reshape(3, 4).class                             #  => CATime
-dt.reshape(3, 4).transpose.class                   #  => CATime
-dt.reshape(3, 4).transpose.flip[0..1].unit.base    #  => :D
+hours = CArray.time_series("2024-06-15 00:00", count: 48, unit: :h)
+days  = CArray.time_series("2024-06-15", count: 5, unit: :D)
+days.is_in(hours).to_a           #  => [true, true, false, false, false]
 ```
 
-This is the property that makes a Face actually useful. A time array that turned back into a plain `int64` array after the first slice would be no better than a comment in the code; the whole point is that the interpretation survives.
+The last line compares days with hours: a day is matched by the hour it starts at.
 
-## Going back to the underlying numbers
+## Under the Face
 
-If you ever want the raw numbers — to send them to a function that wants a plain integer, to compute something the Face does not provide, to compare storage values directly — `ticks` is the escape hatch.
+The numbers under a Face are always within reach, through a method named for what they are — `ticks` for a time, `codes` for a categorical. The result is the array underneath, sharing its storage, so a write to it is a write to the Face:
 
 ```ruby
-dt = CArray.time_series("2024-06-15", count: 5, unit: :D)
+dt = CArray.time_series("2024-06-15", count: 3, unit: :D)
+dt.ticks.to_a           #  => [19889, 19890, 19891]    days since 1970-01-01
+dt.ticks[0] = 0
+dt[0].to_s              #  => "1970-01-01"
 
-dt.ticks.class       #  => CArray
-dt.ticks.data_type   #  => :int64
-dt.ticks.to_a        #  => [19889, 19890, 19891, 19892, 19893]
+c.codes.to_a            #  => [0, 1, 2, 0, 1]
 ```
 
-`dt.ticks` is the underlying `int64` array. It shares storage with `dt`, so modifying one modifies the other.
+The other way, a Face is put onto numbers you already have:
 
-You can also go in the opposite direction at any time: take a plain integer array and put a Face on it with `raw.time(unit: ...)`.
+```ruby
+CA_INT64([19889, 19890]).time(unit: :D)[1].to_s      #  => "2024-06-16"
+CACategorical.from_codes(CA_UINT8([2, 0]), ["low", "high", "mid"]).to_a
+                                                     #  => ["mid", "low"]
+```
 
 ## Masks pass through
 
-A Face inherits the mask of its parent. Anything you know about masks from [Masks](05_masks.md) applies directly:
+A Face has the mask of the array underneath, and everything in [Masks and missing values](05_masks.md) applies to it:
 
 ```ruby
 dt = CArray.time_series("2024-06-15", count: 5, unit: :D)
 dt[2] = UNDEF
 
-dt[2]                  #  => UNDEF
-dt.is_masked.to_a      #  => [false, false, true, false, false]
-dt.min.to_s            #  => "2024-06-15"   # ignores masked
+dt[2]                   #  => UNDEF
+dt.is_masked.to_a       #  => [false, false, true, false, false]
+dt.min.to_s             #  => "2024-06-15"
 ```
 
-`dt.strip_mask(0)` clears the mask, replacing the masked entries with the fill value (interpreted in the array's unit).
+## Where a Face does not go
 
-## Other built-in Faces
+Some paths out of CArray carry bytes only, and the meaning of a time or a category is not in its bytes. [MemoryView](15_memory_view.md) is one: a `CATime` or a `CACategorical` is not handed to another library. Hand it the numbers underneath:
 
-CArray ships with two Faces:
+```ruby
+dt = CArray.time_series("2024-06-15", count: 5, unit: :D)
+CArray.memory_view_available?(dt)          #  => false
+CArray.memory_view_available?(dt.ticks)    #  => true
+```
 
-- `CATime` — instants in time, this chapter.
-- `CATimedelta` — durations, briefly shown above.
+## The Faces that come with CArray
 
-Both are layered on `int64` storage and follow the same pattern: a numeric array underneath, a domain interpretation on top, kept across the view algebra.
+| Face | what an element is | stored as | chapter |
+|---|---|---|---|
+| `CATime` | an instant | `int64` ticks on a grid you name | [Time arrays](26_time_arrays.md) |
+| `CATimedelta` | a duration | `int64` ticks | [Time arrays](26_time_arrays.md) |
+| `CAString` | a String | an object array, with String methods | [Text, fixed-length strings, and records](14_text_and_fixlen.md) |
+| `CAConstString` | a String, read-only | one shared byte buffer | [Text, fixed-length strings, and records](14_text_and_fixlen.md) |
+| `CAFixlenString` | a String of a fixed width | fixed-length bytes | [Text, fixed-length strings, and records](14_text_and_fixlen.md) |
+| `CARecord` | a record with named fields | the bytes of a struct | [Text, fixed-length strings, and records](14_text_and_fixlen.md) |
+| `CACategorical` | a category label | integer codes | [Categories and grouping](24_categories_and_grouping.md) |
 
-The Face mechanism itself is general — it is just as much at home with angles in radians, money in a given currency, or any other interpretation where a numeric array is not "just numbers". The two shipped Faces are covered in full — construction, unit algebra, search, and the time bucketing system — in [Time arrays](26_time_arrays.md).
+## Writing your own Face
+
+A Face for a domain of your own can be written in Ruby. Make it a subclass of `CAObject` and pass `face: true`; the array you give as `parent:` holds the data, and every cell is read and written at the speed of that array. Here prices in one currency, over `int64` amounts:
+
+```ruby
+class Price < CAObject
+  def initialize(amounts, currency:)
+    @currency = currency
+    super(CA_INT64, amounts.shape, parent: amounts, face: true)
+  end
+
+  attr_reader :currency
+
+  # carry the currency to every view of a Price
+  def copy_state(src)
+    @currency = src.currency
+  end
+
+  def amounts
+    parent
+  end
+
+  def total
+    "#{amounts.accumulate} #{currency}"
+  end
+end
+
+pr = Price.new(CA_INT64([120, 980, 450, 300]), currency: "JPY")
+pr[1..2].class          #  => Price
+pr[1..2].currency       #  => "JPY"
+pr[1..2].total          #  => "1430 JPY"
+pr + pr                 #  CArray::DataTypeError
+```
+
+A Face like this one refuses the arithmetic and reductions of the numbers underneath, as the Faces above do; you add the operations that mean something for your domain (`total` here). Writing Faces in full — keeping the numeric operations, ordering, values of your own for the elements — is covered in the Developer's Guide.
 
 ## Quick recap
 
-- A Face puts a domain interpretation on top of a numeric array without copying.
-- `CATime` and `CATimedelta` interpret an `int64` array as instants and durations.
-- Indexing returns an `Element` object that carries the interpretation.
-- Fields (`year`, `month`, …) and `strftime` return plain numeric or string arrays — the Face is stripped when the result no longer has the same meaning.
-- Arithmetic follows the algebra of the domain: instant ± duration is fine, instant + instant raises.
-- View-creating operations (`reshape`, slice, `transpose`, `flip`, …) keep the Face on top.
-- `dt.ticks` is the underlying `int64` array, sharing storage.
-- Masks are inherited from the underlying array and work exactly as on a plain CArray.
+- A Face reads an array as something — times, categories, strings — without changing its bytes.
+- Indexing returns a value of the Face, and writing takes one.
+- Views keep the Face; a result that means something else is not that Face.
+- An operation with no meaning for the Face raises.
+- Comparing, searching and finding distinct values work on what the values mean.
+- The numbers underneath are reached by a named method (`ticks`, `codes`), sharing storage.
+- Masks work as on any CArray.
+- A Face can be written in Ruby as a subclass of `CAObject` with `face: true`.
