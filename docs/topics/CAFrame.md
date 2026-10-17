@@ -127,29 +127,55 @@ There are four ways in, one per shape the data arrives in:
 
 ### `CAFrame.new`
 
-Pass a Hash of `name => column`. Columns may be `CArray`s, a Ruby `Array`, or anything else that answers `to_ca` (a lazy view). A `CArray` is kept as it is; a Ruby `Array` is typed by its values as [`from_records`](#caframefrom_records) types a record's: `[1, 2]` an `int64` column, `[1, 2.5]` a `float64` one, `[[1, 2], [3, 4]]` an N-D one, strings or mixed values `:object`, and `nil` or `UNDEF` a missing cell. `df["x"] = [...]` and the values a group's block gives are typed the same way. Column names are **Strings**, here and in every verb that names a column: a Symbol is refused with `TypeError` (`drop: a column name is a String (got :temp)`), since Symbols are the frame's options and types. A name given twice to a verb is refused with `ArgumentError` (`select: names "temp" more than once`), whether the verb takes the columns (`select`, `drop`, `group_by`, `sort_by_key`) or makes them (`into:`, a CSV header); only `df["a", "a"]` returns a column twice, as `Hash#values_at` does. Pairs may be given inline:
+Pass a Hash of `name => column`. All columns must have the same length along axis 0, which is the number of rows:
 
 ```ruby
 CAFrame.new("a" => CA_INT32([1, 2, 3]), "b" => CA_FLOAT64([1.0, 2.0, 3.0]))
+```
 
-# control options are keyword-separated from columns:
+**Columns.** A column may be a `CArray`, a Ruby `Array`, or anything else that answers `to_ca` (a lazy view). A `CArray` is kept as it is, not copied. A Ruby `Array` is typed by its values, the same way [`from_records`](#caframefrom_records) types a record's values:
+
+| values | column |
+|---|---|
+| `[1, 2]` | `int64` |
+| `[1, 2.5]` | `float64` |
+| `[[1, 2], [3, 4]]` | an N-D column |
+| strings, or mixed values | `:object` |
+| `nil` or `UNDEF` | a masked cell |
+
+`df["x"] = [...]` and the values a group's block gives are typed the same way.
+
+**Options.** Three keywords control the frame rather than adding a column:
+
+| keyword | meaning |
+|---|---|
+| `axis_name:` | the name of the row axis |
+| `index:` | the index (see [The index](#the-index)) |
+| `attrs:` | a Hash of the frame's attributes (see [Attributes of the frame](#attributes-of-the-frame)) |
+
+Pass the columns as a Hash in braces when you give options with them:
+
+```ruby
 CAFrame.new({ "v" => CA_FLOAT64([1, 2, 3]) },
             axis_name: "time",
             index: CArray.int64([100, 200, 300]))
 ```
 
-A length disagreement raises immediately:
+**Column names are Strings**, here and in every verb that names a column. Symbols are used for options and types, so a Symbol keyword that is not one of the three options is refused instead of becoming a column. A mistyped option cannot turn into a column without notice. A column named `"index"` is written the ordinary way:
+
+```ruby
+CAFrame.new(temp: CA_INT32([1, 2, 3]))
+# => TypeError: CAFrame.new: a column name is a String (got :temp); axis_name:, index: and attrs: are the options
+CAFrame.new("index" => CA_INT32([1, 2, 3]))     # a column named "index"
+```
+
+Other verbs refuse a Symbol the same way (`drop: a column name is a String (got :temp)`). A name given twice to a verb raises `ArgumentError` (`select: names "temp" more than once`). This applies to verbs that take columns (`select`, `drop`, `group_by`, `sort_by_key`) and to those that make them (`into:`, a CSV header). Only `df["a", "a"]` returns a column twice, as `Hash#values_at` does.
+
+**Lengths.** If the lengths disagree, the error is raised when the frame is built:
 
 ```ruby
 CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_INT32([1, 2, 3]))
 # => ArgumentError: column "b" has axis-0 length 3, expected 2
-```
-
-**Note.** The keyword slot doubles as the `axis_name:` / `index:` control channel. Only those two Symbols are recognized there; any other Symbol keyword is rejected rather than taken as a column, so a mistyped control option cannot silently turn into one. String-keyed pairs always go to columns (a String can't be a keyword), so a column named `"index"` or `"axis_name"` is written the ordinary way:
-
-```ruby
-CAFrame.new(temp: CA_INT32([1, 2, 3]))          # ArgumentError (stray Symbol keyword)
-CAFrame.new("index" => CA_INT32([1, 2, 3]))     # a column named "index"
 ```
 
 ### `CArray#to_frame`
@@ -897,7 +923,7 @@ To drop rows **without** changing the frame in place, take a filtered sub-frame 
 
 ## The index
 
-The index is an array of **row labels** — times, station names, ids — kept beside the columns. You need one for:
+The index is an array of **row labels** — times, station names, ids — kept beside the columns. Labels need not be unique; [`at`](#one-row-by-its-label--at) raises for a label that appears more than once. You need one for:
 
 - looking up a row by label with [`at`](#one-row-by-its-label--at);
 - conditions on labels in [`filter`](#filter--rows-matching-a-condition) (`f.index`);
@@ -1827,12 +1853,14 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | I want to… | use |
 |---|---|
 | make a frame from arrays I already have | [`CAFrame.new`](#caframenew) |
+| view an array I already have as a table, without copying | [`CArray#to_frame`](#carrayto_frame) |
 | read parsed JSON (an Array of objects) | [`CAFrame.from_records`](#caframefrom_records) |
 | read a CSV, with types guessed from the text | [`CAFrame.from_csv(types: :infer)`](#caframefrom_csv) |
 | see what types the text columns could be, before converting | [`infer_types`](#finding-the-types--infer_types) |
 | glance at a frame | [`p df`](#printing--p-puts-to_table) |
 | check every column just read: types, counts, masked cells, ranges | [`describe`](#checking-a-frame-just-read--describe) |
 | know the number of rows, the column names, the types | [`nrow` / `column_names` / `data_types`](#size-names-and-types) |
+| record a title or the source of the data with the frame | [`attrs:` / `set_attr`](#attributes-of-the-frame) |
 
 ### Picking rows and columns
 
@@ -1842,7 +1870,9 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | take several columns as local variables | [`t, rh = df["temp", "rh"]`](#columns-by-name) |
 | keep a frame of some columns, or reorder them | [`select`](#a-frame-of-some-columns--select) |
 | look at one row | [`df[i]`](#one-row-as-a-hash) |
+| look at the rows one at a time | [`each_row`](#one-row-at-a-time--each_row) |
 | look up the row of a station or a time | [`at`](#one-row-by-its-label--at) |
+| get every row whose label appears more than once | [`filter { \|f\| f.index.eq(label) }`](#one-row-by-its-label--at) |
 | see the first or last few rows | [`head` / `tail`](#first-and-last-rows--head-tail) |
 | keep the rows where a condition holds | [`filter`](#filter--rows-matching-a-condition) |
 | keep the rows whose condition could not be judged, for a later pass | [`filter(keep_masked: true)`](#rows-whose-condition-is-undetermined--keep_masked) |
@@ -1851,12 +1881,14 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | keep the rows in a range of times | [`filter { \|f\| (f.index >= lo) & (f.index <= hi) }`](#filter--rows-matching-a-condition) |
 | sort by one or more columns | [`sort_by_key`](#sort_by_key--reorder-rows-by-key-columns) |
 | sort by a computed value, e.g. nearest to a target | [`sort_by`](#sort_by--sort-by-a-computed-key) |
+| remove repeated rows, keeping one of each | [`df[df.is_duplicate.not]`](#repeated-rows--is_duplicate) |
 
 ### Fixing columns
 
 | I want to… | use |
 |---|---|
 | add a derived column | [`append`](#adding-removing-and-renaming-columns) |
+| put a column next to a given one | [`append(..., before: / after:)`](#adding-removing-and-renaming-columns) |
 | remove or rename columns | [`drop` / `rename`](#adding-removing-and-renaming-columns) |
 | turn text into numbers | [`cast`](#changing-a-columns-type) |
 | be told when a cell does not read as a number, instead of getting `UNDEF` | [`cast(..., on_error: :raise)`](#changing-a-columns-type) |
@@ -1872,6 +1904,7 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | delete rows from the frame itself | [`df[sel] = nil`](#masking-deleting-and-splicing-rows) |
 | replace a span of rows with corrected ones | [`df[span] = other`](#masking-deleting-and-splicing-rows) |
 | make times or stations the row labels | [`set_index`](#set_index--reset_index) |
+| turn the row labels back into a column | [`reset_index`](#set_index--reset_index) |
 
 ### Aggregating
 
@@ -1883,6 +1916,7 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | hourly totals from 10-minute data | [`resample`](#time-bins--resample) |
 | hourly values labelled by the end of the hour, as for precipitation | [`resample(..., label: :right)`](#time-bins--resample) |
 | a row for every hour, `UNDEF` where there was no data | [`resample(..., fill: true)`](#time-bins--resample) |
+| a statistic over the hour before each row (a moving window) | [`windows(on:, before:)`](#windows-bounded-by-a-key--windows) |
 | a statistic over a three-hour window every hour (windows that overlap) | [`windows(..., at:)`](#windows-bounded-by-a-key--windows) |
 | refuse an hourly mean that has too few readings | [`mean(min_count:)`](#the-same-reduction-for-every-column) |
 | the change since a station's previous reading | [`group_by(...).lag`](#values-within-a-group--lag-order-running-values) |
@@ -1895,6 +1929,7 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 |---|---|
 | add station metadata to observations by a key | [`join`](#join--match-rows-by-key) |
 | keep only the rows found in both frames | [`join(how: :inner)`](#join--match-rows-by-key) |
+| keep the rows whose key is (or is not) in another frame | [`join(how: :semi / :anti)`](#join--match-rows-by-key) |
 | match each observation to the latest radar time before it | [`join_asof`](#join_asof--the-nearest-key) |
 | put a series onto a complete time grid, gaps becoming rows | [`align`](#align--conform-to-a-reference-key-set) |
 | put one month's frame after another, as a view | [`CAFrame.meld`](#caframemeld--caframeconcatenate--rows-after-rows) |
