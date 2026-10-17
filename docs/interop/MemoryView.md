@@ -1,76 +1,68 @@
 # MemoryView interoperability in CArray
 
-CArray implements Ruby 3.0+ MemoryView protocol (`rb_memory_view_t`)
-as a standardized, zero-copy interchange with other numerical
-libraries (Numo::NArray, Apache Arrow, OpenCV, Fiddle, NetCDF, …).
+CArray implements Ruby 3.0+ MemoryView protocol (`rb_memory_view_t`) as a standardized, zero-copy interchange with other libraries that implement it. At present these include Apache Arrow (red-arrow) and `Fiddle::MemoryView`.
 
-This document is the user-facing reference. The canonical `format`
-string specification is in
-[`MemoryViewFormat.md`](MemoryViewFormat.md).
+This document is the user-facing reference. The canonical `format` string specification is in [`MemoryViewFormat.md`](MemoryViewFormat.md).
 
 ---
 
 ## 1. Overview
 
-A CArray and a Numo::NArray (or Arrow tensor, OpenCV `Mat`, …) are
-each just *buffer + shape + data_type + strides*, but every library
-packages that information differently. MemoryView is Ruby's standard
-envelope. Implementing the protocol once lets CArray interoperate
-with every other library that does the same — no per-pair bridge
-code.
+A numerical array is just *buffer + shape + data_type + strides*, but every library packages that information differently. MemoryView is Ruby's standard envelope. Implementing the protocol once lets CArray interoperate with every other library that does the same — no per-pair bridge code.
 
 Three things you can do:
 
-1. **Receive a buffer from any producer** —
-   `CArray.from_memory_view(obj)` or `CArray.wrap_memory_view(obj)`.
-2. **Hand a CArray to any consumer** — pass `ca` to any function
-   that calls `rb_memory_view_get` (Numo, Arrow, NetCDF I/O bindings,
-   …). No conversion code on either side.
-3. **Build arbitrary strided views over your own data** —
-   `CArray#as_strided(shape:, strides:)`.
+1. **Receive a buffer from any producer** — `CArray.from_memory_view(obj)` or `CArray.wrap_memory_view(obj)`.
+2. **Hand a CArray to any consumer** — pass `ca` to any function that calls `rb_memory_view_get` (Arrow, `Fiddle::MemoryView`, …). No conversion code on either side.
+3. **Build arbitrary strided views over your own data** — `CArray#as_strided(shape:, strides:)`.
 
 ---
 
 ## 2. Quick start
 
-### Zero-copy interop with Numo
+Every example here runs with what ships with Ruby (Fiddle) or with red-arrow.
+
+### From Arrow (zero-copy)
 
 ```ruby
 require "carray"
-require "numo/narray"
-require "numo/narray/memoryview"
+require "arrow"
 
-# CArray -> Numo (zero-copy)
+arrow = Arrow::DoubleArray.new([1.0, 2.0, 3.0])
+v = CArray.wrap_memory_view(arrow)
+v.to_a         # => [1.0, 2.0, 3.0]
+v.read_only?   # => true  (Arrow's buffer is immutable)
+```
+
+### To a consumer (zero-copy)
+
+`Fiddle::MemoryView` reads a CArray's buffer in place:
+
+```ruby
+require "fiddle"
+
 ca = CArray.float64(3, 4).seq
-na = Numo::NArray.wrap_memory_view(ca)
-na[0, 0] = -1
-ca[0, 0]  # => -1.0  (shared memory)
-
-# Numo -> CArray (zero-copy)
-na2 = Numo::Int32.new(5).seq
-ca2 = CArray.wrap_memory_view(na2)
+mv = Fiddle::MemoryView.new(ca)
+mv.format      # => "d"
+mv.shape       # => [3, 4]
+mv[1, 2]       # => 6.0
+ca[1, 2] = -1
+mv[1, 2]       # => -1.0  (shared memory)
+mv.release
 ```
 
-### Reading bytes from a typeless producer (mmap, IO buffer)
+### Bytes with no type (typeless producer)
 
-Some producers (e.g. `mmap-view`) publish `format == NULL` — raw
-bytes with no data_type label. Supply `data_type:` (or use the data_type-class
-factory) to reinterpret:
+Some producers publish raw bytes with no data type (`format == NULL`); `Fiddle::Pointer` is one. Supply `data_type:`, or use the data-type-class factory, to read them:
 
 ```ruby
-arr = CArray.wrap_memory_view(mmap_view, data_type: :float64).reshape(100, 100)
+ptr = Fiddle::Pointer.malloc(32, Fiddle::RUBY_FREE)
+ptr[0, 32] = [1.0, 2.0, 3.0, 4.0].pack("d*")
+
+arr = CArray.wrap_memory_view(ptr, data_type: :float64).reshape(2, 2)
 # or
-arr = CArray::Float64.wrap_memory_view(mmap_view).reshape(100, 100)
-```
-
-### CArray as producer to BulkMemoryView
-
-```ruby
-require "bulk-memory-view"
-
-ca  = CArray.float64(3, 4).seq
-bmv = BulkMemoryView.from(ca)    # snapshot copy
-bmv2 = BulkMemoryView.wrap(ca)   # zero-copy alias
+arr = CArray::Float64.wrap_memory_view(ptr).reshape(2, 2)
+arr.to_a       # => [[1.0, 2.0], [3.0, 4.0]]
 ```
 
 ---
@@ -79,21 +71,11 @@ bmv2 = BulkMemoryView.wrap(ca)   # zero-copy alias
 
 ### `CArray.memory_view_available?(obj) → Boolean`
 
-Cheap probe: returns `true` if `obj` is a MemoryView producer — Ruby's
-`rb_memory_view_available_p`.  Does not acquire the view; safe to call
-in hot paths.  It does not say CArray can read the view: a producer
-can still refuse it, or offer a format CArray does not read, and
-`from_memory_view` / `wrap_memory_view` then raise.
+Cheap probe: returns `true` if `obj` is a MemoryView producer — Ruby's `rb_memory_view_available_p`. Does not acquire the view; safe to call in hot paths. It does not say CArray can read the view: a producer can still refuse it, or offer a format CArray does not read, and `from_memory_view` / `wrap_memory_view` then raise.
 
 ### `CArray.memory_view_reject_reason(obj) → String | nil`
 
-Diagnostic for CArray as a producer.  For a CArray, returns a one-line
-explanation of why it cannot export itself (so why another library's
-consumer, or `wrap_memory_view(ca)`, would be refused), or `nil` if it
-can.  For any other object it returns `nil`.  Use this when a wrap
-call raises and you want a precise reason — the exception itself
-carries only `"object does not support MemoryView"` because Ruby's
-MemoryView core swallows producer exceptions.
+Diagnostic for CArray as a producer. For a CArray, returns a one-line explanation of why it cannot export itself (so why another library's consumer, or `wrap_memory_view(ca)`, would be refused), or `nil` if it can. For any other object it returns `nil`. Use this when a wrap call raises and you want a precise reason — the exception itself carries only `"object does not support MemoryView"` because Ruby's MemoryView core swallows producer exceptions.
 
 ```ruby
 ca = CArray.int32(3, 4).seq
@@ -105,72 +87,48 @@ CArray.memory_view_reject_reason(ca[ca > 5])
 
 ### `CArray.from_memory_view(obj, data_type: nil, mask: nil) → CArray`
 
-**Copy** import. Acquires a MemoryView, allocates an independent
-contiguous CArray, copies (or gathers) the data, and releases the
-view. The result owns its buffer; mutations on either side are
-isolated.
+**Copy** import. Acquires a MemoryView, allocates an independent contiguous CArray, copies (or gathers) the data, and releases the view. The result owns its buffer; mutations on either side are isolated.
 
 - Accepts strided sources (gathered into row-major order).
-- Accepts typeless producers when `data_type:` is given.  Their bytes
-  are read as one 1-D run, so a typeless producer whose own shape and
-  strides are not row-major contiguous is refused.
-- `mask:` takes a second producer for the mask: one byte per element
-  (`?`, `B` / `C`, `b` / `c`), row-major contiguous, of the data's
-  shape.  Any non-zero byte is masked.
+- Accepts typeless producers when `data_type:` is given. Their bytes are read as one 1-D run, so a typeless producer whose own shape and strides are not row-major contiguous is refused.
+- `mask:` takes a second producer for the mask: one byte per element (`?`, `B` / `C`, `b` / `c`), row-major contiguous, of the data's shape. Any non-zero byte is masked.
 - A boolean (`?`) producer's bytes other than 0 and 1 are read as true.
-- The result is a plain `CArray` whatever the receiver; a receiver
-  other than `CArray` or a `CAWrap` (a Face class, `CScalar`) raises
-  `TypeError`.
+- The result is a plain `CArray` whatever the receiver; a receiver other than `CArray` or a `CAWrap` (a Face class, `CScalar`) raises `TypeError`.
 
 ```ruby
-tr = Numo::Int32.new(3, 4).seq.transpose   # strided
-ca = CArray.from_memory_view(tr)            # OK, gather to contiguous
+ca = CArray.int32(3, 4).seq
+tr = CArray.from_memory_view(ca.transpose)   # strided source, gathered
+tr.shape                                     # => [4, 3]
 
 # typeless producer: name the data_type with `data_type:`
-raw = CArray.from_memory_view(mmap_view, data_type: :float64)
+raw = CArray.from_memory_view(ptr, data_type: :float64)
 ```
 
 ### `CArray.wrap_memory_view(obj, data_type: nil, mask: nil) → CAWrap | CAStride`
 
-**Zero-copy** import. Returns a view that points directly at the
-foreign buffer. The view is held alive until the wrap is GC'd;
-mutations on either side are immediately visible.
+**Zero-copy** import. Returns a view that points directly at the foreign buffer. The view is held alive until the wrap is GC'd; mutations on either side are immediately visible.
 
 - Contiguous source → `CAWrap`.
-- Strided source (negative strides, transposed, column-major, …)
-  → `CAStride` (see §6).
-- Typeless source → 1D wrap with the given `data_type:`; chain
-  `.reshape` for shape.  A strided typeless source is refused.
-- `mask:` borrows a second producer as the mask, under the rules of
-  `from_memory_view`, plus: the data must be row-major contiguous, the
-  mask must not share bytes with the data, and its bytes must be 0 or
-  1 (a wrap cannot normalise them; `from_memory_view` can).  A store
-  writes the mask cell of each element it stores, so a read-only mask
-  makes the whole array read-only.
+- Strided source (negative strides, transposed, column-major, …) → `CAStride` (see §5).
+- Typeless source → 1D wrap with the given `data_type:`; chain `.reshape` for shape. A strided typeless source is refused.
+- `mask:` borrows a second producer as the mask, under the rules of `from_memory_view`, plus: the data must be row-major contiguous, the mask must not share bytes with the data, and its bytes must be 0 or 1 (a wrap cannot normalise them; `from_memory_view` can). A store writes the mask cell of each element it stores, so a read-only mask makes the whole array read-only.
 - A boolean (`?`) producer must hold 0 or 1 in every byte.
 
-What is checked against the producer's buffer: for a contiguous view,
-that its shape fits in `byte_size`; for a strided one, that
-`byte_size` covers the element count.  A strided view's `byte_size` is
-by convention the element count times `item_size` (CArray, NumPy and
-Arrow all export it so), which does not bound where the strides reach,
-so the strides themselves are trusted.  A negative shape, a shape too
-large to count, and a missing `strides` array (read as row-major) are
-handled for every source.
+What is checked against the producer's buffer: for a contiguous view, that its shape fits in `byte_size`; for a strided one, that `byte_size` covers the element count. A strided view's `byte_size` is by convention the element count times `item_size` (CArray, NumPy and Arrow all export it so), which does not bound where the strides reach, so the strides themselves are trusted. A negative shape, a shape too large to count, and a missing `strides` array (read as row-major) are handled for every source.
 
 ```ruby
-na = Numo::DFloat.new(3, 4).seq
-ca = CArray.wrap_memory_view(na)
+src = CArray.float64(3, 4).seq
+ca  = CArray.wrap_memory_view(src)
 ca[0, 0] = -1
-na[0, 0]   # => -1.0
+src[0, 0]   # => -1.0
 
 # typeless producer: name the data_type with `data_type:`, then reshape
-buf = CArray.wrap_memory_view(mmap_view, data_type: :float64).reshape(100, 100)
+buf = CArray.wrap_memory_view(ptr, data_type: :float64).reshape(2, 2)
 ```
 
 ### Dtype-class factories
 
-The standard Numo-style factory form is supported:
+Each data-type class takes the same two methods:
 
 ```ruby
 CArray::Float64.from_memory_view(obj)
@@ -179,18 +137,13 @@ CArray::UInt8.from_memory_view(obj)
 # etc. for every numeric data_type class
 ```
 
-This is a thin wrapper for `CArray.{from,wrap}_memory_view(obj,
-data_type: <data_type>)` and takes `mask:` as they do — useful when
-you want the data_type obvious at the call site, or when bridging
-typeless producers.  A typed producer keeps its shape (and must agree
-with the class's type); a typeless one is read as 1-D.
+This is a thin wrapper for `CArray.{from,wrap}_memory_view(obj, data_type: <data_type>)` and takes `mask:` as they do — useful when you want the data_type obvious at the call site, or when bridging typeless producers. A typed producer keeps its shape (and must agree with the class's type); a typeless one is read as 1-D.
 
 ---
 
 ## 4. `wrap` vs `from`: when to use which
 
-Both methods accept the same producers, but their guarantees and
-acceptance criteria differ.
+Both methods accept the same producers, but their guarantees and acceptance criteria differ.
 
 | | `from_memory_view` | `wrap_memory_view` |
 |---|---|---|
@@ -200,38 +153,27 @@ acceptance criteria differ.
 | Source mutated later | result unaffected | result sees the change |
 | Result mutated | source unaffected | source sees the change |
 | Read-only source | always OK | result is read-only |
-| `value_array` / `mask`, etc. on the result | allowed | restricted (see §6.2) |
 
-Rule of thumb: **use `from_memory_view` when you want an
-independent snapshot, `wrap_memory_view` when you want shared
-state**. If the source has an unstable lifetime (file just
-mmap'd, network buffer about to be released), prefer `from_`.
+Rule of thumb: **use `from_memory_view` when you want an independent snapshot, `wrap_memory_view` when you want shared state**. If the source has an unstable lifetime (file just mmap'd, network buffer about to be released), prefer `from_`.
 
 ---
 
 ## 5. Strided imports
 
-Imported strided producers are exposed as `CAStride`, a virtual
-array that does direct strided addressing into the foreign buffer.
+Imported strided producers are exposed as `CAStride`, a virtual array that does direct strided addressing into the foreign buffer. The example below uses a CArray as the producer:
 
 ```ruby
-bmv = BulkMemoryView.new([4, 5], format: "d")
-bmv.write((0...20).map(&:to_f).pack("d*"))
-
-# yrev: negate the row stride to reverse the row axis
-yrev = BulkMemoryView.wrap(bmv, strides: [-bmv.strides[0], bmv.strides[1]])
+src  = CArray.float64(4, 5).seq
+yrev = src[-1..0, nil]                # rows in reverse order: a negative row stride
 ca   = CArray.wrap_memory_view(yrev)
 ca.class    # => CAStride
 ca.shape    # => [4, 5]
 ca.strides  # => [-40, 8]
-ca[0, 0]    # => 15.0  (was bmv[3, 0])
-ca[3, 0]    # => 0.0   (was bmv[0, 0])
+ca[0, 0]    # => 15.0  (src[3, 0])
+ca[3, 0]    # => 0.0   (src[0, 0])
 ```
 
-`CAStride` supports the standard CArray interface: indexing, slicing,
-math, masking, etc. Writes go straight through to the foreign
-buffer (no staging copy). Read-only sources propagate to
-`ca.read_only?`.
+`CAStride` supports the standard CArray interface: indexing, slicing, math, masking, etc. Writes go straight through to the foreign buffer (no staging copy). Read-only sources propagate to `ca.read_only?`.
 
 ### CAStride attributes
 
@@ -245,10 +187,7 @@ ca.read_only?    # => propagated from the producer
 
 ### Building strided views over your own data
 
-`CArray#as_strided(shape:, strides:, offset: 0)` constructs a
-`CAStride` view directly. The interface mirrors
-`numpy.lib.stride_tricks.as_strided`: you supply byte strides and
-take responsibility for staying in-bounds.
+`CArray#as_strided(shape:, strides:, offset: 0)` constructs a `CAStride` view directly. The interface mirrors `numpy.lib.stride_tricks.as_strided`: you supply byte strides and take responsibility for staying in-bounds.
 
 ```ruby
 ca = CArray.float64(3, 4).seq
@@ -257,9 +196,7 @@ v  = ca.as_strided(shape: [2, 2], strides: [16, 8])
 v.to_a  # => [[0.0, 1.0], [2.0, 3.0]]
 ```
 
-Useful for broadcasting tricks (stride=0), windowing, axis
-reversal (negative stride), and anything else expressible as
-`addr = parent_ptr + base_offset + Σ idx[k] * strides[k]`.
+Useful for broadcasting tricks (stride=0), windowing, axis reversal (negative stride), and anything else expressible as `addr = parent_ptr + base_offset + Σ idx[k] * strides[k]`.
 
 ---
 
@@ -267,24 +204,15 @@ reversal (negative stride), and anything else expressible as
 
 ### 6.1 Which arrays are exported
 
-The export is **zero-copy only**: a consumer gets a view onto bytes that
-already exist. Nothing is materialised for it — a materialised snapshot
-would not see later writes, and writes into it would not reach the
-array.
+The export is **zero-copy only**: a consumer gets a view onto bytes that already exist. Nothing is materialised for it — a materialised snapshot would not see later writes, and writes into it would not reach the array.
 
 An array is exported when it is
 
 - an **entity** (`CArray`, `CAWrap`, `CScalar`), or
-- a **strided view** (`CARefer`, `CABlock`, `CATranspose`, `CAFarray`,
-  `CARepeat`, `CAField`, `CAStride`) whose chain of parents composes into
-  byte strides over an entity, or
-- a **Face** whose storage bytes carry its values on their own — a
-  `CARecord` (exported member by member, §7.6) or a `CAFixlenString`
-  (exported as `Ns` bytes) — over one of the above,
+- a **strided view** (`CARefer`, `CABlock`, `CATranspose`, `CAFarray`, `CARepeat`, `CAField`, `CAStride`) whose chain of parents composes into byte strides over an entity, or
+- a **Face** whose storage bytes carry its values on their own — a `CARecord` (exported member by member, see [Record format for CARecord](#record-format-for-carecord)) or a `CAFixlenString` (exported as `Ns` bytes) — over one of the above,
 
-and it has no mask and an exportable data type (§7). A strided view is
-exported with its strides; a consumer that asks for a contiguous view
-(as `Fiddle::MemoryView` does) gets one only when the view is contiguous.
+and it has no mask and an exportable data type (§7). A strided view is exported with its strides; a consumer that asks for a contiguous view (as `Fiddle::MemoryView` does) gets one only when the view is contiguous.
 
 Everything else is refused:
 
@@ -299,18 +227,11 @@ Everything else is refused:
 | a `CA_OBJECT` array | Ruby objects, not bytes |
 | an array or view onto an entity installed outside the core (`ca_install_obj_type`, e.g. a `CASource` subclass) | its bytes need not be in memory |
 
-`memory_view_available?` and `memory_view_reject_reason` answer from the
-same rule, so an array they accept is exported and one they refuse is
-explained. To hand a refused array to a consumer, export a copy
-(`arr.copy`); for a refused Face, export its storage (`.ticks`, `.codes`)
-— a copy of a Face is still the Face.
+`memory_view_available?` and `memory_view_reject_reason` answer from the same rule, so an array they accept is exported and one they refuse is explained. To hand a refused array to a consumer, export a copy (`arr.copy`); for a refused Face, export its storage (`.ticks`, `.codes`) — a copy of a Face is still the Face.
 
 ### 6.2 `wrap_memory_view` (zero-copy)
 
-`wrap_memory_view` on a CArray accepts exactly what §6.1 exports:
-the result aliases the same memory as the underlying entity, which
-is what "zero copy" requires. A strided view stays strided (a
-`CAStride` over the entity).
+`wrap_memory_view` on a CArray accepts exactly what §6.1 exports: the result aliases the same memory as the underlying entity, which is what "zero copy" requires. A strided view stays strided (a `CAStride` over the entity).
 
 What this means concretely:
 
@@ -319,7 +240,7 @@ What this means concretely:
 | `ca` (entity) | yes |
 | `ca[i..j, nil]` (outer-row slice, contiguous CABlock) | yes |
 | `ca[nil, j..k]` (column slice, non-contiguous CABlock) | yes (kept as strided CAStride) |
-| `ca.transposed` (CATranspose) | yes |
+| `ca.transpose` (CATranspose) | yes |
 | `ca.farray` (CAFarray) | yes |
 | `ca.reshape(...)` (CARefer, byte-compatible) | yes |
 | `ca.refer(:data_type, dim)` (CARefer, byte reinterpretation) | yes (when parent is contiguous) |
@@ -331,29 +252,24 @@ What this means concretely:
 | `CArray.stack(...)` / `CArray.meld(...)` | no |
 | `ca.as_type(:data_type)` / any lazy expression | no |
 | `CATime` / `CATimedelta` / `CACategorical` / `CAConstString` | no |
-| `bit_or_object_typed_carray` | no |
+| `CABitarray` / `CABitfield` / a `CA_OBJECT` array | no |
 
-For rejected views, the diagnostic message from
-`memory_view_reject_reason` names which link in the chain failed.
+For rejected views, the diagnostic message from `memory_view_reject_reason` names which link in the chain failed.
 
-If you need to hand a rejected view to a consumer, take a
-snapshot first:
+If you need to hand a rejected view to a consumer, take a snapshot first:
 
 ```ruby
 snap = ca[ca > 5].copy                # CASelect -> entity
 CArray.wrap_memory_view(snap)         # OK
 ```
 
-`to_ca` does not take a snapshot (it returns a view as it is), and
-`from_memory_view` reads only arrays that are exported, so neither
-replaces `copy` here.
+`to_ca` does not take a snapshot (it returns a view as it is), and `from_memory_view` reads only arrays that are exported, so neither replaces `copy` here.
 
 ---
 
 ## 7. data_type mapping
 
-CArray emits PEP 3118 canonical format strings (v1.2). The full
-table:
+CArray emits the format vocabulary of `ruby/memory_view.h` (`c` / `C` / `s` / `S` for the narrow integers). Only boolean (`?`), complex (`Zf` / `Zd`) and fixed-length bytes (`Ns`) keep their PEP 3118 spelling, since Ruby's vocabulary has none for them. The full table:
 
 | CArray data_type | `format` | `item_size` |
 |---|---|---|
@@ -372,15 +288,11 @@ table:
 | `CA_CMPLX128` | `"Zd"` | 16 |
 | `CA_FIXLEN` (`bytes` = N) | `"Ns"` | N |
 
-The importer is permissive: it accepts v1.0/v1.1 synonyms (`"C"`
-for boolean, `"ff"` / `"dd"` for complex, `i`/`i!`/`l!`/`s!` etc.)
-and disambiguates by `item_size`. See [`MemoryViewFormat.md`](MemoryViewFormat.md)
-for the full producer/consumer convention.
+The importer is permissive: it also accepts the PEP 3118 spellings (`b` / `B` / `h` / `H`) and the other pack synonyms (`l` / `L`, `s!` / `i!` / `l!` / `q!`), and reads `l` / `L` of item size 8 as 64-bit. See [`MemoryViewFormat.md`](MemoryViewFormat.md) for the full producer/consumer convention.
 
-### 7.6 Record format for CARecord
+### Record format for CARecord
 
-A `CARecord` exports its members' specifiers in a row, in Ruby's
-vocabulary, with `x<N>` for padding:
+A `CARecord` exports its members' specifiers in a row, in Ruby's vocabulary, with `x<N>` for padding:
 
 ```ruby
 r = CARecord.new(CArray.struct { uint8 :a; uint64 :b }, 2)
@@ -389,11 +301,7 @@ CArray.memory_view_available?(r)   # => true
 r.memory_view_field_names          # => ["a", "b"]
 ```
 
-Ruby's format has no member names, so the record array gives them as
-`memory_view_field_names`, one per specifier.  A bridge to PEP 3118
-(pycall-memoryview, for numpy) uses them to write a named `T{...}`
-format.  A member declared with `endian:` is written with Ruby's byte
-order spelling.  CArray does not import a record format.
+Ruby's format has no member names, so the record array gives them as `memory_view_field_names`, one per specifier. A bridge to PEP 3118 (pycall-memoryview, for numpy) uses them to write a named `T{...}` format. A member declared with `endian:` is written with Ruby's byte order spelling. CArray does not import a record format.
 
 See [`MemoryViewFormat.md`](MemoryViewFormat.md) for the normative spec.
 
@@ -401,19 +309,15 @@ See [`MemoryViewFormat.md`](MemoryViewFormat.md) for the normative spec.
 
 - `CA_OBJECT` — VALUE column, not raw memory
 
-`CA_FLOAT128` / `CA_CMPLX256` are reserved enum values but disabled
-(`ca_valid[]=0`) in 3.0 — they cannot appear on a live CArray, so
-the question of exporting them does not arise.
+`CA_FLOAT128` / `CA_CMPLX256` are reserved enum values but disabled (`ca_valid[]=0`) in 3.0 — they cannot appear on a live CArray, so the question of exporting them does not arise.
 
 ---
 
 ## 8. Mask handling
 
-CArray's mask layer has no representation in the MemoryView
-protocol. The policy:
+CArray's mask layer has no representation in the MemoryView protocol. The policy:
 
-- A masked CArray passed directly to `from_memory_view` or
-  `wrap_memory_view` is **rejected** with `ArgumentError`.
+- A masked CArray passed directly to `from_memory_view` or `wrap_memory_view` is **rejected** with `ArgumentError`.
 - Use `.value` to export the raw value layer (mask ignored).
 - Use `.mask` to export the mask itself as a boolean CArray.
 - Use `.strip_mask(fill)` for a copy with masked positions filled.
@@ -429,45 +333,21 @@ CArray.wrap_memory_view(ca.mask)             # OK (boolean carray)
 CArray.wrap_memory_view(ca.strip_mask(-1))   # OK (filled copy)
 ```
 
-The rejection is intentional: masked positions hold unspecified
-values, and silently letting them flow into another library as
-if they were valid would be a data-correctness bug.
+The rejection is intentional: masked positions hold unspecified values, and silently letting them flow into another library as if they were valid would be a data-correctness bug.
 
 ### 8.1 Attaching a mask onto a read-only wrap (library / class author only)
 
-Some producers (Arrow, Parquet, ...) carry null-ness in a *separate*
-buffer alongside the values. A bridge that wants a zero-copy
-`wrap_memory_view` for the values and then a mask derived from the null
-buffer hits a wall: the wrap is read-only (the producer's contract), so
-`v.mask = m` raises. `.copy` works and is the answer for user code;
-it negates the zero-copy motivation, which is acceptable at the user
-surface.
+Some producers (Arrow, Parquet, ...) carry null-ness in a *separate* buffer alongside the values. A bridge that wants a zero-copy `wrap_memory_view` for the values and then a mask derived from the null buffer hits a wall: the wrap is read-only (the producer's contract), so `v.mask = m` raises. `.copy` works and is the answer for user code; it negates the zero-copy motivation, which is acceptable at the user surface.
 
-For library / class authors who understand why READONLY was set in the
-first place, CArray provides a private, block-scoped escape:
-`without_read_only_flag { ... }`. **This is not a public API and does
-not weaken the "One-way" semantic of `set_read_only_flag`** — READONLY
-remains un-liftable from user code by design. The primitive is invoked
-via `send`, and the `send` requirement *is* the intended signal that
-the caller is an author who knows the invariants, not general user
-code.
+For library / class authors who understand why READONLY was set in the first place, CArray provides a private, block-scoped escape: `without_read_only_flag { ... }`. **This is not a public API and does not weaken the "One-way" semantic of `set_read_only_flag`** — READONLY remains un-liftable from user code by design. The primitive is invoked via `send`, and the `send` requirement *is* the intended signal that the caller is an author who knows the invariants, not general user code.
 
-The semantic behind READONLY varies by class, and the escape is safe
-only in some cases:
+The semantic behind READONLY varies by class, and the escape is safe only in some cases:
 
-- **(a) external immutable memory** (this section's case — `wrap_memory_view`
-  over Arrow / Parquet / mmap `MAP_PRIVATE`): values buffer is truly
-  immutable but the CArray-side mask slot is separate. Bounded lift for
-  mask attach is **safe**.
-- **(b) formal-API-only writes** (future variants where writes must go
-  through invariant-preserving API to keep derived caches in sync):
-  lifting READONLY would bypass the formal API. **Do not lift.**
-- **(c) no writable target** (`CAObject`, and any `CASource` subclass that
-  produces its elements on demand): elements come from a Ruby callback or
-  an upstream source rather than being stored. Lifting is meaningless.
+- **(a) external immutable memory** (this section's case — `wrap_memory_view` over Arrow / Parquet / mmap `MAP_PRIVATE`): values buffer is truly immutable but the CArray-side mask slot is separate. Bounded lift for mask attach is **safe**.
+- **(b) formal-API-only writes** (future variants where writes must go through invariant-preserving API to keep derived caches in sync): lifting READONLY would bypass the formal API. **Do not lift.**
+- **(c) no writable target** (`CAObject`, and any `CASource` subclass that produces its elements on demand): elements come from a Ruby callback or an upstream source rather than being stored. Lifting is meaningless.
 
-The primitive does not distinguish these. Only the class author knows
-which applies.
+The primitive does not distinguish these. Only the class author knows which applies.
 
 ```ruby
 # Inside a bridge / library / Face author's own code:
@@ -478,47 +358,31 @@ end
 # v is read-only again, now with a mask
 ```
 
-The lift is not limited to the mask. Inside the block every write is
-allowed, values included, and a value write lands in the producer's
-buffer — memory the producer declared immutable. When the producer is
-a frozen CArray, that array's values change. Keep the block to what
-the lift is for.
+The lift is not limited to the mask. Inside the block every write is allowed, values included, and a value write lands in the producer's buffer — memory the producer declared immutable. When the producer is a frozen CArray, that array's values change. Keep the block to what the lift is for.
 
-Discipline (not enforced by the primitive): use it only on **entities**
-(CArray / CScalar / CAWrap). On a view of a read-only parent, `mask=`
-allocates the parent's mask as a side effect (the view chain's
-`create_mask` recursion) and mutates a buffer the producer declared
-immutable, breaking the view-inherits-readonly guarantee for sibling
-views. The author is responsible for knowing that this is safe in
-their context.
+Discipline (not enforced by the primitive): use it only on **entities** (CArray / CScalar / CAWrap). On a view of a read-only parent, `mask=` allocates the parent's mask as a side effect (the view chain's `create_mask` recursion) and mutates a buffer the producer declared immutable, breaking the view-inherits-readonly guarantee for sibling views. The author is responsible for knowing that this is safe in their context.
 
-**If you are writing user code, not a library / bridge / class**,
-`.copy` is the correct answer, not this primitive.
+**If you are writing user code, not a library / bridge / class**, `.copy` is the correct answer, not this primitive.
+
+---
+
+## 9. Lifetime of the view
 
 ### `from_memory_view`
 
-The view is acquired and released inside the call. The result is
-fully independent; the source object may be freed immediately.
+The view is acquired and released inside the call. The result is fully independent; the source object may be freed immediately.
 
 ### `wrap_memory_view`
 
-The view is held alive by a small TypedData "holder" attached to
-the returned wrap via an internal ivar. When the wrap is
-garbage-collected, the holder's `dfree` calls
-`rb_memory_view_release`. The source object is anchored by a
-second ivar so it cannot be GC'd while the wrap is alive.
+The view is held alive by a small TypedData "holder" attached to the returned wrap via an internal ivar. When the wrap is garbage-collected, the holder's `dfree` calls `rb_memory_view_release`. The source object is anchored by a second ivar so it cannot be GC'd while the wrap is alive.
 
-Multiple borrowers of the same source coexist safely (Ruby's
-MemoryView machinery refcounts the source).
+Multiple borrowers of the same source coexist safely (Ruby's MemoryView machinery refcounts the source).
 
 ---
 
 ## 10. Performance: zero-copy via layout design
 
-A `CABlock` returned by `ca[index]` is contiguous **iff** all
-steps are 1 and every inner dimension fully covers the parent.
-On a row-major CArray, outer-axis slices are contiguous; inner
-slices are strided.
+A `CABlock` returned by `ca[index]` is contiguous **iff** all steps are 1 and every inner dimension fully covers the parent. On a row-major CArray, outer-axis slices are contiguous; inner slices are strided.
 
 For row-major `CArray.float64(M, N)`:
 
@@ -532,132 +396,66 @@ For row-major `CArray.float64(M, N)`:
 | `ca[i..j, k..l]` (inner range not full) | no |
 | `ca[[0, M, 2]]` (step > 1) | no |
 
-For destinations such as NetCDF / HDF5 / file I/O, arrange the
-iteration axis as the outermost dimension — the same convention
-NumPy recommends ("keep iteration axis at the slowest-varying
-position"):
+A consumer that asks for a contiguous view, as `Fiddle::MemoryView` does, gets one for an outer-axis slice and is refused one for an inner slice. To hand slices of a large array to such a consumer one at a time, put the axis you step along first:
 
 ```ruby
+require "fiddle"
+
 ca = CArray.float64(365, 180, 360)   # (time, lat, lon)
 
-# zero-copy per timestep
-365.times do |t|
-  nc.var("temp").read_into(ca[t, nil, nil])
-end
+mv = Fiddle::MemoryView.new(ca[0, nil, nil])       # one time step, zero-copy
+mv.shape   # => [180, 360]
+mv.release
 
-# zero-copy slab
-nc.var("temp").read_into(ca[0..30, nil, nil])
+mv = Fiddle::MemoryView.new(ca[0..30, nil, nil])   # 31 time steps, zero-copy
+mv.shape   # => [31, 180, 360]
+mv.release
+
+Fiddle::MemoryView.new(ca[nil, 0, nil])            # ArgumentError: an inner slice
 ```
 
-Non-outer slices still work (the exporter falls back to attach +
-sync), but pay an O(N) materialise cost each call.
+An inner slice is still exported, as a strided view, to a consumer that accepts strides (`CArray.wrap_memory_view(ca[nil, 0, nil])` is a `CAStride`). For a consumer that does not, copy the slice first (`ca[nil, 0, nil].copy`).
 
 ---
 
-## 11. Worked examples
+## 11. Distinct concepts: `reshape` vs `refer` vs `as_type`
 
-### CArray ↔ Numo::NArray
-
-```ruby
-require "carray"
-require "numo/narray"
-require "numo/narray/memoryview"
-
-# CArray -> Numo, zero-copy
-ca = CArray.float64(3, 4).seq
-na = Numo::NArray.wrap_memory_view(ca)
-na[0, 0] = -1
-ca[0, 0]   # => -1.0
-
-# Numo -> CArray, zero-copy
-na2 = Numo::Int32.new(5).seq
-ca2 = CArray.wrap_memory_view(na2)
-ca2[2] = -999
-na2[2]     # => -999
-
-# Strided Numo source: snapshot
-tr  = Numo::Int32.new(3, 4).seq.transpose
-ca3 = CArray.from_memory_view(tr)
-```
-
-### CArray ↔ BulkMemoryView
-
-```ruby
-require "carray"
-require "bulk-memory-view"
-
-# CArray -> BMV
-ca   = CArray.float64(3, 4).seq
-snap = BulkMemoryView.from(ca)   # snapshot copy
-alias_ = BulkMemoryView.wrap(ca) # zero-copy alias
-
-# BMV -> CArray (typed)
-bmv = BulkMemoryView.new([2, 3], format: "d")
-bmv.write([1.0, 2, 3, 4, 5, 6].pack("d*"))
-ca  = CArray.wrap_memory_view(bmv)
-
-# Strided BMV (axis reversal)
-yrev = BulkMemoryView.wrap(bmv, strides: [-bmv.strides[0], bmv.strides[1]])
-ca   = CArray.wrap_memory_view(yrev)   # CAStride, shape [2,3], strides [-24, 8]
-```
-
-### Typeless producer (mmap)
-
-```ruby
-require "carray"
-require "mmap-view"
-
-region = MmapView.open("data.bin")
-arr    = CArray::Float64.wrap_memory_view(region).reshape(1000, 1000)
-# arr is a zero-copy view into the mapped file
-```
-
----
-
-## 12. Distinct concepts: `reshape` vs `refer` vs `as_type`
-
-These three CArray methods return view-style results but differ in
-what they do at the byte level:
+These three CArray methods return view-style results but differ in what they do at the byte level:
 
 | method | view class | semantics | wrap export |
 |---|---|---|---|
 | `ca.reshape(*dim)` | `CARefer` | same data_type, change shape only | yes |
 | `ca.refer(:data_type, dim)` | `CARefer` (byte reinterpret) | reinterpret bytes as another data_type | yes (when parent contiguous) |
-| `ca.as_type(:data_type)` | `CAFake` | **convert values** element-wise | no (lazy materialise) |
+| `ca.as_type(:data_type)` | `CAMonOp` (lazy expression) | **convert values** element-wise | no (the values do not exist yet) |
 
-`as_type` performs a real type conversion (`int → float` etc.);
-the bytes change, so zero-copy is not applicable.
-`refer(:data_type, dim)` reinterprets the same bytes as a different
-data_type (e.g. four `uint8` as one `uint32`) — the data is unchanged
-in memory.
+`as_type` performs a real type conversion (`int → float` etc.); the bytes change, so zero-copy is not applicable. `refer(:data_type, dim)` reinterprets the same bytes as a different data_type (e.g. four `uint8` as one `uint32`) — the data is unchanged in memory.
 
 ---
 
-## 13. Limitations
+## 12. Limitations
 
-- `CA_OBJECT` is not exported or imported (VALUE column, not raw
-  memory). `CA_FIXLEN` is exported as `Ns` bytes, or member by member
-  when it is a `CARecord` (§7.6); a record format is not imported.
-  `CA_FLOAT128` / `CA_CMPLX256` are disabled in 3.0 and cannot
-  appear on a live CArray.
-- Data is exported in the machine's byte order, except a record member
-  declared with `endian:`, which carries Ruby's byte order spelling in
-  the record format. On input, views in the other byte order are
-  rejected. See [`MemoryViewFormat.md`](MemoryViewFormat.md).
-- Only arrays that alias an entity are exported (§6). Export a
-  `copy` of anything else.
+- `CA_OBJECT` is not exported or imported (VALUE column, not raw memory). `CA_FIXLEN` is exported as `Ns` bytes, or member by member when it is a `CARecord` (see [Record format for CARecord](#record-format-for-carecord)); a record format is not imported. `CA_FLOAT128` / `CA_CMPLX256` are disabled in 3.0 and cannot appear on a live CArray.
+- Data is exported in the machine's byte order, except a record member declared with `endian:`, which carries Ruby's byte order spelling in the record format. On input, views in the other byte order are rejected. See [`MemoryViewFormat.md`](MemoryViewFormat.md).
+- Only arrays that alias an entity are exported (§6). Export a `copy` of anything else.
 
 ---
 
-## 14. Where to find the tests
+## 13. Where to find the tests
 
 | File | Coverage |
 |---|---|
-| `spec_ai/test_memory_view.rb` | availability / reject_reason |
-| `spec_ai/test_memory_view_borrower.rb` | end-to-end via the C borrower test ext |
-| `spec_ai/test_memory_view_import.rb` | from / wrap import path matrix |
-| `spec_ai/test_memory_view_typeless.rb` | typeless producer + data_type-class factory |
-| `spec_ai/test_ca_obj_stride.rb` | CAStride + as_strided |
-| `spec_ai/test_ca_obj_stride_bmv.rb` | strided BMV imports |
-| `spec_ai/test_bmv_interop.rb` | CArray-side BMV producer/consumer matrix |
-| `spec_ai/test_castride_family.rb` | CARefer / CABlock / CATranspose / CAFarray / CARepeat unified-CAStride coverage |
+| `spec/spec_ai/test_memory_view.rb` | availability / reject_reason |
+| `spec/spec_ai/test_memory_view_export_matrix.rb` | which arrays are exported |
+| `spec/spec_ai/test_memory_view_simple_form.rb` | producers that leave shape and strides out (SIMPLE form) |
+| `spec/spec_ai/test_memory_view_borrower.rb` | end-to-end via the C borrower test ext |
+| `spec/spec_ai/test_memory_view_import.rb` | from / wrap import path matrix |
+| `spec/spec_ai/test_memory_view_import_contract.rb` | producers that misstate their geometry, typeless producers, the format vocabulary |
+| `spec/spec_ai/test_memory_view_typeless.rb` | typeless producer + data_type-class factory |
+| `spec/spec_ai/test_memory_view_masked_wrap.rb` | `mask:` on import |
+| `spec/spec_ai/test_memory_view_wrap_class.rb` | the class of the result of `wrap_memory_view` |
+| `spec/spec_ai/test_memory_view_fixlen_bytes.rb` | `CA_FIXLEN` as `Ns` |
+| `spec/spec_ai/test_memory_view_release_gc_safety.rb` / `test_memory_view_leaks.rb` | release of the view |
+| `spec/spec_ai/test_ca_obj_stride.rb` | CAStride + as_strided |
+| `spec/spec_ai/test_ca_obj_stride_bmv.rb` | strided BMV imports |
+| `spec/spec_ai/test_bmv_interop.rb` | CArray-side BMV producer/consumer matrix |
+| `spec/spec_ai/test_castride_family.rb` | CARefer / CABlock / CATranspose / CAFarray / CARepeat unified-CAStride coverage |
