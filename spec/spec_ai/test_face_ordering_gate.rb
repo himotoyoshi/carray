@@ -416,11 +416,18 @@ class TestFaceOrderingGate < Test::Unit::TestCase
     assert_kind_of CATime, sorted
   end
 
-  # ----- error message references escape hatch -----------------------
+  # ----- error message names what to order instead ------------------
 
-  def test_error_message_points_to_parent_descent
+  def test_error_message_points_to_the_values
     err = assert_raise(ArgumentError) { num_face.sort_addr }
-    assert_match(/parent/, err.message)
+    assert_match(/to_type\(:object\) gives its values/, err.message)
+    assert_not_match(/parent/, err.message)
+  end
+
+  def test_error_message_names_the_storage_method
+    err = assert_raise(ArgumentError) { CA_OBJECT(%w[b a]).categorize.sort }
+    assert_match(/its storage, which #codes gives/, err.message)
+    assert_not_match(/parent/, err.message)
   end
 
   # ----- frame-less Face: COMPARABLE direct-storage path -------------

@@ -1434,7 +1434,7 @@ class CATime
     else
       raise TypeError,
             "CATime cannot reconcile #{operand.class} " \
-            "(use ca.parent to compare the raw int64 storage directly)"
+            "(compare #ticks for the raw int64 storage)"
     end
   end
 
@@ -2127,7 +2127,7 @@ class CATimedelta
     else
       raise TypeError,
             "CATimedelta cannot reconcile #{operand.class} " \
-            "(use ca.parent to compare the raw int64 storage directly)"
+            "(compare #ticks for the raw int64 storage)"
     end
   end
 

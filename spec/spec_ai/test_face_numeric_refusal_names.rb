@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 #
 # A numeric operation a Face does not define is refused by naming the
-# method and the Face's class, and pointing at its values and its storage --
-# not by the fixlen surface that gates it. A plain array whose data type has
+# method and the Face's class, and pointing at its values -- and at its
+# storage when the Face names it (#ticks, #codes) -- not by the fixlen
+# surface that gates it. A plain array whose data type has
 # no kernel names the method and the type.
 
 require "test/unit"
@@ -42,9 +43,15 @@ class TestFaceNumericRefusalNames < Test::Unit::TestCase
       e = assert_raise(CArray::DataTypeError) { op.call(@f, @g) }
       assert_match(/\A#{Regexp.escape(name)}: .*Plain does not define it/, e.message)
       assert_match(/to_type\(:object\) gives its values/, e.message)
-      assert_match(/\.parent/, e.message)
+      assert_not_match(/parent/, e.message)
       assert_not_match(/fixlen/, e.message)
     end
+  end
+
+  def test_a_face_that_names_its_storage_points_at_it
+    c = CA_OBJECT(%w[low high]).categorize
+    e = assert_raise(CArray::DataTypeError) { c.sum }
+    assert_match(/or on its storage, which #codes gives\z/, e.message)
   end
 
   def test_a_plain_array_names_the_method_and_the_type

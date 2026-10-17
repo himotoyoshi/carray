@@ -303,6 +303,10 @@ int  ca_face_orders_by_itself (VALUE face);
    at (#to_string for a string Face, to_type(:object) for any other). */
 const char *ca_face_conversion_hint (VALUE face);
 
+/* The method that gives the storage under a Face (#ticks, #codes), or NULL
+   when the Face has none of those. */
+const char *ca_face_storage_method (VALUE face);
+
 /* Raise eclass naming a Face that does not define the numeric operation
    `name`; returns when self is not a Face.  See ca_obj_face.c. */
 void ca_face_refuse_numeric (VALUE self, const char *name, VALUE eclass);

@@ -703,18 +703,42 @@ ca_face_conversion_hint (VALUE face)
     : "to_type(:object) gives its values";
 }
 
+/* The method that gives the storage under a Face, for a refusal to point
+   at: #ticks for a time or a duration, #codes for a categorical.  NULL for
+   a Face that names its storage some other way, or not at all. */
+const char *
+ca_face_storage_method (VALUE face)
+{
+  static const char *names[] = { "ticks", "codes" };
+  size_t i;
+  for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    if ( rb_respond_to(face, rb_intern(names[i])) ) {
+      return names[i];
+    }
+  }
+  return NULL;
+}
+
 /* Refuse to order (or, with verb "count", to count by value) a Face whose
    storage does not hold its values in order, pointing at what does: its
    values, or its storage when that is what is meant. */
 void
 ca_face_refuse_order (const char *name, VALUE face, const char *verb)
 {
+  const char *storage = ca_face_storage_method(face);
+  if ( storage ) {
+    rb_raise(rb_eArgError,
+             "%s: %s is not orderable by storage (a cell encodes the value "
+             "rather than being it); %s its values instead -- %s -- or %s "
+             "its storage, which #%s gives",
+             name, rb_obj_classname(face), verb,
+             ca_face_conversion_hint(face), verb, storage);
+  }
   rb_raise(rb_eArgError,
            "%s: %s is not orderable by storage (a cell encodes the value "
-           "rather than being it); %s its values instead -- %s -- or pass "
-           ".parent to %s its storage",
+           "rather than being it); %s its values instead -- %s",
            name, rb_obj_classname(face), verb,
-           ca_face_conversion_hint(face), verb);
+           ca_face_conversion_hint(face));
 }
 
 /* The rule every family that orders, compares, searches or hashes the cells
@@ -767,10 +791,20 @@ ca_face_refuse_numeric (VALUE self, const char *name, VALUE eclass)
   if ( ! ca_is_face(ca) ) {
     return;
   }
+  {
+    const char *storage = ca_face_storage_method(self);
+    if ( storage ) {
+      rb_raise(eclass,
+               "%s: %s does not define it (a cell encodes the value rather "
+               "than being a number); compute on its values instead -- %s -- "
+               "or on its storage, which #%s gives",
+               name, rb_obj_classname(self), ca_face_conversion_hint(self),
+               storage);
+    }
+  }
   rb_raise(eclass,
            "%s: %s does not define it (a cell encodes the value rather than "
-           "being a number); compute on its values instead -- %s -- or pass "
-           ".parent to compute on its storage",
+           "being a number); compute on its values instead -- %s",
            name, rb_obj_classname(self), ca_face_conversion_hint(self));
 }
 
@@ -788,12 +822,24 @@ ca_face_operand_descend (VALUE operand, const char *name)
   if ( ca_test_flag(op, CA_FLAG_FACE_COMPARABLE_STORAGE) ) {
     return rb_ca_strip_face_value(operand);
   }
+  {
+    const char *storage = ca_face_storage_method(operand);
+    if ( storage ) {
+      rb_raise(rb_eArgError,
+               "%s: cannot take a %s operand: its storage is not its surface "
+               "(a cell encodes the value rather than being it), so comparing "
+               "the storage would compare the encoding. Convert the operand "
+               "to the receiver's space first -- %s -- or compare the storage "
+               "of both sides, which #%s gives",
+               name, rb_obj_classname(operand),
+               ca_face_conversion_hint(operand), storage);
+    }
+  }
   rb_raise(rb_eArgError,
            "%s: cannot take a %s operand: its storage is not its surface "
            "(a cell encodes the value rather than being it), so comparing "
            "the storage would compare the encoding. Convert the operand to "
-           "the receiver's space first -- %s -- "
-           "or pass .parent on both sides to work in storage space",
+           "the receiver's space first -- %s",
            name, rb_obj_classname(operand), ca_face_conversion_hint(operand));
   return Qnil;   /* not reached */
 }
@@ -924,10 +970,19 @@ ca_face_reconcile_operand (VALUE reference, VALUE operand, const char *name)
                                              rb_intern("to_comparable"),
                                              1, operand));
   }
+  {
+    const char *storage = ca_face_storage_method(reference);
+    if ( storage ) {
+      rb_raise(rb_eArgError,
+               "%s: %s is not comparable by storage and has no to_comparable "
+               "to bring the operand into its space; compare the storage of "
+               "both sides, which #%s gives",
+               name, rb_obj_classname(reference), storage);
+    }
+  }
   rb_raise(rb_eArgError,
            "%s: %s is not comparable by storage and has no to_comparable "
-           "to bring the operand into its space; pass .parent on both "
-           "sides to work in storage space",
+           "to bring the operand into its space",
            name, rb_obj_classname(reference));
   return Qnil;   /* not reached */
 }

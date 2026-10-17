@@ -1666,11 +1666,17 @@ ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
     {
       CArray *storage = ca_strip_face(ca);
       if ( storage && ca_is_integer_type(storage) && ! ca_is_integer_type(cval) ) {
+        const char *method = ca_face_storage_method(self);
+        if ( method ) {
+          rb_raise(rb_eTypeError,
+                   "%s cannot store a bare %s array as raw storage "
+                   "(write the %s storage, which #%s gives, directly)",
+                   rb_obj_classname(self), ca_type_name[cval->data_type],
+                   ca_type_name[storage->data_type], method);
+        }
         rb_raise(rb_eTypeError,
-                 "%s cannot store a bare %s array as raw storage "
-                 "(use ca.parent to write the %s storage directly)",
-                 rb_obj_classname(self), ca_type_name[cval->data_type],
-                 ca_type_name[storage->data_type]);
+                 "%s cannot store a bare %s array as raw storage",
+                 rb_obj_classname(self), ca_type_name[cval->data_type]);
       }
     }
     return val;
