@@ -16,8 +16,20 @@ class CAFrame
   #   w.mean             # => frame of the windowed mean of every column
   #   w.elements         # => the number of rows in each window
   #
+  # Given +at:+, the windows sit at those points of the key instead of at
+  # the rows, and every answer is one per point: a frame of the reductions
+  # has a row per point, the points as its index and the on: column's name
+  # as its row axis name.  The points need not be sorted or on the rows'
+  # keys.  A grid of points gives windows on a grid; a window with no row
+  # answers as an empty reduction does (+mean+ UNDEF, +count+ 0).  +at:+
+  # cannot be given with +by:+.
+  #
+  #   grid = CArray.time_range(t0, t1, unit: "1 hour")
+  #   df.windows(on: "time", at: grid, after: "3 hours", exclude: :upper).mean
+  #   # => a frame with a row per hour, the mean over [t, t + 3 hours)
+  #
   # @return [WindowedFrame]
-  def windows (on:, before: nil, after: nil, exclude: :lower, by: nil, interval: nil)
+  def windows (on:, before: nil, after: nil, exclude: :lower, by: nil, interval: nil, at: nil)
     on_name  = column_key(on, "windows")
     key      = key_column(on_name, "windows")
     by_names = by.nil? ? [] : column_keys(by.is_a?(Array) ? by : [by], "windows")
@@ -25,8 +37,8 @@ class CAFrame
     plan = CAKeyWindowIterator.new(CArray.int64(nrow).seq, on: key,
                                    before: before, after: after, exclude: exclude,
                                    by: by_cols.empty? ? nil : by_cols,
-                                   interval: interval)
-    WindowedFrame.new(self, plan, [on_name, *by_names])
+                                   interval: interval, at: at)
+    WindowedFrame.new(self, plan, [on_name, *by_names], at: at)
   end
 end
 
@@ -35,10 +47,11 @@ end
 class WindowedFrame
   include CAFrame::ColumnVerbs
 
-  def initialize (frame, plan, key_names)
+  def initialize (frame, plan, key_names, at: nil)
     @frame     = frame
     @plan      = plan
     @key_names = key_names
+    @at        = at
   end
 
   # @overload [](name)
@@ -90,6 +103,10 @@ class WindowedFrame
       @plan.for_value(col).public_send(reduction, **keywords)
     end
     return out unless names.empty?
-    CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index)
+    if @at
+      CAFrame.new(out, axis_name: @key_names.first, index: @at)
+    else
+      CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index)
+    end
   end
 end

@@ -1164,7 +1164,7 @@ class CArray
   #   @param bounds [Symbol] `:skip` / `:nearest` / `:truncate`.
   #   @param fill_value [Object, nil] constant margin value.
   #   @return [CAWindowIterator]
-  # @overload windows(on:, before: nil, after: nil, exclude: :lower, by: nil, interval: nil)
+  # @overload windows(on:, before: nil, after: nil, exclude: :lower, by: nil, interval: nil, at: nil)
   #   Returns a {CAKeyWindowIterator}: a window per value bounded by a width
   #   of the key `on` (a time, a duration or a number) instead of a count of
   #   cells.  The window of a value whose key is t holds the values whose
@@ -1173,9 +1173,12 @@ class CArray
   #   each window within the values with the same by keys, and `interval:`
   #   gives the key's grid step for {CAKeyWindowIterator#is_complete}.  A
   #   value whose key is masked, NaN or infinite is in no window and has no
-  #   window.
+  #   window.  `at:` places the windows at those points of the key instead
+  #   of at the values, one answer per point (a grid of points gives
+  #   windows on a grid); it cannot be given with `by:`.
   #
   #     temp.windows(on: time, before: "1 hour").mean
+  #     temp.windows(on: time, at: hours, after: "3 hours", exclude: :upper).mean
   #   @return [CAKeyWindowIterator]
   def windows (*ranges, on: nil, **key_window)
     unless on.nil?

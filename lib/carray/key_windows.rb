@@ -15,6 +15,13 @@ require "carray/distance_limit"
 # whose key is t holds the rows whose key lies between t - before and
 # t + after.  Each reduction answers once per row, in row order.
 #
+# Given `at:`, the windows sit at those points instead of at the rows: the
+# window of a point t holds the rows whose key lies between t - before and
+# t + after, and each reduction answers once per point, in the order of the
+# points.  A grid of points gives windows on a grid (`after:` the width,
+# `exclude: :upper` for [t, t + width)); a window with no row answers as an
+# empty reduction does.
+#
 # Besides the reductions, the iterator answers what each window covered:
 # {#first_addr} / {#last_addr} (the rows), {#first_key} / {#last_key} (their
 # keys), {#elements} (the number of rows) and {#bounds} (the range the
@@ -43,8 +50,10 @@ class CAKeyWindowIterator < CAIterator
   # by       : a CArray, or an Array of them, that must match exactly:
   #            a row's window holds only the rows with the same by values.
   # interval : the grid step of the key, for {#is_complete}.
+  # at       : nil, or the points the windows sit at, a 1-D CArray of the
+  #            key's kind; the answers are then one per point.
   def initialize (value, on:, before: nil, after: nil, exclude: :lower,
-                  by: nil, interval: nil)
+                  by: nil, interval: nil, at: nil)
     @value = value
     unless on.is_a?(CArray) && on.ndim == 1 && on.elements == value.dim0
       raise ArgumentError,
@@ -59,15 +68,25 @@ class CAKeyWindowIterator < CAIterator
     if before.nil? && after.nil?
       raise ArgumentError, "windows: give before:, after: or both"
     end
+    unless at.nil?
+      unless by.nil?
+        raise ArgumentError, "windows: at: and by: cannot be given together"
+      end
+      unless at.is_a?(CArray) && at.ndim == 1
+        raise ArgumentError, "windows: at: is a one-dimensional CArray of points"
+      end
+    end
     @key      = on
     @n        = value.dim0
+    @points   = at
+    @nout     = at.nil? ? @n : at.elements
     @ndim     = 1
-    @shape    = [@n]
+    @shape    = [@nout]
     before, after, interval = { before: before, after: after, interval: interval }.map do |kw, w|
       CArray::DistanceLimit.read(w, on, "windows: #{kw}:")
     end
     @interval = interval
-    keys, bw, aw, iv = key_numbers(on, before, after, interval)
+    keys, bw, aw, iv, points = key_numbers(on, before, after, interval, at)
     @before_value = before
     @after_value  = after
     groups = group_codes(by)
@@ -83,25 +102,40 @@ class CAKeyWindowIterator < CAIterator
     sk     = keys.project(@order).copy
     sg     = groups.project(@order).int64.copy
 
+    # The windows' anchors, sorted: the rows themselves, or the points that
+    # have a window (one that is masked, NaN or infinite has none).
+    if points
+      pvalid = points.is_not_masked
+      pvalid &= points.is_finite if points.float?
+      pvalid = pvalid.strip_mask(false)
+      prow   = CArray.int64(@nout).seq[pvalid].copy
+      @anchor_order = prow.project(CArray.sort_addr(points.project(prow), prow))
+      sp = points.project(@anchor_order).copy
+    else
+      @anchor_order = @order
+      sp = nil
+    end
+    nwin = @anchor_order.elements
+
     ex_lo = exclude == :lower || exclude == :both
     ex_hi = exclude == :upper || exclude == :both
     expected = iv && (bw / iv + aw / iv + 1 - (ex_lo ? 1 : 0) - (ex_hi ? 1 : 0)).round
     @lo, @hi, @complete =
-      CArray.__find_key_window_row_ranges__(sk, sg, bw, aw, ex_lo, ex_hi, iv, expected)
+      CArray.__find_key_window_row_ranges__(sk, sg, bw, aw, ex_lo, ex_hi, iv, expected, sp)
 
-    # Each row's position among the sorted rows (UNDEF for a row with no
-    # window), to put the answers back in row order.
-    @position = CArray.int64(@n).fill(UNDEF)
-    @position[@order] = CArray.int64(m).seq if m > 0
+    # Each answer's position among the sorted windows (UNDEF for a row or a
+    # point with no window), to put the answers back in row or point order.
+    @position = CArray.int64(@nout).fill(UNDEF)
+    @position[@anchor_order] = CArray.int64(nwin).seq if nwin > 0
 
     # The cells of every window, window after window, as rows of self.
     counts  = @hi - @lo
-    total   = m > 0 ? counts.sum.to_i : 0
-    starts  = m > 0 ? counts.cumsum.int64 - counts : CArray.int64(0)
+    total   = nwin > 0 ? counts.sum.to_i : 0
+    starts  = nwin > 0 ? counts.cumsum.int64 - counts : CArray.int64(0)
     @src_addr = window_cells(counts, starts, total)
-    @offsets = CArray.int64(m + 1)
+    @offsets = CArray.int64(nwin + 1)
     @offsets[0] = 0
-    @offsets[1..-1] = starts + counts if m > 0
+    @offsets[1..-1] = starts + counts if nwin > 0
     @segments = segments_of(value)
   end
 
@@ -288,7 +322,7 @@ class CAKeyWindowIterator < CAIterator
       @segments.each { |piece| pieces << piece }
     end
     empty = @value[0...0, *[nil] * (@value.ndim - 1)]
-    @n.times do |r|
+    @nout.times do |r|
       p = @position[r]
       yield(UNDEF.equal?(p) ? empty : pieces[p])
     end
@@ -369,8 +403,8 @@ class CAKeyWindowIterator < CAIterator
     if sample.is_a?(Array)
       return sample.each_index.map { |k| lay_out(results.map { |r| r[k] }, sample[k], trail) }
     end
-    out = CArray.new(sample.data_type, [@n, *trail], bytes: sample.bytes)
-    flat = out.reshape(@n, results.size)
+    out = CArray.new(sample.data_type, [@nout, *trail], bytes: sample.bytes)
+    flat = out.reshape(@nout, results.size)
     results.each_with_index { |r, j| flat[nil, j] = r }
     out
   end
@@ -395,41 +429,75 @@ class CAKeyWindowIterator < CAIterator
   # by differences of keys alone, so integer keys are measured from their
   # smallest value: that is what lets a uint64 key, or ticks on a finer
   # grid, be compared as int64.
-  def key_numbers (key, before, after, interval)
+  #
+  # Points (at:) are converted together with the keys -- joined, converted
+  # once, and split -- so that both are measured from the same origin on
+  # the same grid.
+  def key_numbers (key, before, after, interval, points = nil)
     if key.is_a?(CATime) || key.is_a?(CATimedelta)
+      if points
+        unless points.instance_of?(key.class)
+          raise ArgumentError,
+                "windows: at: holds points of the key's kind, a #{key.class} " \
+                "(got #{CArray::Inspector.type_label(points)})"
+        end
+        unit = CATimeUnitAlgebra.finer(key.unit, points.unit)
+        key, points = key.to_unit(unit), points.to_unit(unit)
+      end
       widths = [before, after, interval].map { |w| w.nil? ? nil : duration_in_ticks(w, key.unit) }
       scale = widths.compact.map(&:denominator).inject(1, :lcm)
-      ticks = from_smallest(key.ticks, scale)
+      ticks = from_smallest(joined(key.ticks, points&.ticks), scale)
       bw, aw, iv = widths.map { |w| w && (w * scale).to_i }
       bw ||= 0
       aw ||= 0
       check_widths(bw, aw, iv)
-      return [ticks, bw, aw, iv]
+      ticks, points = split(ticks, points)
+      return [ticks, bw, aw, iv, points]
     end
     unless key.numeric? && !key.complex?
       raise ArgumentError,
             "windows: on: is a time, a duration or a real number key " \
             "(got #{CArray::Inspector.type_label(key)})"
     end
+    if points && (points.is_a?(CATime) || points.is_a?(CATimedelta) ||
+                  !points.numeric? || points.complex?)
+      raise ArgumentError,
+            "windows: at: holds points of the key's kind, real numbers " \
+            "(got #{CArray::Inspector.type_label(points)})"
+    end
+    both   = joined(key, points)
     widths = [before, after, interval]
-    if key.integer? && widths.compact.all? { |w| w.is_a?(Integer) }
+    if both.integer? && widths.compact.all? { |w| w.is_a?(Integer) }
       bw, aw, iv = widths
       bw ||= 0
       aw ||= 0
       check_widths(bw, aw, iv)
-      [from_smallest(key, 1), bw, aw, iv]
+      numbers, points = split(from_smallest(both, 1), points)
+      [numbers, bw, aw, iv, points]
     else
       bw, aw, iv = widths.map { |w| w && w.to_f }
       bw ||= 0.0
       aw ||= 0.0
       check_widths(bw, aw, iv)
-      [key.float64, bw, aw, iv]
+      numbers, points = split(both.float64, points)
+      [numbers, bw, aw, iv, points]
     end
   end
 
+  # The keys followed by the points, one array, when there are points.
+  def joined (keys, points)
+    points ? CArray.concatenate([keys, points]) : keys
+  end
+
+  # The keys and the points (nil without them) back out of a joined array.
+  def split (numbers, points)
+    return [numbers, nil] unless points
+    [numbers[0...@n].copy, numbers[@n...numbers.elements].copy]
+  end
+
   def window_bound (width, op)
-    return @key if width.nil?
-    key = @key
+    key = @points || @key
+    return key if width.nil?
     if key.is_a?(CATime) || key.is_a?(CATimedelta)
       key = key.to_unit(CATimeUnitAlgebra.finer(key.unit, width.unit))
     end

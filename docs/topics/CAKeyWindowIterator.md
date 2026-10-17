@@ -107,6 +107,23 @@ gives `(N, 20)`, each row the windowed statistic of every level. `each`
 yields the rows of a window, shaped `(rows in the window, ...)`. A block
 fold (`reduce { ... }`) takes a one-column value only.
 
+## Windows at given points — `at:`
+
+`at:` places the windows at points of the key instead of at the values. The window of a point t holds the values whose key lies between `t - before` and `t + after`, and every answer is one per point, in the order of the points:
+
+```ruby
+hours = CArray.time_range("2024-01-01 00:00", "2024-01-01 23:00", unit: "1 hour")
+temp.windows(on: time, at: hours, after: "3 hours", exclude: :upper).mean
+# => one value per hour, the mean over [t, t + 3 hours)
+```
+
+- A grid of points gives windows on a grid. With a width larger than the step, the windows overlap and a value takes part in several of them.
+- A window with no value answers as an empty reduction does: `mean` is `UNDEF`, `count` and `elements` are 0.
+- The points are of the key's kind (a `CATime` for a time key, numbers for a numeric key). They need not be sorted, repeat or lie on the values' keys. A time point on another unit than the key is compared on the finer of the two.
+- A point that is masked, NaN or infinite has no window; its answers are `UNDEF`.
+- `first_addr` / `last_addr` / `first_key` / `last_key` / `elements` / `bounds` / `is_complete` are one per point too. `is_complete` takes the point as the start of the `interval:` grid.
+- `at:` cannot be given with `by:`.
+
 ## In a CAFrame
 
 ```ruby

@@ -1189,6 +1189,16 @@ w = df.windows(on: "time", before: "1 hour", interval: "10 minutes")
 w.mean("rain").mask_where(w.is_complete.not)    # UNDEF where an observation is missing
 ```
 
+`at:` places the windows at given points of the key instead of at the rows, for windows on a grid that may overlap (a three-hour window every hour). Every answer is then one per point, and the frame of reductions has a row per point, the points as its index and the `on:` column's name as its row axis name:
+
+```ruby
+hours = CArray.time_range("2024-01-01 00:00", "2024-01-01 23:00", unit: "1 hour")
+df.windows(on: "time", at: hours, after: "3 hours", exclude: :upper).mean
+# => a frame with a row per hour, the mean over [t, t + 3 hours)
+```
+
+A window with no row answers as an empty reduction does (`mean` is `UNDEF`, `count` is 0), so every point has its row. `at:` cannot be given with `by:`.
+
 The reductions and checks are those of `CArray#windows(on:)`; see [CAKeyWindowIterator](CAKeyWindowIterator.md).
 
 ## Combining frames
@@ -1873,6 +1883,7 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | hourly totals from 10-minute data | [`resample`](#time-bins--resample) |
 | hourly values labelled by the end of the hour, as for precipitation | [`resample(..., label: :right)`](#time-bins--resample) |
 | a row for every hour, `UNDEF` where there was no data | [`resample(..., fill: true)`](#time-bins--resample) |
+| a statistic over a three-hour window every hour (windows that overlap) | [`windows(..., at:)`](#windows-bounded-by-a-key--windows) |
 | refuse an hourly mean that has too few readings | [`mean(min_count:)`](#the-same-reduction-for-every-column) |
 | the change since a station's previous reading | [`group_by(...).lag`](#values-within-a-group--lag-order-running-values) |
 | a rank or a running total within each station | [`group_by(...).order` / `cumsum`](#values-within-a-group--lag-order-running-values) |
