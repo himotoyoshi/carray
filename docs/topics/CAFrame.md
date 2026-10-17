@@ -310,6 +310,29 @@ The Arrays and Hashes these readers return are made for each call, so changing o
 
 Positional or pattern selection of columns is done on `column_names` rather than with an API of its own — e.g. `df.select(*df.column_names[1..])` or `df.select(*df.column_names.grep(/temp/))`.
 
+### Attributes of the frame
+
+A frame can carry key/value metadata about the table as a whole, such as a title or where the data came from. These are separate from each column's own attributes: `df.attr(:title)` reads the frame's, `df["temp"].attr(:units)` the column's.
+
+```ruby
+df = CAFrame.new(cols, attrs: { title: "hourly observations" })
+df.set_attr(:source, "station network")
+df.attr(:title)      # => "hourly observations"
+df.attrs             # => { "title" => "hourly observations", "source" => "station network" }
+```
+
+`attr`, `set_attr`, `set_attrs`, `delete_attr`, `attrs` and `has_attr?` follow the rules of the same methods on a CArray: a Symbol or String key, stored as a String, and a JSON-compatible value, stored as a frozen copy. A [read-only frame](#read-only-frames) refuses to change them.
+
+A frame made from this one takes its attributes when it holds the same table:
+
+- a selection of rows: `df[rows]`, `filter`, `head`, `tail`, `sort_by`, `sort_by_key`, `join(how: :semi / :anti)`, and a group's `filter`
+- a change of columns: `select`, `append`, `drop`, `rename`, `split_column`, `contrast_columns`, `stack_columns`, `unstack_column`
+- `copy`, `dup` and `clone`
+
+A frame computed from it does not: a summary (`describe`, `verify`, grouped reductions, `aggregate`, `resample`, a window's reductions), a combination (`join`, `join_asof`, `align`, `paste`, `CAFrame.meld` / `concatenate` / `stack`, `unstack`) or a reshape (`pivot`, `melt`, `stack_rows`, `unstack_rows`). To see the original attributes, ask the frame they came from. Each frame has its own set: setting an attribute on a frame made from this one does not change this one.
+
+`to_csv` does not write the frame's attributes.
+
 ---
 
 ## Getting columns and rows

@@ -59,9 +59,15 @@ class CAFrame
   def initialize(columns = {}, **opts)
     axis_name = opts.delete(:axis_name)
     index     = opts.delete(:index)
+    attrs     = opts.delete(:attrs)
     opts.each_key do |k|
       CAFrame.__send__(:column_key, k, "CAFrame.new",
-                       hint: "axis_name: and index: are the options")
+                       hint: "axis_name:, index: and attrs: are the options")
+    end
+    @attrs = nil
+    unless attrs.nil?
+      raise TypeError, "CAFrame.new: attrs: takes a Hash (got #{attrs.class})" unless attrs.is_a?(Hash)
+      set_attrs(attrs)
     end
     columns = columns.merge(opts) unless opts.empty?
 
@@ -455,7 +461,9 @@ class CAFrame
       end
       verdicts[key] = verdict
     end
-    rebuild(verdicts)
+    # The verdicts are a table about the rows, not a part of this one, so the
+    # frame's attributes are not carried.
+    CAFrame.new(verdicts, axis_name: @axis_name, index: @index)
   end
 
   # Move a column to the index and name the row axis after it (memo §3).
@@ -567,7 +575,8 @@ class CAFrame
   def copy
     cols = {}
     @columns.each { |k, v| cols[k] = v.copy }
-    CAFrame.new(cols, axis_name: @axis_name, index: @index && @index.copy)
+    CAFrame.new(cols, axis_name: @axis_name, index: @index && @index.copy,
+                attrs: @attrs)
   end
 
   # +dup+ / +clone+ share the column data -- that is the CArray dup contract
@@ -578,6 +587,70 @@ class CAFrame
   private def initialize_copy(other)
     super
     @columns = @columns.dup
+    @attrs   = @attrs.dup if @attrs
+  end
+
+  # --- attributes of the frame ------------------------------------------
+  #
+  # Key/value metadata about the table as a whole (a title, a source), apart
+  # from each column's own attributes.  Keys and values follow the rules of
+  # CArray#set_attr: a Symbol or String key, stored as a String, and a
+  # JSON-compatible value, stored as a frozen copy.
+  #
+  # A frame made from this one takes its attributes when it holds the same
+  # table: a selection of rows (df[rows], filter, head, tail, sort_by,
+  # join(how: :semi / :anti)), a change of columns (select, append, drop,
+  # rename, ...), copy and dup.  A frame computed from it -- a summary, a
+  # join, a reshape -- does not; ask the frame it came from.  Each frame has
+  # its own Hash: setting an attribute on a frame made from this one leaves
+  # this one unchanged.
+
+  # The value of the attribute +key+, or nil when the frame has none.
+  def attr(key)
+    @attrs ? @attrs[CArray.__send__(:attr_normalize_key, key)] : nil
+  end
+
+  # Set the attribute +key+ to +value+ and return the stored value.
+  def set_attr(key, value)
+    refuse_if_frozen
+    CArray.__send__(:attr_validate_value, value)
+    (@attrs ||= {})[CArray.__send__(:attr_normalize_key, key)] =
+      CArray.__send__(:attr_coerce_value, value)
+  end
+
+  # Set every key of +hash+, as set_attr sets one, and return self.  Every
+  # value is checked before any is written.
+  def set_attrs(hash)
+    refuse_if_frozen
+    raise TypeError, "set_attrs takes a Hash (got #{hash.class})" unless hash.is_a?(Hash)
+    entries = hash.map do |key, value|
+      CArray.__send__(:attr_validate_value, value)
+      [CArray.__send__(:attr_normalize_key, key), CArray.__send__(:attr_coerce_value, value)]
+    end
+    unless entries.empty?
+      h = (@attrs ||= {})
+      entries.each { |k, v| h[k] = v }
+    end
+    self
+  end
+
+  # Remove the attribute +key+ and return its value, or nil.
+  def delete_attr(key)
+    k = CArray.__send__(:attr_normalize_key, key)
+    return nil unless @attrs&.key?(k)
+    refuse_if_frozen
+    @attrs.delete(k)
+  end
+
+  # A frozen Hash of the frame's attributes.
+  def attrs
+    (@attrs ? @attrs.dup : {}).freeze
+  end
+
+  # Whether the frame has any attribute, or the attribute +key+.
+  def has_attr?(key = nil)
+    return !(@attrs.nil? || @attrs.empty?) if key.nil?
+    !!@attrs&.key?(CArray.__send__(:attr_normalize_key, key))
   end
 
   # --- metadata readers (memo §13.2) ------------------------------------
@@ -618,8 +691,10 @@ class CAFrame
     h
   end
 
+  # A frame of the same table with a different set of columns: it takes this
+  # frame's attributes.
   private def rebuild(cols)
-    CAFrame.new(cols, axis_name: @axis_name, index: @index)
+    CAFrame.new(cols, axis_name: @axis_name, index: @index, attrs: @attrs)
   end
 
   # A column given to the frame: a CArray as it is; a Ruby Array typed by its
@@ -832,7 +907,7 @@ class CAFrame
       cols[name] = col[selector, *([nil] * (col.ndim - 1))]
     end
     new_index = @index ? @index[selector] : nil
-    CAFrame.new(cols, axis_name: @axis_name, index: new_index)
+    CAFrame.new(cols, axis_name: @axis_name, index: new_index, attrs: @attrs)
   end
 
   private def select_rows_keep_masked(selector)
@@ -860,7 +935,7 @@ class CAFrame
     # aliased index would write through to the parent from a frame whose columns
     # do not.
     new_index = @index ? @index[keep].copy : nil
-    CAFrame.new(cols, axis_name: @axis_name, index: new_index)
+    CAFrame.new(cols, axis_name: @axis_name, index: new_index, attrs: @attrs)
   end
 
   # A column name given as an argument: a String, as the frame's column

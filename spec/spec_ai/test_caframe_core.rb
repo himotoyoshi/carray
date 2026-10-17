@@ -29,7 +29,7 @@ class TestCAFrameConstruction < Test::Unit::TestCase
     # with the :axis_name / :index options, so it is rejected loudly.
     err = assert_raise(TypeError) { CAFrame.new(a: CA_INT32([1, 2])) }
     assert_equal "CAFrame.new: a column name is a String (got :a); " \
-                 "axis_name: and index: are the options", err.message
+                 "axis_name:, index: and attrs: are the options", err.message
   end
 
   # Column names are Strings in every verb; a Symbol is refused, in an

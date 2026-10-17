@@ -249,6 +249,20 @@ class CArray
   end
 
   def attr_normalize_key (key)
+    CArray.__send__(:attr_normalize_key, key)
+  end
+
+  def attr_validate_value (v)
+    CArray.__send__(:attr_validate_value, v)
+  end
+
+  def attr_coerce_value (v)
+    CArray.__send__(:attr_coerce_value, v)
+  end
+
+  # The key and value rules, as class methods so that CAFrame's attributes
+  # follow the same ones.
+  def self.attr_normalize_key (key)
     case key
     when String then key
     when Symbol then key.to_s
@@ -257,7 +271,7 @@ class CArray
     end
   end
 
-  def attr_validate_value (v, depth = 0)
+  def self.attr_validate_value (v, depth = 0)
     raise ArgumentError, "attribute value nests too deep" if depth > 32
     case v
     when String, Integer, Float, true, false, nil, Symbol
@@ -277,7 +291,7 @@ class CArray
     end
   end
 
-  def attr_coerce_value (v)
+  def self.attr_coerce_value (v)
     case v
     when Symbol then v.to_s.freeze
     when String then v.frozen? ? v : v.dup.freeze
@@ -290,5 +304,6 @@ class CArray
       v
     end
   end
+  private_class_method :attr_normalize_key, :attr_validate_value, :attr_coerce_value
 
 end
