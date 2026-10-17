@@ -14,7 +14,7 @@ Ruby/CArray is an extension library for the multi-dimensional array class. It pr
 * Define your own array class in pure Ruby while keeping the full CArray interface
 * Kernel-style iteration: run a Ruby block over each sub-array spanning the axes you choose
 * Faces: array types for time, strings and categories, with methods of their own on top of everything CArray does
-* Comes with a DataFrame (`CAFrame`) whose columns are plain CArrays, so masks and views keep working on them
+* Comes with a DataFrame ([`CAFrame`](docs/topics/CAFrame.md)) whose columns are plain CArrays, so masks and views keep working on them
 
 Each of these is shown, briefly and with a runnable example, in [A tour of the features](docs/FeatureTour.md).
 
@@ -119,6 +119,7 @@ b.strip_mask(Float::NAN).sum(axis: 0)
 * [Views](guides/users/06_views.md) — referring to data without copying
 * [Reduction and statistics](guides/users/04_reduction_and_statistics.md) — summaries, whole or per axis
 * [Masks and missing values](guides/users/05_masks.md) — undefined elements, and how calculations treat them
+* [Data frames](docs/topics/CAFrame.md) — tables of named columns, each column a CArray
 
 ## Contributing
 
