@@ -152,6 +152,7 @@ class CAFrame
     ng   = gcat.labels.size
     nb   = grid.elements
     comb = gcat.codes.int64 * nb + bins.locate_addr(grid).int64
+    # key-labels: the used (group, bin) codes, not labels; those go through key_labels below
     occupied = fill ? CArray.int64(ng * nb).seq! : comb.unique(sort: true)
     codes = fill ? comb : comb.locate_addr(occupied)
     g_of = nb > 0 ? occupied / nb : occupied
