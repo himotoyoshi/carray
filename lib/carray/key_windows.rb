@@ -78,7 +78,8 @@ class CAKeyWindowIterator < CAIterator
     end
     @key      = on
     @n        = value.dim0
-    @points   = at
+    # Taken as they are now, as the windows are: bounds reads them later.
+    @points   = at&.copy
     @nout     = at.nil? ? @n : at.elements
     @ndim     = 1
     @shape    = [@nout]

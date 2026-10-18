@@ -182,4 +182,11 @@ class TestKeyWindowsAt < Test::Unit::TestCase
     r.index[1] = 55
     assert_equal [0, 1, 2], w.mean.index.to_a
   end
+
+  def test_bounds_are_of_the_points_given_then
+    g = CA_INT64([0, 1, 2])
+    it = CA_FLOAT64([1, 2, 3]).windows(on: CA_INT64([0, 1, 2]), at: g, before: 1)
+    g[0] = 99
+    assert_equal [[-1, 0, 1], [0, 1, 2]], it.bounds.map(&:to_a)
+  end
 end
