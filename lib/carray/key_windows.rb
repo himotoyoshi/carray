@@ -121,6 +121,11 @@ class CAKeyWindowIterator < CAIterator
     ex_lo = (exclude == :lower || exclude == :both) && !@fraction_lower
     ex_hi = (exclude == :upper || exclude == :both) && !@fraction_upper
     expected = iv && (bw / iv + aw / iv + 1 - (ex_lo ? 1 : 0) - (ex_hi ? 1 : 0)).round
+    if expected && expected < 1
+      raise ArgumentError,
+            "windows: before:, after: and exclude: #{exclude.inspect} leave no key " \
+            "in a window, so interval: has no grid point to check"
+    end
     @lo, @hi, @complete =
       CArray.__find_key_window_row_ranges__(sk, sg, bw, aw, ex_lo, ex_hi, iv, expected, sp)
 
@@ -221,6 +226,9 @@ class CAKeyWindowIterator < CAIterator
   #   within a relative 1e-9; the window itself compares a float key with
   #   its bounds exactly, so on a decimal grid (keys i * 0.1) a key that
   #   misses a bound in the last bit can make a window hold one key more.
+  #   A window that can hold no key (before: 0 and after: 0 with an end
+  #   left out) has no grid point to check, so windows refuses it together
+  #   with interval:.
   #   @return [CArray] boolean
   def is_complete
     unless @complete

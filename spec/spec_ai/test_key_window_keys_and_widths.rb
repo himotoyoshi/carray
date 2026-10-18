@@ -37,6 +37,17 @@ class TestKeyWindowIntegerKeys < Test::Unit::TestCase
     assert_equal [1.0, 3.0], sums(k, Float::INFINITY)
   end
 
+  # With interval:, a window that can hold no key is refused: there is no
+  # grid point for is_complete to check.
+  def test_an_empty_window_with_interval_is_refused
+    k = CA_INT64([0, 1, 2])
+    v = CA_FLOAT64([1, 2, 3])
+    assert_raise(ArgumentError) { v.windows(on: k, before: 0, after: 0, exclude: :both, interval: 1) }
+    assert_raise(ArgumentError) { v.windows(on: k, before: 0, exclude: :lower, interval: 1) }
+    assert_equal [true] * 3, v.windows(on: k, before: 0, exclude: nil, interval: 1).is_complete.to_a
+    assert_equal [0.0] * 3, v.windows(on: k, before: 0, after: 0, exclude: :both).sum.to_a
+  end
+
   # A fractional width bounds an integer key at its floor, included, also
   # on the side exclude: names.
   def test_fractional_width_with_exclude
