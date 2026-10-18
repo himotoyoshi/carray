@@ -35,6 +35,8 @@ class TestFrameRepeatedNames < Test::Unit::TestCase
     end
     assert_repeated("join", "on: names", "a") { df.join(df, on: %w[a a]) }
     assert_repeated("melt", "names", "a") { df.melt(id: %w[a a]) }
+    assert_repeated("pivot", "index: and columns: name", "a") { df.pivot(index: "a", columns: "a", values: "b") }
+    assert_repeated("pivot_grid", "index: and columns: name", "a") { df.pivot_grid(index: "a", columns: "a", values: "b") }
   end
 
   def test_the_verbs_that_make_columns

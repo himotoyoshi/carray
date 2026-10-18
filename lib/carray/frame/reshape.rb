@@ -130,6 +130,7 @@ class CAFrame
   # sorted keys and, for each of the nr * nc cells, the address of the row
   # (or with +aggregate:+, of the reduced pair) that fills it.
   private def pivot_plan(index, columns, aggregate, verb)
+    CAFrame.__send__(:refuse_repeated_names, [index, columns], verb, "index: and columns: name")
     rkey = key_column(index, verb)
     ckey = key_column(columns, verb)
     rlab = pivot_sorted_keys(rkey, "index", index, verb)
