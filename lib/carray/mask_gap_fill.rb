@@ -183,6 +183,10 @@ class CArray
     v = value[present]
     # A complex value interpolates its real and imaginary parts.
     interp = v.complex? ? v.linear_fetch(addr) : v.float64.linear_fetch(addr)
+    # An integer array takes the nearest integer, half away from zero (as a
+    # time Face lands on its own grid), rounded before the store would cut
+    # the fraction off.
+    interp = interp.round if integer?
     # Built from the values alone, so a fully filled result carries no mask.
     out      = value.copy
     masked   = is_masked

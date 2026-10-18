@@ -105,7 +105,11 @@ class CArray
   #     linearly by index from the two bracketing valid cells (numeric
   #     data_type, or a time Face — `CATime` / `CATimedelta` interpolate
   #     through their own `linear_fetch`, so the filled values stay on the
-  #     array's unit and are rounded to it).
+  #     array's unit and are rounded to it). An integer array takes the
+  #     nearest integer, half away from zero (`[190, _, _, 341]` fills
+  #     `240, 291`). The interpolation runs in float64, so in an int64
+  #     array with values beyond 2**53 the filled cells may be off by the
+  #     float64 spacing there; the valid cells are not touched.
   #   @param axis [Integer, nil] scan axis (single axis). `nil` flattens.
   #   @return [self]
   def unmask(*, method: nil, axis: nil); end
