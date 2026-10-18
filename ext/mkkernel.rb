@@ -177,10 +177,8 @@ module MkKernel
   #   expr: { object: "..." }.merge(float_widths("(#2) = sin<f>(#1);"))
   #
   # Not every double-taking call wants this.  `fabs`, `fmin` / `fmax`,
-  # `ceil` / `floor` / `trunc` and the `isnan` family are exact on a
-  # float either way, and `round` (`floor(x + 0.5)`) is exact only in
-  # double -- narrowing it would round `x + 0.5f` first and step the
-  # answer at the boundary.
+  # `ceil` / `floor` / `trunc` / `round` and the `isnan` family are exact
+  # on a float either way.
   def self.float_widths(body)
     {
       [:f32] => at_width(body, "f", "float"),
@@ -8546,7 +8544,9 @@ MkKernel.monfunc :round,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#2) = (#1);",
-    float:  "(#2) = ((#1)>0.0) ? floor((#1)+0.5) : ((#1)<0.0) ? ceil((#1)-0.5) : (#1);",
+    # Half away from zero, as Float#round.  floor(x + 0.5) would round in
+    # the addition: 0.49999999999999994 + 0.5 is 1.0.
+    float:  "(#2) = round(#1);",
     object: '(#2) = rb_funcall((#1), rb_intern("round"), 0);',
   }
 

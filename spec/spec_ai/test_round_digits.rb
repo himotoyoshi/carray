@@ -77,4 +77,18 @@ class TestRoundDigits < Test::Unit::TestCase
     assert_raise(TypeError) { CA_FLOAT64([1.5]).round(1.5) }
     assert_raise(CArray::DataTypeError) { CA_CMPLX128([1]).round(2) }
   end
+
+  # Rounding without digits does not add 0.5 first: that addition rounds
+  # 0.49999999999999994 up to 1.0, and an odd value in [2**52, 2**53) to
+  # the next even one.
+  def test_without_digits_matches_float_round_where_adding_half_rounds
+    v = [0.49999999999999994, -0.49999999999999994,
+         4682615757193975.0, -4682615757193975.0, 2.0**52 + 1, 0.5, -2.5]
+    a = CA_FLOAT64(v)
+    want = v.map { |x| x.round.to_f }
+    assert_equal want, a.round.to_a
+    assert_equal want, a.lazy.round.copy.to_a
+    assert_equal want, a.round(0).to_a
+    assert_equal [0.0, 2.0, -1.0], CA_FLOAT32([0.49999997, 1.5, -0.5]).round.to_a
+  end
 end
