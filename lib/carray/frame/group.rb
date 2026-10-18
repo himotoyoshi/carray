@@ -217,6 +217,7 @@ class GroupedFrame
 
   # Raw exposure: the CArray group iterator for one column (memo §11.6).
   def [](name)
+    refuse_changed_rows("[]")
     @frame[name].group_by_category(@cat)
   end
 
@@ -234,6 +235,7 @@ class GroupedFrame
   #
   #   df.group_by("station").aggregate("temp_mean" => ["temp", :mean], keep_rows: true)
   def aggregate(spec = nil, keep_rows: false, **named)
+    refuse_changed_rows("aggregate")
     spec = (spec || {}).merge(named)
     cols = {}
     spec.each do |out_name, (in_name, reduction, *args)|
@@ -266,6 +268,7 @@ class GroupedFrame
   # first appear; a group whose Hash lacks a name is UNDEF there, as
   # +from_records+ reads a record that lacks a key.
   def table(keep_rows: false)
+    refuse_changed_rows("table")
     outs = []
     each_group_frame do |g|
       out = yield(g)
@@ -347,6 +350,7 @@ class GroupedFrame
                :variance, :stddev, :variancep, :stddevp], :group_reduction)
 
   private def group_reduction (red, *names, min_count: nil, fill_value: nil, keep_rows: false)
+    refuse_changed_rows(red)
     reduce_columns(red, names, keep_rows, min_count: min_count, fill_value: fill_value)
   end
 
@@ -380,6 +384,7 @@ class GroupedFrame
               [:first, :last, :nunique, :count, :all, :any], :group_value)
 
   private def group_value (red, *names, keep_rows: false)
+    refuse_changed_rows(red)
     reduce_columns(red, names, keep_rows)
   end
 
@@ -455,6 +460,7 @@ class GroupedFrame
   # @raise [ArgumentError] for +:linear+, which within groups is not
   #   provided, or another Symbol.
   def fill (name, method_or_value)
+    refuse_changed_rows("fill")
     case method_or_value
     when :ffill, :bfill
       @frame.__send__(:refuse_if_frozen)
@@ -500,6 +506,7 @@ class GroupedFrame
   # @raise [ArgumentError] when the block does not return a boolean CArray of
   #   shape [ngroup].
   def filter (keep_masked: false)
+    refuse_changed_rows("filter")
     chosen = yield(self)
     unless chosen.is_a?(CArray) && chosen.data_type == :boolean
       raise ArgumentError,
@@ -526,6 +533,7 @@ class GroupedFrame
   #
   # @return [CAFrame]
   def to_frame
+    refuse_changed_rows("to_frame")
     @frame.__send__(:rebuild, @frame.column_names.to_h { |name| [name, @frame[name]] })
   end
 
@@ -539,6 +547,7 @@ class GroupedFrame
   # refusal reads as "this type has no such operation", and a wrong keyword
   # would otherwise leave every column out without a word.
   private def transform_columns(op, names, args, keywords)
+    refuse_changed_rows(op)
     CArray.float64(1).public_send(op, *args, **keywords)
     out = over_named_columns(op, names, @key_names, args, keywords) do |col|
       group_transform(col, op, args, keywords)
@@ -612,6 +621,16 @@ class GroupedFrame
   # A column of the Ruby values the groups gave, typed as from_records types
   # a record's values: Integers int64, numbers float64, arrays of one shape
   # an N-D column, anything else object. UNDEF and nil are missing.
+  # The grouping holds one code per row of the frame as it was when grouped.
+  # A frame whose row count changed since (a splice, a deletion) has rows
+  # the grouping does not know, so every verb refuses it.
+  private def refuse_changed_rows(verb)
+    return if @frame.nrow == @cat.elements
+    raise ArgumentError,
+          "#{verb}: the frame has #{@frame.nrow} rows, #{@cat.elements} when it " \
+          "was grouped; group it again"
+  end
+
   private def column_of_values(values)
     CAFrame.__send__(:build_record_column, values, values.size)
   end

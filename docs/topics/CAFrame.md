@@ -1016,7 +1016,7 @@ grp.labels                 # => group key values, in code order
 - **Groups appear in the order their keys first appear.**
 - **Keys are compared as values**: all NaN keys are one group, `-0.0` and `0.0` one group, and a composite key compares each of its columns the same way.
 - **A row whose key is masked belongs to no group**, as `filter` drops a row whose condition is undetermined. With a composite key, one masked component is enough. So the group sizes need not add up to `nrow` — count the masked keys (`df["k"].count_masked`) to account for the difference, or fill them first (`df.fill("k", value)`) to group them together.
-- **When things are read.** The grouping and its labels are fixed when `group_by` is called: changing a key afterwards does not move rows between groups. The **values** are read when a reduction is called, so a reduction after `df["v"][i] = x` sees the new value, in the group the row had when `group_by` was called. Group again after changing a key.
+- **When things are read.** The grouping and its labels are fixed when `group_by` is called: changing a key afterwards does not move rows between groups. The **values** are read when a reduction is called, so a reduction after `df["v"][i] = x` sees the new value, in the group the row had when `group_by` was called. Group again after changing a key. A frame whose number of rows changed since (a splice or a deletion with `df[rows] =`) has rows the grouping does not know, so every verb of the grouping raises `ArgumentError` until you group again.
 
 ### Choosing a reduction
 

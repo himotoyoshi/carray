@@ -80,6 +80,20 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     assert_equal [UNDEF, UNDEF, 1.5], t["tmax"].to_a
   end
 
+  # A frame whose row count changed since it was grouped has rows the
+  # grouping does not know: every verb refuses it, to_frame included.
+  def test_a_changed_row_count_is_refused
+    df = CAFrame.new("g" => CA_INT32([1, 1, 2]), "v" => CA_FLOAT64([1, 2, 3]))
+    grp = df.group_by("g")
+    df[3...3] = CAFrame.new("g" => CA_INT32([2, 3]), "v" => CA_FLOAT64([4, 5]))
+    [-> { grp.mean }, -> { grp.to_frame }, -> { grp.lag }, -> { grp["v"] },
+     -> { grp.filter { |x| x.mean("v").gt(0) } }, -> { grp.fill("v", :ffill) },
+     -> { grp.table { |_| { "n" => 1 } } }].each do |call|
+      err = assert_raise(ArgumentError) { call.() }
+      assert_match(/the frame has 5 rows, 3 when it was grouped; group it again/, err.message)
+    end
+  end
+
   def test_table_g_is_view_frame
     seen = nil
     @df.group_by("station").table { |g| seen = g; { "n" => g.nrow } }
