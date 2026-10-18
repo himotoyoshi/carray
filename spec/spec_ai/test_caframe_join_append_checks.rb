@@ -95,3 +95,34 @@ class TestJoinIndexNameCollision < Test::Unit::TestCase
     assert_equal %w[v name_right], l.paste(r).column_names
   end
 end
+
+class TestOuterJoinKeyKind < Test::Unit::TestCase
+
+  def outer(l, r)
+    CAFrame.new("k" => l, "v" => CA_INT32([1, 2]))
+           .join(CAFrame.new("k" => r, "w" => CA_INT32([3, 4])), on: "k", how: :outer)["k"]
+  end
+
+  def test_a_shared_categorical_stays_with_the_labels_of_both
+    k = outer(CA_OBJECT(%w[a b]).categorize, CA_OBJECT(%w[b c]).categorize(labels: %w[z b c]))
+    assert_kind_of CACategorical, k
+    assert_equal %w[a b z c], k.labels
+    assert_equal %w[a b c], k.to_a
+  end
+
+  def test_a_shared_const_string_stays
+    assert_kind_of CAConstString, outer(CArray.const_string(%w[a b]), CArray.const_string(%w[b c]))
+  end
+
+  # Different kinds give an object column, whichever side is the receiver.
+  def test_different_kinds_are_objects_either_way
+    c = -> { CArray.const_string(%w[a b]) }
+    o = -> { CA_OBJECT(%w[b c]) }
+    [outer(c.(), o.()), outer(o.(), c.())].each do |k|
+      assert_instance_of CArray, k
+      assert_equal :object, k.data_type
+    end
+    k = outer(CA_OBJECT(%w[a b]).categorize, CA_OBJECT(%w[b c]))
+    assert_instance_of CArray, k
+  end
+end

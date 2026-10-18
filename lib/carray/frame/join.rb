@@ -448,7 +448,26 @@ class CAFrame
     # The key takes the attributes both sides show alike, as a
     # concatenation of the two would.
     shared = CArray.__send__(:attrs_shared_by, [lkeys[j], rkeys[j]])
-    common.project(code).tap { |c| c.set_attrs(shared) unless shared.empty? }
+    key = joined_key_kind(common.project(code), lkeys[j], rkeys[j])
+    key.tap { |c| c.set_attrs(shared) unless shared.empty? }
+  end
+
+  # The kind of a key column holding values of both sides, the same
+  # whichever side is the receiver: a Face both sides share stays (a
+  # categorical with the labels of both, the left's first), and keys of
+  # two different Faces, or of a Face and a plain array, are objects.
+  private def joined_key_kind(col, lkey, rkey)
+    lface = lkey.face? ? lkey.class : nil
+    rface = rkey.face? ? rkey.class : nil
+    return col if lface.nil? && rface.nil?
+    if lface == rface
+      return col unless lface <= CACategorical
+      values = CArray.object(col.elements)
+      values[] = col.to_a
+      return values.categorize(labels: lkey.labels | rkey.labels)
+    end
+    return col if !col.face? && col.object?
+    CArray.object(col.elements).tap { |o| o[] = col.to_a }
   end
 
   # Pairs a side's rows (codes +acode+) with the other side's (+bcode+), in

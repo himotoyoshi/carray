@@ -1289,6 +1289,8 @@ Each row appears at most once, in this frame's order, however many rows of the o
 - text held in different ways: fixed-width strings of different widths (`CArray.fixlen_string`), a `CAConstString` or a categorical column against a plain text column — each is read by its strings;
 - NaN matches NaN; a masked key matches nothing.
 
+The key column of an `:outer` join holds keys of both sides. It keeps a type both sides share: a categorical key stays categorical, with the left's labels followed by the right's new ones, and a `CAConstString` or `CAString` key stays one. Keys of two different kinds, or of a Face and a plain array, come out as an object column, whichever frame is the receiver.
+
 Two exceptions: an object column compares Ruby objects with `eql?`, as a Ruby `Hash` does, so `1` and `1.0` there are different keys (cast the column to a number first; `at` compares with `==` and does find `1` for `1.0`), and a time key refuses plain integers, which have no unit to be read in — turn them into times first with [`to_time`](#counts-since-an-epoch--to_time).
 
 The key must be one value per row; an N-D column cannot be a key for `join`, `join_asof` or `align` (take a component, `df["wind"][nil, 0]`, as a column first). A key may also be the index, by the row axis name, on either side: the left index stays the result's index, and an unmatched right row of an `:outer` or `:right` join takes its label from the right, as a key column takes its value.
