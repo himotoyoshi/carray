@@ -537,9 +537,12 @@ class CAFrame
   # comes once with no b-row when +keep_alone+.  Returns [ai, bi].
   private def join_expand(acode, bcode, k, keep_alone)
     na, nb = acode.elements, bcode.elements
+    bcount = bcode.bincount(length: k).int64
+    if k == 0 || bcount.max <= 1
+      return join_expand_unique(acode, bcode, k, bcount, keep_alone)
+    end
     # b's rows by code, each code's rows in b-row order.
     border = CArray.sort_addr(bcode, CArray.int64(nb).seq)
-    bcount = bcode.bincount(length: k).int64
     bstart = bcount.cumsum.int64 - bcount
     matches = bcount.project(acode).strip_mask(0)
     reps = keep_alone ? matches.pmax(1) : matches
@@ -559,6 +562,28 @@ class CAFrame
       bi[hit] = border.project(bstart.project(acode.project(ai[hit])) + j[hit])
     end
     [ai, bi]
+  end
+
+  # join_expand when each code is on at most one b-row: an a-row pairs
+  # with that row or with none, so no a-row repeats.  The b-row of each
+  # code is looked up once, without the repeat-and-scatter of the
+  # general case; the pairs come in the same order.
+  private def join_expand_unique(acode, bcode, k, bcount, keep_alone)
+    na, nb = acode.elements, bcode.elements
+    brow = CArray.int64(k).fill(UNDEF)
+    if nb > 0
+      present = bcode.is_not_masked
+      brow[bcode[present]] = CArray.int64(nb).seq![present]
+    end
+    if keep_alone
+      return [CArray.int64(0), CArray.int64(0)] if na == 0
+      [CArray.int64(na).seq!, brow.project(acode)]
+    else
+      hit = bcount.project(acode).strip_mask(0).gt(0)
+      ai  = CArray.int64(na).seq![hit].copy
+      return [CArray.int64(0), CArray.int64(0)] if ai.elements == 0
+      [ai, brow.project(acode.project(ai))]
+    end
   end
 
   private def project_rows(col, addr)
