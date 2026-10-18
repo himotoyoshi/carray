@@ -577,6 +577,12 @@ class TestCAFrameToCsv < Test::Unit::TestCase
     df = CAFrame.new("😀" => CA_OBJECT(["a"]))
     e = assert_raise(Encoding::UndefinedConversionError) { df.to_csv(encoding: "CP932") }
     assert_match(/\Ato_csv: the name of column 0 /, e.message)
+    v = CA_FLOAT64([1])
+    v.set_attr(:units, "😀")
+    e = assert_raise(Encoding::UndefinedConversionError) do
+      CAFrame.new("a" => v).to_csv(attrs: [:units], encoding: "CP932")
+    end
+    assert_match(/\Ato_csv: attribute "units" of "a" /, e.message)
   end
 
   def test_a_cell_in_another_encoding_is_transcoded

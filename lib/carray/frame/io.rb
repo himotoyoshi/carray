@@ -415,7 +415,7 @@ class CAFrame
       out = begin
         out.encode(encoding)
       rescue Encoding::UndefinedConversionError => e
-        raise csv_unwritable_cell(names, formatted, encoding) || e
+        raise csv_unwritable_cell(names, attr_keys, attr_rows, formatted, encoding) || e
       end
     end
 
@@ -697,8 +697,13 @@ class CAFrame
   end
 
   # The error for the first cell (or name) +encoding+ cannot hold, or nil.
-  private def csv_unwritable_cell(names, formatted, encoding)
+  private def csv_unwritable_cell(names, attr_keys, attr_rows, formatted, encoding)
     cells = names.each_with_index.map { |t, j| [t, "the name of column #{j}"] }
+    attr_rows.each_with_index do |row, k|
+      row.each_with_index do |t, j|
+        cells << [t, "attribute #{attr_keys[k].inspect} of #{names[j].inspect}"] if t
+      end
+    end
     formatted.each_with_index do |fcol, j|
       fcol.each_with_index { |t, i| cells << [t, "row #{i} of #{names[j].inspect}"] if t }
     end
