@@ -907,7 +907,7 @@ What each form does:
 
 - **`= UNDEF`** masks the stored cells, so the shape is unchanged and the index is kept — the masked rows stay identifiable, and every view derived from the frame sees the change.
 - **`= nil`** keeps the remaining rows in order and shrinks the index with them.
-- **`= other`** works like Ruby's `Array#[]=` splice: `other` may have **any number of rows**, so the number of rows changes. Its **set of columns must match exactly**. When the frame has an index, `other` must have one too (its rows need labels), and the indexes are woven together.
+- **`= other`** works like Ruby's `Array#[]=` splice: `other` may have **any number of rows**, so the number of rows changes. Its **set of columns must match exactly**. When the frame has an index, `other` must have one too (its rows need labels), and the indexes are woven together. Each column, and the index, keeps the attributes this frame's had; those of `other` are not taken.
 
 To drop rows **without** changing the frame in place, take a filtered sub-frame instead — `df[mask]` or `filter` return a new frame and leave this one as it is.
 

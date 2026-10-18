@@ -832,8 +832,10 @@ class CAFrame
                                                    # column beforehand — silent
                                                    # promotion in a splice would
                                                    # hide schema drift.
+      splice_keep_attrs(new_cols[name], col)
     end
     new_index = splice_index(other, lo, hi)
+    splice_keep_attrs(new_index, @index) if new_index
     @columns  = new_cols
     @index    = new_index
     # Read the new count off something the frame now holds, rather than
@@ -847,6 +849,13 @@ class CAFrame
               0
             end
     self
+  end
+
+  # A splice edits this frame's table, so a spliced column keeps the
+  # attributes this frame's column had, whatever the rows put in carry.
+  private def splice_keep_attrs(result, own)
+    (result.attrs.keys - own.attrs.keys).each { |k| result.delete_attr(k) }
+    result.set_attrs(own.attrs)
   end
 
   # The index for a splice: head + other's index + tail. When this frame has

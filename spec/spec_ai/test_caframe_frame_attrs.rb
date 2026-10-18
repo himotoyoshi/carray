@@ -193,4 +193,20 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     assert_nil df.attr(:units)
     assert_nil df["k"].attr(:title)
   end
+
+  # A splice edits this frame's table: each column and the index keep the
+  # attributes they had, whether or not the rows put in carry any.
+  def test_splice_keeps_the_columns_attributes
+    a = CA_FLOAT64([1, 2, 3, 4])
+    a.set_attr(:units, "K")
+    idx = CA_INT32([1, 2, 3, 4])
+    idx.set_attr(:units, "s")
+    df = CAFrame.new({ "a" => a }, index: idx)
+    o = CA_FLOAT64([9])
+    o.set_attr(:extra, 1)
+    df[0..0] = CAFrame.new({ "a" => o }, index: CA_INT32([9]))
+    assert_equal({ "units" => "K" }, df["a"].attrs)
+    assert_equal({ "units" => "s" }, df.index.attrs)
+    assert_equal({ "extra" => 1 }, o.attrs)
+  end
 end
