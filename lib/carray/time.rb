@@ -2653,8 +2653,10 @@ module CATimeLiteral
         units << (defined?(DateTime) && v.is_a?(DateTime) ? CATimeLiteral.exact_instant(v.to_time).unit : :D)
       end
     end
+    # A month beside a day is read on the fixed grid both instants reach,
+    # as two elements are compared (diff_unit); finer covers one group only.
     units.map { |u| CATime::Resolution.parse(u) }
-         .reduce { |a, b| CATimeUnitAlgebra.finer(a, b) } || CATime::Resolution.parse(:s)
+         .reduce { |a, b| CATimeUnitAlgebra.diff_unit(a, b) } || CATime::Resolution.parse(:s)
   end
 
   # The unit a String read with Date._parse shows, or nil when it does not

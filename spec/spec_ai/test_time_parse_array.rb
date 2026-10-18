@@ -139,6 +139,22 @@ class TestTimeParseArray < Test::Unit::TestCase
     assert_equal "s", unit.([Date.new(2024, 1, 1), "2024-01-01T10:00"])
     assert_equal "h", unit.(%w[2013-08-01], unit: :h)
   end
+
+  # A month beside a day or an hour is read on the fixed unit both reach.
+  def test_calendar_and_fixed_elements_take_the_fixed_unit
+    m = CArray.time(["2024-03"], unit: :M)[0]
+    d = CArray.time(["2024-03-05"], unit: :D)[0]
+    h = CArray.time(["2024-03-05 10:00"], unit: :h)[0]
+    y = CArray.time(["2024"], unit: :Y)[0]
+    show = ->(t) { [t.unit.to_s, t.to_a.map { |v| UNDEF.equal?(v) ? v : v.to_s }] }
+    assert_equal ["D", ["2024-03-01", "2024-03-05"]], show.(CArray.time([m, d]))
+    assert_equal ["h", ["2024-03-01T00:00:00Z", "2024-03-05T10:00:00Z"]], show.(CArray.time([m, h]))
+    assert_equal ["M", ["2024-01", "2024-03"]], show.(CArray.time([y, m]))
+    assert_equal ["D", ["2024-03-01", UNDEF, "2024-03-05"]], show.(CArray.time([m, nil, d]))
+    assert_equal ["D", ["2024-03-01", "2024-03-05"]], show.(CArray.time(%w[2024-03 2024-03-05]))
+    assert_equal ["2024-03-01", "2024-03-05"],
+                 CAFrame.from_records([{ "t" => m }, { "t" => d }])["t"].to_a.map(&:to_s)
+  end
   def test_an_integer_counts_ticks_of_the_unit
     ts = ->(t) { t.to_a.map(&:to_s) }
     assert_equal ["1970-01-01T00:00:00Z", "1970-01-01T00:10:00Z", "1970-01-01T01:00:00Z"],
