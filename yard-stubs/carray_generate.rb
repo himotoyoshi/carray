@@ -8,8 +8,12 @@ class CArray
   # @overload where
   #   Returns a fresh 1-D CArray of flat addresses where `self` is
   #   non-zero (or `true`). Masked positions are excluded.
-  #   Non-boolean arrays are first coerced to boolean.
+  #   An integer, float or complex array selects its non-zero cells
+  #   (NaN is non-zero). Any other array that is not boolean is cast to
+  #   boolean, which takes only `0`, `1`, `true` and `false`.
   #   @return [CArray] 1-D, `:int64` (`ca_size_t`).
+  #   @raise [CArray::DataTypeError, TypeError] if an array that is not
+  #     boolean, integer, float or complex cannot be cast to boolean.
   #   @example
   #     CArray.int32(5) { [0, 1, 0, 2, 0] }.where.to_a
   #     # => [1, 3]

@@ -15,9 +15,10 @@
 /* ----------------------------------------------------------------- */
 
 /* CArray#where -- collect the flat addresses of all non-zero (or
-   true) cells in self into a fresh 1-D CA_SIZE array.  Non-boolean
-   inputs are first coerced to boolean via rb_ca_to_boolean.  Masked
-   cells are excluded.
+   true) cells in self into a fresh 1-D CA_SIZE array.  An integer,
+   float or complex array selects its non-zero cells (NaN is non-zero);
+   any other non-boolean array is cast to boolean, which takes only
+   0 / 1 / true / false.  Masked cells are excluded.
 
    Also used internally by ext/ca_obj_grid.c when it needs to extract
    the addresses of true cells from a boolean axis selector. */
@@ -30,7 +31,18 @@ rb_ca_where (VALUE self)
   ca_size_t *q;
   ca_size_t i, j, n, last, count;
 
-  bool0 = ( ! rb_ca_is_boolean_type(self) ) ? rb_ca_to_boolean(self) : self;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  if ( ca_is_boolean_type(ca) ) {
+    bool0 = self;
+  }
+  else if ( ! ca_is_face(ca) &&
+            ( ca_is_integer_type(ca) || ca_is_float_type(ca) ||
+              ca_is_complex_type(ca) ) ) {
+    bool0 = rb_funcall(self, rb_intern("ne"), 1, INT2FIX(0));
+  }
+  else {
+    bool0 = rb_ca_to_boolean(self);
+  }
 
   TypedData_Get_Struct(bool0, CArray, &carray_data_type, ca);
 
