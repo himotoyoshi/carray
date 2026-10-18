@@ -53,7 +53,7 @@ names = ["north", "south", "central"]
 expected = CAFrame.from_records(names.product(days).map { |s, d| { "shop" => s, "date" => d } })
 partial  = sales[sales["date"].ne("2024-03-07") | sales["shop"].ne("south")]   # a file missing one row
 p expected.join(partial, on: ["shop", "date"], how: :anti)
-# #<CAFrame nrow=1 columns=[shop:object, date:object]>
+# #<CAFrame nrow=1 columns=[shop:CAString, date:CATime[D]]>
 # shop   date
 # -----  ----------
 # south  2024-03-07

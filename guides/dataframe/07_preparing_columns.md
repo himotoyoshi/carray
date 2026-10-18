@@ -147,7 +147,7 @@ With a type, `promote(:float64)`, it converts to that type, but only if no colum
 
 ## Text columns
 
-A text column read from a CSV is a `CAString`: an array of strings with the `String` methods applied to every cell. The `!` forms change the column in place, and so the frame:
+A text column — read from a CSV, or given as a Ruby Array of strings — is a `CAString`: an array of strings with the `String` methods applied to every cell. The `!` forms change the column in place, and so the frame:
 
 ```ruby
 df = CAFrame.new("code" => CArray.string([" A-12", "B-7 ", "a-3"]))
@@ -156,7 +156,7 @@ df["code"].upcase!
 df["code"].to_a   # => ["A-12", "B-7", "A-3"]
 ```
 
-`CArray.string` makes a text column from Ruby strings. A column built from a plain Ruby Array of strings is an `object` column — an array of Ruby objects that happen to be strings — and has no string methods of its own; `df["code"] = CArray.string(df["code"])` turns it into a text column.
+`CArray.string` makes a text column from Ruby strings; a plain Ruby Array of strings given for a column becomes one too. An `object` column — an array of Ruby objects, such as the result of `then_else` with two strings — has no string methods of its own; when its values are strings, `df["code"] = CArray.string(df["code"])` turns it into a text column.
 
 The non-`!` forms (`strip`, `upcase`, `sub`, `gsub`, …) return a new column. Predicates — `start_with?`, `include?`, `match?` — return boolean columns for conditions (chapter 6), and `str_len` gives each cell's length.
 

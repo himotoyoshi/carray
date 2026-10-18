@@ -88,10 +88,10 @@ weekend["visitors"].to_a   # => [341, 322]
 t = north.copy
 t["visitors"][3..4] = UNDEF
 t.fill("visitors", :linear)
-t["visitors"].to_a   # => [182, 175, 190, 240, 290, 341, 322, 188]
+t["visitors"].to_a   # => [182, 175, 190, 240, 291, 341, 322, 188]
 ```
 
-The column holds integers, so the interpolated values lose their fractional part: 240.33 becomes 240, and 290.67 becomes 290. Cast the column to `:float64` first to keep the fractions. Without an index, `:linear` interpolates by row position, which is the same only when the rows are equally spaced.
+The column holds integers, so each interpolated value is rounded to the nearest integer: 240.33 becomes 240, and 290.67 becomes 291. Cast the column to `:float64` first to keep the fractions. Without an index, `:linear` interpolates by row position, which is the same only when the rows are equally spaced.
 
 ### Labelling summaries
 

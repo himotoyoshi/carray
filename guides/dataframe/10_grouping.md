@@ -106,25 +106,16 @@ shops = CAFrame.from_csv("shops.csv", types: :infer)
 df = sales.join(shops.select("shop", "size"), on: "shop")
 df["day_type"] = df["date"].weekday.is_in([0, 6]).then_else("weekend", "weekday")
 p df.select("size", "day_type", "visitors", "revenue").group_by("size", "day_type").mean
-# #<CAFrame nrow=4 columns=[visitors:float64, revenue:float64] index="group">
-# group                   visitors      revenue
-# --------------------  ----------  -----------
-# ["small", "weekday"]  159.636364  2057.578333
-# ["large", "weekday"]  319.666667      2980.63
-# ["small", "weekend"]      255.75     3399.165
-# ["large", "weekend"]       378.5      3604.93
+# #<CAFrame nrow=4 columns=[size:CAString, day_type:object, visitors:float64, revenue:float64]>
+# size   day_type    visitors      revenue
+# -----  --------  ----------  -----------
+# small  weekday   159.636364  2057.578333
+# large  weekday   319.666667      2980.63
+# small  weekend       255.75     3399.165
+# large  weekend        378.5      3604.93
 ```
 
-With several keys, each group's label is the Array of its key values, and the index is named `group`. `reset_index` turns the labels into a column of such Arrays; to have one column per key instead, put the parts back as columns:
-
-```ruby
-m = df.select("size", "day_type", "revenue").group_by("size", "day_type").mean
-labels = m.index.to_a
-m = m.reset_index.drop("group")
-m["size"]     = labels.map(&:first)
-m["day_type"] = labels.map(&:last)
-m.column_names   # => ["revenue", "size", "day_type"]
-```
+With several keys, the result has a column for each key, holding each group's key values, followed by the summaries; it has no index. To label the rows by one of the keys, `set_index` it (chapter 9).
 
 ### A computed key
 
@@ -183,7 +174,7 @@ p sales.group_by("shop").table { |g|
   best = g.sort_by_key("revenue", order: :desc)[0]
   { "days" => g.nrow, "best_date" => best["date"], "per_visitor" => g["revenue"].sum / g["visitors"].sum }
 }
-# #<CAFrame nrow=3 columns=[days:int64, best_date:object, per_visitor:float64] index="shop">
+# #<CAFrame nrow=3 columns=[days:int64, best_date:CATime[D], per_visitor:float64] index="shop">
 # shop     days  best_date   per_visitor
 # -------  ----  ----------  -----------
 # north       8  2024-03-10    12.296754
@@ -191,7 +182,7 @@ p sales.group_by("shop").table { |g|
 # central     8  2024-03-09     8.266546
 ```
 
-Integers in the returned Hashes become an integer column and other numbers a float column; anything else — times, strings, `true`/`false` — becomes an object column. `nil` and `UNDEF` are missing.
+Integers in the returned Hashes become an integer column and other numbers a float column, strings a text column, and times taken from a time column a time column; anything else — `true`/`false`, a mix of kinds — becomes an object column. `nil` and `UNDEF` are missing.
 
 Note that `per_visitor` here sums each column over its own present days: the south shop's 6 March revenue counts but its visitors do not. If the two should cover the same days, choose the rows first (`g.filter { |f| f["visitors"].is_not_masked }`).
 

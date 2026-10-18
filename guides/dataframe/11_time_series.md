@@ -149,7 +149,26 @@ p orders.drop("item").resample("time", "1 hour").sum
 
 The result's index is each period's start, as a time column, and its rows are in time order. The time column itself becomes the index rather than a summarised column. With a time index, give the index's name as the time column.
 
-Weekly totals of the daily figures, one column per shop, combine a week key made with `floor` with `pivot` (chapter 13), which spreads one column's values across columns:
+### Periods within each group — `by:`
+
+`by:` names a column (or several) to split the rows by first; the periods are then made within each group. Weekly revenue for each shop:
+
+```ruby
+p sales.select("date", "shop", "revenue").resample("date", "1 week", by: "shop").sum
+# #<CAFrame nrow=6 columns=[shop:CAString, date:CATime[D], revenue:float64]>
+# shop     date         revenue
+# -------  ----------  --------
+# north    2024-03-04  20733.67
+# north    2024-03-11   2261.26
+# south    2024-03-04  13767.57
+# south    2024-03-11    1525.1
+# central  2024-03-04   19105.0
+# central  2024-03-11   3008.01
+```
+
+The result has a column for each `by:` key and one for the period's start, and a row for each group and period. It has no index; the groups keep the order in which they first appear. Weeks begin on Monday.
+
+To have one column per shop instead, make a week key with `floor` and spread it with `pivot` (chapter 13), which puts one column's values across columns:
 
 ```ruby
 weekly = sales.select("date", "shop", "revenue").copy
@@ -161,8 +180,6 @@ p weekly.pivot(index: "week", columns: "shop", values: "revenue", aggregate: :su
 # 2024-03-04  19105.0  20733.67  13767.57
 # 2024-03-11  3008.01   2261.26    1525.1
 ```
-
-Weeks begin on Monday.
 
 ### Empty periods — `fill: true`
 

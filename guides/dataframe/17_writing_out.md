@@ -103,7 +103,7 @@ puts JSON.generate(records)
 | column names and order | kept |
 | values | kept |
 | missing cells | kept: `nil` is read as missing |
-| column types | rebuilt from the values: integers become `int64`, floats `float64`, and anything else — times, text, `true`/`false` — an object column |
+| column types | rebuilt from the values: integers become `int64`, floats `float64`, text a text column, and times a time column of the same resolution; `true`/`false` and a mix of kinds become an object column |
 | the index | comes back as an ordinary first column; call `set_index` again |
 
 When the types matter, give `types:` when reading back, or use CSV with `types:`.

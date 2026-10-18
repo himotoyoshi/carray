@@ -22,7 +22,7 @@ df = CAFrame.new(
   "visitors" => [182, 95, nil],
 )
 p df
-# #<CAFrame nrow=3 columns=[shop:object, revenue:float64, visitors:int64]>
+# #<CAFrame nrow=3 columns=[shop:CAString, revenue:float64, visitors:int64]>
 # shop     revenue  visitors
 # -------  -------  --------
 # north    2121.39       182
@@ -37,12 +37,14 @@ A column may be given as a Ruby Array, as here, or as a CArray.
 A Ruby Array is turned into a column by its values:
 
 - whole numbers give an `int64` column, and any decimal among them a `float64` column;
-- strings, or a mix of kinds, give an `object` column;
+- strings give a text column (`CAString`, chapter 7), as when they are read from a CSV file;
+- times taken out of a time column give a time column again;
+- a mix of kinds gives an `object` column, which holds the values as they are;
 - an Array of equal-length Arrays gives a column with more than one value per row (chapter 14);
 - `nil` or `UNDEF` is a missing cell. The `visitors` column above is `int64` with its last cell missing.
 
 ```ruby
-df.data_types   # => {"shop" => :object, "revenue" => :float64, "visitors" => :int64}
+df.data_types   # => {"shop" => CAString, "revenue" => :float64, "visitors" => :int64}
 ```
 
 ### CArrays
@@ -66,7 +68,7 @@ df3 = CAFrame.new({ "shop"     => ["north", "south", "central"],
                     "revenue"  => [2121.39, 1391.47, 3038.0],
                     "visitors" => [182, 95, 310] },
                   types: { "revenue" => :float32, "visitors" => :int16 })
-df3.data_types   # => {"shop" => :object, "revenue" => :float32, "visitors" => :int16}
+df3.data_types   # => {"shop" => CAString, "revenue" => :float32, "visitors" => :int16}
 ```
 
 `types:` takes the same forms as in `from_records` and `from_csv` (chapter 3): a Hash of column name to type, `:infer`, or a Hash with `default:` for the columns it does not name. Strings are read as numbers here too, so `types: { "count" => :int32 }` turns a column of `"12"`, `"7"` into integers; a string that cannot be read becomes missing, or with `on_error: :raise` raises an error (chapter 3).
@@ -157,7 +159,7 @@ json = <<~JSON
 JSON
 df = CAFrame.from_records(JSON.parse(json))
 p df
-# #<CAFrame nrow=3 columns=[shop:object, revenue:float64, visitors:int64, note:object]>
+# #<CAFrame nrow=3 columns=[shop:CAString, revenue:float64, visitors:int64, note:CAString]>
 # shop     revenue  visitors  note
 # -------  -------  --------  ---------
 # north    2121.39       182  _
@@ -167,14 +169,14 @@ p df
 
 - The columns are every key that appears in any record, in the order they first appear.
 - A key missing from a record, or a `null`, is a missing cell. The south shop has no `visitors`, and two shops have no `note`.
-- Each column's type comes from its values, which JSON has already typed: all integers give `int64`, integers and decimals `float64`. Anything else — strings, booleans, a mix — gives an `object` column holding the values as they are.
+- Each column's type comes from its values, which JSON has already typed: all integers give `int64`, integers and decimals `float64`. Strings give a text column (`CAString`). Anything else — booleans, a mix of kinds — gives an `object` column holding the values as they are.
 - Strings are not parsed. A date written as a string stays a string until you convert it (chapter 11).
 
 `types:` converts named columns as they are built:
 
 ```ruby
 df = CAFrame.from_records(JSON.parse(json), types: { "visitors" => :int32 })
-df.data_types   # => {"shop" => :object, "revenue" => :float64, "visitors" => :int32, "note" => :object}
+df.data_types   # => {"shop" => CAString, "revenue" => :float64, "visitors" => :int32, "note" => CAString}
 ```
 
 Symbol keys work as well as String keys; they become String column names.

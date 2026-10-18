@@ -68,6 +68,7 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | choose between two values by a condition | `cond.then_else(a, b)` | 7 |
 | rename columns | `rename` | 7 |
 | convert text to numbers, or change a type | `cast` | 7 |
+| round values to a number of decimal places | `round(2)` | 1 |
 | make every column one type | `promote` | 7 |
 | store repeated text compactly | `cast("x" => :categorical)` | 7 |
 | tidy text: trim, change case, replace | `strip!`, `upcase!`, `gsub!` | 7 |
@@ -114,6 +115,7 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | the previous value within each group | `lag` | 10, 11 |
 | a rank or running total within each group | `order`, `cumsum` | 10 |
 | totals per hour, day, week or month | `resample` | 11 |
+| totals per period for each shop (or other group) | `resample(..., by:)` | 11 |
 | a row for every period, including empty ones | `resample(..., fill: true)` | 11 |
 | a moving average over a span of time | `windows(on:, before:)` | 11 |
 | one column per group, rows per date | `pivot` | 13 |

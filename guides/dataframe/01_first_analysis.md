@@ -222,7 +222,7 @@ The shop table gives each shop its floor area. `join` adds those columns to the 
 ```ruby
 shops = CAFrame.from_csv("shops.csv", types: :infer)
 report = summary.reset_index.join(shops.select("shop", "name", "floor_m2"), on: "shop")
-report["revenue_per_m2"] = (report["revenue"] / report["floor_m2"] * 100).round / 100.0
+report["revenue_per_m2"] = (report["revenue"] / report["floor_m2"]).round(2)
 p report
 # #<CAFrame nrow=3 columns=[shop:CAString, revenue:float64, best_day:float64, busiest:int64, days_counted:int64, name:CAString, floor_m2:int64, revenue_per_m2:float64]>
 # shop      revenue  best_day  busiest  days_counted  name             floor_m2  revenue_per_m2
@@ -239,7 +239,7 @@ The west shop is in the shop table but has no sales, so it does not appear: by d
 `to_csv` writes a frame as CSV — to a file when given a path, or as a String. The revenue totals are sums of floating-point numbers, which can leave a tail of digits such as `22113.010000000002`; rounding them to cents first keeps the file tidy:
 
 ```ruby
-report["revenue"] = (report["revenue"] * 100).round / 100.0
+report["revenue"] = report["revenue"].round(2)
 report.to_csv("report.csv")
 puts report.to_csv
 # shop,revenue,best_day,busiest,days_counted,name,floor_m2,revenue_per_m2
