@@ -27,7 +27,8 @@ carray knows by name (see ch. 10 for why that exception exists).
 
 If you are writing a kernel, you want ch. 11, not this chapter. Come here
 only when the code that will run is *generated* and addresses cells on its
-own terms.
+own terms — or when a hand-written C kernel has to read cells by address
+across rows, which is what the C entry (below) is for.
 
 ## Why it is not one of the four surfaces
 
@@ -49,14 +50,18 @@ CArray::AddressBasis.open(arrays, writable,
                           packed = false) { |...| ... }
 
 CArray::AddressBasis.classify(array)   #=> Hash
+CArray::AddressBasis.tier(array)       #=> TIER_ENTITY, TIER_STRIDE or TIER_XFER
 ```
 
 `open` opens every array, yields, and closes them all on the way out —
 **including when the block raises**, which is the whole reason it is a block
 form. `classify` reports how an array *would* be opened without opening it,
-which is what a caller uses to decide whether a fast path applies.
+which is what a caller uses to decide whether a fast path applies. `tier`
+answers what `classify` reports as `:tier`, without building the Hash, for a
+caller that asks on every call.
 
-`classify` refuses nothing. `open` refuses, before it opens any array:
+`classify` refuses nothing; its `:refusal` is the reason `open` would refuse
+the array for reading, or nil. `open` refuses, before it opens any array:
 
 - an array whose `data_type` is `CA_OBJECT`, because its cells are `VALUE`s
   and a generated kernel computes on numbers (`ArgumentError`);
@@ -64,6 +69,71 @@ which is what a caller uses to decide whether a fast path applies.
   (`RuntimeError`);
 - a masked view that reinterprets the element size (see *Masks* below,
   `ArgumentError`).
+
+## The C entry: `ca_with_address_bases`
+
+A C extension does not go through Ruby. It calls the same machinery
+directly, declared in `carray.h`:
+
+```c
+typedef struct {
+  char       *ptr;                        /* cell (0, ..., 0) */
+  ca_size_t   strides[CA_RANK_MAX];       /* byte step along each axis */
+  boolean8_t *mask;                       /* NULL when no mask */
+  ca_size_t   mask_strides[CA_RANK_MAX];  /* byte step in the mask */
+  int         writable;
+} ca_address_basis_t;
+
+VALUE ca_with_address_bases (int32_t n, CArray **arrays, const int *writable,
+                             const ca_size_t *const *box_start,
+                             const ca_size_t *const *box_count,
+                             VALUE (*body)(ca_address_basis_t *bases, VALUE arg),
+                             VALUE arg);
+```
+
+It opens the `n` arrays, calls `body` with one basis per array, and closes
+them all on the way out, including when `body` raises. Everything this
+chapter says about `open` holds for it: the same refusals, the same three
+tiers, the same masks, the same closing. Two things differ.
+
+- **The tier is not shown.** A basis is a pointer, strides, a mask and a
+  flag; the C caller addresses cells through it the same way whichever tier
+  produced it. A cell is at `ptr + Σ idx[k] * strides[k]`, its mask byte at
+  `mask + Σ idx[k] * mask_strides[k]`.
+- **The box is given per array, as start and count.** `box_start[i]` and
+  `box_count[i]` hold `ndim` values each for array `i`. Pass `NULL` for both
+  pointers, or for one array's entries, to lend the whole array. Give them
+  as a pair — a start without a count is refused.
+
+The region rules below apply unchanged: the box decides what tier 3 copies,
+tiers 1 and 2 lend the whole array either way, and the kernel must address
+only the box.
+
+A three-point stencil over rows, reading `a` and writing `out`:
+
+```c
+static VALUE
+stencil_body (ca_address_basis_t *b, VALUE arg)
+{
+  Info *info = (Info *) arg;               /* rows and columns of out */
+  for (ca_size_t i = 0; i < info->rows; i++)
+    for (ca_size_t j = 0; j < info->cols; j++) {
+      double v0 = *(double *)(b[0].ptr + i * b[0].strides[0] + j * b[0].strides[1]);
+      double v2 = *(double *)(b[0].ptr + (i + 2) * b[0].strides[0] + j * b[0].strides[1]);
+      *(double *)(b[1].ptr + i * b[1].strides[0] + j * b[1].strides[1]) = v0 + v2;
+    }
+  return Qnil;
+}
+
+CArray *arrays[2] = { a, out };
+int writable[2] = { 0, 1 };
+ca_with_address_bases(2, arrays, writable, NULL, NULL, stencil_body, (VALUE) &info);
+```
+
+`a` may be a transposed view, a gathered view, an integer array seen through
+`fake(:float64)` or a lazy expression; `out` may be a view of another array.
+The kernel does not change. The `CArray` pointers must stay alive for the
+call, so keep the `VALUE`s they came from on the stack.
 
 ## The three tiers
 
@@ -149,10 +219,8 @@ neighbour would be marked on the way back.
 A mask added to a parent after a view of it was made is not on the view
 until the view is asked for it. `open` asks, so such a mask is opened.
 
-Note that a mask slot carries no region of its own: when the data is boxed,
-the mask is still transferred whole. That is consistent rather than wrong —
-both are addressed by the view's coordinates — but it is a transfer the box
-did not ask for.
+A mask has its array's shape, so it takes its array's box: in tier 3 the
+mask moves the same cells as the data, not the whole view's.
 
 ## The block form
 
@@ -239,8 +307,10 @@ void kernel (char **pointers, int64_t *strides, int64_t *bounds,
 
 `open` runs the block under `rb_ensure`, and closes in reverse order.
 
-- A **tier-1 or tier-2** basis addresses the root's own memory, so a write is
-  already where it belongs. Closing detaches the root, and nothing else.
+- A **tier-1 or tier-2** basis addresses the root's own memory. Closing syncs
+  the root and detaches it. For an ordinary entity the sync does nothing; an
+  entity that keeps its cells elsewhere while attached (the mask of a
+  CAObject whose mask comes from Ruby hooks) receives the writes there.
 - A **tier-3** region is a buffer of its own. If the array was opened
   writable, closing sends back **the cells whose bytes the kernel changed**,
   a run along the last axis at a time, and frees the buffer. Sending the
@@ -271,6 +341,32 @@ regions back, frees every buffer and detaches every root, and raises it
 afterwards — unless the block raised, in which case the block's exception is
 the one that propagates.
 
+**CArray's exceptions carry `CArray::AddressBasis::Failure`.** An exception
+raised while the arrays are checked, opened or closed — a refusal, an array
+whose own transfer fails — is extended with that module. One raised by the
+block is not, and neither is a mistake in the request (a region outside the
+array, a missing flag). A caller that runs code of its own in the block tells
+the two apart by it: `Fusion` keeps a registered evaluator when the failure
+is CArray's, and lets the walk meet the same array.
+
+## What a basis does not guard
+
+**Two bases that write the same cell.** Opening one array twice, or an array
+and a view of it, lends two bases that can reach the same cell. What that
+cell holds afterwards is not specified: a box sends its changed cells back
+when it is closed, after anything written in place, and the arrays are closed
+in the reverse of the order they were given. Neither is something to rely on.
+Reading through one basis what was written through another is not specified
+either, since a box is a copy taken at the opening. Arrays that share storage
+are not refused — `a[0..1]` and `a[2..3]` share it and touch different cells
+— so the caller keeps the cells it writes apart.
+
+**What is written is not checked.** A basis lends the storage: a Face is lent
+as its storage type (a `CATime` as eight-byte fixlen) and its values are not
+checked on the way back, and a boolean cell takes whatever byte is written.
+A kernel writes values the array's own store would accept — 0 or 1 into a
+boolean — or the array holds something no other route could have put there.
+
 ## What is pinned, and where
 
 `spec/spec_ai/test_address_basis.rb` covers the three tiers, the region, the
@@ -278,6 +374,12 @@ mask slots, the refusals, and the packed layout above, plus the closing path
 twice over: functionally (a raising block's writes still land) and by
 measurement (the malloc zone does not grow across two hundred raising opens;
 macOS only, omitted elsewhere).
+
+`spec/spec_ai/test_address_basis_c.rb` drives the C entry from an extension
+compiled outside carray (`spec/spec_ai/ext_address_basis/`): a stencil over
+entities, folded views, gathered views, conversions, lazy expressions and a
+CAObject, a box write that leaves the cells outside the box alone, and a
+raising body whose write still lands.
 
 ## Related chapters
 

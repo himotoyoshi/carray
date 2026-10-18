@@ -138,11 +138,11 @@ m.flatten.to_a               #=> [0, 1, 2, 3, 4, 5]
 ```ruby
 m = CArray.int32(12).seq
 
-m.reshape(3, -1).dim         #=> [3, 4]    (-1 infers the remaining axis)
-m.reshape(2, :~).dim         #=> [2, 6]    (:~ is the same auto-infer sigil)
+m.reshape(3, -1).shape         #=> [3, 4]    (-1 infers the remaining axis)
+m.reshape(2, :~).shape         #=> [2, 6]    (:~ is the same auto-infer sigil)
 
 b = CArray.int32(2, 3).seq
-b.reshape(nil, nil).dim      #=> [2, 3]    (nil copies the source axis)
+b.reshape(nil, nil).shape      #=> [2, 3]    (nil copies the source axis)
 ```
 
 **Element count is conserved.** Without a placeholder, the product of the

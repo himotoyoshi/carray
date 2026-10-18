@@ -20,18 +20,35 @@
 #include "ca_obj_face.h"
 #include "carray_internal.h"   /* ca_obj_extremum_replaces */
 
+/* An element index is an Integer, as it is for `[]`; a Float would be cut
+   to an integer by NUM2SIZE. */
+static inline ca_size_t
+elem_index_value (VALUE v)
+{
+  if ( FIXNUM_P(v) ) return (ca_size_t) FIX2LONG(v);
+  if ( ! RB_INTEGER_TYPE_P(v) ) {
+    rb_raise(rb_eIndexError, "object '%"PRIsVALUE"' is invalid for an index",
+             rb_inspect(v));
+  }
+  return NUM2SIZE(v);
+}
+
 /* T_ARRAY index parser.  ridx is assumed already known to be T_ARRAY.
    Direct VALUE * access + FIXNUM_P fast path eliminates rb_ary_entry
    bounds check and NUM2SIZE Bignum branching for the common case. */
 static inline void
 elem_parse_idx_array (CArray *ca, VALUE rary, ca_size_t *idx)
 {
-  const VALUE *iarr = RARRAY_CONST_PTR(rary);
+  const VALUE *iarr;
   int8_t ndim = ca->ndim;
   int8_t i;
+  if ( RARRAY_LEN(rary) != ndim ) {
+    rb_raise(rb_eIndexError, "%ld indices given for a carray of ndim %i",
+             (long) RARRAY_LEN(rary), (int) ndim);
+  }
+  iarr = RARRAY_CONST_PTR(rary);
   for (i=0; i<ndim; i++) {
-    VALUE v = iarr[i];
-    ca_size_t k = FIXNUM_P(v) ? (ca_size_t)FIX2LONG(v) : NUM2SIZE(v);
+    ca_size_t k = elem_index_value(iarr[i]);
     CA_CHECK_INDEX(k, ca->dim[i]);
     idx[i] = k;
   }
@@ -41,7 +58,7 @@ elem_parse_idx_array (CArray *ca, VALUE rary, ca_size_t *idx)
 static inline ca_size_t
 elem_parse_idx_scalar (CArray *ca, VALUE ridx)
 {
-  ca_size_t k = FIXNUM_P(ridx) ? (ca_size_t)FIX2LONG(ridx) : NUM2SIZE(ridx);
+  ca_size_t k = elem_index_value(ridx);
   CA_CHECK_INDEX(k, ca->elements);
   return k;
 }
@@ -278,33 +295,56 @@ rb_ca_elem_store (VALUE self, VALUE ridx, VALUE obj)
         if ( FIXNUM_P(obj) )             { *(int64_t *)p = (int64_t)FIX2LONG(obj); return obj; }
         break;
       case CA_INT32:
-        if ( FIXNUM_P(obj) )             { *(int32_t *)p = (int32_t)FIX2LONG(obj); return obj; }
+        if ( FIXNUM_P(obj) && FIX2LONG(obj) >= INT32_MIN && FIX2LONG(obj) <= INT32_MAX ) {
+          /* fits: checked against the type's range above */
+          *(int32_t *)p = (int32_t)FIX2LONG(obj); return obj;
+        }
         break;
       case CA_INT16:
-        if ( FIXNUM_P(obj) )             { *(int16_t *)p = (int16_t)FIX2LONG(obj); return obj; }
+        if ( FIXNUM_P(obj) && FIX2LONG(obj) >= INT16_MIN && FIX2LONG(obj) <= INT16_MAX ) {
+          /* fits: checked against the type's range above */
+          *(int16_t *)p = (int16_t)FIX2LONG(obj); return obj;
+        }
         break;
       case CA_INT8:
-        if ( FIXNUM_P(obj) )             { *(int8_t *)p = (int8_t)FIX2LONG(obj); return obj; }
+        if ( FIXNUM_P(obj) && FIX2LONG(obj) >= INT8_MIN && FIX2LONG(obj) <= INT8_MAX ) {
+          /* fits: checked against the type's range above */
+          *(int8_t *)p = (int8_t)FIX2LONG(obj); return obj;
+        }
         break;
       case CA_UINT64:
-        if ( FIXNUM_P(obj) )             { *(uint64_t *)p = (uint64_t)FIX2LONG(obj); return obj; }
+        if ( FIXNUM_P(obj) && FIX2LONG(obj) >= 0 ) {
+          *(uint64_t *)p = (uint64_t)FIX2LONG(obj); return obj;
+        }
         break;
       case CA_UINT32:
-        if ( FIXNUM_P(obj) )             { *(uint32_t *)p = (uint32_t)FIX2LONG(obj); return obj; }
+        if ( FIXNUM_P(obj) && FIX2LONG(obj) >= 0 && FIX2LONG(obj) <= (long) UINT32_MAX ) {
+          /* fits: checked against the type's range above */
+          *(uint32_t *)p = (uint32_t)FIX2LONG(obj); return obj;
+        }
         break;
       case CA_UINT16:
-        if ( FIXNUM_P(obj) )             { *(uint16_t *)p = (uint16_t)FIX2LONG(obj); return obj; }
+        if ( FIXNUM_P(obj) && FIX2LONG(obj) >= 0 && FIX2LONG(obj) <= (long) UINT16_MAX ) {
+          /* fits: checked against the type's range above */
+          *(uint16_t *)p = (uint16_t)FIX2LONG(obj); return obj;
+        }
         break;
       case CA_UINT8:
-        if ( FIXNUM_P(obj) )             { *(uint8_t *)p = (uint8_t)FIX2LONG(obj); return obj; }
+        if ( FIXNUM_P(obj) && FIX2LONG(obj) >= 0 && FIX2LONG(obj) <= (long) UINT8_MAX ) {
+          /* fits: checked against the type's range above */
+          *(uint8_t *)p = (uint8_t)FIX2LONG(obj); return obj;
+        }
         break;
       case CA_BOOLEAN:
         if ( obj == Qtrue )              { *(uint8_t *)p = 1; return obj; }
         if ( obj == Qfalse )             { *(uint8_t *)p = 0; return obj; }
-        if ( FIXNUM_P(obj) )             { *(uint8_t *)p = (FIX2LONG(obj) != 0); return obj; }
+        if ( obj == INT2FIX(0) || obj == INT2FIX(1) ) {
+          *(uint8_t *)p = (obj == INT2FIX(1)); return obj;
+        }
         break;
       }
-      /* Fall through: data type matches but obj kind needs general coercion. */
+      /* Fall through: the value needs the general coercion, or does not fit
+         the cell, which the general path refuses. */
     }
   }
 
@@ -331,14 +371,12 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  if ( ca_is_empty(ca) ) return Qnil;
-
   if ( TYPE(ridx) == T_ARRAY ) {
     volatile VALUE out;
     elem_parse_idx_array(ca, ridx, idx);
 
     /* Super-hot path: entity + common numeric data type + no mask.
-       Bypass ca_fetch_index dispatch AND rb_ca_ptr2obj cast-table dispatch.
+       Bypass ca_fetch_index dispatch AND rb_ca_ptr2obj_storage cast-table dispatch.
        Covers the bench's float64 / int64 / int32 cases. */
     if ( ca_is_entity(ca) && ! ca->mask ) {
       ca_size_t addr = elem_entity_addr(ca, idx);
@@ -370,13 +408,13 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
       else {
         ca_fetch_index(ca, idx, v);
       }
-      out = rb_ca_ptr2obj(self, v);
+      out = rb_ca_ptr2obj_storage(self, v);
     }
     else {
       volatile VALUE holder;
       char *v = ALLOCV_N(char, holder, ca->bytes);
       ca_fetch_index(ca, idx, v);
-      out = rb_ca_ptr2obj(self, v);
+      out = rb_ca_ptr2obj_storage(self, v);
       ALLOCV_END(holder);
     }
 
@@ -749,6 +787,11 @@ rb_ca_elem_unmask (VALUE self, VALUE ridx)
  * rule (NaN is treated as missing: `min(NaN, v)` returns `v`,
  * `min(x, NaN)` returns `x`).  Raises for non-numeric data_type. */
 
+/* The entity fast path takes a Float into a float cell and an Integer
+   that fits the cell.  Anything else -- a Float into an integer cell, an
+   Integer out of the type's range, a Bignum or Rational -- goes to the
+   general path, which compares in Ruby and stores as `self[idx] = v`
+   does, so a value that wins but does not fit raises. */
 #define ELEM_MINMAX_BODY(OP) do { \
   if ( ca_is_entity(ca) ) { \
     ca_size_t addr; \
@@ -766,14 +809,6 @@ rb_ca_elem_unmask (VALUE self, VALUE ridx)
       switch ( ca->data_type ) { \
       case CA_FLOAT64: { double *q=(double *)p;  if (v OP *q || *q != *q) *q = v; return self; } \
       case CA_FLOAT32: { float  *q=(float  *)p;  float vf=(float)v; if (vf OP *q || *q != *q) *q = vf; return self; } \
-      case CA_INT64:   { int64_t *q=(int64_t *)p; if ((int64_t)v OP *q) *q = (int64_t)v; return self; } \
-      case CA_INT32:   { int32_t *q=(int32_t *)p; if ((int32_t)v OP *q) *q = (int32_t)v; return self; } \
-      case CA_INT16:   { int16_t *q=(int16_t *)p; if ((int16_t)v OP *q) *q = (int16_t)v; return self; } \
-      case CA_INT8:    { int8_t  *q=(int8_t  *)p; if ((int8_t )v OP *q) *q = (int8_t )v; return self; } \
-      case CA_UINT64:  { uint64_t *q=(uint64_t*)p; if ((uint64_t)v OP *q) *q = (uint64_t)v; return self; } \
-      case CA_UINT32:  { uint32_t *q=(uint32_t*)p; if ((uint32_t)v OP *q) *q = (uint32_t)v; return self; } \
-      case CA_UINT16:  { uint16_t *q=(uint16_t*)p; if ((uint16_t)v OP *q) *q = (uint16_t)v; return self; } \
-      case CA_UINT8:   { uint8_t  *q=(uint8_t *)p; if ((uint8_t )v OP *q) *q = (uint8_t )v; return self; } \
       } \
     } \
     else if ( FIXNUM_P(rval) ) { \
@@ -782,13 +817,13 @@ rb_ca_elem_unmask (VALUE self, VALUE ridx)
       case CA_FLOAT64: { double *q=(double *)p; double vd=(double)v; if (vd OP *q || *q != *q) *q = vd; return self; } \
       case CA_FLOAT32: { float  *q=(float  *)p; float  vf=(float )v; if (vf OP *q || *q != *q) *q = vf; return self; } \
       case CA_INT64:   { int64_t *q=(int64_t *)p; if ((int64_t)v OP *q) *q = (int64_t)v; return self; } \
-      case CA_INT32:   { int32_t *q=(int32_t *)p; if ((int32_t)v OP *q) *q = (int32_t)v; return self; } \
-      case CA_INT16:   { int16_t *q=(int16_t *)p; if ((int16_t)v OP *q) *q = (int16_t)v; return self; } \
-      case CA_INT8:    { int8_t  *q=(int8_t  *)p; if ((int8_t )v OP *q) *q = (int8_t )v; return self; } \
-      case CA_UINT64:  { uint64_t *q=(uint64_t*)p; if ((uint64_t)v OP *q) *q = (uint64_t)v; return self; } \
-      case CA_UINT32:  { uint32_t *q=(uint32_t*)p; if ((uint32_t)v OP *q) *q = (uint32_t)v; return self; } \
-      case CA_UINT16:  { uint16_t *q=(uint16_t*)p; if ((uint16_t)v OP *q) *q = (uint16_t)v; return self; } \
-      case CA_UINT8:   { uint8_t  *q=(uint8_t *)p; if ((uint8_t )v OP *q) *q = (uint8_t )v; return self; } \
+      case CA_INT32:   { if ( ! (v >= INT32_MIN && v <= INT32_MAX) ) break; int32_t *q=(int32_t *)p; if ((int32_t)v OP *q) *q = (int32_t)v; return self; } \
+      case CA_INT16:   { if ( ! (v >= INT16_MIN && v <= INT16_MAX) ) break; int16_t *q=(int16_t *)p; if ((int16_t)v OP *q) *q = (int16_t)v; return self; } \
+      case CA_INT8:    { if ( ! (v >= INT8_MIN && v <= INT8_MAX) ) break; int8_t  *q=(int8_t  *)p; if ((int8_t )v OP *q) *q = (int8_t )v; return self; } \
+      case CA_UINT64:  { if ( ! (v >= 0) ) break; uint64_t *q=(uint64_t*)p; if ((uint64_t)v OP *q) *q = (uint64_t)v; return self; } \
+      case CA_UINT32:  { if ( ! (v >= 0 && v <= (long) UINT32_MAX) ) break; uint32_t *q=(uint32_t*)p; if ((uint32_t)v OP *q) *q = (uint32_t)v; return self; } \
+      case CA_UINT16:  { if ( ! (v >= 0 && v <= (long) UINT16_MAX) ) break; uint16_t *q=(uint16_t*)p; if ((uint16_t)v OP *q) *q = (uint16_t)v; return self; } \
+      case CA_UINT8:   { if ( ! (v >= 0 && v <= (long) UINT8_MAX) ) break; uint8_t  *q=(uint8_t *)p; if ((uint8_t )v OP *q) *q = (uint8_t )v; return self; } \
       } \
     } \
   } \
@@ -807,6 +842,10 @@ rb_ca_elem_min (VALUE self, VALUE ridx, VALUE rval)
   if ( ! ca_is_numeric_type(ca) ) {
     rb_raise(rb_eCADataTypeError,
              "elem_min requires a numeric array");
+  }
+  if ( ca_is_complex_type(ca) ) {
+    rb_raise(rb_eCADataTypeError,
+             "elem_min requires a real array (complex values have no order)");
   }
 
   /* Super-hot path: entity + numeric data type + Fixnum/Float rval. */
@@ -863,6 +902,10 @@ rb_ca_elem_max (VALUE self, VALUE ridx, VALUE rval)
   if ( ! ca_is_numeric_type(ca) ) {
     rb_raise(rb_eCADataTypeError,
              "elem_max requires a numeric array");
+  }
+  if ( ca_is_complex_type(ca) ) {
+    rb_raise(rb_eCADataTypeError,
+             "elem_max requires a real array (complex values have no order)");
   }
 
   ELEM_MINMAX_BODY(>);

@@ -13,7 +13,7 @@ class TestY1eComposeRootGate < Test::Unit::TestCase
     20.times { |i| 16.times { |j| @entity[i, j] = i * 100 + j } }
   end
 
-  # ---- Chain pattern: a[idx_2d] (= CAMAPPING_REMOVAL silent forward) ----
+  # ---- Chain pattern: a[idx_2d] (an index-array chain) ----
 
   def test_chain_idx_2d_whole_view_get
     idx2d = CArray.int32(8, 5)

@@ -79,8 +79,8 @@ class TestY4CAWindowXferAddrs < Test::Unit::TestCase
     CArray.bench_xfer_addrs_put_addrs(sh, addrs, payload.dump_binary)
     # Interior: shift(1, -1) means output row i takes parent row i-1, col j takes parent col j+1.
     # OOB: output row 0 (parent row -1) and output col 39 (parent col 40).
-    (1...sh.dim[0]).each do |i|
-      (0...sh.dim[1] - 1).each do |j|
+    (1...sh.shape[0]).each do |i|
+      (0...sh.shape[1] - 1).each do |j|
         assert_equal payload[i, j], target[i - 1, j + 1], "interior (#{i},#{j}) write should reach parent"
       end
     end

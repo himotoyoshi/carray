@@ -177,6 +177,7 @@ ca_binop_setup (CABinOp *ca, CArray *left, CArray *right, uint16_t op_id)
 CABinOp *
 ca_binop_new (CArray *left, CArray *right, uint16_t op_id)
 {
+  /* check: the setup checks nothing */
   CABinOp *ca = (CABinOp *) ca_array_alloc(CA_OBJ_BINOP, left->ndim);
   ca_binop_setup(ca, left, right, op_id);
   return ca;
@@ -227,7 +228,7 @@ ca_binop_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   ca_size_t s;
 
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinOp is read-only (xfer_index PUT)");
+    ca_refuse_read_only();
   }
 
   s = ca->bytes;
@@ -322,7 +323,7 @@ ca_binop_eval (CABinOp *bo, const ca_lazy_req_t *req, void *data)
     boolean8_t *slab_mask = NULL;
     void *mscratch = NULL;
 
-    if ( ca_binop_is_trapping(bo->op_id, bo->data_type) ) {
+    if ( ca_op_raises_on_cell(CA_OP_KIND_BINOP, bo->op_id, bo->data_type) ) {
       CArray *ops[2];
       ops[0] = bo->parent;
       ops[1] = bo->right;
@@ -356,7 +357,7 @@ ca_binop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   ca_lazy_req_t req;
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinOp is read-only (xfer_stride PUT)");
+    ca_refuse_read_only();
   }
   ca_lazy_req_region(&req, ap, starts, counts, strides);
   ca_binop_eval((CABinOp *) ap, &req, data);
@@ -370,7 +371,7 @@ ca_binop_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
 {
   ca_lazy_req_t req;
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinOp is read-only (xfer_addrs PUT)");
+    ca_refuse_read_only();
   }
   ca_lazy_req_addrs(&req, n, addrs);
   ca_binop_eval((CABinOp *) ap, &req, data);
@@ -393,15 +394,7 @@ static void
 ca_binop_func_allocate (void *ap)
 {
   CABinOp *ca = (CABinOp *) ap;
-  ca->ptr = xmalloc(ca_length(ca));
-  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
-     soon as the view is, so it must not be handed to the GC as raw
-     xmalloc garbage. */
-  if ( ca->data_type == CA_OBJECT ) {
-    VALUE *p = (VALUE *) ca->ptr;
-    ca_size_t i;
-    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
-  }
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -418,19 +411,11 @@ ca_binop_func_attach (void *ap)
   int8_t    k;
   ca_size_t s;
 
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 
   s = ca->bytes;
   for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
   for ( k = 0; k < ca->ndim; k++ ) starts[k] = 0;
-  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
-     soon as the view is, so it must not be handed to the GC as raw
-     xmalloc garbage. */
-  if ( ca->data_type == CA_OBJECT ) {
-    VALUE *p = (VALUE *) ca->ptr;
-    ca_size_t i;
-    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
-  }
   ca_binop_func_xfer_stride(ca, starts, ca->dim, native, ca->ptr, CA_XFER_GET);
 }
 
@@ -452,7 +437,7 @@ NORETURN(static void ca_binop_func_fill_data (void *ap, void *ptr));
 static void
 ca_binop_func_fill_data (void *ap, void *ptr)
 {
-  rb_raise(rb_eRuntimeError, "CABinOp is read-only (fill_data)");
+  ca_refuse_read_only();
 }
 
 /* Build out.mask: the operands' masks ORed on each read (CAMaskOfOperands), so
@@ -605,8 +590,7 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
   /* No kernel for that data_type (fixlen arithmetic, ...): raise as the
      eager binop does, before a view is built over it. */
   if ( ca_binop_kernel_lookup_vv(op_id, l_in_dt) == ca_binop_not_implement ) {
-    rb_raise(rb_eCADataTypeError,
-             "invalid data_type for binop (not implemented)");
+    ca_op_refuse_unimplemented(l_cary, l_in_dt, rb_eCADataTypeError);
   }
 
   if ( l_in_dt != l->data_type ) {
@@ -694,6 +678,7 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
 static VALUE
 rb_ca_binop_s_build (VALUE klass, VALUE l_cary, VALUE r_cary, VALUE op_id_val)
 {
+  /* fits: an operation number from the library's own table */
   uint16_t op_id = (uint16_t) NUM2UINT(op_id_val);
   (void) klass;
   return rb_ca_binop_build(l_cary, r_cary, op_id);
@@ -708,7 +693,7 @@ rb_ca_binop_trapping (VALUE self)
 {
   CABinOp *bo;
   TypedData_Get_Struct(self, CABinOp, &cabinop_data_type, bo);
-  return ca_binop_is_trapping(bo->op_id, bo->data_type) ? Qtrue : Qfalse;
+  return ca_op_raises_on_cell(CA_OP_KIND_BINOP, bo->op_id, bo->data_type) ? Qtrue : Qfalse;
 }
 
 static VALUE
@@ -729,6 +714,7 @@ rb_ca_binop_right (VALUE self)
 }
 
 /* Test instrumentation (mirrors CAMonOp counters). */
+#ifdef CARRAY_DEV_BUILD
 static VALUE
 rb_ca_binop_s_reset_scratch_counter (VALUE klass)
 {
@@ -754,6 +740,7 @@ rb_ca_binop_s_materialise_count (VALUE klass)
 {
   return SIZE2NUM(ca_binop_materialise_call_count);
 }
+#endif /* CARRAY_DEV_BUILD */
 
 static VALUE
 rb_ca_binop_s_allocate (VALUE klass)
@@ -834,6 +821,7 @@ Init_ca_obj_binop (void)
                                 rb_ca_binop_right, 0);
 
   /* Test instrumentation, not user-facing. */
+#ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCABinOp, "__reset_scratch_counter__",
                              rb_ca_binop_s_reset_scratch_counter, 0);
   rb_define_singleton_method(rb_cCABinOp, "__scratch_count__",
@@ -842,4 +830,5 @@ Init_ca_obj_binop (void)
                              rb_ca_binop_s_reset_materialise_counter, 0);
   rb_define_singleton_method(rb_cCABinOp, "__materialise_count__",
                              rb_ca_binop_s_materialise_count, 0);
+#endif
 }

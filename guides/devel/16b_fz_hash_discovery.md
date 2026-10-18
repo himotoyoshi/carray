@@ -207,6 +207,14 @@ to the discovery-then-scatter path in Ruby (`mask_duplicates[:is_not_masked].to_
 because they either reorder the codes (breaking factorize's
 appearance-order alignment) or supply the vocabulary externally.
 
+Several key columns are coded by one part, `CACategorical.from_keys(cols)`
+(private): each column is categorized on its own, a row's category is the
+tuple of its codes, and one masked component leaves the row in no category,
+as a masked single key does. `CAFrame#group_by`, `#is_duplicate` and
+`windows(on:, by:)` use it. `join` codes the rows of two frames on the
+values they share, which this part does not give, and keeps its own
+folding. `rake key_codes_check` refuses a fold written elsewhere.
+
 ## 16b.4 The kernel_iterator layering
 
 Every fz_hash kernel drives the fiber loop through the standard

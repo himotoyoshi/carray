@@ -104,12 +104,24 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
 
   def test_a_symbol_key_other_than_default_raises
     df = frame
-    err = assert_raise(ArgumentError) { df.cast(defualt: :infer) }
-    assert_match(/\Acast /, err.message)
+    err = assert_raise(TypeError) { df.cast(defualt: :infer) }
+    assert_match(/\Acast: /, err.message)
     assert_match(/:default/, err.message)
     assert_match(/:defualt/, err.message)
-    err = assert_raise(ArgumentError) { df.cast({ temp: :float64 }) }
+    err = assert_raise(TypeError) { df.cast({ temp: :float64 }) }
     assert_match(/:temp/, err.message)
+  end
+
+  # A misspelt keyword next to a name or a map is named as one; it used to
+  # read as a second map ("a name and a type, or a map, not both").
+  def test_a_misspelt_keyword_is_named
+    df = frame
+    err = assert_raise(ArgumentError) { df.cast("temp", :float64, on_erorr: :mask) }
+    assert_match(/\Acast: unknown keyword: :on_erorr/, err.message)
+    err = assert_raise(ArgumentError) { df.cast({ "temp" => :float64 }, on_erorr: :mask) }
+    assert_match(/unknown keyword: :on_erorr/, err.message)
+    err = assert_raise(ArgumentError) { df.cast({ "temp" => :float64 }, "count" => :int32) }
+    assert_match(/not both/, err.message)
   end
 
   def test_a_raise_leaves_the_frame_as_it_was
@@ -138,7 +150,7 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
     assert_match(/\Atypes: takes a map of column types or :infer/, err.message)
     err = assert_raise(KeyError) { df.cast({ "nope" => :int32 }, option_name: :types) }
     assert_match(/\Atypes: /, err.message)
-    err = assert_raise(ArgumentError) { df.cast({ defualt: :infer }, option_name: :types) }
+    err = assert_raise(TypeError) { df.cast({ defualt: :infer }, option_name: :types) }
     assert_match(/\Atypes: /, err.message)
   end
 
@@ -149,7 +161,7 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
       CAFrame.from_csv(StringIO.new(CSV_TEXT), types: { "nope" => :int32 })
     end
     assert_match(/\Atypes: /, err.message)
-    err = assert_raise(ArgumentError) do
+    err = assert_raise(TypeError) do
       CAFrame.from_csv(StringIO.new(CSV_TEXT), types: { defualt: :infer })
     end
     assert_match(/\Atypes: /, err.message)

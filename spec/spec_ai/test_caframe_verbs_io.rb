@@ -211,6 +211,111 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
     end
   end
 
+  def test_dsl_named_header_becomes_column_attributes
+    csv = "date,temp,rh\n,K,%\n,temperature,\"\"\n2024-01-01,1,50\n"
+    df = CAFrame.from_csv(StringIO.new(csv), types: { "temp" => :float64 }) do |r|
+      r.header
+      r.header(:units)
+      r.header(:long_name)
+      r.data
+    end
+    assert_equal({ "units" => "K", "long_name" => "temperature" }, df["temp"].attrs)
+    assert_equal({ "units" => "%", "long_name" => "" }, df["rh"].attrs)
+    assert_equal({}, df["date"].attrs)
+    assert_nil df["date"].attr(:units)
+    assert_equal({ "units" => "K", "long_name" => "temperature" }, df.copy["temp"].attrs)
+  end
+
+  def test_dsl_named_header_follows_the_columns_selected
+    csv = "a,b,c\nu1,u2,u3\n1,2,3\n"
+    df = CAFrame.from_csv(StringIO.new(csv)) do |r|
+      r.header
+      r.header(:units)
+      r.columns("c", "a")
+      r.data
+    end
+    assert_equal ["c", "a"], df.column_names
+    assert_equal "u3", df["c"].attr(:units)
+    assert_equal "u1", df["a"].attr(:units)
+  end
+
+  def test_dsl_named_header_without_column_names
+    df = CAFrame.from_csv(StringIO.new("m,s\n1,2\n")) { |r| r.header(:units); r.data }
+    assert_equal "s", df["c1"].attr(:units)
+  end
+
+  def test_dsl_named_header_shorter_than_the_columns
+    df = CAFrame.from_csv(StringIO.new("a,b\nm\n1,2\n")) { |r| r.header; r.header(:units); r.data }
+    assert_equal "m", df["a"].attr(:units)
+    assert_nil df["b"].attr(:units)
+  end
+
+  def test_dsl_named_header_longer_than_the_columns_is_refused
+    err = assert_raise(ArgumentError) do
+      CAFrame.from_csv(StringIO.new("a,b\nm,s,x\n1,2\n")) { |r| r.header; r.header(:units); r.data }
+    end
+    assert_match(/header\(:units\) on line 2 has 3 fields for the 2 columns/, err.message)
+  end
+
+  def test_dsl_named_header_read_twice_is_refused
+    assert_raise(ArgumentError) do
+      CAFrame.from_csv(StringIO.new("a\nm\ns\n1\n")) { |r| r.header; r.header(:u); r.header(:u); r.data }
+    end
+  end
+
+  def test_attrs_round_trip_through_csv
+    t = CA_FLOAT64([1.5, 2.0]).tap { |c| c.set_attrs(units: "K", long_name: "air, 2 m", height: 10) }
+    r = CA_FLOAT64([50, 60]).tap { |c| c.set_attrs(units: "%", long_name: "") }
+    df = CAFrame.new("temp" => t, "rh" => r, "note" => CA_OBJECT(["a", "b"]))
+    csv = df.to_csv(attrs: [:units, :long_name, :height])
+    assert_equal "temp,rh,note\nK,%,\n\"air, 2 m\",\"\",\n10,,\n", csv.lines.first(4).join
+    back = CAFrame.from_csv(StringIO.new(csv), attrs: [:units, :long_name, :height],
+                            types: { "temp" => :float64 })
+    assert_equal({ "units" => "K", "long_name" => "air, 2 m", "height" => "10" }, back["temp"].attrs)
+    assert_equal({ "units" => "%", "long_name" => "" }, back["rh"].attrs)
+    assert_equal({}, back["note"].attrs)
+    assert_equal [1.5, 2.0], back["temp"].to_a
+  end
+
+  def test_attrs_round_trip_one_column_without_the_attribute
+    df = CAFrame.new("x" => CA_INT32([7, 8, 9]))
+    back = CAFrame.from_csv(StringIO.new(df.to_csv(attrs: [:units, :long])),
+                            attrs: [:units, :long])
+    assert_equal ["7", "8", "9"], back["x"].to_a
+    assert_equal({}, back["x"].attrs)
+  end
+
+  def test_attrs_round_trip_a_frame_without_columns
+    back = CAFrame.from_csv(StringIO.new(CAFrame.new.to_csv(attrs: [:units])), attrs: [:units])
+    assert_equal [0, []], [back.nrow, back.column_names]
+  end
+
+  # attrs: nil means no attribute line, as from_csv reads it.
+  def test_attrs_nil_writes_no_attribute_line
+    df = CAFrame.new("a" => CA_INT32([1]))
+    assert_equal df.to_csv, df.to_csv(attrs: nil)
+  end
+
+  def test_to_csv_attrs_of_the_index
+    df = CAFrame.new({ "v" => CA_INT32([1, 2]).tap { |c| c.set_attr(:units, "m") } },
+                     index: CA_INT32([10, 20]).tap { |c| c.set_attr(:units, "s") },
+                     axis_name: "t")
+    assert_equal "t,v\ns,m\n", df.to_csv(attrs: [:units]).lines.first(2).join
+  end
+
+  def test_attrs_arguments_are_checked
+    df = CAFrame.new("x" => CA_FLOAT64([1]).tap { |c| c.set_attr(:a, [1, 2]) })
+    assert_raise(TypeError) { df.to_csv(attrs: :units) }
+    assert_raise(TypeError) { df.to_csv(attrs: [1]) }
+    assert_raise(ArgumentError) { df.to_csv(attrs: [:units, "units"]) }
+    assert_raise(ArgumentError) { df.to_csv(header: false, attrs: [:units]) }
+    assert_raise(ArgumentError) { df.to_csv(attrs: [:a]) }
+    csv = "x\nm\n1\n"
+    assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(csv), header: false, attrs: [:u]) }
+    assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(csv), attrs: [:u], data: 1) }
+    assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(csv), attrs: [:u]) { |r| r.data } }
+  end
+
   def test_dsl_generated_names_when_headerless
     with_csv("1,2,3\n4,5,6\n") do |path|
       df = CAFrame.from_csv(path) { |r| r.data }
@@ -309,6 +414,16 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
     seen = nil
     CAFrame.from_csv(:whatever, parser: ->(src) { seen = src; [["a"], [["1"]]] })
     assert_equal :whatever, seen
+  end
+
+  # The parser reads the header, the data and the columns; the options that
+  # say where they are would be dropped, so they are refused.
+  def test_layout_options_with_a_parser_are_refused
+    pr = ->(_) { [["a", "b"], [["1", "2"]]] }
+    [{ columns: ["b"] }, { attrs: [:u] }, { header: false }, { data: 1 },
+     { column_names: %w[x y] }].each do |kw|
+      assert_raise(ArgumentError, kw.inspect) { CAFrame.from_csv(:x, parser: pr, **kw) }
+    end
   end
 
   # --- files in another encoding -----------------------------------------
@@ -468,6 +583,12 @@ class TestCAFrameToCsv < Test::Unit::TestCase
     df = CAFrame.new("😀" => CA_OBJECT(["a"]))
     e = assert_raise(Encoding::UndefinedConversionError) { df.to_csv(encoding: "CP932") }
     assert_match(/\Ato_csv: the name of column 0 /, e.message)
+    v = CA_FLOAT64([1])
+    v.set_attr(:units, "😀")
+    e = assert_raise(Encoding::UndefinedConversionError) do
+      CAFrame.new("a" => v).to_csv(attrs: [:units], encoding: "CP932")
+    end
+    assert_match(/\Ato_csv: attribute "units" of "a" /, e.message)
   end
 
   def test_a_cell_in_another_encoding_is_transcoded
@@ -645,6 +766,32 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
     assert_raise(ArgumentError) { @df.append("bad", CA_INT32([1, 2])) }
   end
 
+  def test_append_before_and_after
+    x = CA_FLOAT64([7, 8, 9])
+    assert_equal ["c", "a", "b"], @df.append("c", x, before: "a").column_names
+    assert_equal ["a", "c", "b"], @df.append("c", x, after: "a").column_names
+    assert_equal ["a", "b", "c"], @df.append("c", x, after: "b").column_names
+    assert_equal [7.0, 8.0, 9.0], @df.append("c", x, before: "a")["c"].to_a
+  end
+
+  def test_append_moves_an_existing_column_to_the_position
+    x = CA_FLOAT64([7, 8, 9])
+    r = @df.append("b", x, before: "a")
+    assert_equal ["b", "a"], r.column_names
+    assert_equal [7.0, 8.0, 9.0], r["b"].to_a
+    assert_equal ["a", "b"], @df.append("b", x, before: "b").column_names
+  end
+
+  def test_append_position_refusals
+    x = CA_FLOAT64([7, 8, 9])
+    e = assert_raise(ArgumentError) { @df.append("c", x, before: "a", after: "b") }
+    assert_match(/give before: or after:, not both/, e.message)
+    e = assert_raise(KeyError) { @df.append("c", x, after: "zz") }
+    assert_match(/no column "zz" to put "c" after/, e.message)
+    e = assert_raise(ArgumentError) { @df.append("c", CA_FLOAT64([1]), before: "a") }
+    assert_match(/column "c" has axis-0 length 1, expected 3/, e.message)
+  end
+
   def test_append_to_empty_frame_adopts_length
     df = CAFrame.new
     r = df.append("x", CA_INT32([1, 2, 3, 4]))
@@ -803,7 +950,7 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
   class ScaledInt < CAObject
     def initialize(parent, scale: 100)
       @scale = scale
-      super(CA_FIXLEN, parent.dim, bytes: 8, storage: CA_INT64,
+      super(CA_FIXLEN, parent.shape, bytes: 8, storage: CA_INT64,
             parent: parent, face: true)
     end
     attr_reader :scale

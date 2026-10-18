@@ -6,8 +6,9 @@ class CArray
   # @!group Index and address conversion
 
   # @overload valid_index?(*idx)
-  #   Returns `true` if the given index tuple is in range for `self`.
-  #   The number of indices must equal `ndim`.
+  #   Returns `true` if the given index tuple names a cell of `self`,
+  #   that is, if `self[*idx]` would not raise. A negative index counts
+  #   from the end of its axis. The number of indices must equal `ndim`.
   #   @param idx [Array<Integer>] one index per axis.
   #   @return [Boolean]
   #   @raise [ArgumentError] if the number of indices does not match
@@ -15,7 +16,8 @@ class CArray
   def valid_index?(*idx); end
 
   # @overload valid_addr?(addr)
-  #   Returns `true` if `addr` is in range `0...elements` for `self`.
+  #   Returns `true` if `addr` names a cell of `self`: `0...elements`, or
+  #   a negative address counting from the end (`-elements..-1`).
   #   @param addr [Integer] flat address into the contiguous element
   #     sequence.
   #   @return [Boolean]

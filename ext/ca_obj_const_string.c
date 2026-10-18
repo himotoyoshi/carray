@@ -31,6 +31,7 @@
 --------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "ruby/util.h"
 #include "carray_internal.h"
 #include "ca_obj_face.h"
 #include <ruby/encoding.h>
@@ -122,6 +123,12 @@ ca_const_string_setup (CAConstString *ca, CArray *parent, VALUE buffer, int enco
              "(parent.data_type must be CA_FIXLEN with bytes == 16)");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type    = CA_OBJ_CONST_STRING;
   /* FIXLEN surface auto-gates mkkernel numeric dispatch. */
   ca->data_type   = CA_FIXLEN;
@@ -143,9 +150,6 @@ ca_const_string_setup (CAConstString *ca, CArray *parent, VALUE buffer, int enco
   ca->buffer      = buffer;
   ca->encoding_id = encoding_id;
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask((CArray *) ca);
-  }
 
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -160,8 +164,11 @@ ca_const_string_setup (CAConstString *ca, CArray *parent, VALUE buffer, int enco
 CAConstString *
 ca_const_string_new (CArray *parent, VALUE buffer, int encoding_id)
 {
-  CAConstString *ca = (CAConstString *) ca_array_alloc(CA_OBJ_CONST_STRING, parent->ndim);
+  CAConstString *ca;
+  ca_const_string_setup(NULL, parent, buffer, encoding_id);
+  ca = (CAConstString *) ca_array_alloc(CA_OBJ_CONST_STRING, parent->ndim);
   ca_const_string_setup(ca, parent, buffer, encoding_id);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -574,7 +581,9 @@ rb_ca_const_string_copy (VALUE self)
 
   ca_detach((CArray *) ca);
 
-  return rb_ca_const_string_wrap(vout, rb_str_freeze(newbuf), ca->encoding_id);
+  vout = rb_ca_const_string_wrap(vout, rb_str_freeze(newbuf), ca->encoding_id);
+  rb_ca_inherit_attr(vout, self);
+  return vout;
 }
 
 /* to_ca descends to the same compacting copy.  The result is detached
@@ -649,6 +658,7 @@ ca_const_string_scan_begin_pair (VALUE va, ca_const_string_scan_t *a,
   ca_const_string_scan_begin(va, a);
   x.self = vb;
   x.s    = b;
+  /* protect: ends the first scan, which is not an array */
   rb_protect(ca_const_string_scan_begin_body, (VALUE) &x, &tag);
   if ( tag ) {
     ca_const_string_scan_end(a);
@@ -894,13 +904,12 @@ rb_ca_const_string_search (VALUE self, VALUE query)
    byte-for-byte faithful to `to_object.sort` with no collation
    loss. */
 
-/* qsort comparator context — single-threaded under the GVL (thread-safety is
-   a non-goal; see project memory), so a file-static context is safe. */
-static ca_const_string_scan_t *ca_const_string_sort_ctx;
-
+/* The scan is passed to the comparator, not held in a static: Ractors
+   sort at the same time. */
 static int
-ca_const_string_byte_cmp (const void *a, const void *b)
+ca_const_string_byte_cmp (const void *a, const void *b, void *ctx)
 {
+  ca_const_string_scan_t *scan = (ca_const_string_scan_t *) ctx;
   ca_size_t ia = *(const ca_size_t *) a;
   ca_size_t ib = *(const ca_size_t *) b;
   /* sort raises on masked input, so record() always sets these here; the
@@ -908,11 +917,19 @@ ca_const_string_byte_cmp (const void *a, const void *b)
   const char *pa = NULL, *pb = NULL;
   int64_t la = 0, lb = 0;
   int c;
-  ca_const_string_record(ca_const_string_sort_ctx, ia, &pa, &la);
-  ca_const_string_record(ca_const_string_sort_ctx, ib, &pb, &lb);
+  ca_const_string_record(scan, ia, &pa, &la);
+  ca_const_string_record(scan, ib, &pb, &lb);
   c = memcmp(pa, pb, (size_t) (la < lb ? la : lb));
   if ( c != 0 ) return c;
   return (la > lb) - (la < lb);
+}
+
+static int
+ca_const_string_index_cmp (const void *a, const void *b)
+{
+  ca_size_t ia = *(const ca_size_t *) a;
+  ca_size_t ib = *(const ca_size_t *) b;
+  return (ia > ib) - (ia < ib);
 }
 
 /* compute the ascending sort permutation; raises on masked input (matches
@@ -928,9 +945,19 @@ ca_const_string_sort_perm (ca_const_string_scan_t *s)
   }
   idx = ALLOC_N(ca_size_t, s->n);
   for ( i = 0; i < s->n; i++ ) idx[i] = i;
-  ca_const_string_sort_ctx = s;
-  qsort(idx, (size_t) s->n, sizeof(ca_size_t), ca_const_string_byte_cmp);
-  ca_const_string_sort_ctx = NULL;
+  ruby_qsort(idx, (size_t) s->n, sizeof(ca_size_t), ca_const_string_byte_cmp, s);
+  /* qsort is not stable.  Equal strings keep their order, as CArray's own
+     sort does, so each run of them is put back in position order.  Breaking
+     the tie inside the comparator instead doubles the sort on columns with
+     many repeats. */
+  for ( i = 0; i < s->n; ) {
+    ca_size_t j = i + 1;
+    while ( j < s->n && ca_const_string_byte_cmp(&idx[i], &idx[j], s) == 0 ) j++;
+    if ( j - i > 1 ) {
+      qsort(idx + i, (size_t) (j - i), sizeof(ca_size_t), ca_const_string_index_cmp);
+    }
+    i = j;
+  }
   return idx;
 }
 
@@ -1006,6 +1033,128 @@ static VALUE rb_ca_const_string_min (VALUE self) { return ca_const_string_extrem
 static VALUE rb_ca_const_string_max (VALUE self) { return ca_const_string_extremum(self, 1); }
 
 /* ------------------------------------------------------------------- */
+/* Native factorize: categorize's discovery pass, read from the bytes.  The
+   storage cells are byte ranges, so the fixlen lane of
+   CArray#__factorize_appearance__ would tell ranges apart, not strings.  A
+   String is made per distinct value only, after the scan's window closes. */
+
+static uint64_t
+ca_const_string_hash_bytes (const char *p, int64_t len)
+{
+  uint64_t h = 1469598103934665603ULL;            /* FNV-1a */
+  int64_t i;
+  for ( i = 0; i < len; i++ ) {
+    h ^= (unsigned char) p[i];
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
+
+/* CAConstString#__factorize_appearance__ -> [codes, levels], as the CArray
+   method answers: codes are the narrowest unsigned type holding the k codes
+   and the type-max sentinel, which masked cells store; levels are the k
+   distinct Strings in first-appearance order. */
+static VALUE
+rb_ca_const_string_factorize_appearance (VALUE self)
+{
+  ca_const_string_scan_t s;
+  CAConstString *ca;
+  volatile VALUE vcodes, levels;
+  CArray *co;
+  uint32_t *codes, *slot;
+  int64_t *lev_start, *lev_len;
+  size_t cap = 16, mask_bits;
+  ca_size_t n, i, k = 0;
+  int8_t code_dt;
+  VALUE  slot_holder = 0, start_holder = 0, len_holder = 0;
+
+  TypedData_Get_Struct(self, CAConstString, &catext_data_type, ca);
+  n = ca->elements;
+  if ( (uint64_t) n >= 0xFFFFFFFFULL ) {
+    rb_raise(rb_eArgError, "categorize: too many elements for uint32 codes");
+  }
+  while ( cap < (size_t) n * 2 ) {
+    cap <<= 1;
+  }
+  mask_bits = cap - 1;
+  /* Everything the scan writes is allocated before its window opens, and
+     held by the collector: opening the window reads the offsets, which
+     can raise for a parent that answers in Ruby. */
+  vcodes    = rb_carray_new(CA_UINT32, ca->ndim, ca->dim, 0, NULL);
+  TypedData_Get_Struct(vcodes, CArray, &carray_data_type, co);
+  codes     = (uint32_t *) co->ptr;
+  slot      = ALLOCV_N(uint32_t, slot_holder, cap);  /* code + 1; 0 is empty */
+  MEMZERO(slot, uint32_t, cap);
+  lev_start = ALLOCV_N(int64_t, start_holder, n > 0 ? n : 1);
+  lev_len   = ALLOCV_N(int64_t, len_holder, n > 0 ? n : 1);
+
+  ca_const_string_scan_begin(self, &s);
+  for ( i = 0; i < s.n; i++ ) {
+    const char *p;
+    int64_t len;
+    size_t j;
+    if ( ! ca_const_string_record(&s, i, &p, &len) ) {
+      codes[i] = 0xFFFFFFFFu;
+      continue;
+    }
+    j = (size_t) ca_const_string_hash_bytes(p, len) & mask_bits;
+    for (;;) {
+      uint32_t c = slot[j];
+      if ( c == 0 ) {
+        lev_start[k] = (int64_t) (p - s.buf);
+        lev_len[k]   = len;
+        slot[j]      = (uint32_t) (k + 1);
+        codes[i]     = (uint32_t) k;
+        k++;
+        break;
+      }
+      if ( lev_len[c - 1] == len && memcmp(s.buf + lev_start[c - 1], p, (size_t) len) == 0 ) {
+        codes[i] = c - 1;
+        break;
+      }
+      j = (j + 1) & mask_bits;
+    }
+  }
+  ca_const_string_scan_end(&s);
+  ALLOCV_END(slot_holder);
+
+  /* The buffer is the column's frozen String, alive past the window. */
+  levels = rb_ary_new_capa(k);
+  {
+    const char *buf = RSTRING_PTR(ca->buffer);
+    rb_encoding *enc = rb_enc_from_index(ca->encoding_id);
+    for ( i = 0; i < k; i++ ) {
+      rb_ary_push(levels, rb_enc_str_new(buf + lev_start[i], lev_len[i], enc));
+    }
+  }
+  ALLOCV_END(start_holder);
+  ALLOCV_END(len_holder);
+
+  if      ( k <= 0xFF )   { code_dt = CA_UINT8;  }
+  else if ( k <= 0xFFFF ) { code_dt = CA_UINT16; }
+  else                    { code_dt = CA_UINT32; }
+  if ( code_dt != CA_UINT32 ) {
+    VALUE vnarrow = rb_carray_new(code_dt, ca->ndim, ca->dim, 0, NULL);
+    CArray *cn;
+    TypedData_Get_Struct(vnarrow, CArray, &carray_data_type, cn);
+    if ( code_dt == CA_UINT8 ) {
+      uint8_t *cp = (uint8_t *) cn->ptr;
+      for ( i = 0; i < n; i++ ) {
+        cp[i] = codes[i] == 0xFFFFFFFFu ? (uint8_t) 0xFF : (uint8_t) codes[i];
+      }
+    }
+    else {
+      uint16_t *cp = (uint16_t *) cn->ptr;
+      for ( i = 0; i < n; i++ ) {
+        cp[i] = codes[i] == 0xFFFFFFFFu ? (uint16_t) 0xFFFF : (uint16_t) codes[i];
+      }
+    }
+    vcodes = vnarrow;
+  }
+  return rb_ary_new3(2, vcodes, levels);
+}
+
+/* ------------------------------------------------------------------- */
 
 static VALUE
 rb_ca_const_string_s_allocate (VALUE klass)
@@ -1028,6 +1177,7 @@ rb_ca_const_string_initialize_copy (VALUE self, VALUE other)
     ca_array_pool_alloc(ca, CA_OBJ_CONST_STRING, cs->parent->ndim);
   }
   ca_const_string_setup(ca, cs->parent, cs->buffer, cs->encoding_id);
+  ca_view_inherit_mask((VALUE) ca);
   return self;
 }
 
@@ -1080,10 +1230,14 @@ Init_ca_obj_const_string (void)
   /* Native flat sort permutation / min / max (§3.7), byte-memcmp
      comparator.  The public ordering surface is built on these in
      lib/carray/const_string.rb; see the comment above their definitions. */
-  rb_define_method(rb_cCAConstString, "__sort_addr_bytes__",
-                                      rb_ca_const_string_sort_index, 0);
-  rb_define_method(rb_cCAConstString, "__min_bytes__", rb_ca_const_string_min, 0);
-  rb_define_method(rb_cCAConstString, "__max_bytes__", rb_ca_const_string_max, 0);
+  rb_define_private_method(rb_cCAConstString, "sort_addr_by_bytes",
+                           rb_ca_const_string_sort_index, 0);
+  rb_define_private_method(rb_cCAConstString, "min_string_by_bytes",
+                           rb_ca_const_string_min, 0);
+  rb_define_private_method(rb_cCAConstString, "__factorize_appearance__",
+                           rb_ca_const_string_factorize_appearance, 0);
+  rb_define_private_method(rb_cCAConstString, "max_string_by_bytes",
+                           rb_ca_const_string_max, 0);
 
   /* Y-pilot: Face-local C-level fast path for per-cell scalar fetch. */
   ca_face_register_storage_to_element(CA_OBJ_CONST_STRING, rb_ca_const_string_storage_to_element);

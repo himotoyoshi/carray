@@ -63,7 +63,7 @@ class TestLazyMonopProperty < Test::Unit::TestCase
   # Apply a chain to an array (eager).
   def apply_eager(arr, ops)
     ops.each_with_index.inject(arr) do |acc, (op, i)|
-      acc.__send__(:"__#{op}_eager__")
+      acc.__send__(op)
     end
   end
 
@@ -143,7 +143,7 @@ class TestLazyMonopProperty < Test::Unit::TestCase
       ops = random_chain(rng, max_depth: 4)
       arr = safe_sample(rng, data_type, n: 20)
       # apply random mask
-      arr.dim[0].times do |i|
+      arr.shape[0].times do |i|
         arr[i] = UNDEF if rng.rand < 0.2
       end
 
@@ -168,7 +168,7 @@ class TestLazyMonopProperty < Test::Unit::TestCase
       end
 
       # unmasked cells should match (within FP tolerance)
-      arr.dim[0].times do |i|
+      arr.shape[0].times do |i|
         next if eager_result.is_masked[i]
         a, b = eager_result[i], lazy_result[i]
         if a.nan? && b.nan?

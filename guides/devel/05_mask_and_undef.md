@@ -75,6 +75,20 @@ bytes. (For a CAStride subclass, the mask is itself a CAStride subclass with
 `mask->mask == NULL` — the cascade terminates because a mask has no mask of its
 own.)
 
+## Stand-ins: a view's mask over a parent that has none
+
+Some views have masked cells of their own: a grid's holes, the out-of-range cells of a window or shift built with `fill_value: UNDEF`, and the cells of a stack or meld that come from a masked part. Their mask is a view over the parent's mask, but the parent may have no mask. Asking such a view about its mask must not give the parent one, so the mask reads an all-false **stand-in** in the parent's place.
+
+The rule: asking about the mask, or writing nothing but false into it, gives the parent no mask. The stand-in gives way to the parent's own mask once the parent has one, or once a true has been written into it. A write of a value into the view writes false into its mask, so it gives the parent no mask either, as the same write into an entity does not.
+
+Three parts in `ext/carray_mask.c` (declared in `carray_internal.h`) hold the rule, and a view that keeps stand-ins uses them and nothing of its own:
+
+- `ca_mask_standin_new(parent)` makes the stand-in, read-only when the parent is.
+- `ca_mask_standin_current(mask_view, reading, parent, standin)` says what the mask reads now. Every entry into the mask's cells calls it first: each transfer, fill, attach and allocate slot, and any walk that reads the parents directly (the kernel iterator's stack paths). It leaves the reading alone while the mask view is attached with its buffer out, since that buffer and its detach belong to the stand-in.
+- `ca_mask_standin_settle(parent, standin)` runs after a write that may have put a true into the stand-in: the trues are added to the parent's mask, made for it. A parent that can never have a mask (a value array, a mask array) refuses them with `TypeError`.
+
+A write goes into the stand-in as it is and is settled afterwards, so a true that lands on a cell the view leaves out (a hole, an out-of-range cell) never reaches the parent. A view whose mask reads a stand-in declines `fold_stride`, since a write folded through to the stand-in would skip the settle. `ca_multi_parent_mask`, `ca_multi_parent_mask_refresh` and `ca_multi_parent_mask_settle` apply the parts to each part of a stack or meld. `rake mask_standin_check` refuses a stand-in made or switched by hand.
+
 ## UNDEF: the C singleton
 
 `UNDEF` is the sentinel a caller assigns to mark a cell missing. At the C level it
@@ -189,9 +203,13 @@ predicates for cases where you genuinely need to inspect contents.
 ```c
 void ca_create_mask  (void *ca);              /* allocate mask, zero-fill */
 void ca_clear_mask   (void *ca);              /* zero an existing mask */
-void ca_setup_mask   (void *ca, CArray *mask);/* attach a given mask */
+void ca_setup_mask   (void *ca, CArray *mask);/* take a given mask */
 void ca_update_mask  (void *ca);              /* re-gather from parent */
 ```
+
+`ca_setup_mask` copies a boolean mask with one cell per cell of `ca`
+(another data type raises `CArray::DataTypeError`, another size
+`ArgumentError`); `NULL` clears the mask.
 
 `ca_create_mask` dispatches through `ca_func[ca->obj_type].create_mask`
 — so a CABlock yields a `CABlockMask`, not a generic mask. **Forget to
@@ -235,17 +253,20 @@ the inputs').
 input masks via `xfer_all` into arena scratch and byte-ORs them onto
 `ca_out->mask`, **never** calling `ca_attach` on the input masks. Use
 it whenever the input could be a shrinking view of a giant parent —
-which is "always" in user-facing arithmetic kernels.
+which is "always" in user-facing arithmetic kernels. It writes
+`ca_out->mask->ptr` directly, so `ca_out` is an entity or an attached
+view; each input other than a scalar has `ca_out`'s number of elements
+(`ArgumentError` otherwise), and there are at most 8 inputs.
 
 ### Drop / fill
 
 ```c
 void    ca_unmask        (void *ca, char *fill_value);   /* in-place */
-CArray *ca_unmasked_copy (void *ca, char *fill_value);   /* fresh copy */
+CArray *ca_unmask_copy   (void *ca, char *fill_value);   /* fresh copy */
 ```
 
 `ca_unmask` fills masked cells with `fill_value` bytes (cast from the
-caller's interpretation) and drops the mask. `ca_unmasked_copy`
+caller's interpretation) and drops the mask. `ca_unmask_copy`
 returns a new CArray with the same effect. The VALUE counterparts are
 `rb_ca_unmask` / `rb_ca_unmask_copy` / `rb_ca_mask_fill` /
 `rb_ca_mask_fill_copy` ([ch. 15](15_carray_h_helper_reference.md)).

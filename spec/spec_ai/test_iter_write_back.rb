@@ -12,7 +12,7 @@
 # pins behaviour that is correct -- `test_sound_` for the invariant the
 # working half rests on, and plain names for what has since been fixed.
 #
-# The invariant that makes the sound cells sound: under CA_SLAB_WHOLE the
+# The invariant that makes the sound cells sound: in a whole-array walk the
 # gather extent and the scatter extent are the same, so what was collected
 # is what gets pushed back.  Every broken cell below is a CA_SLAB_AXES path
 # that broke that equality -- it gathers slab-sized or fiber-sized and then
@@ -124,6 +124,38 @@ class TestIterWriteBack < Test::Unit::TestCase
     end
   end
 
+  # A slab along a shifted or index-selected axis: the per-slab gather of
+  # such an axis reads only, so the write takes the transfer walk.  It was
+  # refused with rc=3.
+  def test_a_view_receives_the_write_along_its_shifted_or_selected_axis
+    {
+      "shift" => ->(b) { b.shift(1, 0) },
+      "grid"  => ->(b) { b[CA_INT64([2, 0]), nil] },
+    }.each do |name, mk|
+      %i[iw_fiber_fill iw_slab_fill].each do |entry|
+        b = base
+        CArray.send(entry, mk.call(b), 0, -1.0)
+        want = base
+        mk.call(want)[] = -1.0
+        assert_equal want.to_a, b.to_a, "#{name} #{entry}"
+      end
+    end
+  end
+
+  # A whole-array walk (init_l1) is routed as the per-axis walk is: a
+  # selection of a converting view goes by transfer, which writes masked
+  # cells as well.  The L1 walk attached the converting view instead, whose
+  # write-back skipped the masked cells.
+  def test_a_whole_write_through_a_selection_of_a_converting_view_reaches_masked_cells
+    b = CArray.int32(3, 4).seq!
+    b[1, 1] = UNDEF
+    b[2, 3] = UNDEF
+    CArray.iw_write_cells(b.fake(:float64)[CA_BOOLEAN([1, 1, 1]), nil], 0, 0)
+    assert_equal (1000..1011).to_a, b.value.to_a.flatten
+    assert_equal [[false] * 4, [false, true, false, false], [false, false, false, true]],
+                 b.mask.to_a
+  end
+
   # A shifted view walked with its shift axis outside the slab: the walk
   # gathers the whole view, and has to scatter all of it back.
   def test_a_shifted_view_receives_the_write_along_its_other_axis
@@ -162,8 +194,8 @@ class TestIterWriteBack < Test::Unit::TestCase
     end
   end
 
-  # next_slab_strided hands out the mask on every source the WHOLE walk
-  # takes; on an entity and a CAStride it used to give none.
+  # An L2 walk hands out the mask on every source; on an entity and a
+  # CAStride the strided walk used to give none.
   def test_a_strided_walk_hands_out_the_mask
     {
       "entity"    => ->(b) { b },
@@ -189,6 +221,21 @@ class TestIterWriteBack < Test::Unit::TestCase
     end
     out = CArray.float64(2, 3, 4)
     CArray.iw_inout_copy(a, out, 1)
+    assert_equal a.to_a, out.to_a
+  end
+
+  # The slab form too, also when the output is a view that would let the
+  # walk reach past it into its root.
+  def test_slab_inout_refuses_a_shape_mismatch
+    a = CArray.float64(5, 4).seq!(100)
+    root = CArray.float64(5, 4)
+    assert_raise(ArgumentError) { CArray.iw_slab_inout_copy(a, root[0..2, nil], 0) }
+    assert_equal [0.0] * 20, root.to_a.flatten
+    [CArray.float64(4, 5), CArray.float64(20)].each do |out|
+      assert_raise(ArgumentError) { CArray.iw_slab_inout_copy(a, out, 0) }
+    end
+    out = CArray.float64(5, 4)
+    CArray.iw_slab_inout_copy(a, out, 0)
     assert_equal a.to_a, out.to_a
   end
 
@@ -267,8 +314,37 @@ class TestIterWriteBack < Test::Unit::TestCase
     assert_equal 2, CArray.iw_init_rc(base, 9, WRITE), "axis out of range"
     assert_equal 2, CArray.iw_init_rc(base, -1, WRITE), "negative axis"
     assert_equal 2, CArray.iw_init_rc(base[base.gt(0)], 1, WRITE), "1-D view, axis 1"
-    assert_equal 3, CArray.iw_init_rc(base.shift(1, 0), 0, WRITE), "shift + WRITE"
+    assert_equal 0, CArray.iw_init_rc(base.shift(1, 0), 0, WRITE), "shift + WRITE"
     assert_equal 0, CArray.iw_init_rc(base.shift(1, 0), 0, 0), "shift READ is fine"
+  end
+
+  # A write sends back only the cells the kernel changed.  Two views where
+  # sending the whole slab back is wrong: a grid that shows a root row
+  # twice (the copy the kernel did not write would overwrite the one it
+  # did) and a conversion that does not bring every value back (an int64
+  # above 2**53 seen as float64).
+  def test_a_whole_write_over_a_repeated_row_keeps_the_written_copy
+    r = CArray.float64(3, 4).seq!
+    CArray.iw_whole_fill_prefix(r[CA_INT64([0, 0, 2]), nil], 4, -1.0)
+    assert_equal [[-1.0] * 4, [4.0, 5.0, 6.0, 7.0], [8.0, 9.0, 10.0, 11.0]], r.to_a
+    r = CArray.float64(3, 4).seq!
+    CArray.iw_whole_fill_prefix(r[CA_INT64([0, 0]), CA_INT64([2, 2])], 1, -1.0)
+    assert_equal [[0.0, 1.0, -1.0, 3.0], [4.0, 5.0, 6.0, 7.0], [8.0, 9.0, 10.0, 11.0]], r.to_a
+  end
+
+  def test_a_fiber_write_over_a_lossy_conversion_keeps_the_unwritten_cells
+    big = 2**53 + 1
+    r = CArray.int64(3, 4) { big }
+    CArray.iw_fiber_fill_first(r.fake(:float64), 1, -1.0)
+    assert_equal [[-1, big, big, big]] * 3, r.to_a
+  end
+
+  # init_l2 walks named axes only.  The whole array is init_l1's walk, and
+  # one strided run per innermost row is CA_SLAB_AXES with the last axis.
+  def test_init_l2_refuses_the_whole_array_policy
+    [base, base.transpose, base[CA_INT64([0, 2]), nil], base.fake(:int32)].each do |v|
+      assert_equal 2, CArray.iw_l2_whole_rc(v), v.class.name
+    end
   end
 
   # The header promises CA_ITER_ERR_FLAGS for a NULL source.
@@ -284,7 +360,6 @@ class TestIterWriteBack < Test::Unit::TestCase
       "axis past the end" => [b, 9],
       "negative axis"     => [b, -1],
       "axis 1 of a 1-D view" => [b[b.gt(0)], 1],
-      "shift as a WRITE destination" => [b.shift(1, 0), 0],
       "read-only destination" => [b.lazy + 1, 0],
     }.each do |what, (view, axis)|
       e = assert_raise(RuntimeError, what) do
@@ -310,7 +385,7 @@ class TestIterWriteBack < Test::Unit::TestCase
       require "iter_write"
       b = CArray.float64(3, 4).seq!(1)
       begin
-        CArray.iw_slab_fill_poisoned(b.shift(1, 0), 0, -1.0)
+        CArray.iw_slab_fill_poisoned(b, 9, -1.0)
       rescue RuntimeError
         exit 0
       end

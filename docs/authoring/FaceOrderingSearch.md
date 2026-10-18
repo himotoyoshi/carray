@@ -122,6 +122,14 @@ O(operands × faces). A new Face author writes one method and receives every
 operand type its `case` chooses to accept; **coverage is per-Face** (time
 accepts `Time`/`DateTime`; timedelta, being a duration, does not).
 
+A comparison does not have to land on the reference's grid, so a Face with a
+unit may also define `comparable_pair(operand)`, which returns the reference
+and the operand in one unit: the reference's own when the operand sits on its
+grid (the reference is not converted), and otherwise the finer unit the two
+share, so a value off the grid is compared as the value it is rather than
+refused. The time Faces define both; `to_comparable` stays the rule for an
+assignment, which has to land on the grid.
+
 `to_comparable` is a semantic conversion (unit arithmetic), so it is a Ruby
 method, not a flag. The split is deliberate:
 
@@ -138,7 +146,11 @@ per-method Ruby override**. One C part, `ca_face_reconcile_operand` in
 an operand against a Face -- search, `linear_section`, `count(v)`, the
 comparison operators, the value-hash family and a bulk store into a unit
 Face -- so a pair of arrays is taken by all of them or refused by all of
-them:
+them.  The doors that compare (all but the store) go through
+`ca_face_reconcile_pair`, which asks `comparable_pair` first when the
+reference defines it and otherwise falls to `ca_face_reconcile_operand`.
+UNDEF passes through unreconciled: it is undefined in every space, and the
+door answers it as it does for a plain array.
 
 ```
 reference (self):
@@ -155,6 +167,8 @@ operand (query / rhs), driven by the reference:
                                        raise for a Face whose storage
                                        encodes its values in order (a time)
                                                                      (direct)
+    reference with comparable_pair  -> reference.comparable_pair(operand):
+       (a comparing door)              both in one unit, the operand stripped
     reference a non-COMPARABLE Face -> reference.to_comparable(operand), strip
                                        (ANY operand type: Face CArray, Element,
                                        Time, DateTime, ...; raises if the
@@ -307,7 +321,7 @@ flags (so a Ruby-authored Face still declares its safety without a callback):
 ```ruby
 class Relabel < CAObject                 # single-interpretation int relabel
   def initialize(parent)
-    super(CA_INT64, parent.dim, parent: parent, face: true,
+    super(CA_INT64, parent.shape, parent: parent, face: true,
           orderable_storage: true, comparable_storage: true)
   end
 end
@@ -343,18 +357,24 @@ ORDERABLE plus the cast is sufficient.
 | fixlen storage read as strings (`CAFixlenString`) | ORDERABLE + COMPARABLE | not needed | ✓ | ✓ direct; a String query is padded to the cell width |
 | non-orderable numeric storage | none | — | reject | reject |
 
-**Sort-family Face gate.** The sort family descends any Face to its storage and
-then relies on the storage's `data_type`:
+**Sort-family Face gate.** The storage stands for the values only when the
+Face says so, whatever the storage's `data_type`:
 
-- **fixlen storage → memcmp**, the default order for fixlen (the same order a
-  plain fixlen array sorts by). A fixed-width string Face sorts correctly.
-  `CARecord` does not reach the gate: its ordering members are Ruby methods
-  that rank the records by the members the struct names in `order_by:`, and
-  raise when it names none — the bytes of a record are no order of its
-  values.
-- **numeric storage → requires ORDERABLE**, so the numeric order equals the
-  surface order. A non-orderable numeric Face raises (numeric-sorting it would
-  reorder the surface silently).
+- **ORDERABLE → its storage.** A fixed-width string Face (`CAFixlenString`)
+  declares ORDERABLE, so it sorts and reduces by memcmp, the order a plain
+  fixlen array sorts by. A fixlen storage that is *not* ORDERABLE is not taken
+  as ordered by its bytes: a little-endian number or a byte range would sort
+  silently wrong.
+- **not ORDERABLE, with an `#order` of its own → that order.** `CAConstString`
+  and `CARecord` define `#order` (a record ranks by the members the struct
+  names in `order_by:`, and raises when it names none), so the families that
+  order by a key (`sort_addr`, `rank_index`, `partition`, `nlargest`,
+  `max_by_key`, ...) take it. Their own `min` / `max` / comparison operators
+  are Ruby methods as well.
+- **anything else → raise**, in every family: the sort family, the
+  reductions (`min` / `max` / `minmax`), search, interpolation, the
+  value-hash family and the comparison operators. Numeric-sorting such a Face
+  would reorder the surface silently.
 
 `search` / `linear` stay numeric-only for now: they need a comparable/
 interpolatable numeric coordinate, so a fixlen Face is still rejected there.
@@ -364,8 +384,13 @@ asks the query for `#distance` and refuses, by name, anything that does not
 answer it.
 
 The reject remains the last line of defence for the cases that have no defined
-order: a non-orderable numeric Face still raises, so nothing silently
+order: a non-orderable Face still raises, numeric or fixlen, so nothing silently
 mis-compares.
+
+In C, every family asks the same two parts in `ext/ca_obj_face.c`:
+`ca_face_require_orderable` (return, or refuse naming the method) and, where a
+key will do, `ca_face_orders_by_itself`. `rake face_parts_check` refuses a flag
+test written anywhere else.
 
 ---
 

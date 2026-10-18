@@ -178,8 +178,10 @@ class TestCAFrameCastTime < Test::Unit::TestCase
   end
 
   def test_a_format_and_mixed
-    assert_equal ["2024-02-01T00:00:00Z"], times(["01/02/2024"], "%d/%m/%Y")
-    assert_equal ["2024-01-02T00:00:00Z"], times(["Jan 2, 2024"], :mixed)
+    # The unit is the finest the format writes, or the text shows: dates here.
+    assert_equal ["2024-02-01"], times(["01/02/2024"], "%d/%m/%Y")
+    assert_equal ["2024-01-02"], times(["Jan 2, 2024"], :mixed)
+    assert_equal ["2024-02-01T10:30:00.250Z"], times(["01/02/2024 10:30:00.25"], "%d/%m/%Y %H:%M:%S.%L")
     assert_raise(ArgumentError) { times(["2024-01-01"], :guess) }
   end
 

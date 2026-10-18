@@ -137,4 +137,21 @@ class TestWriteOverlappingInputAuthorSurface < Test::Unit::TestCase
     assert_equal e.to_a, x.to_a, "transpose"
   end
 
+  # A view with several parents (stack, meld) reaches the root through
+  # each parent, on either side of the walk.
+  def test_iterator_inout_through_a_multi_parent_view
+    omit "iter_write fixture not built" unless ITER
+    swapped = ->(r) { CArray.stack([r[1, nil], r[0, nil]]) }
+    melded  = ->(r) { CArray.meld(r[1..1, nil], r[0..0, nil], axis: 0) }
+    [swapped, melded].each_with_index do |build, i|
+      x = CA_FLOAT64([[1, 2, 3], [4, 5, 6]])
+      CArray.iw_inout_copy(build.(x), x, 1)
+      assert_equal [[4, 5, 6], [1, 2, 3]], x.to_a, "input view #{i}"
+
+      x = CA_FLOAT64([[1, 2, 3], [4, 5, 6]])
+      CArray.iw_inout_copy(x, build.(x), 1)
+      assert_equal [[4, 5, 6], [1, 2, 3]], x.to_a, "output view #{i}"
+    end
+  end
+
 end

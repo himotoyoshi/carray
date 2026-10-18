@@ -32,7 +32,7 @@ describe "TestCArrayStruct " do
   example "struct_refer" do
     st = CArray.struct(:pack=>1) { uint16 :mem_i; char_p :mem_f, :bytes => 3 }
     a = CArray.new(:fixlen, [3], :bytes=>5)
-    b = a.refer(st, a.dim)
+    b = a.refer(st, a.shape)
     is_asserted_by {  false == a.has_data_class? }
     is_asserted_by {  true == b.has_data_class? }
     is_asserted_by {  st == b.data_class }

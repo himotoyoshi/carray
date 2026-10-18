@@ -14,7 +14,7 @@
 # Phase B reject patterns (= deferred):
 #   - slab contains INDEX axis (e.g., csa.sum(axis: 0))     → Phase C T3
 #   - outer SHIFT axis (CAShift / negative window range) → B.1.5 materialise
-#   - CASelect / CAMapping (descriptor.ndim = 1, kind=INDEX) → Phase C T3
+#   - CASelect (descriptor.ndim = 1, kind=INDEX) → Phase C T3
 #
 # Pinning byte parity vs ca.sum() reference for accept cases, and
 # CA_ITER_ERR_POLICY (= rc=2) for reject cases.
@@ -40,7 +40,7 @@ class TestCASlabAxesT2 < Test::Unit::TestCase
     [0, 2, 4].each { |i| mask[i] = 1 }
     csa = a[mask, nil, nil]
     assert_kind_of(CArray, csa)
-    assert_equal([3, 4, 3], csa.dim)
+    assert_equal([3, 4, 3], csa.shape)
     assert_close(csa.sum(axis: 1), csa.sum(axis: 1))
     assert_close(csa.sum(axis: 2), csa.sum(axis: 2))
   end
@@ -50,7 +50,7 @@ class TestCASlabAxesT2 < Test::Unit::TestCase
     mask = CArray.boolean(5)
     [1, 3].each { |i| mask[i] = 1 }
     csa = a[mask, nil, nil]
-    assert_equal([2, 4, 3], csa.dim)
+    assert_equal([2, 4, 3], csa.shape)
     assert_close(csa.sum(axis: [1, 2]), csa.sum(axis: [1, 2]))
   end
 
@@ -84,7 +84,7 @@ class TestCASlabAxesT2 < Test::Unit::TestCase
     idx[0] = 1; idx[1] = 4
     g = a.grid(idx, nil, nil)
     assert_kind_of(CAGrid, g)
-    assert_equal([2, 4, 3], g.dim)
+    assert_equal([2, 4, 3], g.shape)
     assert_close(g.sum(axis: [1, 2]), g.sum(axis: [1, 2]))
     assert_close(g.sum(axis: 1),    g.sum(axis: 1))
   end
@@ -104,7 +104,7 @@ class TestCASlabAxesT2 < Test::Unit::TestCase
     a = CArray.float64(5, 4, 3).seq
     w = a.window(1..3, nil, nil)
     assert_kind_of(CAWindow, w)
-    assert_equal([3, 4, 3], w.dim)
+    assert_equal([3, 4, 3], w.shape)
     assert_close(w.sum(axis: [1, 2]), w.sum(axis: [1, 2]))
     assert_close(w.sum(axis: [0, 2]), w.sum(axis: [0, 2]))
   end

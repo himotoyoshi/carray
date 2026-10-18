@@ -323,12 +323,13 @@ ca_install_obj_type (VALUE klass,
                      const ca_operation_function_t *func,
                      size_t func_size)
 {
-  int obj_type  = ca_obj_num++;
+  int obj_type;
 
-  if ( ca_obj_num >= CA_OBJ_TYPE_MAX ) {
+  /* The obj_type parameters of ca_array_alloc / ca_stride_setup are
+     int8_t, so a number of 128 or above cannot be passed to them. */
+  if ( ca_obj_num > INT8_MAX || ca_obj_num + 1 >= CA_OBJ_TYPE_MAX ) {
     rb_raise(rb_eRuntimeError,
-             "internal: too many CArray object types installed <CA_OBJ_TYPE_MAX = %i>",
-             CA_OBJ_TYPE_MAX);
+             "internal: too many CArray object types installed (an obj_type is numbered below 128)");
   }
 
   if ( func_size > sizeof(ca_operation_function_t) ) {
@@ -338,15 +339,19 @@ ca_install_obj_type (VALUE klass,
              func_size, sizeof(ca_operation_function_t));
   }
 
-  /* Everything from xfer_index on was appended after the table's first
-     shape, so a caller may legitimately stop short of it.  Anything shorter
-     than that cannot dispatch at all. */
-  if ( func_size < offsetof(ca_operation_function_t, xfer_index) ) {
+  /* xfer_index, xfer_addrs and xfer_all have no default, so the table
+     reaches through xfer_all; the slots after it fall back when NULL. */
+  if ( func_size < offsetof(ca_operation_function_t, xfer_all) +
+                   sizeof(((ca_operation_function_t *) 0)->xfer_all) ) {
     rb_raise(rb_eRuntimeError,
              "operation table is too small to dispatch (%zu < %zu)",
              func_size,
-             (size_t) offsetof(ca_operation_function_t, xfer_index));
+             (size_t) (offsetof(ca_operation_function_t, xfer_all) +
+                       sizeof(((ca_operation_function_t *) 0)->xfer_all)));
   }
+
+  /* A refused table takes no number. */
+  obj_type = ca_obj_num++;
 
   /* Copy by the caller's length and zero the rest: slots this build knows
      about but the caller does not are NULL, which every dispatcher already
@@ -557,7 +562,7 @@ rb_ca_new_reduced (VALUE self, int8_t *slab_axes, int8_t naxes, int32_t data_typ
   ca_size_t bytes = ca_sizeof[data_type];
   if ( bytes <= 0 ) {
     rb_raise(rb_eArgError,
-             "rb_ca_new_reduced: data_type=%d unsupported (CA_FIXLEN/OBJECT not supported)",
+             "rb_ca_new_reduced: data_type=%d has no fixed width (use rb_ca_new_reduced_bytes)",
              (int) data_type);
   }
   return rb_ca_new_reduced_bytes(self, slab_axes, naxes, data_type, bytes, keep_axis);
@@ -565,9 +570,8 @@ rb_ca_new_reduced (VALUE self, int8_t *slab_axes, int8_t naxes, int32_t data_typ
 
 /* ------------------------------------------------------------------- */
 
-/* Parse the variadic axis argument of a reduction kernel into a
-   sort-ascending
-   int8_t array, with full validation.
+/* Parse the variadic axis argument of a reduction kernel into an int8_t
+   array, with full validation.
 
    Accepts:
      - Integer args:     kernel(0, 2, 3)        → axes = {0, 2, 3}
@@ -575,8 +579,9 @@ rb_ca_new_reduced (VALUE self, int8_t *slab_axes, int8_t naxes, int32_t data_typ
      - Negative axes (Python-style): -1 = innermost, normalised to
        positive in-range indices before validation
 
+   argc == 0 means every axis (a full reduction).
+
    Validation (raises ArgumentError on failure):
-     - argc == 0                          → no axes given
      - naxes > ca->ndim                   → too many axes
      - any axis out of [0, ca->ndim)      → range
      - duplicate axes                     → duplicate
@@ -591,6 +596,10 @@ rb_ca_new_reduced (VALUE self, int8_t *slab_axes, int8_t naxes, int32_t data_typ
    variadic entry (rb_ca_parse_reduce_axes) and the kwarg entry
    (rb_ca_parse_reduce_axes_kw).  ctx names the method in error messages;
    the two public entries pass the method the user called. */
+/* ctx NULL names the method the user called, looked up only when a
+   message is built: the lookup walks the frames. */
+#define CA_CTX_NAME(ctx) ( (ctx) ? (ctx) : ca_calling_method_name() )
+
 static int8_t
 parse_axes_items (const VALUE *items, int count, CArray *ca,
                   int8_t *out_axes, const char *ctx)
@@ -599,31 +608,25 @@ parse_axes_items (const VALUE *items, int count, CArray *ca,
   int8_t seen[CA_RANK_MAX];
 
   if ( count <= 0 ) {
-    rb_raise(rb_eArgError, "%s: empty axes array", ctx);
+    rb_raise(rb_eArgError, "%s: empty axes array", CA_CTX_NAME(ctx));
   }
-  if ( count > CA_RANK_MAX ) {
+  if ( count > CA_RANK_MAX ) {   /* rank-check: a list of axes, no longer than the rank */
     rb_raise(rb_eArgError,
              "%s: too many axes (%d > CA_RANK_MAX=%d)",
-             ctx, count, CA_RANK_MAX);
+             CA_CTX_NAME(ctx), count, CA_RANK_MAX);
   }
   if ( count > ca->ndim ) {
     rb_raise(rb_eArgError,
              "%s: too many axes (%d > ndim=%d)",
-             ctx, count, (int) ca->ndim);
+             CA_CTX_NAME(ctx), count, (int) ca->ndim);
   }
 
   for ( i = 0; i < CA_RANK_MAX; i++ ) seen[i] = 0;
   for ( i = 0; i < count; i++ ) {
-    ca_size_t raw = ca_axis_integer(items[i], NULL);
-    ca_size_t a   = ( raw < 0 ) ? raw + ca->ndim : raw;
-    if ( a < 0 || a >= ca->ndim ) {
-      rb_raise(rb_eArgError,
-               "%s: axis %ld out of range for ndim %d",
-               ctx, (long) raw, (int) ca->ndim);
-    }
+    ca_size_t a = ca_normalize_axis_arg(items[i], (int) ca->ndim, ctx);
     if ( seen[a] ) {
       rb_raise(rb_eArgError,
-               "%s: duplicate axis %ld", ctx, (long) a);
+               "%s: duplicate axis %ld", CA_CTX_NAME(ctx), (long) a);
     }
     seen[a] = 1;
     out_axes[i] = (int8_t) a;
@@ -656,8 +659,7 @@ rb_ca_parse_reduce_axes (int argc, VALUE *argv, CArray *ca, int8_t *out_axes)
     items = (const VALUE *) RARRAY_CONST_PTR(arr);
   }
 
-  return parse_axes_items(items, count, ca, out_axes,
-                          ca_calling_method_name());
+  return parse_axes_items(items, count, ca, out_axes, NULL);
 }
 
 /* Kwarg form of rb_ca_parse_reduce_axes — accepts the `axis:` value as
@@ -698,14 +700,13 @@ rb_ca_parse_reduce_axes_kw_ctx (VALUE axis_val, CArray *ca, int8_t *out_axes,
   rb_raise(rb_eTypeError,
            "%s: axis must be nil, an Integer or an Array of Integer "
            "(got %"PRIsVALUE")",
-           ctx, rb_obj_class(axis_val));
+           CA_CTX_NAME(ctx), rb_obj_class(axis_val));
 }
 
 int8_t
 rb_ca_parse_reduce_axes_kw (VALUE axis_val, CArray *ca, int8_t *out_axes)
 {
-  return rb_ca_parse_reduce_axes_kw_ctx(axis_val, ca, out_axes,
-                                        ca_calling_method_name());
+  return rb_ca_parse_reduce_axes_kw_ctx(axis_val, ca, out_axes, NULL);
 }
 
 /* ------------------------------------------------------------------- */
@@ -946,7 +947,7 @@ ca_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   CArray *ca = (CArray *) ap;
 
   if ( dir == CA_XFER_PUT && ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can not store data to read-only array");
+    ca_refuse_read_only();
   }
 
   /* Fast path: non-CA_OBJECT element type needs no GC protection. */
@@ -1074,7 +1075,7 @@ ca_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data, int dir)
   CArray *ca = (CArray *) ap;
 
   if ( dir == CA_XFER_PUT && ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can not store data to read-only array");
+    ca_refuse_read_only();
   }
 
   /* Fast path: non-CA_OBJECT element type needs no GC protection. */
@@ -1376,6 +1377,7 @@ ca_xfer_strided_walk (char            *src_base,
     ca_size_t inner_dst_bytes  = counts[ndim-2] * counts[ndim-1] * bytes;
 
     for ( k = 0; k < outer_n; k++ ) idx[k] = 0;
+    /* empty: the walk returns on an empty region at its entry */
     while ( 1 ) {
       ca_size_t soff = 0;
       for ( k = 0; k < outer_n; k++ ) soff += idx[k] * src_strides[k];
@@ -1393,6 +1395,7 @@ ca_xfer_strided_walk (char            *src_base,
 
   /* prefix axes [0..slab_start-1] on odometer, slab-sized memcpy per iter. */
   for ( k = 0; k < slab_start; k++ ) idx[k] = 0;
+  /* empty: the walk returns on an empty region at its entry */
   while ( 1 ) {
     ca_size_t soff = 0;
     for ( k = 0; k < slab_start; k++ ) soff += idx[k] * src_strides[k];
@@ -1466,6 +1469,7 @@ ca_xfer_stride_dispatch (CArray *ca, ca_size_t *starts, ca_size_t *counts,
 
   /* fallback: per-cell via byte offset -> flat addr -> index -> xfer_index. */
   for ( k = 0; k < ndim; k++ ) idx[k] = 0;
+  /* empty: its one caller, ca_xfer_stride, returns on an empty region */
   while ( 1 ) {
     ca_size_t soff = base, vidx[CA_RANK_MAX];
     for ( k = 0; k < ndim; k++ ) soff += idx[k] * strides[k];
@@ -1514,7 +1518,7 @@ ca_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   CArray *ca = (CArray *) ap;
 
   if ( dir == CA_XFER_PUT && ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can not store data to read-only array");
+    ca_refuse_read_only();
   }
 
   if ( ca_region_is_empty(ca->ndim, counts) ) return;
@@ -1607,9 +1611,7 @@ ca_xfer_all (void *ap, void *data, int dir)
      written by nested transfers land inside it. */
   if ( ca->data_type == CA_OBJECT && dir == CA_XFER_GET ) {
     if ( data != (void *) ca->ptr ) {
-      VALUE *p = (VALUE *) data;
-      ca_size_t i;
-      for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
+      ca_object_cells_clear(data, ca->elements);
     }
     guard = ca_gc_hold_push(data, ca->elements);
   }
@@ -1666,22 +1668,31 @@ static long ca_attached_views = 0;
 #define CA_VIEW_ATTACH_STEP(ca, d) do {                                       \
     uint32_t attach_before_ = CAVIEW(ca)->attach;                             \
     CAVIEW(ca)->attach += (d);                                                \
-    ca_attached_views += ( CAVIEW(ca)->attach > 0 ) - ( attach_before_ > 0 ); \
+    __atomic_add_fetch(&ca_attached_views,                                   \
+                       ( CAVIEW(ca)->attach > 0 ) - ( attach_before_ > 0 ),     \
+                       __ATOMIC_RELAXED);                                        \
   } while (0)
 
 static VALUE
 rb_ca_s_attached_views (VALUE klass)
 {
-  return LONG2NUM(ca_attached_views);
+  return LONG2NUM(__atomic_load_n(&ca_attached_views, __ATOMIC_RELAXED));
 }
 
 /* Set once at load from CARRAY_GENERAL_PATH; see carray_internal.h. */
 int ca_fast_paths_on = 1;
+int ca_iter_transfer_only_on = 0;
 
 static VALUE
 rb_ca_s_fast_paths_enabled (VALUE klass)
 {
   return ca_fast_paths_on ? Qtrue : Qfalse;
+}
+
+static VALUE
+rb_ca_s_iter_by_transfer_only (VALUE klass)
+{
+  return ca_iter_transfer_only_on ? Qtrue : Qfalse;
 }
 #else
 #define CA_VIEW_ATTACH_STEP(ca, d) ( CAVIEW(ca)->attach += (d) )
@@ -1753,6 +1764,18 @@ ca_attach_view_first (VALUE arg)
   return Qnil;
 }
 
+static VALUE
+ca_attach_mask_step (VALUE arg)
+{
+  CArray *ca    = (CArray *) arg;
+  CArray *mask0 = ca->mask;
+  ca_update_mask(ca);
+  if ( ca->mask == mask0 ) {   /* see ca_attach_view_first */
+    ca_attach(ca->mask);
+  }
+  return Qnil;
+}
+
 /* attach parent's data to ca->ptr */
 
 void
@@ -1797,10 +1820,18 @@ ca_attach (void *ap)
   }
 
   {
-    CArray *mask0 = ca->mask;
-    ca_update_mask(ca);
-    if ( ca->mask == mask0 ) {   /* see ca_attach_view_first */
-      ca_attach(ca->mask);
+    /* Making the mask can raise (a CAObject's mask hooks); the attach
+       taken above is given back then. */
+    int tag = 0;
+    rb_protect(ca_attach_mask_step, (VALUE) ca, &tag);
+    if ( tag ) {
+      if ( ca_is_view(ca) ) {
+        CA_VIEW_ATTACH_STEP(ca, -1);
+      }
+      else {
+        ca_func[ca->obj_type].detach(ap);
+      }
+      rb_jump_tag(tag);
     }
   }
 }
@@ -1887,7 +1918,10 @@ ca_sync_all (CArray **list, int32_t n)
    even when body raised or broke out -- the cells body wrote reach the
    parent, as they would for an entity, which has no separate buffer.  An
    'a' array is not synced after a raise: allocate did not gather, so its
-   cells body never wrote hold nothing faithful to push back.
+   cells body never wrote hold nothing faithful to push back.  Allocate
+   clears the mask as it opens, and an entity (or the parent under a view)
+   has no separate mask to fall back on, so the mask of an 'a' array is
+   copied before it opens and written back when body raises.
 
    Every array is detached, in reverse order, whatever happens.  body's
    own exception wins over one raised by a sync; when body returned and a
@@ -1903,7 +1937,56 @@ typedef struct {
   volatile VALUE sync_err;
   VALUE      (*body)(VALUE);
   VALUE        arg;
+  volatile VALUE masks;         /* per array: the mask bytes of an 'a' array, or nil */
 } ca_window_ctx_t;
+
+/* Copy the masks of the 'a' arrays before they open. */
+static void
+ca_attach_window_save_masks (ca_window_ctx_t *w)
+{
+  int32_t k;
+  w->masks = Qnil;
+  for ( k = 0; k < w->n; k++ ) {
+    CArray *ca = w->list[k];
+    if ( w->modes[k] != 'a' || ! ca || ! ca_has_mask(ca) ) {
+      continue;
+    }
+    if ( NIL_P(w->masks) ) {
+      w->masks = rb_ary_new_capa(w->n);
+    }
+    ca_update_mask(ca);
+    {
+      VALUE buf = rb_str_new(NULL, (long) ca->elements);
+      ca_copy_data(ca->mask, RSTRING_PTR(buf));
+      rb_ary_store(w->masks, k, buf);
+    }
+  }
+}
+
+/* Write the copied masks back, once every array is detached. */
+static void
+ca_attach_window_restore_masks (ca_window_ctx_t *w)
+{
+  int32_t k;
+  if ( NIL_P(w->masks) ) {
+    return;
+  }
+  for ( k = 0; k < w->n; k++ ) {
+    VALUE buf = rb_ary_entry(w->masks, k);
+    CArray *ca = w->list[k];
+    if ( NIL_P(buf) ) {
+      continue;
+    }
+    ca_update_mask(ca);
+    if ( ! ca->mask ) {
+      ca_create_mask(ca);
+    }
+    ca_xfer_all(ca->mask, RSTRING_PTR(buf), CA_XFER_PUT);
+    /* held only by w->masks, where compaction can move it; the write may
+       call into Ruby (a CAObject's mask hooks) */
+    RB_GC_GUARD(buf);
+  }
+}
 
 static VALUE
 ca_attach_window_open (VALUE varg)
@@ -1963,6 +2046,9 @@ ca_attach_window_close (VALUE varg)
       ca_detach(ca);
     }
   }
+  if ( ! w->body_done ) {
+    ca_attach_window_restore_masks(w);
+  }
   return Qnil;
 }
 
@@ -1983,6 +2069,7 @@ ca_attach_window (int32_t n, CArray **list, const char *modes,
   w.sync_err  = Qnil;
   w.body      = body;
   w.arg       = arg;
+  ca_attach_window_save_masks(&w);
 
   rb_protect(ca_attach_window_open, (VALUE) &w, &tag);
   if ( tag ) {
@@ -1992,6 +2079,7 @@ ca_attach_window (int32_t n, CArray **list, const char *modes,
         ca_detach(w.list[w.opened]);
       }
     }
+    ca_attach_window_restore_masks(&w);
     rb_jump_tag(tag);
   }
 
@@ -2004,7 +2092,7 @@ ca_attach_window (int32_t n, CArray **list, const char *modes,
   return result;
 }
 
-/* attach parent's data to ca->ptr */
+/* re-gather an attached view's buffer from its parent */
 
 void
 ca_update (void *ap)
@@ -2022,7 +2110,7 @@ ca_update (void *ap)
     }
     else {
       rb_raise(rb_eRuntimeError,
-        "[BUG] ca_update() called for not-attached virtal array");
+        "[BUG] ca_update() called for not-attached virtual array");
     }
 
   }
@@ -2048,8 +2136,7 @@ ca_sync (void *ap)
   }
 
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError,
-             "can not modify read-only array");
+    ca_refuse_read_only();
   }
 
   /* Only a mask that exists can hold writes: one made inside the window
@@ -2259,8 +2346,7 @@ ca_sync_data (void *ap, char *ptr)
   CArray *ca = (CArray *) ap;
 
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError,
-             "can not sync data to read-only array");
+    ca_refuse_read_only();
   }
 
   if ( ca_is_view(ca) && CAVIEW(ca)->nosync ) {
@@ -2281,8 +2367,7 @@ ca_fill_data (void *ap, void *aptr)
   char *ptr = (char *) aptr;
 
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError,
-             "can not fill data to read-only array");
+    ca_refuse_read_only();
   }
 
   if ( ca_is_view(ca) ) {   /* view array */
@@ -2314,7 +2399,10 @@ ca_fill_stride_default (void *ap, ca_size_t base, int8_t ndim,
   ca_size_t idx[CA_RANK_MAX];
   int8_t    k;
 
+  if ( ca_region_is_empty(ndim, counts) ) return;
+
   for ( k = 0; k < ndim; k++ ) idx[k] = 0;
+  /* empty: the function returns on an empty region at its entry */
   while ( 1 ) {
     ca_size_t addr = base, vidx[CA_RANK_MAX];
     for ( k = 0; k < ndim; k++ ) addr += idx[k] * steps[k];
@@ -2333,7 +2421,7 @@ ca_fill_stride (void *ap, ca_size_t base, int8_t ndim,
   CArray *ca = (CArray *) ap;
 
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can not fill data to read-only array");
+    ca_refuse_read_only();
   }
 
   if ( ca_region_is_empty(ndim, counts) ) return;
@@ -2429,6 +2517,7 @@ ca_fill_stride_via_addrs (void *ap, ca_size_t base, int8_t ndim,
     idx[k] = 0;
   }
 
+  /* empty: an axis of count 0 returns above */
   while ( 1 ) {
     ca_size_t addr = base;
     for ( k = 0; k < ndim; k++ ) addr += idx[k] * steps[k];
@@ -2452,7 +2541,7 @@ ca_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
   CArray *ca = (CArray *) ap;
 
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can not fill data to read-only array");
+    ca_refuse_read_only();
   }
 
   if ( ca_func[ca->obj_type].fill_addrs ) {
@@ -2483,7 +2572,7 @@ ca_fill (void *ap, void *aptr)
   char *ptr = (char *) aptr;
 
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can not fill data to read-only array");
+    ca_refuse_read_only();
   }
 
   ca_fill_data(ap, ptr);
@@ -2992,9 +3081,12 @@ Init_carray_core (void)
   {
     const char *general = getenv("CARRAY_GENERAL_PATH");
     ca_fast_paths_on = !( general && general[0] && strcmp(general, "0") );
+    ca_iter_transfer_only_on = ( general && ! strcmp(general, "2") );
   }
   rb_define_singleton_method(rb_cCArray, "__fast_paths_enabled__",
                              rb_ca_s_fast_paths_enabled, 0);
+  rb_define_singleton_method(rb_cCArray, "__iter_by_transfer_only__",
+                             rb_ca_s_iter_by_transfer_only, 0);
 #endif
 
   rb_define_method(rb_cCArray, "members", rb_ca_members, 0);

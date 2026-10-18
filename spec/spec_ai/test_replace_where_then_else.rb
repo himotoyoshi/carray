@@ -203,4 +203,94 @@ class TestReplaceWhereThenElse < Test::Unit::TestCase
     assert_equal(a2.to_a, r.to_a)
   end
 
+  # A String branch is a value, not the name of a data type.
+  def test_string_and_symbol_branches_are_values
+    cond = CA_BOOLEAN([true, false, true])
+    cond[2] = UNDEF
+    r = cond.then_else("green", "red")
+    assert_equal CA_OBJECT, r.data_type
+    assert_equal ["green", "red", UNDEF], r.to_a
+    assert_kind_of CAString, r
+    assert_equal ["int32", "x", UNDEF], cond.then_else("int32", "x").to_a
+    assert_equal [:a, :b, UNDEF], cond.then_else(:a, :b).to_a
+    assert_equal [1, "z", UNDEF], cond.then_else(CA_INT32([1, 2, 3]), "z").to_a
+  end
+
+  # select and conditional read a String value as a value too, as
+  # then_else does, rather than as the name of a data type.
+  def test_select_and_conditional_take_string_values
+    cond = CA_BOOLEAN([true, false])
+    assert_equal ["x", "y"], CArray.select([cond], ["x"], default: "y").to_a
+    assert_equal ["int32", "z"], CArray.select([cond], ["int32"], default: "z").to_a
+    assert_equal ["x", "y"],
+                 CA_INT32([1, 2]).conditional(cond, ->(_) { "x" }, ->(_) { "y" }).to_a
+    assert_equal "int32", CArray.select([cond], [CA_INT32([1, 2])], default: 0).data_type_name
+  end
+
+  # A selection among Strings is text: a CAString, which has the String
+  # operations.  A Symbol, a String beside a value of another kind, or a
+  # data_type named by the caller keeps an object array.
+  def test_string_selections_are_castring
+    cond = CA_BOOLEAN([true, false])
+    text = CArray.string(["p", "q"])
+    assert_kind_of CAString, cond.then_else("x", UNDEF)
+    assert_kind_of CAString, cond.lazy.then_else("x", "y")
+    assert_equal ["X", "Y"], cond.then_else("x", "y").upcase.to_a
+    assert_kind_of CAString, CArray.select([cond], ["x"], default: "y")
+    assert_kind_of CAString, CArray.select([cond], [text], default: "z")
+    assert_kind_of CAString,
+                   CA_INT32([1, 2]).conditional(cond, ->(_) { "x" }, ->(_) { "y" })
+    assert_kind_of CAString, CA_INT32([0, 1]).choose(["x", text])
+    [cond.then_else(:x, :y), cond.then_else("x", 1), cond.then_else(UNDEF, UNDEF),
+     CArray.select([cond], ["x"], default: "y", data_type: :object),
+     CA_INT32([0, 1]).choose(["x", "y"], data_type: :object)].each do |r|
+      assert_equal CArray, r.class
+      assert_equal CA_OBJECT, r.data_type
+    end
+  end
+
+  # Beside a Face branch, an array branch must be of the same Face class,
+  # in either position: a plain array would be read as the Face's storage
+  # (an integer as a time's ticks), and the result took the class of
+  # whichever branch came second.  A scalar branch still goes through the
+  # Face's store.
+  def test_face_branch_beside_other_array_is_refused
+    cond = CA_BOOLEAN([true, false])
+    text = CArray.string(["a", "b"])
+    time = CArray.time(["2024-01-01", "2024-01-02"], unit: :D)
+    [[text, CA_OBJECT(["c", "d"])], [time, CA_INT64([5, 6])],
+     [text, CArray.const_string(["p", "q"])]].each do |face, other|
+      [[face, other], [other, face]].each do |x, y|
+        assert_raise_message(/cannot mix Face and non-Face/) { cond.then_else(x, y) }
+      end
+    end
+    assert_equal ["a", "y"], cond.then_else(text, CArray.string(["x", "y"])).to_a
+    assert_kind_of CAString, cond.then_else(text, "y")
+    assert_kind_of CATime, cond.then_else(time, Time.utc(2025, 1, 1))
+  end
+
+  # A masked label gives a masked cell, whatever the choices are.
+  def test_choose_masks_the_cell_of_a_masked_label
+    l = CA_INT32([0, 1, 0, 1])
+    l[0] = UNDEF
+    assert_equal [UNDEF, 20, 10, 20], l.choose([10, 20]).to_a
+    assert_equal [UNDEF, 2, 1, 2], l.choose([CA_INT32([1] * 4), CA_INT32([2] * 4)]).to_a
+    t = l.choose(%w[a b])
+    assert_kind_of CAString, t
+    assert_equal [UNDEF, "b", "a", "b"], t.to_a
+  end
+
+  # A label with no choice is refused, naming it; a masked one is not.
+  def test_choose_refuses_a_label_out_of_range
+    [CA_INT32([0, 1, 2]), CA_INT32([0, -1])].each do |l|
+      assert_raise(IndexError) { l.choose([10, 20]) }
+      assert_raise(IndexError) { l.choose(%w[a b]) }
+    end
+    e = assert_raise(IndexError) { CA_INT32([0, 5]).choose([10, 20]) }
+    assert_match(/label 5/, e.message)
+    m = CA_INT32([0, 9])
+    m[1] = UNDEF
+    assert_equal [7, UNDEF], m.choose([7, 8]).to_a
+  end
+
 end

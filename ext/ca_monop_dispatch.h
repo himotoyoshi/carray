@@ -190,6 +190,7 @@ extern ca_monop_func_t ca_monop_arg_i  [CA_NTYPE];
 /* Look up the per-data_type kernel for a normal monop op_id.  Returns NULL
    for cast op_ids (caller handles cast via ca_cast_block).  */
 ca_monop_func_t ca_monop_kernel_lookup (uint16_t op_id, int8_t in_data_type);
+int ca_monop_op_id_of_table (ca_monop_func_t table[]);
 
 /* Returns true iff op_id encodes a cast operation.  */
 int ca_monop_is_cast (uint16_t op_id);

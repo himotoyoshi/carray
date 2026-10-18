@@ -23,7 +23,7 @@ class TestCAFarray < Test::Unit::TestCase
   end
 
   def test_shape_reversed
-    assert_equal [3, 2], @fa.dim.to_a   # [ncols, nrows]
+    assert_equal [3, 2], @fa.shape.to_a   # [ncols, nrows]
   end
 
   def test_read

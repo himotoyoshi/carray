@@ -69,7 +69,7 @@ class TestCAFrameTypesDefault < Test::Unit::TestCase
   end
 
   def test_a_symbol_other_than_default_raises
-    err = assert_raise(ArgumentError) { frame(types: { defualt: :infer }) }
+    err = assert_raise(TypeError) { frame(types: { defualt: :infer }) }
     assert_match(/:default/, err.message)
   end
 

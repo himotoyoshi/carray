@@ -42,7 +42,7 @@ class TestY1dCAStrideXferAddrsIdentity < Test::Unit::TestCase
     assert_equal payload_ca.to_a, rs.to_a
   end
 
-  # ---- Chain: a[idx_2d] (= CAMAPPING_REMOVAL silent forward) ----
+  # ---- Chain: a[idx_2d] (an index-array chain) ----
 
   def test_chain_idx_2d_whole_view_get
     # outer reshape -> CAGrid -> inner reshape -> entity

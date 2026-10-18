@@ -43,7 +43,7 @@ class TestCAFrameCSVMissing < Test::Unit::TestCase
   end
 
   def test_a_symbol_other_than_default_raises
-    err = assert_raise(ArgumentError) { read(missing: { temp: "-999" }) }
+    err = assert_raise(TypeError) { read(missing: { temp: "-999" }) }
     assert_match(/:default/, err.message)
   end
 

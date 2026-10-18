@@ -272,6 +272,17 @@ b                       #  => [ 0, 20, 0, 40, 0 ]
 
 (See [Views](06_views.md) for why this is a view rather than a copy.)
 
+A masked cell of the position array selects nothing. Its place stays in the result and reads as masked, and assigning through it leaves the source alone there:
+
+```ruby
+b = CA_INT([10, 20, 30, 40, 50])
+i = CA_INT([4, 0, 2])
+i[1] = UNDEF
+b[i]                    #  => [ 50, _, 30 ]
+b[i] = CA_INT([1, 2, 3])
+b                       #  => [ 10, 20, 3, 40, 1 ]
+```
+
 ## Writing through a slice
 
 Any of the slice forms above can appear on the left of an assignment. Assigning a scalar fills every selected element; assigning an array of matching shape copies it in element-wise.

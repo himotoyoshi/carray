@@ -85,6 +85,7 @@ Self-contained operations you reach for by name.
 | [MaskDuplicates](topics/MaskDuplicates.md) | Guide | `mask_duplicates` — mark duplicates while keeping the shape |
 | [LinearInterpolation](topics/LinearInterpolation.md) | Guide | `linear_section` and `linear_fetch` |
 | [Serialization](topics/Serialization.md) | Reference | Serialize / deserialize via the `_CARRAY3` binary format |
+| [Ractor](topics/Ractor.md) | Guide | Using CArray in Ractors: what works, what crosses, sharing a frozen array |
 
 ## Interoperability
 
@@ -94,7 +95,6 @@ Zero-copy exchange with other array libraries.
 |---|---|---|
 | [MemoryView](interop/MemoryView.md) | Guide | MemoryView interop — importing and exporting buffers (canonical) |
 | [MemoryViewFormat](interop/MemoryViewFormat.md) | Reference | Format-string contract (PEP 3118, strict at the top level) |
-| [InteropWithArrow](interop/InteropWithArrow.md) | Guide | Interoperating with Apache Arrow |
 
 ## Writing C extensions
 

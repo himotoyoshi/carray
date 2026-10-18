@@ -78,8 +78,14 @@ ca_fake_setup (CAFake *ca, CArray *parent, int8_t data_type, ca_size_t bytes)
 
   /* check arguments */
 
-  CA_CHECK_DATA_TYPE(data_type);
-  CA_CHECK_BYTES(data_type, bytes);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
+  CA_CHECK_BYTES_GIVEN(data_type, bytes);
+
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
 
   ndim     = parent->ndim;
   dim      = parent->dim;
@@ -103,9 +109,6 @@ ca_fake_setup (CAFake *ca, CArray *parent, int8_t data_type, ca_size_t bytes)
 
   memcpy(ca->dim, dim, ndim * sizeof(ca_size_t));
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask(ca);
-  }
 
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -117,8 +120,11 @@ ca_fake_setup (CAFake *ca, CArray *parent, int8_t data_type, ca_size_t bytes)
 CAFake *
 ca_fake_new (CArray *parent, int8_t data_type, ca_size_t bytes)
 {
-  CAFake *ca = (CAFake *) ca_array_alloc(CA_OBJ_FAKE, parent->ndim);
+  CAFake *ca;
+  ca_fake_setup(NULL, parent, data_type, bytes);
+  ca = (CAFake *) ca_array_alloc(CA_OBJ_FAKE, parent->ndim);
   ca_fake_setup(ca, parent, data_type, bytes);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -277,18 +283,7 @@ ca_fake_func_allocate (void *ap)
 {
   CAFake *ca = (CAFake *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
-
-  /* CAREFUL: CA_OBJECT storage must contain valid VALUEs before GC can
-     scan it, so seed with Fixnum 0 rather than leaving raw xmalloc bytes. */
-  if ( ca->data_type == CA_OBJECT ) {
-    VALUE *p = (VALUE *) ca->ptr;
-    VALUE zero = SIZE2NUM(0);
-    ca_size_t i;
-    for (i=0; i<ca->elements; i++) {
-      *p++ = zero;
-    }
-  }
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -296,17 +291,7 @@ ca_fake_func_attach (void *ap)
 {
   CAFake *ca = (CAFake *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
-
-  /* CAREFUL: same VALUE-seed rule as ca_fake_func_allocate. */
-  if ( ca->data_type == CA_OBJECT ) {
-    VALUE *p = (VALUE *) ca->ptr;
-    VALUE zero = SIZE2NUM(0);
-    ca_size_t i;
-    for (i=0; i<ca->elements; i++) {
-      *p++ = zero;
-    }
-  }
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 
   if ( ca->parent->mask ) {
     ca_cast_block_with_mask(ca->elements, ca->parent, ca->parent->ptr, 
@@ -499,6 +484,7 @@ rb_ca_fake_initialize_copy (VALUE self, VALUE other)
     ca_array_pool_alloc(ca, CA_OBJ_FAKE, cs->parent->ndim);
   }
   ca_fake_setup(ca, cs->parent, cs->data_type, cs->bytes);
+  ca_view_inherit_mask((VALUE) ca);
 
   return self;
 }

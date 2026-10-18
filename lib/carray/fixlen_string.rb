@@ -46,7 +46,7 @@ class CArray
   #   @return [CAFixlenString]
   def self.fixlen_string (arg, bytes: nil, truncate: :error, &block)
     if arg.is_a?(CArray)
-      return string_face_of(arg).to_fixlen_string(bytes: bytes, truncate: truncate)
+      return string_face_of(arg, "CArray.fixlen_string").to_fixlen_string(bytes: bytes, truncate: truncate)
     end
     unless [:error, :silent].include?(truncate)
       raise ArgumentError, "truncate: must be :error or :silent (got #{truncate.inspect})"
@@ -90,6 +90,12 @@ end
 # Mutable fixed-width String Face: L1 ops + in-place variants.  In-place
 # transforms re-store through the native fixlen path (silent truncate).
 class CAFixlenString
+  # inspect's name for the array: the class and the cell width, which is the
+  # longest string a cell holds.
+  private def inspect_label
+    "#{self.class}[#{bytes}]"
+  end
+
   include CArray::StringOperationMixin
   include CArray::StringOperationMixin::Mutable
 end

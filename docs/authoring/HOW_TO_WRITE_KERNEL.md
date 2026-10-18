@@ -48,14 +48,31 @@ keeps the author surface stable across engine refactors.
 
 ### 0.1 Catalog
 
-| Macro | Delivery semantics | Use case | Status |
-|---|---|---|---|
-| `CA_FOR_EACH_SLAB` | per-slab strided delivery (general purpose, peak efficiency) | per-axis reduction / map / sort / any per-slab loop kernel | ✓ Landed (§6.1) |
-| `CA_FOR_EACH_SLAB_INOUT` | per-slab strided delivery, input + output in parallel | element-wise transform with input / output in distinct views | ✓ Landed (§6.2) |
-| `CA_FOR_EACH_FIBER` | per-axis fiber, **data contig-guaranteed**, no mask cursor | single-axis specialization for contig-required kernels (sort, search, per-axis SIMD, libc `qsort`) — removes both stride arithmetic and the `axes[]` boilerplate | ✓ Landed (§6.3) |
-| `CA_FOR_EACH_FIBER_INOUT` | per-axis fiber, data contig, INOUT in parallel, no mask cursor | `sort_copy` / `search_copy` / per-fiber map | ✓ Landed (§6.3) |
-| `CA_FOR_EACH_FIBER_MASKED` | per-axis fiber, **data contig** and **mask contig** — author writes `m[i]` directly | mask-aware per-fiber reduction / WRITE | ✓ Landed (§6.3) |
-| `CA_FOR_EACH_FIBER_INOUT_MASKED` | per-axis fiber, data contig, INOUT, mask contig | mask-aware per-fiber map | ✓ Landed (§6.3) |
+The last column names a function in this tree that uses the macro; read
+it to see the whole pattern — the lifecycle, the mask, a body that can
+raise. A form that nothing in carray itself uses points at the spec
+suite's test fixture instead (`spec/` is in the repository, not in the
+installed gem). `rake kernel_surface_check` checks that each named
+function still uses its macro, and that every block macro has a row here.
+
+| Macro | Delivery semantics | Use case | Status | Example in the source |
+|---|---|---|---|---|
+| `CA_FOR_EACH_SLAB` | per-slab strided delivery (general purpose, peak efficiency) | per-axis reduction / map / sort / any per-slab loop kernel | ✓ Landed (§6.1) | `ext/ca_axis_group.c` `GROUP_WALK` |
+| `CA_FOR_EACH_SLAB_INOUT` | per-slab strided delivery, input + output in parallel | element-wise transform with input / output in distinct views | ✓ Landed (§6.2) | none |
+| `CA_FOR_EACH_FIBER` | per-axis fiber, **data contig-guaranteed**, no mask cursor | single-axis specialization for contig-required kernels (sort, search, per-axis SIMD, libc `qsort`) — removes both stride arithmetic and the `axes[]` boilerplate | ✓ Landed (§6.3) | `spec/spec_ai/ext_iter_write/iter_write.c` `iw_fiber_fill` |
+| `CA_FOR_EACH_FIBER_INOUT` | per-axis fiber, data contig, INOUT in parallel, no mask cursor | `sort_copy` / `search_copy` / per-fiber map | ✓ Landed (§6.3) | `ext/carray_partition.c` `rb_ca_partition_copy_c` |
+| `CA_FOR_EACH_FIBER_MASKED` | per-axis fiber, **data contig** and **mask contig** — author writes `m[i]` directly | mask-aware per-fiber reduction / WRITE | ✓ Landed (§6.3) | `ext/carray_factorize.c` `fz_value_counts_flat_body` |
+| `CA_FOR_EACH_FIBER_INOUT_MASKED` | per-axis fiber, data contig, INOUT, mask contig | mask-aware per-fiber map | ✓ Landed (§6.3) | `ext/carray_histogram.c` `rb_ca_histbin_ki` |
+| `CA_FOR_EACH_FIBER_PAIR` | one contig fiber from each of two sources at the same position | a C routine over two vectors of equal length (dot product, correlation) | ✓ Landed (§6.3) | `spec/spec_ai/ext_iter_pair/iter_pair.c` `ip_dot` |
+| `CA_FOR_EACH_FIBER_PAIR_MASKED` | the PAIR form + both mask cursors | mask-aware two-vector routine | ✓ Landed (§6.3) | `spec/spec_ai/ext_iter_pair/iter_pair.c` `ip_dot_masked` |
+| `CA_FOR_EACH_WHOLE` | the whole array as one contig run, row-major, no mask cursor | a kernel that wants every cell and no axes (whole-array scan, hashing the values, handing the buffer to a library) | ✓ Landed (§6.3) | `spec/spec_ai/ext_iter_write/iter_write.c` `iw_whole_write` |
+| `CA_FOR_EACH_WHOLE_MASKED` | the whole array as one contig run + contig mask | mask-aware whole-array kernel | ✓ Landed (§6.3) | `ext/carray_factorize.c` `fz_unique_flat_body` |
+| `CA_SLAB_REDUCE_T` | single-expression reduction kernel (1 line init + REDUCE) | sum / count / min / max / mean / variance | ✓ Landed (§6.5) | `ext/carray_factorize.c` `fz_nunique_body` |
+| `CA_SLAB_REDUCE_T_PLUS_EX` / `_MIN_EX` / `_MAX_EX` / `_STAR_EX` | SIMD-licensed reduction variants (`#pragma omp simd reduction(+/min/max/*:acc)` on contig no-mask path) | sum / mean / variance / prod with 8x throughput on f64 entity | ✓ Landed (§6.7, SL.1.x 2026-06-12) | `ext/mkkernel.rb` (generated kernels) |
+| `CA_SLAB_REDUCE_ARRAY_T_PLUS_EX` | SIMD-licensed weighted reduction (FMA `fmla.2d` + reassoc, dual-stream) | wsum / wmean | ✓ Landed (§6.7, SL.1.4b) | `ext/mkkernel.rb` (generated kernels) |
+| `CA_SLAB_MAP_T` | single-expression element-wise map kernel | sqrt / sin / cos / abs / negate | ✓ Landed (§6.5) | none |
+| `CA_SLAB_SCAN_T` | single-expression prefix-scan kernel | cumsum / cumprod / cummax / cummin / cumcount | ✓ Landed (§6.5) | `ext/mkkernel.rb` (generated kernels) |
+| `CA_SLAB_SEARCH_T` | single-expression search-by-eq kernel | `bsearch` / `search_nearest` family | **Not built** as a one-expression macro. The search family (`find_value_index` / `bsearch` / `search` / `search_nearest` + `_addr`) ships via the mkkernel `MkKernel.search` DSL with an author-written per-slab C body — see [`MkKernelDSL.md`](MkKernelDSL.md) | — |
 
 **Note on contig guarantee**: All four `_FIBER` forms deliver contig
 buffers — data, mask (MASKED forms), and output (INOUT forms). Author
@@ -68,12 +85,6 @@ axes) transparently. INOUT forms require input and output views of
 without MASKED in the name hand out no mask cursor: a masked source is
 walked with its masked cells read as values unless the flags include
 `CA_KERNEL_NO_MASK`, which refuses it.
-| `CA_SLAB_REDUCE_T` | single-expression reduction kernel (1 line init + REDUCE) | sum / count / min / max / mean / variance | ✓ Landed (§6.5) |
-| `CA_SLAB_REDUCE_T_PLUS_EX` / `_MIN_EX` / `_MAX_EX` / `_STAR_EX` | SIMD-licensed reduction variants (`#pragma omp simd reduction(+/min/max/*:acc)` on contig no-mask path) | sum / mean / variance / prod with 8x throughput on f64 entity | ✓ Landed (§6.7, SL.1.x 2026-06-12) |
-| `CA_SLAB_REDUCE_ARRAY_T_PLUS_EX` | SIMD-licensed weighted reduction (FMA `fmla.2d` + reassoc, dual-stream) | wsum / wmean | ✓ Landed (§6.7, SL.1.4b) |
-| `CA_SLAB_MAP_T` | single-expression element-wise map kernel | sqrt / sin / cos / abs / negate | ✓ Landed (§6.5) |
-| `CA_SLAB_SCAN_T` | single-expression prefix-scan kernel | cumsum / cumprod / cummax / cummin / cumcount | ✓ Landed (§6.5) |
-| `CA_SLAB_SEARCH_T` | single-expression search-by-eq kernel | `bsearch` / `search_nearest` family | **Not built** as a one-expression macro. The search family (`find_value_index` / `bsearch` / `search` / `search_nearest` + `_addr`) ships via the mkkernel `MkKernel.search` DSL with an author-written per-slab C body — see [`MkKernelDSL.md`](MkKernelDSL.md) |
 
 ### 0.2 How to pick
 
@@ -159,7 +170,7 @@ refactors without touching the catalog:**
   (`CA_KERNEL_FIBER_CONTIG`) that tells the engine to gather strided
   fibers into per-state scratch (`fiber_data_scratch`,
   `fiber_mask_scratch`) so author sees contig `p[i]` / `m[i]`.
-- **`ca_iter_state_init_l1` / `next_slab` / `next_slab_strided` /
+- **`ca_iter_state_init_l1` / `next_slab` /
   `ca_iter_can_alias`** — alternate entry points not used by the catalog
   macros (the L1 contig path; see §9). Not part of the author contract.
 - **`CA_SLAB_WHOLE` / `CA_SLAB_FREE`** — engine policy enums authors never
@@ -652,9 +663,10 @@ already marks them as UNDEF in the output).
 
 CArray 3.0 ships block macros that wrap the init / next / sync / finish
 lifecycle for the common kernel patterns, so you write the kernel body in
-a single block scope without manual plumbing. Two families of delivery
-macros — the slab forms (`CA_FOR_EACH_SLAB` / `_INOUT`, §6.1–6.2) and the
-contig-fiber forms (`CA_FOR_EACH_FIBER` family, §6.3) — plus the
+a single block scope without manual plumbing. Three families of delivery
+macros — the slab forms (`CA_FOR_EACH_SLAB` / `_INOUT`, §6.1–6.2), the
+contig-fiber forms (`CA_FOR_EACH_FIBER` family, §6.3) and the whole-array
+pair (`CA_FOR_EACH_WHOLE`, end of §6.3) — plus the
 one-expression `CA_SLAB_*` suite (§6.5), the mkkernel generator (§6.6),
 and the SIMD reduction license (§6.7).
 
@@ -693,9 +705,10 @@ CA_FOR_EACH_SLAB_INOUT(st_in, st_out, ca_in, ca_out,
 ```
 
 Runs two iterators in lockstep — input is READ, output is WRITE — with
-`sync_slab` on the output after each iteration. Shape match between
-`ca_in` and `ca_out` is **not validated** by the macro (caller responsibility,
-typically `ca_out = rb_ca_template_with_type(ca_in, data_type, Qnil)`).
+`sync_slab` on the output after each iteration. `ca_in` and `ca_out` must
+have the same shape (`ndim` and every `dim[k]`); the macro raises
+`ArgumentError` before opening either walk when they do not. A typical
+output is `rb_ca_template_with_type(ca_in, data_type, Qnil)`.
 
 ### 6.3 CA_FOR_EACH_FIBER family — contig-delivery block macros
 
@@ -753,6 +766,43 @@ Contract / constraints:
   equivalent (no trailing `else`).
 - Single-axis only. For multiple slab axes or K-D slab geometry, use
   `CA_FOR_EACH_SLAB` (§6.1).
+
+#### The whole array: `CA_FOR_EACH_WHOLE`
+
+| Macro | Signature | Delivers |
+|---|---|---|
+| `CA_FOR_EACH_WHOLE` | `(st, ca, flags, p, n)` | the whole array as contig data `p[0..n-1]`, row-major |
+| `CA_FOR_EACH_WHOLE_MASKED` | `(st, ca, flags, p, n, m)` | + contig mask `m` (NULL if no-mask source) |
+
+The body runs once, with `n` set to the number of cells. It is the grain
+for a kernel that wants every cell in order and no axes:
+
+```c
+ca_iter_state st;
+char       *p;
+ca_size_t   n;
+uint64_t    h = 1469598103934665603ULL;
+CA_FOR_EACH_WHOLE(st, ca, 0, p, n) {
+  for ( ca_size_t i = 0; i < n * ca->bytes; i++ ) {   /* FNV-1a over the cells */
+    h = (h ^ (unsigned char) p[i]) * 1099511628211ULL;
+  }
+}
+```
+
+- **Contiguity is kept by copying when it has to be.** A contiguous array
+  lends its memory; any other source (a transpose, a strided block, a
+  selection, a converting view) is gathered into the walk's scratch first.
+  A kernel that can take strides and wants to avoid the copy uses
+  `CA_FOR_EACH_SLAB` over every axis instead.
+- **A reduction that also runs per axis** is better written once with
+  `CA_FOR_EACH_SLAB` over the chosen axes (every axis for the whole array)
+  than as a whole walk plus a per-axis walk.
+- The flags, the mask cursor (a copy; writing it reaches nothing), `break`
+  and `return`, and a raising body (open the macro inside
+  `ca_iter_ensure`) follow the same rules as the FIBER forms. With
+  `CA_KERNEL_WRITE`, a write that raises keeps the cells already written
+  where the walk lends the array's memory, and none of them where it
+  gathered a copy.
 
 ### 6.4 When the macros are NOT appropriate
 
@@ -873,17 +923,8 @@ walkthrough. You supply:
     - max:  `if (v > acc) acc = v`
     - mean: `(acc += v, cnt++)`  (caller declares `cnt`)
 
-Convenience aliases for the four standard numeric data_types:
-
-| Macro                | Forwards to                          |
-|----------------------|--------------------------------------|
-| `CA_SLAB_REDUCE_F64` | `CA_SLAB_REDUCE_T(double, ...)`      |
-| `CA_SLAB_REDUCE_F32` | `CA_SLAB_REDUCE_T(float, ...)`       |
-| `CA_SLAB_REDUCE_I32` | `CA_SLAB_REDUCE_T(int32_t, ...)`     |
-| `CA_SLAB_REDUCE_I64` | `CA_SLAB_REDUCE_T(int64_t, ...)`     |
-
-Use `CA_SLAB_REDUCE_T` directly for non-standard element types
-(`boolean8_t`, `int8_t`, `uint16_t`, complex, …).
+`T_LOAD` is any element C type: `double`, `float`, `int32_t`,
+`int64_t`, `boolean8_t`, `uint16_t`, complex, …
 
 Mask semantics: when `m != NULL`, masked cells are skipped (REDUCE is
 not invoked). When `m == NULL`, every cell contributes.
@@ -894,11 +935,11 @@ Sibling reductions reuse the same surface — only the init and REDUCE
 expression change:
 
 ```c
-/* sum  */ CA_SLAB_REDUCE_F64(st, p, m, acc, 0.0,        acc += v);
-/* mean */ CA_SLAB_REDUCE_F64(st, p, m, acc, 0.0,        (acc += v, cnt++));
-/* min  */ CA_SLAB_REDUCE_F64(st, p, m, acc,  INFINITY,  if (v < acc) acc = v);
-/* max  */ CA_SLAB_REDUCE_F64(st, p, m, acc, -INFINITY,  if (v > acc) acc = v);
-/* prod */ CA_SLAB_REDUCE_F64(st, p, m, acc, 1.0,        acc *= v);
+/* sum  */ CA_SLAB_REDUCE_T(double, st, p, m, acc, 0.0,        acc += v);
+/* mean */ CA_SLAB_REDUCE_T(double, st, p, m, acc, 0.0,        (acc += v, cnt++));
+/* min  */ CA_SLAB_REDUCE_T(double, st, p, m, acc,  INFINITY,  if (v < acc) acc = v);
+/* max  */ CA_SLAB_REDUCE_T(double, st, p, m, acc, -INFINITY,  if (v > acc) acc = v);
+/* prod */ CA_SLAB_REDUCE_T(double, st, p, m, acc, 1.0,        acc *= v);
 /* var  */ /* needs second-moment accumulator; same shape */
 ```
 
@@ -938,8 +979,6 @@ You supply:
     - sqrt: `r = sqrt(v)`
     - square: `r = v * v`
     - cast + clamp: `r = (T_OUT) (v < 0 ? 0 : (v > MAX ? MAX : v))`
-
-Convenience alias `CA_SLAB_MAP_F64` = `CA_SLAB_MAP_T(double, double, ...)`.
 
 Mask handling is **not** done by `CA_SLAB_MAP_T` itself. If the input
 is masked, MAP_EXPR is still evaluated for every cell; the caller is
@@ -1007,7 +1046,7 @@ fiber/slab walk):
 
 | DSL form | emits per data type | underlying surface |
 |---|---|---|
-| `MkKernel.reduce` | a reduction helper + dispatcher | `CA_SLAB_REDUCE_T` (or the SIMD-licensed `_PLUS/_MIN/_MAX/_STAR_EX` variants when `reduction_kind:` is set; `CA_SLAB_REDUCE_ARRAY_T*` for `array_arg` weighted reductions) |
+| `MkKernel.reduce` | a reduction helper + dispatcher | `CA_SLAB_REDUCE_T` (or the SIMD-licensed `_PLUS/_MIN/_MAX/_STAR_EX` variants when `reduction_kind:` is set; `CA_SLAB_REDUCE_ARRAY_T_EX` / `_PLUS_EX` for `array_arg` weighted reductions) |
 | `MkKernel.scan` | a prefix-scan helper | `CA_SLAB_SCAN_T` / `CA_SLAB_SCAN_TA` |
 | `MkKernel.sort` | a per-fiber position kernel (argsort / partition / rank) | `CA_FOR_EACH_FIBER` + a hand-rolled stable sort / quickselect |
 | `MkKernel.search` | a per-slab search (author-written C body) | `CA_FOR_EACH_SLAB` walk |
@@ -1506,7 +1545,7 @@ and L2):
 | Level | Slab shape | Init / yield API |
 |---|---|---|
 | **L1** (contig kernel) | 1-D contig run, stride implicit = bytes | `init_l1` / `next_slab` |
-| **L2** (strided kernel) | 1-D or K-D, explicit strides | `init_l2` / `next_slab_strided` or `next_slab_axes` |
+| **L2** (strided kernel) | 1-D or K-D, explicit strides | `init_l2` (`CA_SLAB_AXES`) / `next_slab_axes` |
 | L3 (multi-D kernel) | reserved, Phase 1+ | future work |
 
 **Choose L1 when:**
@@ -1546,12 +1585,6 @@ output.  For
 kernels using the §10 helpers, the source kind is fully invisible — the
 same kernel body works regardless of which path the iterator takes
 internally.
-
-(Historical note: CAMapping previously appeared here as an explicit
-reject because its descriptor.ndim differed from view.ndim.  The class
-was removed in 3.0; `a[mapper]` now
-normalises to a CAGrid/CAStride chain whose layers each satisfy
-descriptor.ndim == view.ndim, so the reject is gone.)
 
 ## 10. Argument helpers (Phase B)
 
@@ -1595,7 +1628,7 @@ trailing options Hash:
 - Integer (= `axis: 0`)                        → single axis (negative normalised)
 - Array of Integer (= `axis: [0, 2]`)          → multi-axis in input order
 - Range / Float / String / etc.                → raises TypeError
-- out-of-range / duplicate / overflow          → raises ArgumentError / IndexError
+- out-of-range (an Integer of any width) / duplicate → raises ArgumentError
 
 The returned `naxes` is the count; `slab_axes[]` is filled in input
 order (canonicalisation to ascending happens inside `init_l2`).
@@ -1760,7 +1793,7 @@ The complete FROZEN set (mirrored by the banner in
 | Category | Frozen names |
 |---|---|
 | **Block macros** | `CA_FOR_EACH_SLAB`, `CA_FOR_EACH_SLAB_INOUT`, `CA_FOR_EACH_FIBER`, `CA_FOR_EACH_FIBER_MASKED`, `CA_FOR_EACH_FIBER_INOUT`, `CA_FOR_EACH_FIBER_INOUT_MASKED` |
-| **Body macros** | `CA_SLAB_REDUCE_T` (+ `_EX` / `_PLUS_EX` / `_MIN_EX` / `_MAX_EX` / `_STAR_EX` and the `_PLUS` / `_MIN` / `_MAX` / `_STAR` wrappers), `CA_SLAB_REDUCE_F64` / `_F32` / `_I32` / `_I64`, `CA_SLAB_REDUCE_ARRAY_T` (+ `_EX` / `_PLUS` / `_PLUS_EX`), `CA_SLAB_MAP_T`, `CA_SLAB_MAP_F64`, `CA_SLAB_SCAN_T`, `CA_SLAB_SCAN_TA`, `CA_FOR_EACH_UNMASKED`, `CA_FOR_EACH_INDEX_UNMASKED`, `CA_COUNT_UNMASKED`, `CA_MASK_GET`, `CA_L2_FOR_EACH`, `CA_L2_FOR_EACH_UNMASKED` |
+| **Body macros** | `CA_SLAB_REDUCE_T` (+ `_EX` / `_PLUS_EX`), `CA_SLAB_REDUCE_ARRAY_T_EX` (+ `_PLUS_EX`), `CA_SLAB_MAP_T`, `CA_SLAB_SCAN_T`, `CA_SLAB_SCAN_TA`, `CA_FOR_EACH_UNMASKED`, `CA_L2_FOR_EACH` |
 | **Raw-API entry points** | `ca_iter_state_init_l2`, `ca_iter_state_next_slab_axes`, `ca_iter_state_sync_slab`, `ca_iter_state_finish` |
 | **Enum / status tokens** | `CA_SLAB_AXES`, `CA_KERNEL_WRITE`, `CA_KERNEL_NO_MASK`, `CA_ITER_OK`, `CA_ITER_ERR_*` |
 | **Slab-delivery representation** (`ca_iter_state` fields a kernel reads) | `slab_ndim`, `slab_dims[]`, `slab_strides[]`, `slab_mask_strides[]`, `slab_elements`, `outer_ndim`, `outer_axes[]`, `outer_dims[]` |
@@ -1775,7 +1808,7 @@ own freedom (always-contig delivery, fused gather, …) is exercised through
 the `_FIBER` family and `flags`, not by changing this representation.
 
 **Everything else is INTERNAL and refactors freely**: the state-machine
-function bodies, `init_l1` / `next_slab` / `next_slab_strided` /
+function bodies, `init_l1` / `next_slab` /
 `ca_iter_can_alias`, the `alias_mode` / `src_kind` routing
 (`CA_ITER_ALIAS_*` / `CA_ITER_SRC_*` / `CA_KERNEL_FIBER_CONTIG` /
 `CA_SLAB_WHOLE` / `CA_SLAB_FREE`), every non-frozen `ca_iter_state` field,

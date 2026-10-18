@@ -57,7 +57,7 @@ class TestCAFacePhase2 < Test::Unit::TestCase
 
   def test_new_multidim
     dt = CATime.new(3, 4, unit: :D)
-    assert_equal [3, 4], dt.dim
+    assert_equal [3, 4], dt.shape
     assert_equal :D, dt.unit.base
   end
 
@@ -175,8 +175,12 @@ class TestCAFacePhase2 < Test::Unit::TestCase
     # a coarser duration widens exactly
     r3 = CArray.int64(3) { 0 }.time(unit: :h) + CArray.int64(3) { 1 }.timedelta(unit: :D)
     assert_equal [24, 24, 24], r3.ticks.to_a       # 1 day = 24 h
-    # but a cross-group (fixed time + calendar duration) still raises
-    assert_raise(ArgumentError) { dt + CArray.int64(3) { 1 }.timedelta(unit: :M) }
+    # a calendar duration moves the date by months, as Date#>> does
+    # (1970-01-01T00:16:40 + 1 month), keeping the time of day
+    assert_equal [2678400 + 1000] * 3, (dt + CArray.int64(3) { 1 }.timedelta(unit: :M)).ticks.to_a
+    # but not on a grid a month would leave, nor a fixed duration on a calendar grid
+    assert_raise(ArgumentError) { CArray.int64(3) { 0 }.time(unit: :W) + CArray.int64(3) { 1 }.timedelta(unit: :M) }
+    assert_raise(ArgumentError) { CArray.int64(3) { 0 }.time(unit: :M) + CArray.int64(3) { 1 }.timedelta(unit: :D) }
   end
 
   def test_datetime_widens_integer_receiver_but_raises_on_float
@@ -370,7 +374,7 @@ class TestCAFacePhase2 < Test::Unit::TestCase
     t = dt.transpose
     assert_kind_of CATime, t
     assert_equal :s, t.unit.base
-    assert_equal [4, 3], t.dim
+    assert_equal [4, 3], t.shape
   end
 
   def test_reshape_preserves_face
@@ -378,7 +382,7 @@ class TestCAFacePhase2 < Test::Unit::TestCase
     r = dt.reshape(2, 3)
     assert_kind_of CATime, r
     assert_equal :s, r.unit.base
-    assert_equal [2, 3], r.dim
+    assert_equal [2, 3], r.shape
   end
 
   def test_flip_reverse_roll_preserve_face

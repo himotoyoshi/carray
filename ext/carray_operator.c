@@ -12,7 +12,8 @@
 
 #include "carray.h"
 #include "carray_internal.h"   /* ca_lazy_arena_* */
-#include "ca_binop_dispatch.h"  /* ca_binop_is_trapping */
+#include "ca_binop_dispatch.h"  /* ca_binop_op_id_of_table */
+#include "ca_monop_dispatch.h"  /* ca_monop_op_id_of_table */
 
 /* Operand scratch for a chunked / gathered kernel run.
 
@@ -31,19 +32,17 @@ ca_op_acquire_operand_scratch (CArray *ca, ca_size_t n_elements)
 
 #include "ca_obj_face.h"   /* ca_face_reconcile_comparison (comparison Face gate) */
 
-/* A kernel table with no entry for the operand's data_type.  Name the
-   method and the type, or the Face, rather than leave it to the table's
-   stub, which knows neither. */
-NORETURN(static void ca_op_refuse_unimplemented (VALUE operand, CArray *ca,
-                                                VALUE eclass));
-
-static void
-ca_op_refuse_unimplemented (VALUE operand, CArray *ca, VALUE eclass)
+/* A kernel table with no entry for `data_type`, the type the operator
+   would run in.  Name the method and the type, or the Face, rather than
+   leave it to the table's stub, which knows neither.  The eager operators
+   and the lazy builders refuse through here, so the two say the same. */
+void
+ca_op_refuse_unimplemented (VALUE operand, int8_t data_type, VALUE eclass)
 {
   const char *name = ca_calling_method_name();
   ca_face_refuse_numeric(operand, name, eclass);
   rb_raise(eclass, "%s: not defined for data_type %s",
-           name, ca_type_name[ca->data_type]);
+           name, ca_type_name[data_type]);
 }
 
 VALUE rb_mCAMath;
@@ -276,10 +275,11 @@ ca_chunked_run (ca_chunked_run_t *run)
 /* ---- Kernels that can raise -----------------------------------------
 
    An operator kernel runs with its alias operands attached.  Most kernels
-   cannot raise and are called directly.  Three kinds can:
+   cannot raise and are called directly.  Two kinds can:
 
-   - an object lane, which calls Ruby for every cell
-   - an integer division by zero (div, mod, fmod, rcp, rcp_mul)
+   - a kernel that can raise on a cell (ca_op_raises_on_cell: an object
+     lane, which calls Ruby for every cell; an integer division, remainder
+     or reciprocal by zero; an integer power of zero to a negative power)
    - a data type the operator has no kernel for (the not_implement slot)
 
    Those run through ca_op_guarded, which releases the operands the call
@@ -293,41 +293,71 @@ ca_op_is_integer (int8_t dt)
   return ( dt >= CA_INT8 && dt <= CA_UINT64 );
 }
 
+int
+ca_op_raises_on_cell (int kind, int op_id, int8_t dt)
+{
+  if ( dt == CA_OBJECT ) {
+    return 1;
+  }
+  if ( ! ca_op_is_integer(dt) ) {
+    return 0;
+  }
+  switch ( kind ) {
+  case CA_OP_KIND_MONOP:
+    return op_id == CA_MONOP_RCP;
+  case CA_OP_KIND_BINOP:
+    switch ( op_id ) {
+    case CA_BINOP_DIV:
+    case CA_BINOP_MOD:
+    case CA_BINOP_QUO:
+    case CA_BINOP_FMOD:
+    case CA_BINOP_RCP_MUL:
+    case CA_BINOP_POW:
+    case CA_BINOP_IPOWER:
+      return 1;
+    default:
+      return 0;
+    }
+  default:
+    return 0;
+  }
+}
+
+/* The eager forms: a kernel that can raise on a cell
+   (ca_op_raises_on_cell), or a data type the operator has no kernel for. */
 static int
 ca_monop_may_raise (ca_monop_func_t func[], int8_t dt)
 {
-  return dt == CA_OBJECT
-      || func[dt] == ca_monop_not_implement
-      || ( func == ca_monop_rcp && ca_op_is_integer(dt) );
+  return func[dt] == ca_monop_not_implement
+      || ca_op_raises_on_cell(CA_OP_KIND_MONOP, ca_monop_op_id_of_table(func), dt);
 }
 
-/* Which ops raise on a cell is ca_binop_is_trapping's list, the one the
-   lazy views skip masked cells by. */
 static int
 ca_binop_may_raise (ca_binop_func_t func[], int8_t dt)
 {
-  int op_id;
-  if ( dt == CA_OBJECT || func[dt] == ca_binop_not_implement ) return 1;
-  op_id = ca_binop_op_id_of_table(func);
-  return op_id >= 0 && ca_binop_is_trapping((uint16_t) op_id, dt);
+  return func[dt] == ca_binop_not_implement
+      || ca_op_raises_on_cell(CA_OP_KIND_BINOP, ca_binop_op_id_of_table(func), dt);
 }
 
 static int
 ca_triop_may_raise (ca_triop_func_t func[], int8_t dt)
 {
-  return dt == CA_OBJECT || func[dt] == ca_triop_not_implement;
+  return func[dt] == ca_triop_not_implement
+      || ca_op_raises_on_cell(CA_OP_KIND_TRIOP, -1, dt);
 }
 
 static int
 ca_moncmp_may_raise (ca_moncmp_func_t func[], int8_t dt)
 {
-  return dt == CA_OBJECT || func[dt] == ca_moncmp_not_implement;
+  return func[dt] == ca_moncmp_not_implement
+      || ca_op_raises_on_cell(CA_OP_KIND_MONCMP, -1, dt);
 }
 
 static int
 ca_bincmp_may_raise (ca_bincmp_func_t func[], int8_t dt)
 {
-  return dt == CA_OBJECT || func[dt] == ca_bincmp_not_implement;
+  return func[dt] == ca_bincmp_not_implement
+      || ca_op_raises_on_cell(CA_OP_KIND_BINCMP, -1, dt);
 }
 
 /* One kernel call, packed so that it can run under rb_ensure. */
@@ -456,6 +486,7 @@ ca_op_guard_release (VALUE varg)
     }
     if ( g->mode[k] == 'w' ) {
       int tag = 0;
+      /* protect: a sync that raises is dropped so that every held array is detached */
       rb_protect(ca_op_guard_sync, (VALUE) ca, &tag);
       rb_set_errinfo(Qnil);
     }
@@ -495,11 +526,16 @@ ca_mask_overlay_or_body (VALUE arg)
 {
   ca_mask_overlay_or_t *o = (ca_mask_overlay_or_t *) arg;
   boolean8_t *ms;
+  /* Locals, not o->ma / o->elements: a store through a boolean8_t may alias
+     *o, so reading them through o reloads both every iteration and keeps
+     the loop from vectorizing. */
+  boolean8_t *ma = o->ma;
+  ca_size_t elements = o->elements;
   ca_size_t j;
-  o->scratch = ca_lazy_arena_acquire(o->elements);
+  o->scratch = ca_lazy_arena_acquire(elements);
   ms = (boolean8_t *) o->scratch;
   ca_xfer_all(o->mask, o->scratch, CA_XFER_GET);
-  for ( j = 0; j < o->elements; j++ ) o->ma[j] |= ms[j];
+  for ( j = 0; j < elements; j++ ) ma[j] |= ms[j];
   return Qnil;
 }
 
@@ -515,9 +551,10 @@ ca_mask_overlay_or_body (VALUE arg)
    Memory peak: one mask scratch at a time (= elements bytes, 1 B/cell),
    released between operands.
 
-   CAREFUL: `ca_out` must be a freshly templated entity (driver allocates
-   via ca_template_safe), so ca_out->mask->ptr is directly writable
-   without attach.
+   CAREFUL: ca_out's mask is written through ca_out->mask->ptr, so ca_out
+   is an entity (a fresh one from ca_template_safe) or an attached view.
+   Each operand other than a scalar has ca_out's number of elements
+   (ArgumentError otherwise); at most 8 operands.
 
    This gathers the full mask once; a per-chunk mask gather inside the
    chunked branch is a possible future optimisation. */
@@ -534,9 +571,21 @@ ca_mask_overlay_safe (CArray *ca_out, int n, ...)
   va_start(ap, n);
   for ( i = 0; i < n; i++ ) {
     slist[i] = va_arg(ap, CArray *);
-    if ( slist[i] && ca_has_mask(slist[i]) ) any_mask = 1;
   }
   va_end(ap);
+
+  /* An array operand's mask is gathered over ca_out's cells. */
+  for ( i = 0; i < n; i++ ) {
+    CArray *cs = slist[i];
+    if ( cs && ! ca_is_scalar(cs) && cs->elements != ca_out->elements ) {
+      rb_raise(rb_eArgError,
+               "mask operand has %lld elements, the output %lld",
+               (long long) cs->elements, (long long) ca_out->elements);
+    }
+  }
+  for ( i = 0; i < n; i++ ) {
+    if ( slist[i] && ca_has_mask(slist[i]) ) any_mask = 1;
+  }
 
   if ( ! any_mask ) return;
 
@@ -609,17 +658,12 @@ ca_mask_overlay_attached (CArray *out, int n,
                           CArray *s0, CArray *s1, CArray *s2)
 {
   ca_overlay_args_t a;
-  int tag = 0;
   a.out = out;
   a.n   = n;
   a.src[0] = s0;
   a.src[1] = s1;
   a.src[2] = s2;
-  rb_protect(ca_overlay_attached_body, (VALUE) &a, &tag);
-  if ( tag ) {
-    ca_detach(out);
-    rb_jump_tag(tag);
-  }
+  ca_fill_or_detach(1, &out, ca_overlay_attached_body, (VALUE) &a);
 }
 
 /* Monop driver.  ca1 is input-only (the driver does not attach it); ca2
@@ -642,13 +686,17 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
   }
   if ( func[ca1->data_type] == ca_monop_not_implement ) {
-    ca_op_refuse_unimplemented(self, ca1, rb_eCADataTypeError);
+    ca_op_refuse_unimplemented(self, ca1->data_type, rb_eCADataTypeError);
   }
 
   ca2 = ca_has_mask(ca1) ? ca_template_safe(ca1) : ca_template(ca1);
   out = ca_wrap_struct(ca2);
 
   ca_mask_overlay_safe(ca2, 1, ca1);
+
+  /* No cell to compute: the strided walks below hand the kernel a first
+     row before they look at the outer counts. */
+  if ( ca2->elements == 0 ) return out;
 
   if ( ca_attach_is_alias(ca1) ) {
     ca_monop_call_t k;
@@ -724,6 +772,7 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
                                  ca2->ptr, 1);
           }
           else {
+            /* empty: the function returns on a result with no cells, above */
             while ( 1 ) {
               ca_size_t off1 = e1_base;
               for ( k = 0; k < ndim - 1; k++ ) {
@@ -763,6 +812,8 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
     }
   }
 
+  /* the INT64 view of a boolean operand is reached only through ca1 */
+  RB_GC_GUARD(self);
   return out;
 }
 
@@ -775,7 +826,7 @@ rb_ca_call_monop_bang (VALUE self, ca_monop_func_t func[])
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
   if ( func[ca1->data_type] == ca_monop_not_implement ) {
-    ca_op_refuse_unimplemented(self, ca1, rb_eCADataTypeError);
+    ca_op_refuse_unimplemented(self, ca1->data_type, rb_eCADataTypeError);
   }
 
   ca_attach(ca1);   /* window: the kernel runs through ca_op_guarded when it can raise */
@@ -815,7 +866,7 @@ rb_ca_call_monop_typed (VALUE self, ca_monop_func_t func[],
 
   out_dt = out_data_types[ca1->data_type];
   if ( out_dt < 0 ) {
-    ca_op_refuse_unimplemented(self, ca1, rb_eCADataTypeError);
+    ca_op_refuse_unimplemented(self, ca1->data_type, rb_eCADataTypeError);
   }
 
   /* Allocate output with the per-op output data_type.  Same shape as input. */
@@ -824,6 +875,10 @@ rb_ca_call_monop_typed (VALUE self, ca_monop_func_t func[],
 
   /* Same fast/slow pattern as rb_ca_call_monop.  ca1 input-only, ca2 output. */
   ca_mask_overlay_safe(ca2, 1, ca1);
+
+  /* No cell to compute: the strided walks below hand the kernel a first
+     row before they look at the outer counts. */
+  if ( ca2->elements == 0 ) return out;
 
   if ( ca_attach_is_alias(ca1) ) {
     ca_monop_call_t k;
@@ -895,6 +950,7 @@ rb_ca_call_monop_typed (VALUE self, ca_monop_func_t func[],
                                  ca2->ptr, 1);
           }
           else {
+            /* empty: the function returns on a result with no cells, above */
             while ( 1 ) {
               ca_size_t off1 = e1_base;
               for ( k = 0; k < ndim - 1; k++ ) {
@@ -1165,7 +1221,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
     TypedData_Get_Struct(other, CArray, &carray_data_type, ca2);
   }
   if ( func[ca1->data_type] == ca_binop_not_implement ) {
-    ca_op_refuse_unimplemented(ca_is_face(ca1) ? self : other, ca1,
+    ca_op_refuse_unimplemented(ca_is_face(ca1) ? self : other, ca1->data_type,
                                rb_eCADataTypeError);
   }
 
@@ -1209,6 +1265,10 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
      ca_xfer_all instead of attaching them, so a mask on an attach-hostile
      input-only operand does not raise. */
   ca_mask_overlay_safe(ca3, 2, ca1, ca2);
+
+  /* No cell to compute: the strided walks below hand the kernel a first
+     row before they look at the outer counts. */
+  if ( ca3->elements == 0 ) return out;
 
   /* path decision: alias-attachable both → fast path */
   fast_path = ca_attach_is_alias(ca1) && ca_attach_is_alias(ca2);
@@ -1291,7 +1351,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
        Output ca3 is contig entity; per-row output offset = row_idx *
        inner_count.  The use_chunked / ALLOCV blocks below remain as a
        fallback (dead on the success path) but fire for views outside the
-       CAStride+entity family (CASelect / CAMapping / CAReduce
+       CAStride+entity family (CASelect / CAGrid / CAReduce
        etc.). */
     if ( i1 == 1 && i2 == 1 && nonalias_arrays >= 1 ) {
       extern ca_operation_function_t ca_stride_func;
@@ -1380,6 +1440,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
                    ca3->ptr, i3);
         }
         else {
+          /* empty: the function returns on a result with no cells, above */
           while ( 1 ) {
             ca_size_t off1 = e1_base, off2 = e2_base;
             for ( k = 0; k < ndim - 1; k++ ) {
@@ -1519,7 +1580,7 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
   TypedData_Get_Struct(other, CArray, &carray_data_type, ca2);
   if ( func[ca1->data_type] == ca_binop_not_implement ) {
-    ca_op_refuse_unimplemented(self, ca1, rb_eCADataTypeError);
+    ca_op_refuse_unimplemented(self, ca1->data_type, rb_eCADataTypeError);
   }
 
   self_is_scalar  = RTEST(rb_obj_is_cscalar(self));
@@ -1589,6 +1650,8 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
 
   ca_sync_detach(ca1);
 
+  /* a cast or broadcast view of other is reached only through ca2 */
+  RB_GC_GUARD(other);
   return self;
 }
 
@@ -1732,7 +1795,7 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
   if ( func[ca1->data_type] == ca_triop_not_implement ) {
     ca_op_refuse_unimplemented(ca_is_face(ca1) ? self
                                : ca_is_face(ca2) ? other2 : other3,
-                               ca1, rb_eCADataTypeError);
+                               ca1->data_type, rb_eCADataTypeError);
   }
 
   /* Element-count check: all non-scalar operands must agree.            */
@@ -1855,6 +1918,10 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
     }
   }
 
+  /* the INT64 views of a boolean triop are reached only through ca1..ca3 */
+  RB_GC_GUARD(self);
+  RB_GC_GUARD(other2);
+  RB_GC_GUARD(other3);
   return out;
 }
 
@@ -1883,7 +1950,7 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
   TypedData_Get_Struct(other2, CArray, &carray_data_type, ca2);
   TypedData_Get_Struct(other3, CArray, &carray_data_type, ca3);
   if ( func[ca1->data_type] == ca_triop_not_implement ) {
-    ca_op_refuse_unimplemented(self, ca1, rb_eCADataTypeError);
+    ca_op_refuse_unimplemented(self, ca1->data_type, rb_eCADataTypeError);
   }
 
   /* self is the write target, so the destination rule applies to each
@@ -2018,6 +2085,10 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
 
   ca_sync_detach(ca1);
 
+  /* cast or broadcast views of the operands are reached only through
+     ca2 and ca3 */
+  RB_GC_GUARD(other2);
+  RB_GC_GUARD(other3);
   return self;
 }
 
@@ -2031,7 +2102,7 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
   if ( func[ca1->data_type] == ca_moncmp_not_implement ) {
-    ca_op_refuse_unimplemented(self, ca1, rb_eCADataTypeError);
+    ca_op_refuse_unimplemented(self, ca1->data_type, rb_eCADataTypeError);
   }
 
   if ( ca_is_scalar(ca1) ) {
@@ -2044,6 +2115,9 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
   TypedData_Get_Struct(out, CArray, &carray_data_type, ca2);
 
   ca_mask_overlay_safe(ca2, 1, ca1);
+
+  /* No cell to compute, as in the operators above. */
+  if ( ca2->elements == 0 ) return out;
 
   /* The kernel's masked branch skips masked cells, so they would keep the
      uninitialised data from rb_carray_new.  Zero the output when a mask is
@@ -2302,7 +2376,7 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
   TypedData_Get_Struct(other, CArray, &carray_data_type, ca2);
   if ( func[ca1->data_type] == ca_bincmp_not_implement ) {
-    ca_op_refuse_unimplemented(ca_is_face(ca1) ? self : other, ca1,
+    ca_op_refuse_unimplemented(ca_is_face(ca1) ? self : other, ca1->data_type,
                                rb_eTypeError);
   }
 
@@ -2337,6 +2411,9 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
     TypedData_Get_Struct(out, CArray, &carray_data_type, ca3);
 
     ca_mask_overlay_safe(ca3, 2, ca1, ca2);
+
+    /* No cell to compute, as in the operators above. */
+    if ( ca3->elements == 0 ) return out;
 
     /* The kernel's masked branch skips masked cells, so they would keep the
        uninitialised data from rb_carray_new.  Zero the output when a mask is

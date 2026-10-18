@@ -164,7 +164,7 @@ m = CArray.float64(3, 4) { |i, j| (i * 10 + j).to_f }
 # row i is [10*i, 10*i+1, 10*i+2, 10*i+3]
 
 out = m.linear_fetch(1.5, axis: 1)   # one fetch per row
-out.dim                              # => [3]
+out.shape                              # => [3]
 out.to_a                             # => [1.5, 11.5, 21.5]
 ```
 
@@ -174,7 +174,7 @@ and replaced by the (scalar) result for each fiber:
 ```ruby
 self_3d = CArray.float64(4, 5, 6) { |i, j, k| j.to_f }
 r = self_3d.linear_section(2.5, axis: 1)   # axis 1 (length 5) consumed
-r.dim                                      # => [4, 6]
+r.shape                                      # => [4, 6]
 ```
 
 Negative axes count from the end, exactly like indexing:
@@ -206,19 +206,19 @@ has length 6, and the *base shape* — everything else — is `[4, 5]`):
 self_3d = CArray.float64(4, 5, 6) { |i, j, k| k.to_f }
 
 # A1 — scalar, one answer per fiber
-self_3d.linear_fetch(2.5, axis: -1).dim                  # => [4, 5]
+self_3d.linear_fetch(2.5, axis: -1).shape                  # => [4, 5]
 
 # A2 — a shared list of queries, broadcast to every fiber
 val = CA_DOUBLE([1.5, 3.0, 4.5])
-self_3d.linear_section(val, axis: -1).dim                # => [4, 5, 3]
+self_3d.linear_section(val, axis: -1).shape                # => [4, 5, 3]
 
 # A2.5 — one query per fiber (query shape == base shape)
 val = CArray.float64(4, 5) { |i, j| ((i + j) % 6).to_f }
-self_3d.linear_fetch(val, axis: -1).dim                  # => [4, 5]
+self_3d.linear_fetch(val, axis: -1).shape                  # => [4, 5]
 
 # A3 — M distinct queries per fiber (the meteorological regrid case)
 val = CArray.float64(4, 5, 3) { |i, j, m| (m * 2 + 0.5).to_f }
-self_3d.linear_fetch(val, axis: -1).dim                  # => [4, 5, 3]
+self_3d.linear_fetch(val, axis: -1).shape                  # => [4, 5, 3]
 ```
 
 A3 is the workhorse for regridding: each `(i, j)` column of `self` is a

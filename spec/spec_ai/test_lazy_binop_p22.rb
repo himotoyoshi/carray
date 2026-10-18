@@ -215,6 +215,7 @@ class TestLazyBinopP22 < Test::Unit::TestCase
   end
 
   def test_three_binop_chain_scratch_count
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(64).seq + 1.0
     b = CArray.float64(64).seq + 2.0
     c = CArray.float64(64).seq + 3.0

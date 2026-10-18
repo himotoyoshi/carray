@@ -77,7 +77,7 @@ class TestSortAddrAxisAndByKey < Test::Unit::TestCase
     a[0, 0] = UNDEF
     assert_equal [[3,4,5],[2,1,8],[7,6,0]], a.sort_addr.to_a
     assert_equal [[0,3,4],[5,2,1],[8,7,6]], a.sort_addr(masked_position: :first).to_a
-    assert_equal [3, 3], a.sort_addr.dim.to_a
+    assert_equal [3, 3], a.sort_addr.shape.to_a
   end
 
   # ---- 3.0 breaking: variadic instance form removed -----------------------

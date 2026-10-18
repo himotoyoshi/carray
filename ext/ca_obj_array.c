@@ -61,7 +61,10 @@ const rb_data_type_t carray_data_type = {
         .dsize = ca_dsize,
         .dcompact = NULL
     },
-    .flags = RUBY_TYPED_FREE_IMMEDIATELY,
+    /* A frozen entity is shared between Ractors: reading it writes nothing
+       to its struct (an entity takes no attach count), so each Ractor makes
+       its own views of it. */
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY | RUBY_TYPED_FROZEN_SHAREABLE,
 };
 
 const rb_data_type_t cawrap_data_type = {
@@ -85,7 +88,10 @@ const rb_data_type_t cscalar_data_type = {
         .dsize = ca_dsize,
         .dcompact = NULL
     },
-    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+    /* A frozen entity is shared between Ractors: reading it writes nothing
+       to its struct (an entity takes no attach count), so each Ractor makes
+       its own views of it. */
+    .flags = RUBY_TYPED_FREE_IMMEDIATELY | RUBY_TYPED_FROZEN_SHAREABLE
 };
 
 const rb_data_type_t caview_data_type = {
@@ -142,10 +148,10 @@ carray_setup_i (CArray *ca,
   ca_size_t k;
 
   /* check arguments */
-  CA_CHECK_DATA_TYPE(data_type);
-  CA_CHECK_RANK(ndim);
-  CA_CHECK_DIM(ndim, dim);
-  CA_CHECK_BYTES(data_type, bytes);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
+  CA_CHECK_RANK_GIVEN(ndim);
+  CA_CHECK_DIM_GIVEN(ndim, dim);
+  CA_CHECK_BYTES_GIVEN(data_type, bytes);
 
   elements = ca_shape_elements(ndim, dim, bytes);
 
@@ -190,16 +196,14 @@ carray_setup_i (CArray *ca,
 
     /* allocate memory for entity */
     if ( use_calloc ) {
-      /* ca->ptr = ALLOC_N(char, elements * bytes); */
-      ca->ptr = xmalloc(elements * bytes);
+      ca->ptr = xmalloc(elements * bytes);  /* cells: set to 0 below */
       MEMZERO(ca->ptr, char, elements * bytes);
     }
     else {
-      /* ca->ptr = ALLOC_N(char, elements * bytes); */
-      ca->ptr = xmalloc(elements * bytes);
+      ca->ptr = xmalloc(elements * bytes);  /* cells: set to 0 below */
     }
 
-    /* initialize elements with Qnil for CA_OBJECT data_type */
+    /* an object array starts with every cell 0 */
     if ( allocate && data_type == CA_OBJECT ) {
       volatile VALUE zero = SIZE2NUM(0);
       VALUE *p = (VALUE *) ca->ptr;
@@ -215,6 +219,7 @@ carray_setup_i (CArray *ca,
 
   ca->mask = NULL;
   if ( mask ) {
+    /* mask: only initialize_copy passes one, on a struct Ruby owns */
     ca_setup_mask(ca, mask);
   }
 
@@ -243,8 +248,11 @@ ca_wrap_setup (CArray *ca,
   int ret;
 
   ret = carray_setup_i(ca, data_type, ndim, dim, bytes, mask, 0, 0, NULL);
-  if ( (!ptr) && (ca->elements != 0) ) {
+  if ( (!ptr) && ca_shape_elements(ndim, dim, bytes) != 0 ) {
     rb_raise(rb_eRuntimeError, "wrapping NULL pointer with an non-empty array");
+  }
+  if ( ca == NULL ) {                            /* checks only */
+    return ret;
   }
   ca->ptr = ptr;
   return ret;
@@ -258,8 +266,33 @@ ca_wrap_setup_null (CArray *ca,
   int ret;
 
   ret = carray_setup_i(ca, data_type, ndim, dim, bytes, mask, 0, 0, NULL);
-  ca->ptr = NULL;
+  if ( ca != NULL ) {
+    ca->ptr = NULL;
+  }
   return ret;
+}
+
+static VALUE
+carray_new_copy_mask (VALUE arg)
+{
+  void **a = (void **) arg;
+  ca_setup_mask((CArray *) a[0], (CArray *) a[1]);
+  return Qnil;
+}
+
+/* Reading the mask to copy can call Ruby (a CAObject's mask hooks) and
+   raise, while the new array belongs to no Ruby object yet.  The array is
+   built without it, and the mask is copied in under ca_fill_or_free. */
+static CArray *
+carray_new_with_mask (CArray *ca, CArray *mask)
+{
+  if ( mask ) {
+    void *a[2];
+    a[0] = ca;
+    a[1] = mask;
+    ca_fill_or_free(ca, carray_new_copy_mask, (VALUE) a);
+  }
+  return ca;
 }
 
 CArray *
@@ -267,10 +300,10 @@ carray_new (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask)
 {
   CArray *ca;
-  carray_setup(NULL, data_type, ndim, dim, bytes, mask);
+  carray_setup(NULL, data_type, ndim, dim, bytes, NULL);
   ca = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
-  carray_setup(ca, data_type, ndim, dim, bytes, mask);
-  return ca;
+  carray_setup(ca, data_type, ndim, dim, bytes, NULL);
+  return carray_new_with_mask(ca, mask);
 }
 
 CArray *
@@ -278,10 +311,10 @@ carray_new_safe (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask)
 {
   CArray *ca;
-  carray_safe_setup(NULL, data_type, ndim, dim, bytes, mask);
+  carray_safe_setup(NULL, data_type, ndim, dim, bytes, NULL);
   ca = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
-  carray_safe_setup(ca, data_type, ndim, dim, bytes, mask);
-  return ca;
+  carray_safe_setup(ca, data_type, ndim, dim, bytes, NULL);
+  return carray_new_with_mask(ca, mask);
 }
 
 /* Create an entity that adopts a caller-provided data buffer instead of
@@ -297,6 +330,7 @@ carray_new_adopt (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes
   if ( ! ptr ) {
     rb_raise(rb_eRuntimeError, "carray_new_adopt: NULL data pointer");
   }
+  carray_setup_i(NULL, data_type, ndim, dim, bytes, NULL, 0, 0, ptr);
   ca = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
   carray_setup_i(ca, data_type, ndim, dim, bytes, NULL, 0, 0, ptr);
   return ca;
@@ -306,18 +340,22 @@ CAWrap *
 ca_wrap_new (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask, char *ptr)
 {
-  CAWrap *ca  = (CAWrap *) ca_array_alloc(CA_OBJ_ARRAY_WRAP, ndim);
-  ca_wrap_setup(ca, data_type, ndim, dim, bytes, mask, ptr);
-  return ca;
+  CAWrap *ca;
+  ca_wrap_setup(NULL, data_type, ndim, dim, bytes, NULL, ptr);
+  ca = (CAWrap *) ca_array_alloc(CA_OBJ_ARRAY_WRAP, ndim);
+  ca_wrap_setup(ca, data_type, ndim, dim, bytes, NULL, ptr);
+  return (CAWrap *) carray_new_with_mask((CArray *) ca, mask);
 }
 
 CAWrap *
 ca_wrap_new_null (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
                   CArray *mask)
 {
-  CAWrap *ca  = (CAWrap *) ca_array_alloc(CA_OBJ_ARRAY_WRAP, ndim);
-  ca_wrap_setup_null(ca, data_type, ndim, dim, bytes, mask);
-  return ca;
+  CAWrap *ca;
+  ca_wrap_setup_null(NULL, data_type, ndim, dim, bytes, NULL);
+  ca = (CAWrap *) ca_array_alloc(CA_OBJ_ARRAY_WRAP, ndim);
+  ca_wrap_setup_null(ca, data_type, ndim, dim, bytes, NULL);
+  return (CAWrap *) carray_new_with_mask((CArray *) ca, mask);
 }
 
 void
@@ -360,8 +398,14 @@ static int
 cscalar_setup (CScalar *ca,
                int8_t data_type, ca_size_t bytes, CArray *mask)
 {
-  CA_CHECK_DATA_TYPE(data_type);
-  CA_CHECK_BYTES(data_type, bytes);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
+  CA_CHECK_BYTES_GIVEN(data_type, bytes);
+
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
 
   ca->obj_type  = CA_OBJ_SCALAR;
   ca->data_type = data_type;
@@ -370,7 +414,7 @@ cscalar_setup (CScalar *ca,
   ca->bytes     = bytes;
   ca->elements  = 1;
   ca->dim       = &(ca->_dim);
-  ca->ptr       = xmalloc(bytes);
+  ca->ptr       = xmalloc(bytes);  /* cells: the one cell is set to 0 below */
   ca->mask      = NULL;
 
   ca->dim[0] = 1;
@@ -383,6 +427,7 @@ cscalar_setup (CScalar *ca,
   }
 
   if ( mask ) {
+    /* mask: the constructors pass none (carray_new_with_mask copies it) */
     ca_setup_mask((CArray *)ca, mask);
   }
 
@@ -398,9 +443,11 @@ cscalar_setup (CScalar *ca,
 CScalar *
 cscalar_new (int8_t data_type, ca_size_t bytes, CArray *mask)
 {
-  CScalar *ca = ALLOC(CScalar);
-  cscalar_setup(ca, data_type, bytes, mask);
-  return ca;
+  CScalar *ca;
+  cscalar_setup(NULL, data_type, bytes, NULL);
+  ca = ALLOC(CScalar);
+  cscalar_setup(ca, data_type, bytes, NULL);
+  return (CScalar *) carray_new_with_mask((CArray *) ca, mask);
 }
 
 /*
@@ -410,7 +457,9 @@ cscalar_new (int8_t data_type, ca_size_t bytes, CArray *mask)
 CScalar *
 cscalar_new2 (int8_t data_type, ca_size_t bytes, char *val)
 {
-  CScalar *ca = ALLOC(CScalar);
+  CScalar *ca;
+  cscalar_setup(NULL, data_type, bytes, NULL);
+  ca = ALLOC(CScalar);
   cscalar_setup(ca, data_type, bytes, NULL);
   memcpy(ca->ptr, val, ca->bytes);
   return ca;
@@ -591,6 +640,7 @@ ca_fill_stride_buffer (char *dst, ca_size_t bytes, ca_size_t base, int8_t ndim,
   outer_ndim  = ndim - 1;
 
   for ( k = 0; k < outer_ndim; k++ ) idx[k] = 0;
+  /* empty: the function returns on an empty region at its entry */
   while ( 1 ) {
     ca_size_t addr = base;
     char     *p;
@@ -824,7 +874,7 @@ rb_ca_s_allocate (VALUE klass)
 }
 
 /* Reads the (data_type, dim, bytes: nil) argument list that CArray.new
-   and CArray.__empty__ share.  The two differ only in whether the buffer
+   and CArray.empty_of_data_type share.  The two differ only in whether the buffer
    is filled, so the rule for reading their arguments -- the optional
    bytes for a fixlen, the refusal of a Class, the guess of the data type,
    the demand that dim be an Array -- is written once here. */
@@ -855,7 +905,7 @@ ca_scan_construct_args (int argc, VALUE *argv, int8_t *data_type,
   rb_ca_guess_type_and_bytes(rtype, rbytes, data_type, bytes);
 
   Check_Type(rdim, T_ARRAY);
-  CA_CHECK_RANK(RARRAY_LEN(rdim));     /* before dim[] is filled */
+  CA_CHECK_RANK_GIVEN(RARRAY_LEN(rdim));     /* before dim[] is filled */
   *ndim = RARRAY_LEN(rdim);
   for (i=0; i<*ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
@@ -907,8 +957,13 @@ rb_ca_initialize (int argc, VALUE *argv, VALUE self)
          with the multi-dimensional subscript yielded as individual
          integer arguments, so |i|, |i,j|, |i,j,k| all work uniformly
          across ranks.  Block forms that want the whole subscript as
-         an Array should write |*idx|. */
-    if ( rb_proc_arity(rb_block_proc()) == 0 ) {
+         an Array should write |*idx|.
+       An array of no cells calls neither, as Array.new(0) { ... } does
+       not. */
+    if ( ca->elements == 0 ) {
+      ;
+    }
+    else if ( rb_proc_arity(rb_block_proc()) == 0 ) {
       volatile VALUE rval = rb_yield_values2(0, NULL);
       rb_ca_store_all(self, rval);
     }
@@ -1160,6 +1215,7 @@ rb_ca_initialize_dup (VALUE self, VALUE other)
 {
   rb_call_super(1, &other);
   ca_dup_keep_state(self, other);
+  rb_ca_own_attr(self);
   return self;
 }
 
@@ -1177,6 +1233,7 @@ rb_ca_initialize_clone (int argc, VALUE *argv, VALUE self)
   rb_call_super_kw(argc, argv, RB_PASS_CALLED_KEYWORDS);
   rb_scan_args(argc, argv, "1:", &orig, &opts);
   ca_dup_keep_state(self, orig);
+  rb_ca_own_attr(self);
 
   if ( ! NIL_P(opts) ) {
     vfreeze = rb_hash_lookup2(opts, ID2SYM(rb_intern("freeze")), Qnil);
@@ -1246,7 +1303,7 @@ rb_ca_s_wrap (int argc, VALUE *argv, VALUE self)
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
 
   Check_Type(rdim, T_ARRAY);
-  CA_CHECK_RANK(RARRAY_LEN(rdim));     /* before dim[] is filled */
+  CA_CHECK_RANK_GIVEN(RARRAY_LEN(rdim));     /* before dim[] is filled */
   ndim = RARRAY_LEN(rdim);
   for (i=0; i<ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
@@ -1552,7 +1609,7 @@ rb_ca_s_alloc_uninit (VALUE klass, VALUE rtype, VALUE rshape)
   int8_t i;
   rb_ca_guess_type_and_bytes(rtype, Qnil, &data_type, &bytes);
   Check_Type(rshape, T_ARRAY);
-  CA_CHECK_RANK(RARRAY_LEN(rshape));   /* before dim[] is filled */
+  CA_CHECK_RANK_GIVEN(RARRAY_LEN(rshape));   /* before dim[] is filled */
   ndim = (int8_t) RARRAY_LEN(rshape);
   for (i = 0; i < ndim; i++) dim[i] = NUM2SIZE(rb_ary_entry(rshape, i));
   return rb_carray_new(data_type, ndim, dim, bytes, NULL);
@@ -1596,7 +1653,7 @@ Init_ca_obj_array (void)
   rb_define_method(rb_cCArray, "initialize", rb_ca_initialize, -1);
   rb_define_singleton_method(rb_cCArray, "__alloc_uninit__",
                              rb_ca_s_alloc_uninit, 2);
-  rb_define_singleton_method(rb_cCArray, "__empty__", rb_ca_s_empty, -1);
+  rb_define_private_method(rb_singleton_class(rb_cCArray), "empty_of_data_type", rb_ca_s_empty, -1);
 
   rb_define_singleton_method(rb_cCArray, "fixlen", rb_ca_s_fixlen, -1);
   rb_define_singleton_method(rb_cCArray, "boolean", rb_ca_s_boolean, -1);

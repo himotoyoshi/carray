@@ -100,4 +100,80 @@ class TestTimeParseArray < Test::Unit::TestCase
       CArray.time(CA_OBJECT(["9999-12-31"]), unit: :ns, format: "%Y-%m-%d", on_error: :mask)
     end
   end
+
+  # With a format, an Integer is the digits it is written with, not Unix
+  # seconds; %s and %Q read the seconds and milliseconds since the epoch.
+  def test_a_format_reads_integers_as_their_digits
+    f = "%Y%m%d"
+    assert_equal ["2000-01-01", "2024-02-29"],
+                 CArray.time(CA_INT64([20000101, 20240229]), format: f, unit: :D).to_a.map(&:to_s)
+    x = CA_INT32([20000101, 20240229])
+    x[1] = UNDEF
+    assert_equal ["2000-01-01", UNDEF], CArray.time(x, format: f, unit: :D).to_a.map { |v| UNDEF.equal?(v) ? v : v.to_s }
+    assert_equal ["2000-01-01"], CArray.time(20000101, format: f, unit: :D).to_a.map(&:to_s)
+    assert_equal ["2000-01-01"], CArray.time([20000101], format: f, unit: :D).to_a.map(&:to_s)
+    # Without a format an Integer counts ticks of the unit: days with unit: :D,
+    # seconds with no unit.
+    assert_equal ["1970-01-02"], CArray.time(CA_INT64([1]), unit: :D).to_a.map(&:to_s)
+    assert_equal ["1970-01-02T00:00:00Z"], CArray.time(CA_INT64([86400])).to_a.map(&:to_s)
+    assert_equal ["2023-11-14T22:13:20Z"],
+                 CArray.time(CA_INT64([1700000000]), format: "%s", unit: :s).to_a.map(&:to_s)
+    assert_equal ["2023-11-14T22:13:20.123Z"],
+                 CArray.time("1700000000123", format: "%Q", unit: :ms).to_a.map(&:to_s)
+  end
+
+  # Without unit:, the values are read in the finest unit they show, so a
+  # fraction of a second is kept rather than cut to :s.
+  def test_the_unit_defaults_to_the_finest_the_values_show
+    unit = ->(*a, **k) { CArray.time(*a, **k).unit.to_s }
+    assert_equal "D", unit.(%w[2013-08-01 2013-08-02])
+    assert_equal "s", unit.(["2013-08-01 10:30", "2013-08-02"])
+    assert_equal "ms", unit.(%w[2013-08-01T10:00:00.5])
+    assert_equal ["2013-08-01T10:00:00.500Z"], CArray.time(%w[2013-08-01T10:00:00.5]).to_a.map(&:to_s)
+    assert_equal "ms", unit.(["Aug 1 2013 10:00:00.25"])
+    assert_equal "D", unit.(CA_INT64([20240101]), format: "%Y%m%d")
+    assert_equal "ms", unit.(["2024-01-01 10:00:00.123"], format: "%Y-%m-%d %H:%M:%S.%L")
+    assert_equal "s", unit.(1700000000)
+    assert_equal "ms", unit.(Time.utc(2024, 1, 1, 0, 0, 0.5r))
+    assert_equal "D", unit.(Date.new(2024, 1, 1))
+    assert_equal "s", unit.([Date.new(2024, 1, 1), "2024-01-01T10:00"])
+    assert_equal "h", unit.(%w[2013-08-01], unit: :h)
+  end
+
+  # A month beside a day or an hour is read on the fixed unit both reach.
+  def test_calendar_and_fixed_elements_take_the_fixed_unit
+    m = CArray.time(["2024-03"], unit: :M)[0]
+    d = CArray.time(["2024-03-05"], unit: :D)[0]
+    h = CArray.time(["2024-03-05 10:00"], unit: :h)[0]
+    y = CArray.time(["2024"], unit: :Y)[0]
+    show = ->(t) { [t.unit.to_s, t.to_a.map { |v| UNDEF.equal?(v) ? v : v.to_s }] }
+    assert_equal ["D", ["2024-03-01", "2024-03-05"]], show.(CArray.time([m, d]))
+    assert_equal ["h", ["2024-03-01T00:00:00Z", "2024-03-05T10:00:00Z"]], show.(CArray.time([m, h]))
+    assert_equal ["M", ["2024-01", "2024-03"]], show.(CArray.time([y, m]))
+    assert_equal ["D", ["2024-03-01", UNDEF, "2024-03-05"]], show.(CArray.time([m, nil, d]))
+    assert_equal ["D", ["2024-03-01", "2024-03-05"]], show.(CArray.time(%w[2024-03 2024-03-05]))
+    assert_equal ["2024-03-01", "2024-03-05"],
+                 CAFrame.from_records([{ "t" => m }, { "t" => d }])["t"].to_a.map(&:to_s)
+  end
+  def test_an_integer_counts_ticks_of_the_unit
+    ts = ->(t) { t.to_a.map(&:to_s) }
+    assert_equal ["1970-01-01T00:00:00Z", "1970-01-01T00:10:00Z", "1970-01-01T01:00:00Z"],
+                 ts.(CArray.time(CA_INT64([0, 10, 60]), unit: :m))
+    assert_equal ts.(CA_INT64([0, 1, 2]).time(unit: "10 minutes")),
+                 ts.(CArray.time(CA_INT32([0, 1, 2]), unit: "10 minutes"))
+    assert_equal ["1970-01-01T03:00:00Z"], ts.(CArray.time(3, unit: :h))
+    assert_equal ["1970-01-03", "2024-01-01"], ts.(CArray.time([2, "2024-01-01"], unit: :D))
+    assert_equal ["1970-02"], ts.(CArray.time(CA_INT64([1]), unit: :M))
+    a = CA_INT64([1, 2])
+    a[1] = UNDEF
+    assert_equal ["1970-01-02", UNDEF], CArray.time(a, unit: :D).to_a.map { |v| UNDEF.equal?(v) ? v : v.to_s }
+    # no unit: seconds, as before
+    assert_equal ["2023-11-14T22:13:20Z"], ts.(CArray.time(1700000000))
+  end
+
+  def test_an_integer_instant_elsewhere_is_still_unix_seconds
+    assert_equal ["1970-01-01T01:00:00Z", "1970-01-01T02:00:00Z"],
+                 CArray.time_series(3600, count: 2, unit: :h).to_a.map(&:to_s)
+    assert_equal "#<CATime::Grid hours since 1970-01-01 02:00:00>", CATime::Grid.new(:h, 7200).inspect
+  end
 end

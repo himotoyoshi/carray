@@ -6,6 +6,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* CA_CHECK_*_GIVEN */
 
 /* ------------------------------------------------------------------- */
 /* Symbol cache for data_type code → Symbol lookup.
@@ -25,7 +26,7 @@ ID ca_data_type_sym[CA_NTYPE];
 VALUE
 rb_ca_data_type_to_sym (int8_t data_type)
 {
-  CA_CHECK_DATA_TYPE(data_type);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
   return ID2SYM(ca_data_type_sym[data_type]);
 }
 
@@ -69,7 +70,7 @@ static VALUE
 rb_ca_s_data_type_name (VALUE klass, VALUE type)
 {
   int8_t data_type = rb_ca_guess_type(type);
-  CA_CHECK_DATA_TYPE(data_type);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
   return rb_str_new2(ca_type_name[data_type]);
 }
 
@@ -84,7 +85,7 @@ static VALUE
 rb_ca_s_data_type_code (VALUE klass, VALUE type)
 {
   int8_t data_type = rb_ca_guess_type(type);
-  CA_CHECK_DATA_TYPE(data_type);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
   return INT2NUM(data_type);
 }
 

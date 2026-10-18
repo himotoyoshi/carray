@@ -116,19 +116,23 @@ ca_project_loop (CArray *co, CArray *ca, CArray *ci, char *lfill, char *ufill)
   xfree(ma);
 }
 
-CArray *
+/* The result is wrapped before anything is copied into it: for an object
+   array the gathered cells are VALUEs that only the result's mark keeps
+   alive once the source is detached. */
+static VALUE
 ca_project (CArray *ca, CArray *ci, char *lfill, char *ufill)
 {
+  volatile VALUE obj;
   CArray *co;
 
+  obj = rb_carray_new(ca->data_type, ci->ndim, ci->dim, ca->bytes, NULL);
+  GetCArray(obj, co);
+
   ca_attach_n(2, ca, ci); /* window: nothing raises inside */
-
-  co = carray_new(ca->data_type, ci->ndim, ci->dim, ca->bytes, NULL);
   ca_project_loop(co, ca, ci, lfill, ufill);
-
   ca_detach_n(2, ca, ci); /* DETACH */
 
-  return co;
+  return obj;
 }
 
 /* rk.__count_below__(q, inclusive) -- for each cell of q, how many values
@@ -254,12 +258,12 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
   lfval = ALLOCV_N(char, hlfval, ca->bytes);   /* converting a fill value */
   ufval = ALLOCV_N(char, hufval, ca->bytes);   /* can raise; the unwind frees */
 
-  if ( ! NIL_P(vlfval) ) {
+  if ( ! NIL_P(vlfval) && vlfval != CA_UNDEF ) {
     rb_ca_obj2ptr(self, vlfval, lfval);
     rb_ca_obj2ptr(self, vlfval, ufval);
   }
 
-  if ( ! NIL_P(vufval) ) {
+  if ( ! NIL_P(vufval) && vufval != CA_UNDEF ) {
     rb_ca_obj2ptr(self, vufval, ufval);
   }
 
@@ -274,14 +278,18 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
     TypedData_Get_Struct(vstorage, CArray, &carray_data_type, ca);
   }
 
-  co = ca_project(ca, ci,
-                 ( ! NIL_P(vlfval) ) ? lfval : NULL,
-                 ( ( ! NIL_P(vufval) ) || ( ! NIL_P(vlfval) ) ) ? ufval : NULL);
+  /* A fill of UNDEF is no fill: the cell is masked, as it is with none. */
+  {
+    VALUE vlower = vlfval;
+    VALUE vupper = NIL_P(vufval) ? vlfval : vufval;
+    obj = ca_project(ca, ci,
+                     ( NIL_P(vlower) || vlower == CA_UNDEF ) ? NULL : lfval,
+                     ( NIL_P(vupper) || vupper == CA_UNDEF ) ? NULL : ufval);
+  }
+  GetCArray(obj, co);
 
   ALLOCV_END(hlfval);
   ALLOCV_END(hufval);
-
-  obj = ca_wrap_struct(co);
 
   if ( ! ca_is_any_masked(co) ) {
     obj = rb_ca_unmask_copy(obj);
@@ -291,6 +299,7 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
     obj = ca_face_lift(obj, self);
   }
 
+  rb_ca_inherit_attr(obj, self);
   return obj;
 }
 
@@ -532,6 +541,41 @@ rb_ca_search_nearest_addr_kw (int argc, VALUE *argv, VALUE self)
 
 /* ---- sort_by_key family ---------------------------------------------- */
 
+/* The key orders self's cells one for one, so it has self's shape. */
+static void
+ca_by_key_check_shape (VALUE self, VALUE rkey, const char *name)
+{
+  CArray *ca, *ck;
+  int8_t i;
+  rb_check_carray_object(rkey);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(rkey, CArray, &carray_data_type, ck);
+  if ( ca->ndim == ck->ndim ) {
+    for (i = 0; i < ca->ndim; i++) {
+      if ( ca->dim[i] != ck->dim[i] ) break;
+    }
+    if ( i == ca->ndim ) return;
+  }
+  rb_raise(rb_eArgError, "%s: the key's shape %"PRIsVALUE" differs from "
+           "the array's %"PRIsVALUE, name,
+           rb_funcall(rkey, rb_intern("shape"), 0),
+           rb_funcall(self, rb_intern("shape"), 0));
+}
+
+/* self at the addresses an extremum by key found.  A fiber with no cell to
+   compare has a masked (or UNDEF) address and answers UNDEF. */
+static VALUE
+ca_by_key_fetch (VALUE self, VALUE addrs)
+{
+  if ( addrs == CA_UNDEF ) {
+    return CA_UNDEF;
+  }
+  if ( rb_obj_is_carray(addrs) && RTEST(rb_ca_has_mask(addrs)) ) {
+    return rb_funcall(self, rb_intern("project"), 1, addrs);
+  }
+  return rb_ca_fetch(self, addrs);
+}
+
 /* sort_by_key(key, axis: 0) -- gather self at key.sort_addr(axis:). */
 static VALUE
 rb_ca_sort_by_key (int argc, VALUE *argv, VALUE self)
@@ -542,6 +586,7 @@ rb_ca_sort_by_key (int argc, VALUE *argv, VALUE self)
   if ( NIL_P(raxis) ) {
     raxis = INT2FIX(0);
   }
+  ca_by_key_check_shape(self, rkey, "sort_by_key");
   VALUE addrs = rb_ca_sort_addr_c(rkey, raxis, 0, 1);  /* masked_last=1 (:last), unchanged default */
   return rb_ca_fetch(self, addrs);
 }
@@ -553,9 +598,11 @@ rb_ca_max_by_key (int argc, VALUE *argv, VALUE self)
   VALUE rkey, rkw = Qnil, raxis = Qnil;
   rb_scan_args(argc, argv, "1:", &rkey, &rkw);
   rb_scan_options(rkw, "axis", &raxis);
-  if ( RTEST(rb_ca_is_empty(self)) ) {
-    return rb_const_get(rb_cObject, rb_intern("UNDEF"));
+  ca_by_key_check_shape(self, rkey, "max_by_key");
+  if ( NIL_P(raxis) && RTEST(rb_ca_is_empty(self)) ) {
+    return CA_UNDEF;
   }
+  rkey = ca_order_key(rkey, "max_by_key");
 
   VALUE addrs;
 
@@ -568,7 +615,7 @@ rb_ca_max_by_key (int argc, VALUE *argv, VALUE self)
     rb_hash_aset(kw, ID2SYM(id_axis), raxis);
     addrs = rb_funcallv_kw(rkey, rb_intern("max_addr"), 1, &kw, RB_PASS_KEYWORDS);
   }
-  return rb_ca_fetch(self, addrs);
+  return ca_by_key_fetch(self, addrs);
 }
 
 /* min_by_key(key, axis: nil) -- self[key.min_addr(axis:)] (or UNDEF if empty). */
@@ -578,9 +625,11 @@ rb_ca_min_by_key (int argc, VALUE *argv, VALUE self)
   VALUE rkey, rkw = Qnil, raxis = Qnil;
   rb_scan_args(argc, argv, "1:", &rkey, &rkw);
   rb_scan_options(rkw, "axis", &raxis);
-  if ( RTEST(rb_ca_is_empty(self)) ) {
-    return rb_const_get(rb_cObject, rb_intern("UNDEF"));
+  ca_by_key_check_shape(self, rkey, "min_by_key");
+  if ( NIL_P(raxis) && RTEST(rb_ca_is_empty(self)) ) {
+    return CA_UNDEF;
   }
+  rkey = ca_order_key(rkey, "min_by_key");
 
   VALUE addrs;
 
@@ -593,7 +642,7 @@ rb_ca_min_by_key (int argc, VALUE *argv, VALUE self)
     rb_hash_aset(kw, ID2SYM(id_axis), raxis);
     addrs = rb_funcallv_kw(rkey, rb_intern("min_addr"), 1, &kw, RB_PASS_KEYWORDS);
   }
-  return rb_ca_fetch(self, addrs);
+  return ca_by_key_fetch(self, addrs);
 }
 
 /* ---- take_along_axis / put_along_axis -------------------------------- */
@@ -637,10 +686,16 @@ rb_ca_put_along_axis (int argc, VALUE *argv, VALUE self)
     raxis = INT2FIX(0);
   }
   VALUE addrs = rb_ca_axis2addr_c(self, argv[0], raxis);
-  /* A masked index writes nothing: scatter_replace! skips a masked
-     address (and writes the rest last-write-wins, as the store does). */
+  /* A masked index writes nothing.  The values are first laid out over the
+     indices by the store itself (an array of the indices' shape, so a
+     broadcast, UNDEF or a Face value means what it means unmasked), and
+     only the cells at unmasked indices are written. */
   if ( RTEST(rb_ca_has_mask(addrs)) ) {
-    rb_funcall(self, rb_intern("scatter_replace!"), 2, addrs, argv[1]);
+    VALUE sel  = rb_funcall(addrs, rb_intern("is_not_masked"), 0);
+    VALUE vals = rb_funcall(self, rb_intern("project"), 1, addrs);
+    rb_funcall(vals, rb_intern("[]="), 1, argv[1]);
+    rb_ca_store(self, rb_funcall(addrs, rb_intern("[]"), 1, sel),
+                rb_funcall(vals, rb_intern("[]"), 1, sel));
     return self;
   }
   rb_ca_store(self, addrs, argv[1]);
@@ -653,13 +708,233 @@ static VALUE
 rb_ca_range_method (VALUE self)
 {
   VALUE mm_argv[1] = { Qnil };
-  VALUE pair = rb_ca_minmax_ki(0, mm_argv, self);
+  CArray *ca;
+  VALUE pair;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  /* A Face answers its own minmax (in its order, with its elements). */
+  pair = ca_is_face(ca) ? rb_funcall(self, rb_intern("minmax"), 0)
+                        : rb_ca_minmax_ki(0, mm_argv, self);
   VALUE lo = rb_ary_entry(pair, 0);
   VALUE hi = rb_ary_entry(pair, 1);
   return rb_range_new(lo, hi, 0);
 }
 
 /* ---- nlargest / nsmallest family ------------------------------------- */
+
+/* The partition picks the right values but, among cells that tie with the
+   last one picked, any of them.  The answer is the cells first in the
+   order (value, then NaN, then masked; the values descending for the
+   largest) with ties broken by position, as `order` breaks them.  So the
+   tied candidates are replaced by the earliest cells that tie, and the
+   candidates are sorted by (order, position): O(n) per fiber besides the
+   sort of the candidates. */
+
+typedef struct {
+  const char       *v;      /* the fiber's values, contiguous */
+  const boolean8_t *m;      /* its mask, or NULL */
+  int8_t            type;
+  ca_size_t         bytes;
+  int               desc;
+} ca_topk_fiber_t;
+
+/* 0 a value, 1 NaN, 2 masked: the classes come in that order. */
+static int
+ca_topk_class (const ca_topk_fiber_t *f, ca_size_t i)
+{
+  if ( f->m && f->m[i] ) return 2;
+  if ( f->type == CA_FLOAT64 && isnan(((const double *) f->v)[i]) ) return 1;
+  if ( f->type == CA_FLOAT32 && isnan(((const float *) f->v)[i]) ) return 1;
+  return 0;
+}
+
+#define CA_TOPK_CMP(T)                                                  \
+  { T a_ = ((const T *) f->v)[i], b_ = ((const T *) f->v)[j];         \
+    r = (a_ < b_) ? -1 : (a_ > b_) ? 1 : 0; }                          \
+  break
+
+/* The order of cells i and j, ties not broken. */
+static int
+ca_topk_cmp (const ca_topk_fiber_t *f, ca_size_t i, ca_size_t j)
+{
+  int ci = ca_topk_class(f, i), cj = ca_topk_class(f, j), r = 0;
+  if ( ci != cj ) return ( ci < cj ) ? -1 : 1;
+  if ( ci != 0 ) return 0;
+  switch ( f->type ) {
+  case CA_BOOLEAN:
+  case CA_UINT8:   CA_TOPK_CMP(uint8_t);
+  case CA_INT8:    CA_TOPK_CMP(int8_t);
+  case CA_INT16:   CA_TOPK_CMP(int16_t);
+  case CA_UINT16:  CA_TOPK_CMP(uint16_t);
+  case CA_INT32:   CA_TOPK_CMP(int32_t);
+  case CA_UINT32:  CA_TOPK_CMP(uint32_t);
+  case CA_INT64:   CA_TOPK_CMP(int64_t);
+  case CA_UINT64:  CA_TOPK_CMP(uint64_t);
+  case CA_FLOAT32: CA_TOPK_CMP(float);
+  case CA_FLOAT64: CA_TOPK_CMP(double);
+  case CA_FIXLEN:
+    r = memcmp(f->v + i * f->bytes, f->v + j * f->bytes, (size_t) f->bytes);
+    r = ( r > 0 ) - ( r < 0 );
+    break;
+  default:
+    r = 0;
+  }
+  return f->desc ? -r : r;
+}
+
+#undef CA_TOPK_CMP
+
+/* Merge sort of positions by (order, position). */
+static void
+ca_topk_sort (const ca_topk_fiber_t *f, ca_size_t *p, ca_size_t *tmp, ca_size_t n)
+{
+  ca_size_t h, i, j, k;
+  if ( n < 2 ) return;
+  h = n / 2;
+  ca_topk_sort(f, p, tmp, h);
+  ca_topk_sort(f, p + h, tmp, n - h);
+  i = 0; j = h; k = 0;
+  while ( i < h && j < n ) {
+    int r = ca_topk_cmp(f, p[i], p[j]);
+    if ( r < 0 || ( r == 0 && p[i] < p[j] ) ) tmp[k++] = p[i++];
+    else                                      tmp[k++] = p[j++];
+  }
+  while ( i < h ) tmp[k++] = p[i++];
+  while ( j < n ) tmp[k++] = p[j++];
+  memcpy(p, tmp, (size_t) n * sizeof(ca_size_t));
+}
+
+#define CA_TOPK_SCAN_VALUE(T)                                               \
+  { const T *v_ = (const T *) f->v; T w_ = v_[worst];                       \
+    for (j = 0; j <= end && ties > 0; j++) {                                \
+      if ( v_[j] == w_ && ! ( f->m && f->m[j] ) ) { c[n++] = j; ties--; }   \
+    } }                                                                      \
+  break
+
+/* The earliest cells, up to `end`, that tie with cell `worst`, appended to
+   c[n..] until `ties` are found.  A value compares by ==, which leaves out
+   NaN and the masked cells; those classes tie within themselves. */
+static ca_size_t
+ca_topk_scan_ties (const ca_topk_fiber_t *f, ca_size_t worst, ca_size_t end,
+                   ca_size_t *c, ca_size_t n, ca_size_t ties)
+{
+  ca_size_t j;
+  int cls = ca_topk_class(f, worst);
+  if ( cls != 0 || f->type == CA_FIXLEN ) {
+    for (j = 0; j <= end && ties > 0; j++) {
+      if ( ca_topk_cmp(f, j, worst) == 0 ) { c[n++] = j; ties--; }
+    }
+    return n;
+  }
+  switch ( f->type ) {
+  case CA_BOOLEAN:
+  case CA_UINT8:   CA_TOPK_SCAN_VALUE(uint8_t);
+  case CA_INT8:    CA_TOPK_SCAN_VALUE(int8_t);
+  case CA_INT16:   CA_TOPK_SCAN_VALUE(int16_t);
+  case CA_UINT16:  CA_TOPK_SCAN_VALUE(uint16_t);
+  case CA_INT32:   CA_TOPK_SCAN_VALUE(int32_t);
+  case CA_UINT32:  CA_TOPK_SCAN_VALUE(uint32_t);
+  case CA_INT64:   CA_TOPK_SCAN_VALUE(int64_t);
+  case CA_UINT64:  CA_TOPK_SCAN_VALUE(uint64_t);
+  case CA_FLOAT32: CA_TOPK_SCAN_VALUE(float);
+  case CA_FLOAT64: CA_TOPK_SCAN_VALUE(double);
+  }
+  return n;
+}
+
+#undef CA_TOPK_SCAN_VALUE
+
+static void
+ca_topk_fix_fiber (const ca_topk_fiber_t *f, ca_size_t len,
+                   ca_size_t *c, ca_size_t cap, ca_size_t *tmp)
+{
+  ca_size_t worst = c[0], ties = 0, n = 0, end = 0, k;
+  for (k = 1; k < cap; k++) {
+    if ( ca_topk_cmp(f, c[k], worst) > 0 ) worst = c[k];
+  }
+  /* Keep the candidates before the worst; the ones tied with it are
+     replaced by the earliest cells that tie, which lie no later than the
+     last tied candidate. */
+  for (k = 0; k < cap; k++) {
+    if ( ca_topk_cmp(f, c[k], worst) < 0 ) {
+      c[n++] = c[k];
+    }
+    else {
+      ties++;
+      if ( c[k] > end ) end = c[k];
+    }
+  }
+  (void) len;
+  n = ca_topk_scan_ties(f, worst, end, c, n, ties);
+  ca_topk_sort(f, c, tmp, cap);
+}
+
+/* `picked` holds cap candidate positions per fiber along axis; returns the
+   stable answer of the same shape.  The fibers are read with the axis
+   moved last, from a contiguous copy. */
+static VALUE
+ca_topk_stable (VALUE self, VALUE picked, long axis, int desc)
+{
+  volatile VALUE key = ca_order_key(self, desc ? "nlargest" : "nsmallest");
+  volatile VALUE vals, pk, holder = 0;
+  VALUE perm[CA_RANK_MAX], inv[CA_RANK_MAX];
+  CArray *cv, *cp;
+  ca_topk_fiber_t f;
+  ca_size_t len, cap, outer, o, *tmp;
+  int ndim, k, last;
+
+  GetCArray(key, cv);
+  ndim = cv->ndim;
+  last = ( axis == ndim - 1 );
+  if ( ! last ) {
+    int n = 0;
+    for (k = 0; k < ndim; k++) if ( k != axis ) perm[n++] = INT2FIX(k);
+    perm[n] = LONG2NUM(axis);
+    for (k = 0; k < ndim; k++) inv[NUM2INT(perm[k])] = INT2FIX(k);
+  }
+  /* An entity whose fibers already lie along its last axis is read in
+     place; anything else is copied into that layout. */
+  if ( last && ca_is_entity(cv) ) {
+    vals = key;
+    ca_update_mask(cv);
+  }
+  else {
+    vals = rb_ca_copy(last ? key : rb_funcallv(key, rb_intern("transpose"), ndim, perm));
+  }
+  pk   = rb_ca_copy(last ? picked : rb_funcallv(picked, rb_intern("transpose"), ndim, perm));
+  GetCArray(vals, cv);
+  GetCArray(pk, cp);
+
+  len   = cv->dim[ndim - 1];
+  cap   = cp->dim[ndim - 1];
+  if ( len == 0 || cap == 0 ) return picked;
+  outer = cv->elements / len;
+  f.type  = cv->data_type;
+  f.bytes = cv->bytes;
+  f.desc  = desc;
+  tmp = ALLOCV_N(ca_size_t, holder, cap);
+  for (o = 0; o < outer; o++) {
+    f.v = cv->ptr + o * len * cv->bytes;
+    f.m = cv->mask ? (boolean8_t *) cv->mask->ptr + o * len : NULL;
+    ca_topk_fix_fiber(&f, len, (ca_size_t *) cp->ptr + o * cap, cap, tmp);
+  }
+  ALLOCV_END(holder);
+  return last ? pk : rb_ca_copy(rb_funcallv(pk, rb_intern("transpose"), ndim, inv));
+}
+
+/* Whether self holds a cell the order puts after the numbers: a masked
+   cell, or a NaN. */
+static int
+ca_topk_has_cells_after_numbers (VALUE self, CArray *ca)
+{
+  if ( ca_has_mask(ca) && ca_count_masked(ca) > 0 ) {
+    return 1;
+  }
+  if ( ca_is_float_type(ca) ) {
+    VALUE nan = rb_funcall(self, rb_intern("is_nan"), 0);
+    return RTEST(rb_funcall(nan, rb_intern("any"), 0));
+  }
+  return 0;
+}
 
 /* Per-axis top-k positions (cap clamped, axis normalized).
  * Called by rb_ca_topk_index below. */
@@ -671,12 +946,32 @@ rb_ca_topk_positions (VALUE self, long cap, long axis_norm, int desc)
   long dim_axis = (long) ca->dim[axis_norm];
   VALUE raxis_norm = LONG2NUM(axis_norm);
 
+  /* The largest: reversing the ascending order would put the NaN and the
+     masked cells first, so rank them descending (NaN, then the masked
+     cells, last) when there are any.  An object array is ranked by
+     `order` both ways (its cells compare in Ruby). */
+  if ( ca->data_type == CA_OBJECT ||
+       ( desc && ca_topk_has_cells_after_numbers(self, ca) ) ) {
+    VALUE kw = rb_hash_new();
+    rb_hash_aset(kw, ID2SYM(rb_intern("axis")), raxis_norm);
+    rb_hash_aset(kw, ID2SYM(rb_intern("descending")), desc ? Qtrue : Qfalse);
+    VALUE rank = rb_funcallv_kw(self, rb_intern("order"), 1, &kw, RB_PASS_KEYWORDS);
+    VALUE full = rb_ca_sort_index_ki_quick(rank, raxis_norm);
+    if ( cap >= dim_axis ) {
+      return rb_ca_copy(full);
+    }
+    int ndim = (int) ca->ndim;
+    VALUE spec[CA_RANK_MAX];
+    for ( int k = 0; k < ndim; k++ ) {
+      spec[k] = Qnil;
+    }
+    spec[axis_norm] = rb_range_new(INT2FIX(0), LONG2NUM(cap), 1);
+    return rb_ca_copy(rb_ca_fetch2(full, ndim, spec));
+  }
+
   if ( cap >= dim_axis ) {
     VALUE full = rb_ca_sort_index_ki_quick(self, raxis_norm);
-    if ( desc ) {
-      full = rb_ca_flip_axis(full, NUM2LONG(raxis_norm));
-    }
-    return rb_ca_copy(full);
+    return ca_topk_stable(self, full, axis_norm, desc);
   }
 
   long pivot = desc ? (dim_axis - cap) : (cap - 1);
@@ -703,7 +998,7 @@ rb_ca_topk_positions (VALUE self, long cap, long axis_norm, int desc)
     order = rb_ca_flip_axis(order, NUM2LONG(raxis_norm));
   }
   VALUE picked = rb_ca_take_along_axis_c(partidx_top, order, raxis_norm);
-  return rb_ca_copy(picked);
+  return ca_topk_stable(self, picked, axis_norm, desc);
 }
 
 /* Dispatcher: normalize axis, clamp cap, empty-cap corner.
@@ -807,11 +1102,10 @@ rb_ca_nsmallest (int argc, VALUE *argv, VALUE self)
  * ever compare equal), so a later sort_addr key never gets consulted;
  * dense ranks preserve ties, so it does.
  *
- * descending: still works under method: :dense via the same
- * (n-1)-ascending transform below: n is fixed per-fiber, so within a
- * tied group ascending values are equal and (n-1)-ascending stays
- * equal too -- ties survive the transform, and the group-to-group
- * order still reverses correctly. */
+ * descending: ranks the largest value 0, with NaN after the numbers as
+ * ascending.  The kernel gives the descending dense rank; the ordinal rank
+ * is the ascending ordinal rank of it, so tied cells keep their original
+ * order in both directions. */
 
 static VALUE
 rb_ca_order (int argc, VALUE *argv, VALUE self)
@@ -826,11 +1120,24 @@ rb_ca_order (int argc, VALUE *argv, VALUE self)
   int do_stable = NIL_P(rkind) ? 0
   : ca_symbol_choice(rkind, "kind", "quick", "stable", NULL);
 
-  VALUE asc, n;
+  if ( RTEST(rdesc) && ! dense ) {
+    VALUE kw = rb_hash_new();
+    rb_hash_aset(kw, ID2SYM(rb_intern("axis")), raxis);
+    rb_hash_aset(kw, ID2SYM(rb_intern("descending")), Qtrue);
+    rb_hash_aset(kw, ID2SYM(rb_intern("method")), ID2SYM(rb_intern("dense")));
+    rb_hash_aset(kw, ID2SYM(rb_intern("kind")), do_stable ? ID2SYM(rb_intern("stable")) : ID2SYM(rb_intern("quick")));
+    VALUE ranked = rb_funcallv_kw(self, rb_intern("order"), 1, &kw, RB_PASS_KEYWORDS);
+    rb_hash_delete(kw, ID2SYM(rb_intern("descending")));
+    rb_hash_delete(kw, ID2SYM(rb_intern("method")));
+    return rb_funcallv_kw(ranked, rb_intern("order"), 1, &kw, RB_PASS_KEYWORDS);
+  }
+
+  /* The kernel's dense == 2 is the descending dense rank. */
+  int kmode = ( dense && RTEST(rdesc) ) ? 2 : dense;
   if ( NIL_P(raxis) ) {
     VALUE flat = rb_ca_flatten(self);
     /* Direct C-level dispatch via c_callable: true extern (mkkernel). */
-    VALUE ranked = rb_ca_rank_index_ki_kind_dense(flat, INT2FIX(0), do_stable, dense);
+    VALUE ranked = rb_ca_rank_index_ki_kind_dense(flat, INT2FIX(0), do_stable, kmode);
     /* reshape(*shape) */
     CArray *ca;
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
@@ -838,43 +1145,12 @@ rb_ca_order (int argc, VALUE *argv, VALUE self)
     for ( long k = 0; k < (long) ca->ndim; k++ ) {
       shape_argv[k] = LONG2NUM((long) ca->dim[k]);
     }
-    asc = rb_ca_reshape((int) ca->ndim, shape_argv, ranked);
-    n = RTEST(rb_ca_has_mask(self))
-      ? SIZE2NUM(ca_count_not_masked(ca))   /* = elements - count_masked */
-      : rb_ca_elements(self);
-  } else {
-    long axis_norm = rb_ca_normalize_axis_value(self, raxis, "order");
-    VALUE raxis_norm = LONG2NUM(axis_norm);
-    asc = rb_ca_rank_index_ki_kind_dense(self, raxis_norm, do_stable, dense);
-    if ( RTEST(rb_ca_has_mask(self)) ) {
-      n = rb_ca_count_not_masked_c(self, raxis_norm);
-    } else {
-      CArray *ca;
-      TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-      n = LONG2NUM((long) ca->dim[axis_norm]);
-    }
-    if ( RTEST(rb_obj_is_kind_of(n, rb_cCArray)) ) {
-      VALUE ia_argv[1] = { raxis_norm };
-      n = rb_ca_insert_axis(1, ia_argv, n);
-    }
+    return rb_ca_reshape((int) ca->ndim, shape_argv, ranked);
   }
-
-  VALUE diff;
-  if ( RTEST(rdesc) ) {
-    /* `-` via rb_funcall handles both Integer-Integer and
-       CArray/Integer mixed receivers uniformly via Ruby's operator
-       dispatch.  No single C entry covers both. */
-    VALUE n_minus_1 = rb_funcall(n, id_sub, 1, INT2FIX(1));
-    diff = rb_funcall(n_minus_1, id_sub, 1, asc);
-  } else {
-    diff = asc;
-  }
-  /* Output data_type: CA_SIZE (= ca_size_t, int64 on 64-bit builds),
-     matching the rest of the *_index family (sort_index / partition_index
-     / rank_index) that order is built on.  No explicit cast needed here:
-     asc (rank_index_ki's output) is already CA_SIZE, and Integer - CArray
-     promotion in the descending branch preserves it. */
-  return diff;
+  long axis_norm = rb_ca_normalize_axis_value(self, raxis, "order");
+  /* Output data_type: CA_SIZE (int64 on 64-bit builds), as the rest of the
+     *_index family. */
+  return rb_ca_rank_index_ki_kind_dense(self, LONG2NUM(axis_norm), do_stable, kmode);
 }
 
 /* ---- linear_section / linear_fetch ----------------------------------- */
@@ -896,9 +1172,7 @@ ca_linear_prep (VALUE self, VALUE raxis, const char *name, long *axis_out)
      Face) is caught by the rb_ca_to_float64 cast below, so no separate
      float-numeric flag is needed. */
   if ( ca_is_face(ca) ) {
-    if ( ! ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-      ca_face_refuse_order(name, self, "order");
-    }
+    ca_face_require_orderable(self, name, "order");
     self = rb_ca_strip_face_value(self);
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   }
@@ -925,13 +1199,26 @@ rb_ca_linear_section_m (int argc, VALUE *argv, VALUE self)
   rb_check_arity(argc, 1, 1);
   VALUE val = argv[0];
 
-  /* Query gate: the reference axis, still a Face here, reconciles the query
-     into its own space (ca_face_reconcile_operand). */
+  /* Query gate: the reference axis, still a Face here, and the query are
+     brought into one space (ca_face_reconcile_pair). */
   if ( rb_obj_is_carray(self) ) {
     CArray *sca;
     TypedData_Get_Struct(self, CArray, &carray_data_type, sca);
     if ( ca_is_face(sca) ) {
-      val = ca_face_reconcile_operand(self, val, "linear_section");
+      volatile VALUE ref = self, query = val;
+      ca_face_reconcile_pair(&ref, &query, "linear_section");
+      self = ref;
+      val  = query;
+    }
+  }
+
+  {
+    CArray *ca;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+    if ( ca_is_complex_type(ca) ) {
+      rb_raise(rb_eCADataTypeError,
+               "linear_section: a %s array has no order (complex numbers are "
+               "not ordered)", ca_type_name[ca->data_type]);
     }
   }
 
@@ -959,6 +1246,27 @@ rb_ca_linear_fetch_m (int argc, VALUE *argv, VALUE self)
   rb_scan_options(ropt, "axis", &raxis);
   rb_check_arity(argc, 1, 1);
   VALUE addr = argv[0];
+
+  /* A complex array interpolates its real and imaginary parts: the
+     weights are real, so each part is a real interpolation. */
+  {
+    CArray *ca;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+    if ( ca_is_complex_type(ca) ) {
+      VALUE args[2], re, im;
+      int n = 1;
+      args[0] = addr;
+      if ( ! NIL_P(ropt) ) args[n++] = ropt;
+      re = rb_funcallv_kw(rb_funcall(self, rb_intern("real"), 0),
+                          rb_intern("linear_fetch"), n, args,
+                          NIL_P(ropt) ? RB_NO_KEYWORDS : RB_PASS_KEYWORDS);
+      im = rb_funcallv_kw(rb_funcall(self, rb_intern("imag"), 0),
+                          rb_intern("linear_fetch"), n, args,
+                          NIL_P(ropt) ? RB_NO_KEYWORDS : RB_PASS_KEYWORDS);
+      return rb_funcall(re, '+', 1,
+                        rb_funcall(im, '*', 1, rb_Complex(INT2FIX(0), INT2FIX(1))));
+    }
+  }
 
   long axis_norm = 0;
   VALUE sc = ca_linear_prep(self, raxis, "linear_fetch", &axis_norm);

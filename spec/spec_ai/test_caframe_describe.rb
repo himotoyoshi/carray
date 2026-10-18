@@ -45,7 +45,7 @@ class TestCAFrameDescribe < Test::Unit::TestCase
 
   def test_time_statistics_are_times
     r = row("time")
-    assert_equal "CATime", r["type"]
+    assert_equal "CATime[D]", r["type"]
     assert_equal "2024-01-01", r["min"].to_s
     assert_equal "2024-01-03", r["max"].to_s
     assert_equal "2024-01-02", r["mean"].to_s
@@ -111,6 +111,6 @@ class TestCAFrameDescribe < Test::Unit::TestCase
   def test_shows_as_a_table
     text = @d.to_table
     assert_match(/^temp\s+float64\s+2\s+1\s+2\s+19\.0\s+22\.1/, text)
-    assert_match(/^time\s+CATime\s+3\s+0\s+3\s+2024-01-01\s+2024-01-03/, text)
+    assert_match(/^time\s+CATime\[D\]\s+3\s+0\s+3\s+2024-01-01\s+2024-01-03/, text)
   end
 end

@@ -37,7 +37,7 @@ class TestCARefer < Test::Unit::TestCase
     a   = CArray.int(6).tap { |__a| __a[] = [*1..6] }
     r   = a.refer(CA_INT32, [2, 3])
     assert_equal CARefer, r.class
-    assert_equal [2, 3], r.dim.to_a
+    assert_equal [2, 3], r.shape.to_a
     assert_equal 1, r[0, 0]
     assert_equal 6, r[1, 2]
   end

@@ -40,8 +40,9 @@ class CAFrame
     validate_sort_order(order)
     named = specs.map do |spec|
       name, dir = parse_sort_key_spec(spec, order)
-      [name.to_s, sort_key_column(name), dir]
+      [column_key(name, "sort_by_key"), key_column(column_key(name, "sort_by_key"), "sort_by_key"), dir]
     end
+    CAFrame.__send__(:refuse_repeated_names, named.map(&:first), "sort_by_key")
     keys = named.map do |name, col, dir|
       dir == :desc ? col.order(descending: true, method: :dense) : col
     end
@@ -55,8 +56,11 @@ class CAFrame
       # The core names the conversion as an array method; in a frame it is
       # written with sort_by.
       reason = "#{reason.split(";").first}; sort by its values with " \
-               "sort_by { |f| f[#{name.inspect}].to_type(:object) }, or by its " \
-               "storage with sort_by { |f| f[#{name.inspect}].parent }"
+               "sort_by { |f| f[#{name.inspect}].to_type(:object) }"
+      if (storage = col.__send__(:face_storage_method))
+        reason += ", or by its storage with " \
+                  "sort_by { |f| f[#{name.inspect}].#{storage} }"
+      end
     end
     raise e.class, "sort_by_key: the column #{name.inspect} cannot be sorted: #{reason}"
   end
@@ -118,20 +122,4 @@ class CAFrame
     raise ArgumentError, "sort order must be :asc or :desc, got #{dir.inspect}"
   end
 
-  private def sort_key_column(name)
-    key = name.to_s
-    col = if @columns.key?(key)
-            @columns[key]
-          elsif @index && @axis_name == key
-            @index
-          else
-            raise KeyError, "no column #{key.inspect}"
-          end
-    unless col.ndim == 1
-      raise ArgumentError,
-            "sort_by_key: key column #{key.inspect} is #{col.ndim}-D; " \
-            "sort by a scalar (1-D) column"
-    end
-    col
-  end
 end

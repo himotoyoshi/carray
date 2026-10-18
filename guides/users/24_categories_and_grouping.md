@@ -614,6 +614,7 @@ variance   stddev   variancep   stddevp
 count   count_masked   elements   minmax
 wsum(w)   wmean(w)
 median   percentile(p)   quantile
+first   last   nunique
 min_addr   max_addr   sort_addr
 ```
 
@@ -844,6 +845,11 @@ Every reduction returns a length-`k` `CArray` aligned to `cat.labels` unless not
 | `quantile` | `Array<CArray>` | five-number summary `[min, Q1, median, Q3, max]` |
 | `wsum(w)` / `wmean(w)` | float64 | weighted; `w` is a per-cell weight in source order |
 | `all` / `any` | boolean | boolean value data type only |
+| `first` / `last` | as `CArray#first` / `#last` | first / last present member, in source order; none = `UNDEF` |
+| `nunique` | int64 | distinct present members; none = `0` |
+| `lag(n)` | source-shaped | the value `n` steps earlier among the category's members; none = `UNDEF` |
+| `order` | source-shaped int64 | each cell's rank among the category's members, as `CArray#order` |
+| `strip_mask(method: :ffill)` / `:bfill` | source-shaped | each masked cell filled from the category's members; nothing to carry = `UNDEF` |
 | `min_index` / `max_index` | int64 | group-local position of the min / max |
 | `min_addr` / `max_addr` | int64 | flat source address of the min / max |
 | `sort_addr` | int64 | length-`nvalid`, source addresses that sort each group, group-major |

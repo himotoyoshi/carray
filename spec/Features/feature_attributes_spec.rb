@@ -9,10 +9,10 @@ describe "TestCArrayAttribute " do
     is_asserted_by {  a.class == CArray }
     is_asserted_by {  CA_OBJ_ARRAY == a.obj_type }
     is_asserted_by {  CA_INT32 == a.data_type }
-    is_asserted_by {  4 == a.rank }
+    is_asserted_by {  4 == a.ndim }
     is_asserted_by {  CArray.sizeof(CA_INT32) == a.bytes }
     is_asserted_by {  24 == a.elements }
-    is_asserted_by {  [4, 3, 2, 1] == a.dim }
+    is_asserted_by {  [4, 3, 2, 1] == a.shape }
     is_asserted_by {  4 == a.dim0 }
     is_asserted_by {  3 == a.dim1 }
     is_asserted_by {  2 == a.dim2 }
@@ -187,19 +187,19 @@ describe "TestCArrayAttribute " do
     a = CArray.int32(3,3)
     is_asserted_by {  true == a.valid_index?(2, 2) }
     is_asserted_by {  true == a.valid_index?(1, 1) }
-#    is_asserted_by {  true == a.valid_index?((-1), (-1)) }
-#    is_asserted_by {  true == a.valid_index?((-3), (-3)) }
+    is_asserted_by {  true == a.valid_index?((-1), (-1)) }
+    is_asserted_by {  true == a.valid_index?((-3), (-3)) }
 
     is_asserted_by {  true == a.valid_addr?(8) }
     is_asserted_by {  true == a.valid_addr?(4) }
-#    is_asserted_by {  true == a.valid_addr?((-4)) }
-#    is_asserted_by {  true == a.valid_addr?((-8)) }
+    is_asserted_by {  true == a.valid_addr?((-4)) }
+    is_asserted_by {  true == a.valid_addr?((-8)) }
       
     is_asserted_by {  false == a.valid_index?(1, 3) }
-#    is_asserted_by {  false == a.valid_index?((-4), 1) }
+    is_asserted_by {  false == a.valid_index?((-4), 1) }
 
     is_asserted_by {  false == a.valid_addr?(9) }
-#    is_asserted_by {  false == a.valid_addr?((-10)) }
+    is_asserted_by {  false == a.valid_addr?((-10)) }
   end
 
   example "same_shape?" do

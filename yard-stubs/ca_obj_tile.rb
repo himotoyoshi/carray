@@ -2,7 +2,7 @@
 # Stubs for methods defined in ext/ca_obj_tile.c.
 # See yard-stubs/README.md and yard-stubs/STYLE.md.
 
-# Tiled repetition view.  Output shape is `parent.dim[k] * reps[k]`
+# Tiled repetition view.  Output shape is `parent.shape[k] * reps[k]`
 # along each axis; every tile is a full-parent alias, so writes to
 # overlapping cells are last-write-wins.
 class CATile < CAView

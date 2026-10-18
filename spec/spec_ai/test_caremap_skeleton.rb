@@ -35,7 +35,7 @@ class TestCARemapSkeleton < Test::Unit::TestCase
     assert_kind_of CARemap, view
     assert_equal [3, 4], view.shape
     assert view.parent.equal?(ref)
-    assert view.mapper.equal?(idx)
+    assert_equal idx.to_a, view.mapper.to_a
   end
 
   def test_construct_same_shape_3d
@@ -103,11 +103,13 @@ class TestCARemapSkeleton < Test::Unit::TestCase
 
   # ---------------------------------------------------------------- mapper accessor
 
-  def test_mapper_returns_same_object
+  # The view keeps the indices given at the call: its mapper holds them,
+  # and is not the caller's array.
+  def test_mapper_holds_the_indices_given
     ref = CArray.float64(2, 3).seq
     idx = make_idx([2, 3], [5, 3, 1, 0, 4, 2])
     view = ref[idx]
-    assert view.mapper.equal?(idx), "view.mapper must return the same CArray"
+    assert ! view.mapper.equal?(idx)
     assert_equal [[5, 3, 1], [0, 4, 2]], view.mapper.to_a
   end
 

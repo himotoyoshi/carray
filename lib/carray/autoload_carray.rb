@@ -6,7 +6,7 @@
 #  after autoload_method_extension is installed.  Split by intent:
 #
 #    (1) Top-level feature files under carray/ — constant class + entry
-#        methods (Serializer, TableMethods, iterators, aggregation
+#        methods (Serializer, iterators, aggregation
 #        accumulators, categorical / axis-group).
 #    (2) Single-feature method files under carray/methods/ — each first
 #        call requires its file, whose definitions overwrite the stubs
@@ -19,21 +19,6 @@
 # ============================================================================
 # (1) Top-level feature files
 # ============================================================================
-
-# ---- Inspection (#inspect / #source_code) ----------------------------------
-#
-# CArray::Inspector (:nodoc:) and #inspect / #source_code live in carray/inspect.rb.
-# #inspect is an implicit method (p / pp / irb / error interpolation), so the
-# stub loads the file the first time any CArray is displayed. Nothing in the
-# eager core references it at load time; #desc is private (code-internal) and
-# Inspector is internal, so only the two public methods need stubs.
-
-class CArray
-  inspect_rb = "carray/inspect"
-  autoload_method "inspect",      inspect_rb
-  autoload_method "inspect_full", inspect_rb
-  autoload_method "source_code",  inspect_rb
-end
 
 # ---- Serializer / Marshal / dump / load ------------------------------------
 
@@ -64,21 +49,6 @@ class CARecord
   autoload_method "marshal_dump",        "carray/serialize"
 end
 
-# ---- Arrow tensor IPC (interop) --------------------------------------------
-
-class CArray
-  arrow_tensor_rb = "carray/arrow_tensor"
-  autoload :ArrowTensor, arrow_tensor_rb
-  autoload_method "self.load_arrow_tensor", arrow_tensor_rb
-  autoload_method "save_arrow_tensor",      arrow_tensor_rb
-end
-
-# ---- Table (row-major dispatch helper) -------------------------------------
-
-class CArray
-  autoload :TableMethods, "carray/table"
-end
-
 # ---- Fusion (reading a lazy expression as a plan) --------------------------
 #
 # Nothing in the core asks for a plan -- CArray can always walk the view --
@@ -101,6 +71,7 @@ end
 
 autoload :CASlabIterator,   "carray/slab_iterator"
 autoload :CAWindowIterator, "carray/window_iterator"
+autoload :CAKeyWindowIterator, "carray/key_windows"
 autoload :CABlockIterator,  "carray/block_iterator"
 
 class CArray
@@ -175,6 +146,10 @@ autoload :CAFrame,      "carray/frame"
 autoload :GroupedFrame, "carray/frame"
 
 class CArray
+  autoload_method "to_frame", "carray/frame"
+end
+
+class CArray
   struct_rb = "carray/struct"
   autoload_method "self.struct", struct_rb
   autoload_method "self.union",  struct_rb
@@ -231,10 +206,12 @@ class CArray
   autoload_method "intersection",    "carray/methods/is_in"
   autoload_method "difference",      "carray/methods/is_in"
   autoload_method "union",           "carray/methods/is_in"
+  autoload_method "is_between",      "carray/methods/is_between"
   autoload_method "self.align_addr",         "carray/methods/align_addr"
   autoload_method "self.align_nearest_addr", "carray/methods/align_addr"
   autoload_method "value_counts",    "carray/methods/value_counts"
   autoload_method "nunique",         "carray/methods/nunique"
+  autoload_method "lag",             "carray/methods/lag"
   autoload_method "is_mode",         "carray/methods/mode"
   autoload_method "mode",            "carray/methods/mode"
   autoload_method "snap",           "carray/methods/snap"

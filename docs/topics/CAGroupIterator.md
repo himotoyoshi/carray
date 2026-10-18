@@ -58,6 +58,7 @@ g.accumulate(axis: :group)   g.prod(axis: :group)      g.max(axis: :group)
 g.variance(axis: :group)     g.stddev(axis: :group)    g.minmax(axis: :group)
 g.wsum(w, axis: :group)      g.wmean(w, axis: :group)
 g.median(axis: :group)       g.percentile(90, axis: :group)   g.quantile(axis: :group)
+g.first(axis: :group)        g.last(axis: :group)             g.nunique(axis: :group)
 g.count(axis: :group)        g.count_masked(axis: :group)     g.elements(axis: :group)
 g.min_addr(axis: :group)     g.max_addr(axis: :group)
 ```
@@ -127,6 +128,13 @@ seen. Only two cases are `UNDEF`: a cell **excluded from every group** (its
 category code out of vocabulary or masked), and a `cummax` / `cummin` cell whose
 group has **no member yet** (an empty extremum has no value — the same reason an
 empty-group `max` reduces to `UNDEF`).
+
+`lag(n, axis: :group)` follows the same order: each cell gets the value `n`
+steps earlier among its group's members (per band), `UNDEF` where there is none,
+so a lag never reaches another group. `order(axis: :group)` ranks each cell
+among its group's members (per band), with the keywords of `CArray#order`, and
+`strip_mask(method: :ffill, axis: :group)` / `:bfill` fill the masked cells from
+the group's members.
 
 ```ruby
 # per-station running total through the year, kept in the [station, month] grid

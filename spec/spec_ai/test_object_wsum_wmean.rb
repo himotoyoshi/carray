@@ -6,7 +6,7 @@ require "test/unit"
 # Design (2026-07-13): CA_OBJECT is handled by the mkkernel object_escape:
 # hook, not a dedicated :object kernel branch.  The generated dispatcher
 # (carray_kernels.c rb_ca_wsum_ki / rb_ca_wmean_ki) intercepts CA_OBJECT
-# source and forwards to CArray#__wsum_object__ / #__wmean_object__ in
+# source and forwards to CArray#wsum_object / #wmean_object in
 # runtime.rb, which compose:
 #   wsum(w)  = (self * w).sum
 #   wmean(w) = Σ(self*w) / Σ(w over cells valid after mask overlay)

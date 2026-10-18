@@ -27,9 +27,7 @@ keys** you sort, group, or join on, where a `CA_OBJECT` column's per-element
 is **no offset-sharing dedup**.  So for a column of a few distinct labels
 repeated many times, [`CACategorical`](CACategorical.md) (dense integer codes +
 a small label vocabulary = Arrow `DictionaryArray`) is the better fit: it stores
-each distinct value once and only a small code per element.  One imports
-straight from an Arrow `DictionaryArray` — see
-[Interoperating with Arrow](../interop/InteropWithArrow.md#31-which-arrow-types-a-carray-can-hold).
+each distinct value once and only a small code per element.
 
 ## Construction
 
@@ -209,5 +207,3 @@ multi-parent constructions that portable types do.
 - [`CAFace.md`](../topics/CAFace.md) — the Face substrate this builds on.
 - [`CACategorical.md`](CACategorical.md) — the better fit for a high-duplication
   label column.
-- [`InteropWithArrow.md`](../interop/InteropWithArrow.md) — importing an Arrow
-  `String` / `LargeString` column.

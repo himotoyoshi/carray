@@ -18,7 +18,8 @@ class TestReduceFillValue < Test::Unit::TestCase
     assert_equal 9,    @i.min(axis: 1, min_count: 3, fill_value: 9.9)[0]
     assert_equal 9.9,  @f.sum(min_count: 100, fill_value: 9.9)
     assert_equal 9.9,  @f.sum(axis: 1, min_count: 3, fill_value: 9.9)[0]
-    assert_equal 241,  @u.accumulate(min_count: 100, fill_value: -9999)
+    # -9999 does not fit uint8: assigning it raises, as a store does.
+    assert_raise(RangeError) { @u.accumulate(min_count: 100, fill_value: -9999) }
   end
 
   def test_undef_fill_leaves_the_result_undefined

@@ -1,4 +1,5 @@
-require "carray/methods/is_in"   # fixlen_widened_with, values_in_face, values_for_lookup
+require "carray/methods/is_in"   # fixlen_widened_with, values_for_lookup
+require "carray/distance_limit"
 
 class CArray
 
@@ -42,10 +43,9 @@ class CArray
   #   variables without repeating the lookup.
   #
   #   @param ref [CArray, Array, Range] reference values to match against;
-  #     any shape (used as flat). An Array or Range is coerced with `to_ca`
-  #     and so lands in `:object`, where numeric matching follows Ruby
-  #     `eql?` (`2.0` does not match `2`); pass a CArray to match in a
-  #     numeric lane.
+  #     any shape (used as flat). An Array or Range is the list of its
+  #     values, met at a common type with `self` as {#is_in} meets one, so
+  #     `2` finds `2.0`.
   #   @return [CArray] `:int64` flat addresses into `ref`, same shape as
   #     `self`; unmatched cells are masked.
   #   @raise [CArray::DataTypeError] when `self` and `ref` have no common data type.
@@ -58,16 +58,23 @@ class CArray
       a, b = in_common_unit_with(ref)
       return a.locate_addr(b)
     end
-    if respond_to?(:to_comparable) && !ref.respond_to?(:to_comparable)
-      ref = values_in_face(self, ref)
-      return CArray.int64(*shape).fill(UNDEF) unless ref
-    elsif ref.respond_to?(:to_comparable) && !respond_to?(:to_comparable)
-      q = values_in_face(ref, self)
-      return CArray.int64(*shape).fill(UNDEF) unless q
-      return q.locate_addr(ref)
+    # They meet as a comparison does (comparable_pair).
+    if respond_to?(:comparable_pair) && !ref.respond_to?(:comparable_pair)
+      key, r = comparable_pair(ref)
+      return key.locate_addr(r)
+    elsif ref.respond_to?(:comparable_pair) && !respond_to?(:comparable_pair)
+      r, key = ref.comparable_pair(self)
+      return key.locate_addr(r)
     end
     unless ref.is_a?(CArray) || ref.respond_to?(:to_ca)
       raise TypeError, "locate_addr: the reference is an array of values (got #{ref.class})"
+    end
+    # An Array or Range of values meets self as is_in's does: the common type
+    # comes from self and the elements, so 2 finds 2.0 in a float array.  The
+    # conversion keeps the order, so the addresses stay positions in ref.
+    if ref.is_a?(Array) || ref.is_a?(Range)
+      q, r = promote_elements(ref.is_a?(Range) ? ref.to_a : ref)
+      return q.send(:__locate_addr__, r)
     end
     ref = ref.to_ca unless ref.is_a?(CArray)
     ref = values_for_lookup(ref)
@@ -75,13 +82,11 @@ class CArray
       a, b = fixlen_widened_with(ref)
       return a.locate_addr(b) unless a.equal?(self) && b.equal?(ref)
     end
-    # Put self and ref in a common lane via the single-source promotion rule
-    # (CArray.result_type), so a fractional query against an int ref is compared
-    # at the promoted type instead of truncating (1.5 no longer matches 1).
-    # to_type is elementwise and order-preserving, so the addresses stay valid
-    # indices into ref. result_type raises for cross-family input; an integer
-    # pair of mixed sign is matched by value (see value_match_type).
-    t = value_match_type(CArray.result_type(self, ref), ref.data_type)
+    # Put self and ref in the type they match in (query_match_type), so a
+    # fractional query against an int ref is compared as a float (1.5 does
+    # not match 1) and a pair of mixed sign by value.  to_type is elementwise
+    # and order-preserving, so the addresses stay valid indices into ref.
+    t = ref.send(:query_match_type, self)
     q = (data_type     == t) ? self : to_type(t)
     r = (ref.data_type == t) ? ref  : ref.to_type(t)
     q.send(:__locate_addr__, r)
@@ -137,6 +142,8 @@ class CArray
             "locate_nearest_addr: direction must be :round / :floor / " \
             ":ceil (got #{direction.inspect})"
     end
+    [self, ref].each { |key| nearest_refuse_bytes(key) }
+    limit = tolerance && DistanceLimit.read(tolerance, self, "tolerance:")
     return CArray.int64(*shape) if elements == 0
     # A masked reference value matches nothing, as in locate_addr: sorting
     # puts the masked ones last, and only the others are searched.  A NaN
@@ -169,11 +176,27 @@ class CArray
     si = si.reshape(*shape)
     si[is_masked] = UNDEF if has_mask?
     idx = ri.project(si)
-    if tolerance
+    if limit
       dist = (ref.project(idx) - self).abs
-      idx[dist > nearest_tolerance(tolerance, dist)] = UNDEF
+      idx[dist > limit] = UNDEF
     end
     idx
+  end
+
+  # A key held as fixed-length bytes (raw fixlen, or a fixlen string) has
+  # no nearest: the search counts keys as numbers.  A Face whose storage is
+  # a number (a time) is searched by that number.
+  # +subject+ and +remedy+ let a caller (CAFrame#join_asof) say it in its
+  # own words.
+  private def nearest_refuse_bytes(key, subject = nil, remedy = "match exact values with locate_addr")
+    # A Face whose cells encode the value (a const string, a categorical)
+    # is refused later by its own reconcile, which says why.
+    return unless key.is_a?(CArray) && key.__send__(:orderable_storage?)
+    storage = key.face? ? key.__send__(:face_storage) : key
+    return unless storage.data_type == CA_FIXLEN
+    subject ||= "locate_nearest_addr: a #{CArray::Inspector.type_label(key)} key"
+    raise CArray::DataTypeError,
+          "#{subject} is held as fixed-length bytes, which have no nearest; #{remedy}"
   end
 
   # The keys locate_nearest_addr orders by: the storage of the sorted
@@ -189,10 +212,10 @@ class CArray
         rs = rs.to_unit(u)
         q  = q.to_unit(u)
       end
-      q  = rs.__send__(:__reconcile_operand__, q, "locate_nearest_addr")
-      rs = rs.__send__(:__face_storage__)
+      q  = rs.__send__(:reconcile_operand, q, "locate_nearest_addr")
+      rs = rs.__send__(:face_storage)
     end
-    t = value_match_type(CArray.result_type(q, rs), rs.data_type)
+    t = rs.send(:query_match_type, q)
     rk = (rs.data_type == t) ? rs : rs.to_type(t)
     qk = (q.data_type  == t) ? q  : q.to_type(t)
     [rk, qk.flatten]
@@ -232,33 +255,6 @@ class CArray
     si = lt - 1
     si[upper] = lt[upper]
     si
-  end
-
-  # The tolerance in the units of the distance. A time key measures its
-  # distance as a CATimedelta, so its tolerance is a duration: a String in
-  # the spelling CArray.time takes for a unit ("10 minutes"), or a
-  # CATimedelta value. A bare number would mean a different length in each
-  # unit, so it is refused there; any other key takes a number.
-  private def nearest_tolerance(tolerance, dist)
-    unless dist.is_a?(CATimedelta)
-      if tolerance.is_a?(String)
-        raise ArgumentError,
-              "tolerance: #{tolerance.inspect} is a duration, but the key is " \
-              "#{data_type_name}; give a number"
-      end
-      return tolerance
-    end
-    case tolerance
-    when String
-      res = CATime::Resolution.parse(tolerance)
-      CATimedelta::Element.new(res.count, res.base)
-    when CATimedelta::Element
-      tolerance
-    else
-      raise ArgumentError,
-            "tolerance: a time key needs a duration such as \"10 minutes\" " \
-            "or a CATimedelta value (got #{tolerance.inspect})"
-    end
   end
 
   # @!endgroup

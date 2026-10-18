@@ -496,6 +496,7 @@ ca_decimal_object_integer (VALUE v, int *negative, uint64_t *magnitude)
     /* truncate raises for a NaN or infinite BigDecimal, which reads as
        nothing an integer can hold. */
     int state = 0;
+    /* protect: a BigDecimal that is not finite reads as no integer; nothing is held */
     VALUE whole = rb_protect(ca_decimal_truncate, v, &state);
     if ( state ) {
       rb_set_errinfo(Qnil);
@@ -589,11 +590,11 @@ ca_decimal_string_store (VALUE str, int8_t data_type, void *out)
   case CA_DECIMAL_OK:
     return;
   case CA_DECIMAL_OUT_OF_RANGE:
-    rb_raise(rb_eRangeError, "%+"PRIsVALUE" is out of range for %s",
-             str, ca_type_name[data_type]);
+    rb_raise(rb_eRangeError, "%s: %+"PRIsVALUE" is out of range for %s",
+             ca_calling_method_name(), str, ca_type_name[data_type]);
   default:
-    rb_raise(rb_eArgError, "%+"PRIsVALUE" cannot be read as %s",
-             str, ca_type_name[data_type]);
+    rb_raise(rb_eArgError, "%s: %+"PRIsVALUE" cannot be read as %s",
+             ca_calling_method_name(), str, ca_type_name[data_type]);
   }
 }
 
@@ -767,6 +768,7 @@ ca_obj2dbl_ok (VALUE val, double *out)
   }
   {
     int state = 0;
+    /* protect: converts the caller's value and reports failure; nothing is held */
     volatile VALUE r = rb_protect(ca_kernel_float, val, &state);
     if ( state ) {
       rb_set_errinfo(Qnil);
@@ -795,6 +797,7 @@ ca_obj2cmplx_ok (VALUE val, double complex *out)
   if ( NIL_P(val) ) {
     return 0;
   }
+  /* protect: converts the caller's value and reports failure; nothing is held */
   r = rb_protect(ca_cmplx_cell_body, val, &state);
   if ( state ) {
     rb_set_errinfo(Qnil);
@@ -819,6 +822,7 @@ ca_obj2integer_ok (VALUE val, int8_t wide_type, void *wide, VALUE *integer)
   if ( RB_TYPE_P(val, T_STRING) ) {
     return ca_decimal_string_to(val, wide_type, wide);
   }
+  /* protect: converts the caller's value and reports failure; nothing is held */
   *integer = rb_protect(ca_kernel_integer, val, &state);
   if ( state ) {
     rb_set_errinfo(Qnil);
@@ -1052,7 +1056,7 @@ ca_ptr2val (void *ap1, void *ptr1, int8_t data_type, void *ptr2)
 {
   CArray *ca1 = (CArray *)ap1;
   static CArray dummy;
-  CA_CHECK_DATA_TYPE(data_type);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
   dummy.data_type = data_type;
   ca_cast_func_table[ca1->data_type][data_type](1, ca1, ptr1, &dummy, ptr2, NULL);
   return;
@@ -1063,7 +1067,7 @@ ca_val2ptr (int8_t data_type, void *ptr1, void *ap2, void *ptr2)
 {
   CArray *ca2 = (CArray *)ap2;
   static CArray dummy;
-  CA_CHECK_DATA_TYPE(data_type);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
   dummy.data_type = data_type;
   ca_cast_func_table[data_type][ca2->data_type](1, &dummy, ptr1, ca2, ptr2, NULL);
   return;
@@ -1073,8 +1077,8 @@ void
 ca_val2val (int8_t data_type1, void *ptr1, int8_t data_type2, void *ptr2)
 {
   static CArray dummy1, dummy2;
-  CA_CHECK_DATA_TYPE(data_type1);
-  CA_CHECK_DATA_TYPE(data_type2);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type1);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type2);
   dummy1.data_type = data_type1;
   dummy2.data_type = data_type2;
   ca_cast_func_table[data_type1][data_type2](1, &dummy1, ptr1, &dummy2, ptr2, NULL);
@@ -1767,8 +1771,11 @@ rb_ca_ptr2ptr (VALUE ra1, void *ptr1, VALUE ra2, void *ptr2)
 }
 
 
+/* A cell's bytes as the value of self's data type before the last two
+   steps of ca[i]: a boolean is 0 or 1 and a Face cell is its storage
+   value.  The element readers call this, check the mask, then decode. */
 VALUE
-rb_ca_ptr2obj (VALUE self, void *ptr)
+rb_ca_ptr2obj_storage (VALUE self, void *ptr)
 {
   volatile VALUE obj;
   static CArray dummy;
@@ -1782,6 +1789,20 @@ rb_ca_ptr2obj (VALUE self, void *ptr)
   else {
     return obj;
   }
+}
+
+VALUE
+rb_ca_ptr2obj (VALUE self, void *ptr)
+{
+  CArray *ca;
+  VALUE obj = rb_ca_ptr2obj_storage(self, ptr);
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(obj, self, ca);
+  if ( ca->data_type == CA_BOOLEAN &&
+       ( obj == INT2FIX(0) || obj == INT2FIX(1) ) ) {
+    obj = ( obj == INT2FIX(1) ) ? Qtrue : Qfalse;
+  }
+  return obj;
 }
 
 /* Surface -> storage-domain conversion for a Face store (mirror of the
@@ -1853,7 +1874,7 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
   if ( rb_obj_is_carray(obj) ) {                    /* obj == carray */
     TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
     if ( ca_is_readonly(ca) ) {
-      rb_raise(rb_eRuntimeError, "can not modify read-only array");
+      ca_refuse_read_only();
     }
     if ( NIL_P(rtype) ) {
       data_type = ca->data_type;
@@ -1891,7 +1912,7 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
     }
     TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
     if ( ca_is_readonly(ca) ) {
-      rb_raise(rb_eRuntimeError, "can not modify read-only array");
+      ca_refuse_read_only();
     }
     if ( NIL_P(rtype) ) {
       data_type = ca->data_type;
@@ -1905,12 +1926,9 @@ rb_ca_wrap_writable (VALUE arg, VALUE rtype)
     }
   }
   else if ( rb_memory_view_available_p(obj) ) {     /* MemoryView producer */
-    obj = rb_funcall(rb_cCArray, rb_intern("wrap_memory_view"), 1, obj);
+    obj = ca_mv_wrap(obj, Qnil, rb_cCAWrap, -1,
+                     NIL_P(rtype) ? -1 : rb_ca_guess_type(rtype), 1);
     TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
-    if ( ca_is_readonly(ca) ) {
-      rb_raise(rb_eRuntimeError,
-               "MemoryView source is read-only; can't wrap as writable");
-    }
     if ( NIL_P(rtype) ) {
       data_type = ca->data_type;
     }
@@ -2029,7 +2047,8 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
     }
   }
   else if ( rb_memory_view_available_p(obj) ) {     /* MemoryView producer */
-    obj = rb_funcall(rb_cCArray, rb_intern("wrap_memory_view"), 1, obj);
+    obj = ca_mv_wrap(obj, Qnil, rb_cCAWrap, -1,
+                     NIL_P(rtype) ? -1 : rb_ca_guess_type(rtype), 0);
     TypedData_Get_Struct(obj, CArray, &carray_data_type, ca);
     if ( NIL_P(rtype) ) {
       data_type = ca->data_type;
@@ -2169,6 +2188,36 @@ ca_check_integer_fits (VALUE v, int8_t dt)
     rb_raise(rb_eRangeError, "%"PRIsVALUE" is out of range for %s",
              rb_inspect(v), ca_type_name[dt]);
   }
+}
+
+/* The store reader for an integer cell: the value as an Integer, refused
+   when it does not fit the cell's type, as an operator refuses it.  A
+   store raises where an array cast (to_type) keeps the C conversion.  A
+   non-Integer goes through Integer() (1.5 is 1; nil and NaN raise). */
+VALUE
+ca_obj2integer_fitting (VALUE v, int8_t data_type)
+{
+  VALUE integer = RB_INTEGER_TYPE_P(v) ? v : rb_Integer(v);
+  if ( FIXNUM_P(integer) ) {
+    long x = FIX2LONG(integer);
+    int fits;
+    switch ( data_type ) {
+    case CA_INT8:   fits = ( x >= INT8_MIN  && x <= INT8_MAX );   break;
+    case CA_UINT8:  fits = ( x >= 0         && x <= UINT8_MAX );  break;
+    case CA_INT16:  fits = ( x >= INT16_MIN && x <= INT16_MAX );  break;
+    case CA_UINT16: fits = ( x >= 0         && x <= UINT16_MAX ); break;
+    case CA_INT32:  fits = ( x >= INT32_MIN && x <= INT32_MAX );  break;
+    case CA_UINT32: fits = ( x >= 0         && (unsigned long) x <= UINT32_MAX ); break;
+    case CA_INT64:  fits = 1;                                     break;
+    case CA_UINT64: fits = ( x >= 0 );                            break;
+    default:        fits = 1;                                     break;
+    }
+    if ( fits ) {
+      return integer;
+    }
+  }
+  ca_check_integer_fits(integer, data_type);
+  return integer;
 }
 
 /* A Ruby Integer operand against an integer array is taken in the array's
@@ -2425,7 +2474,7 @@ ca_arg_to_data_type (VALUE obj)
   else {
     data_type = ca_value_to_data_type(obj);
   }
-  CA_CHECK_DATA_TYPE(data_type);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
   if ( ! ca_valid[data_type] ) {
     rb_raise(rb_eArgError,
              "data type '%s' is not valid in this build",
@@ -2465,6 +2514,9 @@ int8_t
 ca_promote_type (int8_t a, int8_t b)
 {
   int test;
+  if ( a <= CA_NONE || a >= CA_NTYPE || b <= CA_NONE || b >= CA_NTYPE ) {
+    rb_raise(rb_eArgError, "invalid data_type id (%i, %i)", (int) a, (int) b);
+  }
   if ( a == b ) {
     return a;
   }
@@ -2521,6 +2573,49 @@ ca_value_match_type (int8_t t, int8_t a, int8_t b)
   }
 }
 
+/* The type a value query and a reference of type `ref` are compared in,
+   by equality or order, as `eq` compares them: the reference is read
+   through a view of that type, so the query is never cut to the
+   reference's type (3.9 does not match 3, -1 does not read as 255).
+   A Float query takes the type the operators give it beside the
+   reference; an Integer query keeps the reference's type when it fits and
+   otherwise the type its value needs, where it matches nothing; a CArray
+   query takes the type the two arrays match in (the common type, widened
+   by ca_value_match_type).  Beside a reference that is not a number, a
+   scalar query keeps the reference's type. */
+int8_t
+ca_query_match_type (int8_t ref, VALUE query)
+{
+  int ref_int   = ( ref >= CA_INT8 && ref <= CA_UINT64 );
+  int ref_float = ( ref == CA_FLOAT32 || ref == CA_FLOAT64 );
+  if ( rb_obj_is_carray(query) ) {
+    CArray *q;
+    TypedData_Get_Struct(query, CArray, &carray_data_type, q);
+    return ca_value_match_type(ca_promote_type(ref, q->data_type), ref,
+                               q->data_type);
+  }
+  if ( ! ref_int && ! ref_float && ref != CA_BOOLEAN ) {
+    return ref;
+  }
+  if ( RB_FLOAT_TYPE_P(query) ) {
+    return ca_promote_scalar_type(ref, query, CA_FLOAT64);
+  }
+  if ( RB_INTEGER_TYPE_P(query) ) {
+    return ref_int ? ca_promote_scalar_type(ref, query, CA_INT64) : ref;
+  }
+  return ref;
+}
+
+/* ca.query_match_type(query) -- ca_query_match_type with self as the
+   reference, for the set family and locate_addr. */
+static VALUE
+rb_ca_query_match_type (VALUE self, VALUE query)
+{
+  CArray *ca;
+  GetCArray(self, ca);
+  return rb_ca_data_type_to_sym(ca_query_match_type(ca->data_type, query));
+}
+
 /* ca.value_match_type(t, other_type) -- ca_value_match_type with self's
    data type as the first operand, for the set family and locate_addr. */
 static VALUE
@@ -2553,13 +2648,23 @@ ca_arg_is_scalar (VALUE obj)
    by the rule the operators apply: a scalar of the same kind takes the
    array's type (0.1 beside float32 is float32, 1 beside int8 is int8); one
    of another kind promotes (1.5 beside int32 is float64).  An Integer that
-   does not fit the array's integer type takes the type of its value, where
-   an operator would raise RangeError. */
+   does not fit the array's integer type takes a type that holds it and the
+   array's values (int64, or object where no integer type does), where an
+   operator would raise RangeError. */
 int8_t
 ca_promote_scalar_type (int8_t at, VALUE obj, int8_t st)
 {
   if ( RB_INTEGER_TYPE_P(obj) && at >= CA_INT8 && at <= CA_UINT64 ) {
-    return ( ca_integer_range_side(obj, at) == 0 ) ? at : ca_promote_type(at, st);
+    int8_t vt;
+    if ( ca_integer_range_side(obj, at) == 0 ) {
+      return at;
+    }
+    /* The type the value needs, widened so that the array's values are
+       kept beside it (a uint64 array and -1 meet in object). */
+    vt = ( ca_integer_range_side(obj, CA_INT64) == 0 )  ? CA_INT64
+       : ( ca_integer_range_side(obj, CA_UINT64) == 0 ) ? CA_UINT64
+       : CA_OBJECT;
+    return ca_value_match_type(ca_promote_type(at, vt), at, vt);
   }
   if ( ca_cast_table2[st][at] >= 0 ) {
     return at;
@@ -2606,6 +2711,8 @@ rb_ca_s_result_type (int argc, VALUE *argv, VALUE klass)
       cur = ( cur < 0 ) ? t : ca_promote_scalar_type(cur, argv[i], t);
     }
   }
+  /* argv points into rest, and classifying an argument can allocate */
+  RB_GC_GUARD(rest);
   /* Return Symbol for family consistency with
      CArray.value_to_data_type and ca.data_type. */
   return rb_ca_data_type_to_sym(cur);
@@ -2859,14 +2966,23 @@ rb_ca_clip_uint64 (VALUE self)
     uint64_t *op = (uint64_t *) out->ptr;
     ca_size_t n = ca->elements;
     const double LIMIT = 18446744073709551616.0; /* 2^64, exact in f64 */
+    boolean8_t *m = ca_has_mask(src) ? (boolean8_t *) src->mask->ptr : NULL;  /* attached with src */
+    int found_nan = 0;
     for ( ca_size_t i = 0; i < n; i++ ) {
       double v = sp[i];
-      if ( v != v )         op[i] = 0;              /* NaN -> 0 */
+      if ( v != v ) {                 /* NaN has no integer: refused below */
+        op[i] = 0;
+        if ( ! m || ! m[i] ) found_nan = 1;
+      }
       else if ( v >= LIMIT ) op[i] = UINT64_MAX;
       else if ( v <= 0.0 )   op[i] = 0;
       else                   op[i] = (uint64_t) v;
     }
     ca_detach(src);
+    if ( found_nan ) {
+      rb_raise(rb_eFloatDomainError, "%s: NaN cannot be converted to uint64",
+               ca_calling_method_name());
+    }
     if ( ca_has_mask(ca) ) {
       ca_copy_mask(out, ca);
     }
@@ -2889,7 +3005,7 @@ rb_ca_clip_uint64 (VALUE self)
      Numeric  -> CScalar, or #to_ca when the object answers it
      String   -> the whitespace / `,` / `;` / `_`->UNDEF parser, which reads
                  far more naturally in Ruby and so is the one branch that
-                 calls back out to it (CArray.__cast_string__ in
+                 calls back out to it (CArray.cast_string in
                  carray/basics.rb, eager-loaded).  It receives the data_type
                  as a Symbol.
 
@@ -3541,6 +3657,8 @@ Init_carray_cast (void)
            "result_type", rb_ca_s_result_type, -1);
   rb_define_private_method(rb_cCArray,
            "value_match_type", rb_ca_value_match_type, 2);
+  rb_define_private_method(rb_cCArray,
+           "query_match_type", rb_ca_query_match_type, 1);
 
   rb_define_singleton_method(rb_cCArray,
            "promote_list", rb_ca_s_promote_list, -1);
@@ -3554,7 +3672,7 @@ Init_carray_cast (void)
      classes registered in ext/carray_data_type.c. */
   id_new_cast               = rb_intern("new");
   id_guess_array_shape_cast = rb_intern("guess_array_shape");
-  id_cast_string            = rb_intern("__cast_string__");
+  id_cast_string            = rb_intern("cast_string");
   id_to_ca_cast             = rb_intern("to_ca");
   id_length_cast            = rb_intern("length");
   id_begin_cast             = rb_intern("begin");

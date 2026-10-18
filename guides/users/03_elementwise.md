@@ -282,6 +282,16 @@ c.gt(1) & c.lt(5) & c.ne(3)
 #  => [ 1, 0, 0, 0, 1 ]    at the extremes, excluding 0
 ```
 
+A value between two bounds has its own method, `is_between`. Both bounds are included unless `exclude:` names the one to leave out, and a Range says the same thing:
+
+```ruby
+c.is_between(2, 4)                    # 2 <= c <= 4
+c.is_between(2, 4, exclude: :upper)   # 2 <= c <  4
+c.is_between(2, 4, exclude: :both)    # 2 <  c <  4
+c.is_between(2...4)                   # 2 <= c <  4, as with exclude: :upper
+c.is_between(..2)                     # c <= 2
+```
+
 Boolean arrays are commonly used to index — see [Indexing and slicing](02_indexing_and_slicing.md) — and to mask elements (see [Masks](05_masks.md)).
 
 ## Arithmetic with a masked array
@@ -522,6 +532,7 @@ The methods that hand back a real array — `real`, `imag`, `abs`, `abs2`, `arg`
 |          | `a.feq(b)`    | Float equality with a small built-in tolerance — guards against the `0.1 + 0.2 != 0.3` trap |
 |          | `a.is_close(b, tol)`  | `\|a - b\| <= tol` element-wise                                                      |
 |          | `a.is_equiv(b, tol)`  | `is_close` with relative tolerance                                                 |
+|          | `a.is_between(lo, hi)` | `lo <= a <= hi`; `exclude: :lower` / `:upper` / `:both` leaves bounds out, or pass a Range |
 
 For object arrays:
 

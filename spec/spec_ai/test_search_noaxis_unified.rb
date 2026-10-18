@@ -57,7 +57,7 @@ class TestSearchNoaxisUnified < Test::Unit::TestCase
   def test_bsearch_2d_query_keeps_shape
     a = CA_INT([10, 20, 30, 40, 50])
     r = a.bsearch(CA_INT([[10, 35], [50, 99]]))
-    assert_equal [2, 2], r.dim
+    assert_equal [2, 2], r.shape
     assert_equal [[0, UNDEF], [4, UNDEF]], r.to_a
   end
 
@@ -67,7 +67,7 @@ class TestSearchNoaxisUnified < Test::Unit::TestCase
     a = CA_INT([10, 20, 30, 40, 50])
     r = a.bsearch(CA_INT([30]))
     assert_kind_of CArray, r
-    assert_equal [1], r.dim
+    assert_equal [1], r.shape
     assert_equal [2], r.to_a
     # no-match single-element query -> [1] masked
     r2 = a.bsearch(CA_INT([35]))

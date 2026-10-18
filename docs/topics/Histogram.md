@@ -64,6 +64,8 @@ h.counts.to_a                              # => [1, 2, 0, 0, 1]
 
 `edges` are `N+1` ascending boundary values defining `N` bins. Bin `k`
 spans `[edges[k], edges[k+1])` — closed on the left, open on the right.
+Edges that decrease, a NaN edge and a masked edge raise `ArgumentError`;
+equal edges (a bin of zero width) and infinite edges are accepted.
 
 ### The extended counts model: under and over
 

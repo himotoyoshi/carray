@@ -32,6 +32,45 @@ class CAIterator
   # The keywords a member passes on to a core reduction over its own axes.
   # The member sets `axis:`, so one from the caller is refused; the rest go
   # to the core, which checks them.
+  # Whether a fill method carries values backward: :forward / :ffill carry
+  # them forward, :backward / :bfill back. A member fills within its own
+  # pieces by holding the nearest present value; :linear, which needs a
+  # coordinate, is the core's alone.
+  def self.hold_backward? (method) # :nodoc:
+    case method
+    when :forward, :ffill   then false
+    when :backward, :bfill  then true
+    else
+      raise ArgumentError,
+            "strip_mask: method must be :forward, :ffill, :backward or :bfill " \
+            "within a piece (got #{method.inspect})"
+    end
+  end
+
+  # A one-cell (1, 1) array of the kind `value` holds, for asking the core
+  # what a reduction or scan of it answers in: its data type, cell width and,
+  # for a Face, its Face.  A member that answers by a route of its own
+  # (a fused kernel, a fold by offset) takes its output type from here, so
+  # the route and the core cannot disagree.  A Face is a view of the values
+  # themselves rather than a blank -- a Face cannot be allocated from its
+  # surface data type alone, and a zeroed record is not a valid cell for every
+  # one (a const string's record indexes a shared pool).  A Face with no cell
+  # is asked with the blank cell its resize gives, so a reduction over no
+  # groups answers in the same kind as over some; this is nil only when the
+  # Face has no blank cell.
+  def self.core_probe (value) # :nodoc:
+    unless value.face?
+      return CArray.new(value.data_type, [1, 1], bytes: value.bytes)
+    end
+    flat = value.reshape(value.elements)
+    return flat[[0]].reshape(1, 1) if value.elements > 0
+    begin
+      flat.resize(1).reshape(1, 1)
+    rescue StandardError
+      nil
+    end
+  end
+
   def self.reduce_keywords (op, kw) # :nodoc:
     if kw.key?(:axis)
       raise ArgumentError, "#{op}: unknown keyword: :axis (the iterator sets the axes)"
@@ -127,6 +166,18 @@ class CAIterator
   #   Returns the five-number summary of each piece,
   #   `[min, Q1, median, Q3, max]`.
   #   @return [Array<CArray>] five arrays, one per position.
+  # @!method first
+  #   Returns the first present value of each piece, in the piece's own
+  #   order; a piece with no present value is UNDEF.
+  #   @return [CArray] one value per piece, in the source's data type.
+  # @!method last
+  #   Returns the last present value of each piece; a piece with no present
+  #   value is UNDEF.
+  #   @return [CArray] one value per piece, in the source's data type.
+  # @!method nunique
+  #   Returns the number of distinct present values in each piece, as
+  #   `CArray#nunique` counts them; a piece with none counts 0.
+  #   @return [CArray] `:int64`, one count per piece.
   # @!method count(value = nil)
   #   Returns a count per piece: with no argument the cells that are not
   #   masked, with `UNDEF` the masked cells, and with any other value the
@@ -161,14 +212,16 @@ class CAIterator
     :min_index, :max_index, :min_addr, :max_addr,                     # position
     :wsum, :wmean,                                                    # weighted
     :median, :percentile, :quantile,                                 # tier 3
+    :first, :last, :nunique,                                          # position / distinct
     :count, :count_not_masked, :count_masked, :elements,             # count family
     :each, :reduce,                                                   # generic iterate
   ].freeze
 
   REQUIRED_SURFACE.each do |name|
-    define_method(name) do |*, **, &_blk|
+    # define_method: a stub that names itself in its own message
+    define_method(name, &Ractor.make_shareable(proc do |*, **, &_blk|
       raise NotImplementedError, "#{self.class} must implement ##{name}"
-    end
+    end))
   end
 
   # Recommended (should) surface -- template methods.  These are well-defined
@@ -176,7 +229,8 @@ class CAIterator
   # required: `map` is a per-piece element-wise transform scattered back to the
   # source, `sort_addr` is a per-piece sort returning source flat addresses, and
   # the segment scans (cumsum / cumprod / cummax / cummin / cumcount) write a
-  # per-cell running statistic of each piece.  A member implements each when it
+  # per-cell running statistic of each piece, and `lag` the value some steps
+  # earlier in the same piece.  A member implements each when it
   # is well-defined and overrides it to raise with a reason when it is not.  The
   # scans belong here for the same reason as map: a running per-cell value is
   # single-valued only when each cell belongs to exactly one piece, so the
@@ -221,11 +275,35 @@ class CAIterator
   #   masked within each piece.
   #   @return [CArray] shaped like the source.
   #   @raise [NotImplementedError] for a member whose pieces overlap.
-  [:map, :sort_addr,
-   :cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |name|
-    define_method(name) do |*, **, &_blk|
+  # @!method lag(n = 1)
+  #   Returns a source-shaped array whose cell holds the value `n` steps
+  #   earlier within the same piece, as `CArray#lag` does along an axis; a
+  #   cell with no such value in its piece is UNDEF, so a lag never reaches
+  #   across into another piece.
+  #   @param n [Integer] steps back; a negative `n` looks ahead.
+  #   @return [CArray] shaped like the source.
+  #   @raise [NotImplementedError] for a member whose pieces overlap, where a
+  #     cell has no single position within a piece.
+  # @!method strip_mask(method:)
+  #   Returns a source-shaped array with each masked cell filled from its own
+  #   piece, as `CArray#strip_mask(method:)` fills: `:forward` (`:ffill`)
+  #   carries the last present value forward, `:backward` (`:bfill`) the next
+  #   one back, never across into another piece.
+  #   @param method [Symbol] `:forward`, `:ffill`, `:backward` or `:bfill`.
+  #   @return [CArray] shaped like the source.
+  #   @raise [NotImplementedError] for a member whose pieces overlap.
+  # @!method order(descending: false, method: :ordinal, kind: :quick)
+  #   Returns a source-shaped int64 array of each cell's rank among the cells
+  #   of its piece, as `CArray#order` ranks them (`0` the smallest).
+  #   @return [CArray] shaped like the source.
+  #   @raise [NotImplementedError] for a member whose pieces overlap, where a
+  #     cell has no single rank.
+  [:map, :sort_addr, :order, :strip_mask,
+   :cumsum, :cumprod, :cummax, :cummin, :cumcount, :lag].each do |name|
+    # define_method: a stub that names itself in its own message
+    define_method(name, &Ractor.make_shareable(proc do |*, **, &_blk|
       raise NotImplementedError, "#{self.class} does not provide ##{name} (optional)"
-    end
+    end))
   end
 
 end

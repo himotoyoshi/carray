@@ -104,6 +104,10 @@ void Init_ca_face (void);
 extern int8_t CA_OBJ_RECORD;
 VALUE   rb_ca_record_get_data_class (CArray *ca);
 
+/* CA_OBJ_STRING identifies CAString, read by the store path
+   (carray_access.c) to send an array source through the write hook. */
+extern int8_t CA_OBJ_STRING;
+
 /* -- Convenience macro for view-creating method deployment --
    Insert at the tail of each view-creating Ruby method (= rb_ca_transpose
    / rb_ca_reshape / etc.) just before return. `ca` is self's CArray *,
@@ -288,9 +292,24 @@ VALUE ca_face_strip_one (VALUE v);
 NORETURN(void ca_face_refuse_order (const char *name, VALUE face,
                                     const char *verb));
 
+/* The gate of every family that orders, compares, searches or hashes a Face
+   reference: returns when the Face is ORDERABLE_STORAGE, refuses otherwise
+   (ca_face_refuse_order).  Call this rather than testing the flag. */
+void ca_face_require_orderable (VALUE face, const char *name,
+                                const char *verb);
+
+/* Whether a Face is not ORDERABLE and answers #order itself (CAConstString,
+   CARecord), so a family that orders by a key takes that order instead of
+   the storage. */
+int  ca_face_orders_by_itself (VALUE face);
+
 /* The conversion a refusal of a Face whose cells encode its values points
    at (#to_string for a string Face, to_type(:object) for any other). */
 const char *ca_face_conversion_hint (VALUE face);
+
+/* The method that gives the storage under a Face (#ticks, #codes), or NULL
+   when the Face has none of those. */
+const char *ca_face_storage_method (VALUE face);
 
 /* Raise eclass naming a Face that does not define the numeric operation
    `name`; returns when self is not a Face.  See ca_obj_face.c. */

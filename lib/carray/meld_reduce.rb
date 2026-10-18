@@ -16,7 +16,7 @@
 #
 # Fast path activates when:
 #   - axis kwarg is a single Integer (or absent for flat reduce)
-#   - no mask on CAMeld or any parent (skipna needs per-cell dispatch;
+#   - no mask on CAMeld or any parent (skipping masked cells needs per-cell dispatch;
 #     the decompose would not see correct mask propagation across parents)
 #   - no non-:axis kwargs (min_count / fill_value / keep_axis / etc. punt
 #     to super; those change finalisation semantics)
@@ -66,9 +66,9 @@ class CAMeld
       total_count = parents.map(&:elements).inject(:+)
       total_sum / total_count.to_f
     elsif meld_axis_normalized?(axis)
-      return super if parents.all? { |p| p.dim[meld_axis] == 0 }
+      return super if parents.all? { |p| p.shape[meld_axis] == 0 }
       total_sum = parents.map { |p| p.sum(axis: axis) }.inject(:+)
-      total_count = parents.map { |p| p.dim[meld_axis] }.inject(:+)
+      total_count = parents.map { |p| p.shape[meld_axis] }.inject(:+)
       total_sum / total_count.to_f
     else
       non_meld_axis_decompose(:mean, axis)
@@ -88,8 +88,8 @@ class CAMeld
       return super if parents.all? { |p| p.elements == 0 }
       meld_combine_flat(:min)
     elsif meld_axis_normalized?(axis)
-      return super if parents.all? { |p| p.dim[meld_axis] == 0 }
-      nonempty = parents.reject { |p| p.dim[meld_axis] == 0 }
+      return super if parents.all? { |p| p.shape[meld_axis] == 0 }
+      nonempty = parents.reject { |p| p.shape[meld_axis] == 0 }
       CArray.stack(nonempty.map { |p| p.min(axis: axis) }).min(axis: 0)
     else
       non_meld_axis_decompose(:min, axis)
@@ -107,8 +107,8 @@ class CAMeld
       return super if parents.all? { |p| p.elements == 0 }
       meld_combine_flat(:max)
     elsif meld_axis_normalized?(axis)
-      return super if parents.all? { |p| p.dim[meld_axis] == 0 }
-      nonempty = parents.reject { |p| p.dim[meld_axis] == 0 }
+      return super if parents.all? { |p| p.shape[meld_axis] == 0 }
+      nonempty = parents.reject { |p| p.shape[meld_axis] == 0 }
       CArray.stack(nonempty.map { |p| p.max(axis: axis) }).max(axis: 0)
     else
       non_meld_axis_decompose(:max, axis)
@@ -163,7 +163,7 @@ class CAMeld
   private
 
   def meld_axis_normalized?(axis)
-    (axis < 0 ? axis + ndim : axis) == meld_axis
+    normalize_axis(axis) == meld_axis
   end
 
   # Fast path fires when: no mask anywhere, no non-:axis kwargs, and axis
@@ -177,9 +177,7 @@ class CAMeld
     return false unless (kw.keys - [:axis]).empty?
     axis = kw[:axis]
     unless axis.nil?
-      return false unless axis.is_a?(Integer)
-      norm = axis < 0 ? axis + ndim : axis
-      return false unless norm >= 0 && norm < ndim
+      return false unless axis.is_a?(Integer) && axis >= -ndim && axis < ndim   # axis-check: a gate only; super normalizes
     end
     return false if has_mask?
     parents.each { |p| return false if p.has_mask? }
@@ -218,7 +216,7 @@ class CAMeld
   # meld_axis branch and never reaches here.)
   def non_meld_axis_decompose(op, axis)
     parts = parents.map { |p| p.public_send(op, axis: axis) }
-    axis_norm = axis < 0 ? axis + ndim : axis
+    axis_norm = normalize_axis(axis)
     new_meld_axis = axis_norm < meld_axis ? meld_axis - 1 : meld_axis
     CArray.meld(parts, axis: new_meld_axis).copy
   end
@@ -241,7 +239,7 @@ class CAMeld
       return yield if parents.any? { |p| p.elements < min_n }
       finalize_scalar(welford_flat, sample, sqrt)
     elsif meld_axis_normalized?(axis)
-      return yield if parents.any? { |p| p.dim[meld_axis] < min_n }
+      return yield if parents.any? { |p| p.shape[meld_axis] < min_n }
       finalize_vector(welford_axis(axis), sample, sqrt)
     else
       # Non-meld-axis: each parent's variance/stddev is independent along
@@ -288,7 +286,7 @@ class CAMeld
     mean = nil
     m2 = nil
     parents.each do |p|
-      np = p.dim[meld_axis]
+      np = p.shape[meld_axis]
       mp = p.mean(axis: axis)
       # variance is undefined at n=1; for variancep with n=1, m2_p = 0 by
       # definition (variance_family already gated n >= min_n).

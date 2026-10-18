@@ -127,6 +127,17 @@ def indent(s, prefix = "  ")
   s.each_line.map { |l| l.strip.empty? ? l : prefix + l }.join
 end
 
+# The operands are read through cx[] only once their structs are taken, and
+# a caller may pass a view it made for the call and holds nowhere else
+# (rb_ca_wrap_readonly(x, ...) as an argument): keep each one reachable until
+# the walk is done.  rcx0 is the return value and needs no guard.
+def emit_operand_guards(n)
+  (1...n).each do |k|
+    $src.puts "  RB_GC_GUARD(rcx#{k});"
+  end
+  $src.puts "" if n > 1
+end
+
 # --- raw ca_call_cfunc_N ----------------------------------------------------
 #
 # The per-cell loop runs in a walker function of its own, handed to
@@ -198,7 +209,7 @@ def emit_raw_common(n, r:)
     $src.puts "  TypedData_Get_Struct(rcx#{k}, CArray, &carray_data_type, cx[#{k}]);"
   end
   $src.puts ""
-  $src.puts <<~END_C
+  $src.puts indent(<<~END_C)
       /* sweep engine: per-operand acquire (alias / xmalloc + ca_xfer_all),
          operand pairing, mask OR across INPUTs, mask propagate to OUTPUTs.
          Lifecycle template lives in ext/ca_sweep_engine.{c,h}. */
@@ -218,6 +229,9 @@ def emit_raw_common(n, r:)
       ctx.userdata = #{r ? "userdata" : "NULL"};
       ca_sweep_run(&state, #{name}_walk, (VALUE) &ctx);
 
+  END_C
+  emit_operand_guards(n)
+  $src.puts <<~END_C
       return rcx0;
     }
 
@@ -396,7 +410,7 @@ def emit_slab_body(n, name, walker, userdata)
     $src.puts "  TypedData_Get_Struct(rcx#{k}, CArray, &carray_data_type, cx[#{k}]);"
   end
   $src.puts ""
-  $src.puts <<~END_C
+  $src.puts indent(<<~END_C)
       /* sweep engine, chunked path: per-operand acquire (attach for OUTPUT
          and alias INPUT, arena chunk scratch for non-alias INPUT), broadcast
          shape check, mask OR across INPUTs, mask propagate to OUTPUTs at
@@ -421,6 +435,9 @@ def emit_slab_body(n, name, walker, userdata)
       ctx.userdata = #{userdata};
       ca_sweep_run_chunked(&state, #{walker}, (VALUE) &ctx);
 
+  END_C
+  emit_operand_guards(n)
+  $src.puts <<~END_C
       return rcx0;
     }
 

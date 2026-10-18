@@ -98,6 +98,7 @@ ca_bitarray_setup (CABitarray *ca, CArray *parent)
 
   /* The bits of one byte would share that byte's one mask cell, so a bit
      view takes no masked array and holds no mask of its own. */
+  /* mask: the constructor asks first, before it allocates (ca == NULL) */
   if ( ca_has_mask(parent) ) {
     rb_raise(rb_eArgError,
              "bitarray: the array has a mask, which a bit view can not "
@@ -395,7 +396,7 @@ ca_bitarray_func_allocate (void *ap)
 {
   CABitarray *ca = (CABitarray *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -403,7 +404,7 @@ ca_bitarray_func_attach (void *ap)
 {
   CABitarray *ca = (CABitarray *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
   ca_bitarray_attach(ca);
 }
 

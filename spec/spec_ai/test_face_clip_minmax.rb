@@ -11,7 +11,7 @@ class TestFaceClipMinmax < Test::Unit::TestCase
   # ORDERABLE and COMPARABLE, defined in Ruby.
   class PlainTicks < CAObject
     def initialize (parent)
-      super(CA_FIXLEN, parent.dim, bytes: 8, storage: CA_INT64, parent: parent,
+      super(CA_FIXLEN, parent.shape, bytes: 8, storage: CA_INT64, parent: parent,
             face: true, orderable_storage: true, comparable_storage: true)
     end
     def storage_to_element (raw)

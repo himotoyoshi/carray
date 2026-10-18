@@ -18,13 +18,13 @@ class CARecurrence < CAObject
 
   def initialize (data, init = {}, &block)
     @value = data
-    @flag = CArray.boolean(*data.dim)
+    @flag = CArray.boolean(*data.shape)
     @block = block
     init.each do |idx, val|
       @value[*idx] = val
       @flag[*idx] = 1
     end
-    super(data.data_type, data.dim, :bytes => data.bytes, :read_only => true)
+    super(data.data_type, data.shape, :bytes => data.bytes, :read_only => true)
   end
 
   def reset (init = {})

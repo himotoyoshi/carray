@@ -31,7 +31,7 @@ class TestLinearInterpAxisKernels < Test::Unit::TestCase
     out = y.linear_section_binary_ki(vals, 0)
     assert_instance_of CArray, out
     assert_equal CA_FLOAT64, out.data_type
-    assert_equal [3], out.dim
+    assert_equal [3], out.shape
     [1.5, 3.5, 7.5].each_with_index do |v, i|
       assert_in_delta v, out[i], 1e-12
     end
@@ -100,7 +100,7 @@ class TestLinearInterpAxisKernels < Test::Unit::TestCase
     m = CArray.float64(3, 4) { |i, j| (i * 10 + j).to_f }
     # Per-row fetch at addr 1.5 -> [0.5, 10.5, 20.5] + 1 = [1.5, 11.5, 21.5]
     out = m.linear_fetch_ki(1.5, 1)
-    assert_equal [3], out.dim
+    assert_equal [3], out.shape
     assert_in_delta 1.5,  out[0], 1e-12
     assert_in_delta 11.5, out[1], 1e-12
     assert_in_delta 21.5, out[2], 1e-12
@@ -113,7 +113,7 @@ class TestLinearInterpAxisKernels < Test::Unit::TestCase
     vals_pf = CArray.float64(3, 1)
     vals_pf[0, 0] = 2.5; vals_pf[1, 0] = 102.5; vals_pf[2, 0] = 202.5
     out  = m.linear_section_binary_ki(vals_pf, 1)
-    assert_equal [3, 1], out.dim
+    assert_equal [3, 1], out.shape
     [2.5, 2.5, 2.5].each_with_index do |v, i|
       assert_in_delta v, out[i, 0], 1e-12
     end
@@ -124,7 +124,7 @@ class TestLinearInterpAxisKernels < Test::Unit::TestCase
     m = CArray.float64(3, 5) { |i, j| (i * 100 + j).to_f }
     vals = CA_DOUBLE([2.5, 102.5, 202.5])
     out  = m.linear_section_binary_ki(vals, 1)
-    assert_equal [3, 3], out.dim
+    assert_equal [3, 3], out.shape
   end
 
   def test_section_2d_axis1_query_axis_appended
@@ -137,7 +137,7 @@ class TestLinearInterpAxisKernels < Test::Unit::TestCase
     # row 0: [0..4], finds 1.5 and 3.5 -> [1.5, 3.5]
     # row 1: [100..104], queries 1.5 / 3.5 are out of range -> NaN
     #        (Option C: no extrapolation).  Pin row 0; row 1 is NaN.
-    assert_equal [3, 2], out.dim
+    assert_equal [3, 2], out.shape
     assert out[1, 0].nan?, "row 1 out-of-range query should be NaN"
     assert_in_delta 1.5, out[0, 0], 1e-12
     assert_in_delta 3.5, out[0, 1], 1e-12

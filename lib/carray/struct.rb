@@ -340,14 +340,6 @@ class CAStruct
     super
   end
 
-  protected
-
-  def __data__
-    @data
-  end
-
-  public
-
   # Member access.  A member is named by a String (`s["lat"]`) or its
   # Integer position (`s[0]`); its accessor (`s.lat`) reads it too.  A
   # Symbol is not a member name here, and a name that is not a member
@@ -509,26 +501,22 @@ class CAStruct
   # @!method <=(other)
   # @!method >(other)
   # @!method >=(other)
-  { :< => ->(c) { c < 0 }, :<= => ->(c) { c <= 0 },
-    :> => ->(c) { c > 0 }, :>= => ->(c) { c >= 0 } }.each do |op, test|
-    define_method(op) do |other|
+  [:<, :<=, :>, :>=].each do |op|
+    define_method(op, &Ractor.make_shareable(proc do |other|
       c = (self <=> other)
       if c.nil?
         raise ArgumentError,
               "comparison of #{self.class.inspect} with #{other.class.inspect} failed" +
               (self.class.order_by ? "" : " (the struct declares no order_by:)")
       end
-      test.call(c)
-    end
+      c.public_send(op, 0)
+    end))
   end
 
-  # One member of {#<=>}: NaN after every number, as a numeric array sorts.
+  # One member of {#<=>}: the order a sort puts the member's values in
+  # (NaN after every number).
   def self.compare_key (a, b)
-    a_nan = a.is_a?(Float) && a.nan?
-    b_nan = b.is_a?(Float) && b.nan?
-    return (a_nan ? 0 : -1) if b_nan
-    return 1 if a_nan
-    a <=> b
+    CArray.send(:object_order_cmp, a, b)
   end
 
   # Byte-level identity.  Two CAStruct instances are eql? iff they are
@@ -728,8 +716,8 @@ end
 # in Builder sets them up before any instance is created).  Subclasses
 # created by Builder later don't need re-installation -- they inherit the
 # C methods from CAStruct.
-if CArray.respond_to?(:__install_castruct_methods__)
-  CArray.__install_castruct_methods__(CAStruct)
+if CArray.respond_to?(:install_struct_methods, true)
+  CArray.send(:install_struct_methods, CAStruct)
 end
 
 require 'carray/record_order'

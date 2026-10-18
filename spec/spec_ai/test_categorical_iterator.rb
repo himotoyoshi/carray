@@ -888,6 +888,19 @@ class TestCategoricalIterator < Test::Unit::TestCase
     end
   end
 
+  def test_a_write_before_the_first_reduction_reaches_no_member
+    SNAPSHOT_MEMBERS.each do |op|
+      h = CA_DOUBLE([1.0, 2.0, 3.0, 4.0])
+      expected = h.group_by_category(CA_INT32([0, 0, 1, 1]).categorize).public_send(op).to_a
+      grp = h.group_by_category(CA_INT32([0, 0, 1, 1]).categorize)
+
+      h[0] = 100.0
+
+      assert_equal(expected, grp.public_send(op).to_a,
+                   "#{op} asked first after a write through the source")
+    end
+  end
+
   def test_a_fresh_iterator_sees_the_write
     h = CA_DOUBLE([1.0, 2.0, 3.0, 4.0])
     cat = CA_INT32([0, 0, 1, 1]).categorize

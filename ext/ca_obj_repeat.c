@@ -39,9 +39,7 @@ ca_repeat_setup (CAStride *ca, CArray *parent, int8_t ndim, ca_size_t *count)
   int8_t data_ndim = 0;
   int8_t i, j;
 
-  if ( ndim < 0 || ndim > CA_RANK_MAX ) {
-    rb_raise(rb_eArgError, "invalid ndim %d", (int) ndim);
-  }
+  ca_check_rank_fits(ndim, NULL);
   for (i = 0; i < ndim; i++) {
     if (count[i] < 0) {
       rb_raise(rb_eArgError,
@@ -86,9 +84,9 @@ ca_repeat_setup (CAStride *ca, CArray *parent, int8_t ndim, ca_size_t *count)
     return 0;
   }
 
-  ca_stride_setup(ca, CA_OBJ_REPEAT, parent,
-                  parent->data_type, parent->bytes,
-                  ndim, newdim, strides, 0);
+  ca_stride_setup_view(ca, CA_OBJ_REPEAT, parent,
+                       parent->data_type, parent->bytes,
+                       ndim, newdim, strides, 0);
 
   ca_set_flag(ca, CA_FLAG_READ_ONLY);
   if (ca->mask) {
@@ -104,6 +102,7 @@ ca_repeat_new (CArray *parent, int8_t ndim, ca_size_t *count)
   ca_repeat_setup(NULL, parent, ndim, count);
   ca = (CAStride *) ca_array_alloc(CA_OBJ_REPEAT, ndim);
   ca_repeat_setup(ca, parent, ndim, count);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -216,12 +215,12 @@ rb_ca_repeat (int argc, VALUE *argv, VALUE self)
         self = rb_ca_refer_new(self, ca->data_type, ndim, dim, ca->bytes, 0);
       }
     }
-    return rb_ca_repeat((int)RARRAY_LEN(args), (VALUE *)RARRAY_CONST_PTR(args), self);
+    self = rb_ca_repeat((int)RARRAY_LEN(args), (VALUE *)RARRAY_CONST_PTR(args), self);
+    RB_GC_GUARD(args);   /* the repeat reads its arguments out of args */
+    return self;
   }
 
-  if ( argc > CA_RANK_MAX ) {         /* count[] and dim[] hold CA_RANK_MAX */
-    rb_raise(rb_eArgError, "invalid ndim %d", argc);
-  }
+  ca_check_rank_fits(argc, NULL);     /* count[] and dim[] hold CA_RANK_MAX */
 
   repeat = 1;
   for (i=0; i<argc; i++) {

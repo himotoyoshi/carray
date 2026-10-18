@@ -32,8 +32,8 @@ ca_field_setup (CAStride *ca, CArray *parent,
   ca_size_t strides[CA_RANK_MAX];
   int8_t i;
 
-  CA_CHECK_DATA_TYPE(data_type);
-  CA_CHECK_BYTES(data_type, bytes);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
+  CA_CHECK_BYTES_GIVEN(data_type, bytes);
 
   if ( offset < 0 ) {
     rb_raise(rb_eArgError, "negative offset");
@@ -45,6 +45,16 @@ ca_field_setup (CAStride *ca, CArray *parent,
   if ( ca_is_object_type(parent) ) {
     rb_raise(rb_eCADataTypeError,
              "a field can not be taken from an object array");
+  }
+  /* A boolean cell holds 0 or 1, and a field of a numeric array is
+     written as that number.  A record's boolean member is a field of a
+     fixlen array, whose member stores keep it 0 or 1. */
+  if ( data_type == CA_BOOLEAN && parent->data_type != CA_BOOLEAN
+       && parent->data_type != CA_FIXLEN ) {
+    rb_raise(rb_eCADataTypeError,
+             "%s: a field of a %s array can't be read as boolean (its bytes "
+             "need not be 0 or 1); compare it instead, e.g. ne(0)",
+             ca_calling_method_name(), ca_type_name[parent->data_type]);
   }
   if ( parent->bytes < offset + bytes ) {
     rb_raise(rb_eArgError, "offset or bytes out of range");
@@ -67,9 +77,9 @@ ca_field_setup (CAStride *ca, CArray *parent,
     return 0;
   }
 
-  ca_stride_setup(ca, CA_OBJ_FIELD, parent,
-                  data_type, bytes,
-                  parent->ndim, parent->dim, strides, offset);
+  ca_stride_setup_view(ca, CA_OBJ_FIELD, parent,
+                       data_type, bytes,
+                       parent->ndim, parent->dim, strides, offset);
 
   return 0;
 }
@@ -81,6 +91,7 @@ ca_field_new (CArray *parent, ca_size_t offset, int8_t data_type, ca_size_t byte
   ca_field_setup(NULL, parent, offset, data_type, bytes);
   ca = (CAStride *) ca_array_alloc(CA_OBJ_FIELD, parent->ndim);
   ca_field_setup(ca, parent, offset, data_type, bytes);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -181,6 +192,7 @@ rb_ca_field_initialize_copy (VALUE self, VALUE other)
   /* Reconstruct from the source's base_offset / data_type / bytes;
      ca_field_setup recomputes strides from parent's shape. */
   ca_field_setup(ca, cs->parent, cs->base_offset, cs->data_type, cs->bytes);
+  ca_view_inherit_mask((VALUE) ca);
 
   return self;
 }

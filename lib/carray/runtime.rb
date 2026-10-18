@@ -15,13 +15,22 @@ class CArray
     end
   end
 
+  # True when a development build runs with CARRAY_GENERAL_PATH=2: the
+  # kernel iterator then delivers every source through the view's own
+  # transfer.  A release build has no switch.
+  unless respond_to?(:__iter_by_transfer_only__)
+    def self.__iter_by_transfer_only__ # :nodoc:
+      false
+    end
+  end
+
   # String fallback for the global cast functions CA_INT32(data) etc.  The C
   # dispatcher (ext/carray_cast.c) handles every other input class in C and
   # delegates only String here, because the whitespace / `,` / `;` /
   # `_`->UNDEF parser is far more natural (and maintainable) in Ruby.
   # +type+ arrives as the data_type Symbol.  Required: without it
   # +CA_INT32("1 2 3")+ and friends raise.
-  def self.__cast_string__ (type, v) # :nodoc:
+  def self.cast_string (type, v)
     if type == CA_OBJECT
       return CScalar.new(CA_OBJECT) { v }
     elsif type == CA_BOOLEAN
@@ -40,7 +49,7 @@ class CArray
       return CArray.new(type, CArray.guess_array_shape(v)).tap { |a| a[] = v }
     end
   end
-  private_class_method :__cast_string__
+  private_class_method :cast_string
 
   # CA_OBJECT escape for the weighted-sum kernel (mkkernel object_escape:).
   # The C dispatcher (carray_kernels.c rb_ca_wsum_ki) intercepts CA_OBJECT
@@ -53,18 +62,18 @@ class CArray
   # scalar or a full-shape weight), matching CArray's explicit-broadcast rule.
   # +opts+ is the trailing options Hash (axis:/keep_axis:/min_count:/
   # fill_value:) forwarded verbatim by the C escape; it goes straight to +sum+.
-  def __wsum_object__ (weights, opts = {}) # :nodoc:
+  def wsum_object (weights, opts = {}) # :nodoc:
     (self * weights).sum(**opts)
   end
-  private :__wsum_object__
+  private :wsum_object
 
   # CA_OBJECT escape for the weighted-mean kernel.  Weighted mean is
   # +Σ(w*v) / Σw+ over the cells valid after mask overlay (a masked value OR a
   # masked weight drops the cell from BOTH sums).  The denominator is guarded:
   # an empty / all-masked slab or weights summing to zero yields UNDEF (the
   # object analogue of the numeric kernel's 0/0 -> NaN, since objects have no
-  # NaN).  Weight forms and +opts+ as in {#__wsum_object__}.
-  def __wmean_object__ (weights, opts = {}) # :nodoc:
+  # NaN).  Weight forms and +opts+ as in {#wsum_object}.
+  def wmean_object (weights, opts = {}) # :nodoc:
     axis      = opts[:axis]
     keep_axis = opts[:keep_axis]
     prod = self * weights
@@ -84,9 +93,45 @@ class CArray
       else
         num / den
       end
-    CArray.__reduce_fill__(result, opts[:fill_value])
+    CArray.__fill_undefined_result_cells__(result, opts[:fill_value])
   end
-  private :__wmean_object__
+  private :wmean_object
+
+  # Define on +mod+ one method per name in +names+, each a `def` that passes
+  # its own name and its arguments to the private method +to+:
+  #
+  #   CArray.send(:define_named_methods, self, [:sum, :min], :fold_reduction)
+  #   # def sum (...) = fold_reduction(:sum, ...)
+  #
+  # A method made by define_method carries no name in its frame, so an error
+  # raised inside it cannot name the method the user called; a `def` does.
+  # With +super_block+ the method passes its arguments as an Array and a Hash,
+  # and a block that calls the method it overrides with the arguments the
+  # block is given (`yield(*args, **kw)`).
+  #
+  # With +template+ (and no +to+) each method is written out from it, for a
+  # method on a path where a helper call would cost: __NAME__ is the name and
+  # __VALUE__ the value +names+ (a Hash) gives it, inspected.
+  NAMED_METHOD = /\A(?:[a-z_]\w*[?!]?|\+|-|\*\*?|\/|%|<=>|==|<=?|>=?|<<|>>|&|\||\^|~|[+-]@)\z/
+  def self.define_named_methods (mod, names, to = nil, super_block: false, template: nil)
+    loc = caller_locations(1, 1).first
+    names.each do |name, value|
+      unless name.to_s.match?(NAMED_METHOD)
+        raise ArgumentError, "define_named_methods: #{name.inspect} is not a method name"
+      end
+      src = if template
+              template.gsub("__NAME__", name.to_s).gsub("__VALUE__", value.inspect)
+            elsif super_block
+              "def #{name}(*args, **kw, &blk)\n" \
+              "  #{to}(:#{name}, args, kw) { |*a, **k| super(*a, **k, &blk) }\n" \
+              "end\n"
+            else
+              "def #{name}(...)\n  #{to}(:#{name}, ...)\nend\n"
+            end
+      mod.class_eval(src, loc.path, loc.lineno)
+    end
+  end
+  private_class_method :define_named_methods
 
 end
 

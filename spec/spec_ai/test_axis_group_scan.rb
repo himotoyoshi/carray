@@ -1,5 +1,5 @@
 # Differential test for the axis-group segment scan: the per-element-emit
-# sibling of __axis_group_reduce__.  Exercises CAGroupIterator#cumsum / #cumprod
+# sibling of __reduce_by_axis_groups__.  Exercises CAGroupIterator#cumsum / #cumprod
 # / #cummax / #cummin / #cumcount with axis: :group against an independent
 # pure-Ruby reference, over int + float + object dtypes, masks, excluded
 # (fixed-vocabulary) cells, single group axis, multiple group slots, rank-N

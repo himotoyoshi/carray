@@ -39,10 +39,45 @@ class TestCAObjectTransientWrap < Test::Unit::TestCase
     r = Keeper.new(CArray.object(3, 4) { |i, j| "s#{i}#{j}" })
     assert_equal(["s20", "s00"], r[CArray.int64(2) { [2, 0] }, 0].to_a.flatten)
     assert_equal(2, r.kept.size)
-    assert_true(r.kept.none?(&:attached?))
+    assert_true(r.kept.all? { |w| w.elements == 0 })
     assert_equal([["s01", "s02"]], r[0..0, 1..2].to_a)
     assert_equal(1, r.kept.size)
-    assert_true(r.kept.none?(&:attached?))
+    assert_true(r.kept.all? { |w| w.elements == 0 })
+  end
+
+  # What a hook kept has no cells once the hook returns: reading it raises
+  # or answers empty instead of reading the freed buffer.
+  def test_a_kept_wrap_has_no_cells
+    r = Keeper.new(CArray.float64(3, 4).seq!)
+    r[CArray.int64(2) { [2, 0] }, 0].to_a
+    r.kept.each do |w|
+      assert_equal 0, w.elements
+      assert_raise(IndexError) { w[0] }
+      assert_equal [], w.to_a.flatten
+      assert_equal 0.0, w.sum.to_f
+    end
+  end
+
+  class DataKeeper < CAObject
+    attr_reader :kept
+    def initialize(back)
+      @back = back
+      super(back.data_type, back.shape)
+    end
+    private
+    def fetch_addr(a) = @back[a]
+    def copy_data(d) = (@kept = d; d[] = @back)
+    def sync_data(d) = (@kept = d; @back[] = d)
+  end
+
+  def test_the_array_copy_data_was_given_has_no_cells_afterwards
+    r = DataKeeper.new(CArray.float64(3, 4).seq!)
+    assert_equal 66.0, r.sum
+    assert_equal 0, r.kept.elements
+    assert_raise(IndexError) { r.kept[0] }
+    assert_equal 0.0, r.kept.sum.to_f
+    assert_equal [], (r.kept + 1).to_a.flatten
+    assert_equal 66.0, r.sum   # and the next call gets a wrap of its own
   end
 
   SCRIPT = <<~'RUBY'

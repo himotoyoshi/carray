@@ -370,4 +370,14 @@ class TestLocateNearestAddrDegenerate < Test::Unit::TestCase
     assert_equal [10.0, 10.0], left.join_asof(right, on: "k")["w"].to_a
   end
 
+  # An Array or Range is a list of values met at a common type with self, as
+  # is_in meets one: 2 finds 2.0 in a float array, and 2.5 does not
+  # truncate onto 2 in an int one.
+  def test_an_array_or_range_reference_is_met_by_value
+    a = CA_FLOAT64([1, 2.5, 3])
+    assert_equal [0, UNDEF, 2], a.locate_addr(1..3).to_a
+    assert_equal [1, UNDEF, 0], a.locate_addr([3, 1]).to_a
+    assert_equal [UNDEF, 1, UNDEF], CA_INT32([1, 2, 3]).locate_addr([2.5, 2]).to_a
+    assert_equal [UNDEF, 1], CA_FLOAT64([1, 2]).locate_addr(["x", 2.0]).to_a
+  end
 end

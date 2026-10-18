@@ -38,6 +38,7 @@ void Init_carray_attribute ();
 void Init_carray_loop ();
 void Init_carray_mask ();
 void Init_carray_hold ();
+void Init_carray_key_windows ();
 void Init_carray_mask_fast_paths ();  /* patches generated bit-op tables;
                                          must run AFTER Init_ca_op_ipower */
 void Init_carray_access ();
@@ -60,6 +61,7 @@ void Init_carray_median_percentile ();  /* median / percentile / quantile */
 void Init_carray_sort ();         /* sort / sort_copy / sort_addr / axis2addr */
 void Init_carray_count ();
 void Init_carray_kernels ();      /* mkkernel-generated: reductions + maps */
+void Init_carray_round ();
 void Init_carray_utils ();
 void Init_carray_generate ();
 void Init_carray_copy ();
@@ -183,13 +185,13 @@ Init_carray_ext (void)
   /* The flags this build's arithmetic was compiled with.  Anything that
      computes what these kernels compute, somewhere other than in them, has
      to be built the same way to arrive at the same answer. */
-  rb_define_const(rb_cCArray, "BUILD_FLAGS",  rb_str_new2(CA_BUILD_FLAGS));
-  rb_define_const(rb_cCArray, "VERSION",       rb_str_new2(CA_VERSION));
+  rb_define_const(rb_cCArray, "BUILD_FLAGS",  rb_obj_freeze(rb_str_new2(CA_BUILD_FLAGS)));
+  rb_define_const(rb_cCArray, "VERSION",       rb_obj_freeze(rb_str_new2(CA_VERSION)));
   rb_define_const(rb_cCArray, "VERSION_CODE",  INT2NUM(CA_VERSION_CODE));
   rb_define_const(rb_cCArray, "VERSION_MAJOR", INT2NUM(CA_VERSION_MAJOR));
   rb_define_const(rb_cCArray, "VERSION_MINOR", INT2NUM(CA_VERSION_MINOR));
   rb_define_const(rb_cCArray, "VERSION_TEENY", INT2NUM(CA_VERSION_TEENY));
-  rb_define_const(rb_cCArray, "VERSION_DATE",  rb_str_new2(CA_VERSION_DATE));
+  rb_define_const(rb_cCArray, "VERSION_DATE",  rb_obj_freeze(rb_str_new2(CA_VERSION_DATE)));
 
   /* -- system -- */
   rb_define_const(rb_cObject, "CA_RANK_MAX", INT2NUM(CA_RANK_MAX));
@@ -199,8 +201,10 @@ Init_carray_ext (void)
      absence.  C code only ever compares against it; the value is never
      read and must never be passed in from Ruby.  The constant exists to
      anchor the object against the GC. */
-  CA_UNSPECIFIED = rb_funcall(rb_cObject, rb_intern("new"), 0);
+  CA_UNSPECIFIED = rb_obj_freeze(rb_funcall(rb_cObject, rb_intern("new"), 0));
   rb_define_const(rb_cCArray, "UNSPECIFIED", CA_UNSPECIFIED);
+  /* Compared by identity in C, so it must not move. */
+  rb_gc_register_mark_object(CA_UNSPECIFIED);
 
 #ifdef HAVE_COMPLEX_H
   /* @private */
@@ -284,6 +288,7 @@ Init_carray_ext (void)
   Init_carray_undef();
   Init_carray_mask();
   Init_carray_hold();
+  Init_carray_key_windows();
   Init_carray_loop();
   Init_carray_access();
   Init_carray_index_classifier();
@@ -308,6 +313,7 @@ Init_carray_ext (void)
   Init_carray_sort();               /* sort / sort_copy / sort_addr / axis2addr */
   Init_carray_count();
   Init_carray_kernels();            /* mkkernel-generated: reductions + maps */
+  Init_carray_round();              /* round(ndigits); after the generated round */
 
   Init_carray_utils();
 

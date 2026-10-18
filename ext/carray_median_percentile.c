@@ -197,8 +197,7 @@ pct_compute (VALUE method, long k, double r, long n, double lo, double hi)
     return use_k ? lo : hi;
   }
   if ( method == sym_linear ) {
-    if ( r == 0.0 || k + 1 >= n ) return lo;
-    return lo * (1.0 - r) + hi * r;
+    return ca_percentile_linear(lo, hi, r, k, n);
   }
   if ( method == sym_midpoint ) {
     if ( k + 1 >= n ) return lo;
@@ -397,11 +396,16 @@ mp_first_non_numeric (VALUE v)
    the elements' own arithmetic and an exact weight, so a Rational or a
    BigDecimal stays exact and a Float stays a Float. */
 
-/* The interpolation weight r (0 <= r < 1) as a Rational. */
+/* [object] the weight of the upper element at p, exact: (n-1)*p/100 - k as
+   a Rational, with p read as the decimal it was written as.  The double r
+   carries the rounding of (n-1)*p/100 (p = 30 over five elements is
+   0.19999999999999996 there, not 1/5), so it is not used for the weight. */
 static VALUE
-obj_weight (double r)
+obj_weight (long n, double p, long k)
 {
-  return rb_funcall(DBL2NUM(r), id_rationalize, 0);
+  VALUE pr = rb_funcall(DBL2NUM(p), id_rationalize, 0);
+  VALUE f  = rb_funcall(rb_funcall(pr, id_mul, 1, LONG2NUM(n - 1)), rb_intern("quo"), 1, INT2FIX(100));
+  return rb_funcall(f, rb_intern("-"), 1, LONG2NUM(k));
 }
 
 /* The midpoint of lo and hi, (lo + hi) * (1/2): exact for an Integer or a
@@ -488,7 +492,8 @@ obj_kth_pair (VALUE self, long axis, long k, long n, VALUE *lo, VALUE *hi)
 }
 
 /* [object] keep_axis flat: [1,...,1] entity holding val (UNDEF assigns
-   masked).  Uses []= so UNDEF / arbitrary objects store correctly. */
+   masked), in self's Face when self is one.  Uses []= so UNDEF / arbitrary
+   objects store correctly. */
 static VALUE
 obj_keep_axis_full (VALUE self, VALUE val)
 {
@@ -503,7 +508,7 @@ obj_keep_axis_full (VALUE self, VALUE val)
   for ( int i = 0; i < ndim; i++ ) av[i] = INT2FIX(0);
   av[ndim] = val;
   rb_funcallv(out, id_aset, ndim + 1, av);
-  return out;
+  return ca_is_face(ca) ? ca_face_relift_entity(self, out) : out;
 }
 
 /* [object] per-axis median (= reduced CArray; 1-D self -> bare scalar).
@@ -531,11 +536,39 @@ median_object_axis (VALUE self, long axis, long n, int keep_axis)
     VALUE kv = obj_kth_one(self, axis, (n - 1) / 2);
     result = kv;
   }
-  if ( keep_axis ) {
+  /* a 1-D self reduces to a bare object; mp_axis_answer keeps it */
+  if ( keep_axis && rb_obj_is_kind_of(result, rb_cCArray) ) {
     VALUE ia[1] = { LONG2NUM(axis) };
     result = rb_ca_insert_axis(1, ia, result);
   }
   return result;
+}
+
+/* [entry] An axis form's answer in the shape the other reductions give it.
+   A reduction that removes the only axis of a 1-D array is a bare value, as
+   sum(axis: 0) is, and keep_axis: makes it a one-cell array; the lanes answer
+   either way, so the answer is shaped here.  An answer the object lane took
+   as a slice of its partitioned copy is made an array of its own, as the
+   other reductions' answers are. */
+static VALUE
+mp_axis_answer (VALUE self, VALUE res, int keep_axis)
+{
+  CArray *ca;
+  GetCArray(self, ca);
+  int is_array = RTEST(rb_obj_is_kind_of(res, rb_cCArray));
+  if ( ca->ndim != 1 ) {
+    if ( is_array ) {
+      CArray *cr;
+      GetCArray(res, cr);
+      if ( ! ca_is_entity(cr) && ! ca_is_face(cr) ) res = rb_funcall(res, id_copy, 0);
+    }
+    return res;
+  }
+  if ( keep_axis ) {
+    if ( is_array ) return res;
+    return obj_keep_axis_full(self, res);
+  }
+  return is_array ? rb_funcall(res, id_aref, 1, INT2FIX(0)) : res;
 }
 
 /* [object] flat median: mask-strip / min_count, flatten, axis-0 reduce. */
@@ -573,7 +606,7 @@ median_object_flat (VALUE self, long min_count, VALUE fill_value, int keep_axis)
    The :linear / :midpoint interpolation funcalls are irreducible for
    arbitrary objects; the pick methods return the element itself. */
 static VALUE
-pct_compute_object (VALUE method, long k, double r, long n, VALUE lo, VALUE hi)
+pct_compute_object (VALUE method, double p, long k, double r, long n, VALUE lo, VALUE hi)
 {
   if ( method == sym_lower )  return lo;
   if ( method == sym_higher ) return (r == 0.0) ? lo : hi;
@@ -584,7 +617,7 @@ pct_compute_object (VALUE method, long k, double r, long n, VALUE lo, VALUE hi)
   if ( method == sym_linear ) {
     if ( r == 0.0 || k + 1 >= n ) return lo;
     mp_require_interpolable("percentile", method, lo);
-    VALUE w = obj_weight(r);
+    VALUE w = obj_weight(n, p, k);
     VALUE a = rb_funcall(lo, id_mul, 1, rb_funcall(INT2FIX(1), rb_intern("-"), 1, w));
     VALUE b = rb_funcall(hi, id_mul, 1, w);
     return rb_funcall(a, id_plus, 1, b);
@@ -610,7 +643,7 @@ pct_object_one_partition (VALUE self, long axis, long n, double p, VALUE method)
   VALUE lo = Qnil, hi = Qnil;
   if ( need == PCT_LOWER_ONLY ) lo = obj_kth_one(self, axis, k);
   else                          obj_kth_pair(self, axis, k, n, &lo, &hi);
-  return pct_compute_object(method, k, r, n, lo, hi);
+  return pct_compute_object(method, p, k, r, n, lo, hi);
 }
 
 /* [object] single p from a fully sorted entity (multi-p shared sort). */
@@ -629,7 +662,7 @@ pct_object_one_sorted (VALUE sorted, long axis, long n, double p, VALUE method)
   VALUE lo = Qnil, hi = Qnil;
   if ( need != PCT_UPPER_ONLY ) lo = obj_slice(sorted, axis, k);
   if ( need != PCT_LOWER_ONLY ) hi = obj_slice(sorted, axis, kup);
-  return pct_compute_object(method, k, r, n, lo, hi);
+  return pct_compute_object(method, p, k, r, n, lo, hi);
 }
 
 /* [object] per-axis percentile -> array of (reduced CArray | scalar),
@@ -681,7 +714,9 @@ pct_object_axis_masked_one (VALUE self, VALUE sorted, long axis, double p,
                             VALUE fill_value, int keep_axis)
 {
   int8_t ax = (int8_t) axis;
-  VALUE out = rb_ca_new_reduced(self, &ax, 1, CA_OBJECT, keep_axis);
+  /* `sorted` is an entity of self's shape (the storage, when self is a
+     Face); the answer is built on it and lifted back by the caller. */
+  VALUE out = rb_ca_new_reduced(sorted, &ax, 1, CA_OBJECT, keep_axis);
   CArray *co;
   GetCArray(out, co);
   CArray *cs;
@@ -718,7 +753,7 @@ pct_object_axis_masked_one (VALUE self, VALUE sorted, long axis, double p,
       VALUE lo = Qnil, hi = Qnil;
       if ( need != PCT_UPPER_ONLY ) lo = sb[f0 + (ca_size_t)(k * INNER)];
       if ( need != PCT_LOWER_ONLY ) hi = sb[f0 + (ca_size_t)(kup * INNER)];
-      op[oc] = pct_compute_object(method, k, r, np, lo, hi);
+      op[oc] = pct_compute_object(method, p, k, r, np, lo, hi);
     }
   }
   return out;
@@ -743,7 +778,11 @@ percentile_object_axis_masked (VALUE self, VALUE pers, long axis, VALUE method,
     return res;
   }
 
+  /* A Face (a string array) is sorted as itself and read through its
+     storage, whose cells are the values. */
   VALUE sorted = rb_funcall(obj_call_axis(self, id_sort, LONG2NUM(axis)), id_copy, 0);
+  int is_face = ca_is_face(ca);
+  if ( is_face ) sorted = rb_ca_strip_face_value(sorted);
   CArray *cs;
   GetCArray(sorted, cs);
   const boolean8_t *sm = cs->mask ? (const boolean8_t *) cs->mask->ptr : NULL;
@@ -754,10 +793,10 @@ percentile_object_axis_masked (VALUE self, VALUE pers, long axis, VALUE method,
   VALUE result = rb_ary_new_capa(npers);
   for ( long i = 0; i < npers; i++ ) {
     double p = NUM2DBL(rb_ary_entry(pers, i));
-    rb_ary_push(result,
-      pct_object_axis_masked_one(self, sorted, axis, p, method,
-                                 OUTER, MM, INNER, sm, min_count,
-                                 fill_value, keep_axis));
+    VALUE one = pct_object_axis_masked_one(self, sorted, axis, p, method,
+                                           OUTER, MM, INNER, sm, min_count,
+                                           fill_value, keep_axis);
+    rb_ary_push(result, is_face ? ca_face_relift_entity(self, one) : one);
   }
   RB_GC_GUARD(sorted);
   return result;
@@ -867,16 +906,23 @@ rb_ca_median_m_body (int argc, VALUE *argv, VALUE self)
     long n = (long) ca->dim[axis];
     if ( n == 0 ) return mp_axis_all_masked(self, axis, keep_axis);
     /* mask / min_count / fill_value require the per-fiber select (each fiber
-       has its own n_present); the plain partition path assumes a uniform n. */
-    if ( RTEST(rb_ca_has_mask(self)) || min_count > 0 || !NIL_P(fill_value) )
-      return is_obj
+       has its own n_present); the plain partition path assumes a uniform n.
+       Switch      ca_fast_paths_enabled(): off, the per-fiber select. */
+    VALUE res;
+    if ( RTEST(rb_ca_has_mask(self)) || min_count > 0 || !NIL_P(fill_value)
+         || ! ca_fast_paths_enabled() )
+      res = is_obj
         ? median_object_axis_masked(self, axis, min_count, fill_value, keep_axis)
         : median_axis_masked(self, axis, min_count, fill_value, keep_axis);
-    return is_obj ? median_object_axis(self, axis, n, keep_axis)
-                  : median_axis(self, axis, n, keep_axis);
+    else
+      res = is_obj ? median_object_axis(self, axis, n, keep_axis)
+                   : median_axis(self, axis, n, keep_axis);
+    return mp_axis_answer(self, res, keep_axis);
   }
-  return is_obj ? median_object_flat(self, min_count, fill_value, keep_axis)
-                : median_flat(self, min_count, fill_value, keep_axis);
+  /* self may be the float64 view made above, read through its CArray */
+  CA_RETURN_KEEPING(self,
+                    is_obj ? median_object_flat(self, min_count, fill_value, keep_axis)
+                           : median_flat(self, min_count, fill_value, keep_axis));
 }
 
 /* =====================================================================
@@ -1317,9 +1363,10 @@ rb_ca_percentile_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
     long axis = rb_ca_normalize_axis_value(self, raxis, NULL);
     /* mask / min_count / fill_value require the per-fiber select (each fiber
        has its own n_present); the plain partition/sort path assumes a
-       uniform n.  These paths bake keep_axis into the reduced output. */
+       uniform n.  These paths bake keep_axis into the reduced output.
+       Switch      ca_fast_paths_enabled(): off, the per-fiber select. */
     int per_fiber = RTEST(rb_ca_has_mask(self)) || min_count > 0
-                    || !NIL_P(fill_value);
+                    || !NIL_P(fill_value) || ! ca_fast_paths_enabled();
     if ( !is_obj ) {
       result = per_fiber
         ? pct_axis_masked(self, pers, axis, method, min_count, fill_value, keep_axis)
@@ -1329,7 +1376,7 @@ rb_ca_percentile_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
                                              min_count, fill_value, keep_axis);
     } else {
       result = percentile_object_axis(self, pers, axis, method);
-      if ( keep_axis ) {
+      if ( keep_axis && ca->ndim > 1 ) {
         long len = RARRAY_LEN(result);
         VALUE w = rb_ary_new_capa(len);
         VALUE ia[1] = { LONG2NUM(axis) };
@@ -1337,6 +1384,11 @@ rb_ca_percentile_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
           rb_ary_push(w, rb_ca_insert_axis(1, ia, rb_ary_entry(result, i)));
         result = w;
       }
+    }
+    {
+      long len = RARRAY_LEN(result);
+      for ( long i = 0; i < len; i++ )
+        rb_ary_store(result, i, mp_axis_answer(self, rb_ary_entry(result, i), keep_axis));
     }
   } else if ( !is_obj ) {
     result = pct_flat(self, pers, min_count, fill_value, method, keep_axis);
@@ -1350,6 +1402,8 @@ rb_ca_percentile_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
       result = w;
     }
   }
+  /* self may be the float64 view made above, read through its CArray */
+  RB_GC_GUARD(self);
 
   if ( single_p ) return rb_ary_entry(result, 0);
   return result;

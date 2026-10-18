@@ -5,7 +5,8 @@ require "carray"
 # Reductions in several Ractors at once.  The kernel iterator keeps one
 # large scratch buffer for the next walk, and holds the object cells of
 # its scratch for the GC; each Ractor keeps its own of both, so walks
-# running at the same time never share them.
+# running at the same time never share them.  The lazy arena, which also
+# lends scratch to eager code (the mask of a view), is per Ractor too.
 
 class TestIterRactorScratch < Test::Unit::TestCase
 
@@ -68,4 +69,32 @@ class TestIterRactorScratch < Test::Unit::TestCase
                            "o.shift(1, 0, fill_value: 0)")
   end
 
+  # Reading a view's mask takes scratch from the lazy arena.  Rows of
+  # different widths make the Ractors ask for different sizes.
+  def test_mask_scratch_in_parallel_ractors
+    src = <<~RUBY
+      require "carray"
+      Warning[:experimental] = false
+      rs = 8.times.map do |id|
+        Ractor.new(id) do |id|
+          cols = 16 + id * 40
+          n = 8192
+          m = CArray.float64(n, cols).seq!
+          b = CArray.boolean(n, cols)
+          b[n - 1, cols - 1] = 1 if id.even?
+          m.mask = b
+          odd, even = m[[1, n / 2, 2], nil], m[[0, n / 2, 2], nil]
+          bad = 0
+          3000.times do
+            bad += 1 unless odd.any_masked? == id.even?
+            bad += 1 unless even.all_masked? == false
+          end
+          bad
+        end
+      end
+      vals = rs.map { |r| r.respond_to?(:value) ? r.value : r.take }
+      exit(vals.all?(0) ? 0 : 3)
+    RUBY
+    assert_child_ok src
+  end
 end

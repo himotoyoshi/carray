@@ -431,8 +431,7 @@ build on the primitives above:
 - **Kernel iterator** ([ch. 11](11_kernel_iterator.md)) —
   `CA_FOR_EACH_FIBER` / `CA_FOR_EACH_SLAB` / `CA_SLAB_REDUCE_T_*` /
   `CA_SLAB_MAP_T` / `CA_SLAB_SCAN_T` / `CA_L2_FOR_EACH`.
-- **Mask helpers** ([ch. 11](11_kernel_iterator.md)) — `CA_FOR_EACH_UNMASKED`
-  / `CA_FOR_EACH_INDEX_UNMASKED` / `CA_COUNT_UNMASKED` / `CA_MASK_GET`.
+- **Mask helper** ([ch. 11](11_kernel_iterator.md)) — `CA_FOR_EACH_UNMASKED`.
 - **Validation macros** — `CA_CHECK_DATA_TYPE` / `CA_CHECK_RANK` /
   `CA_CHECK_DIM` / `CA_CHECK_BYTES` / `CA_CHECK_INDEX`.
 - **Kernel flags** (frozen author tokens) — `CA_KERNEL_WRITE` /
@@ -458,6 +457,30 @@ int   rb_ca_normalize_axis_for_ndim(long raw, int ndim, const char *name);
 `rb_pop_options` detects and removes a trailing Hash from `(argc, argv)`;
 combined with `rb_scan_options` it's how mkkernel-generated dispatchers
 read `axis:` / `keepdims:` / similar kwargs.
+
+An axis taken from Ruby is read by one part. Inside the library that is
+`ca_normalize_axis_arg(raxis, ndim, name)` (`carray_internal.h`); an
+extension calls `rb_ca_normalize_axis_value`, which goes through it. It
+takes the argument as Ruby gave it, so the range is checked before the
+value is narrowed to a C type: an Integer in `[-ndim, ndim)` counts a
+negative axis from the end, any other Integer, however wide, raises
+`ArgumentError` ("<method>: axis <value> out of range for ndim D"), and
+anything else raises `TypeError`. `rb_ca_normalize_axis_for_ndim` takes a
+`long` that is already narrowed and is for a C caller. `rake
+axis_normalize_check` refuses `ca_axis_integer` and a hand-written range
+message outside `carray_utils.c`.
+
+Every `dim[]` in the library is `CA_RANK_MAX` long, so a rank given or
+computed is held to it by one part, `ca_check_rank_fits(ndim, name)`
+(`carray_internal.h`), before a single dim is written; it raises
+`ArgumentError` "<method>: ndim <n> exceeds CA_RANK_MAX 16". A constructor
+inside the library uses `CA_CHECK_RANK_GIVEN`, which also refuses no axes
+at all and calls the part; the public `CA_CHECK_RANK` is for extensions.
+`ca_normalize_axis_arg` asks the part first, so an axis read against
+`ndim + 1` (an insertion position) refuses a result over the limit. `rake
+rank_limit_check` refuses a rank compared with `CA_RANK_MAX` by hand; a
+count that is not a rank (bundles, indices, a list of axes) says so with
+`rank-check:`.
 
 ## High-level method-binding helpers
 

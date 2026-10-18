@@ -135,6 +135,23 @@ semantic sense, is implemented directly (calling into the int64 storage through
 number" both safe (no silent wrong math) and overrideable (a Face can opt in
 to specific operations on its own terms).
 
+## The ordering gate (ORDERABLE)
+
+A family that orders, compares, searches or hashes the cells of a Face reads
+its storage only when the Face declares `CA_FLAG_FACE_ORDERABLE_STORAGE`
+(`docs/authoring/FaceOrderingSearch.md`). A fixlen storage is no exception:
+its bytes are an order only when the Face says so. A new entry calls the part
+in `ext/ca_obj_face.c` rather than testing the flag:
+
+- `ca_face_require_orderable(face, name, verb)` returns for an ORDERABLE Face
+  and refuses any other, naming the method.
+- `ca_face_orders_by_itself(face)` is true for a Face that is not ORDERABLE
+  but defines `#order` (CAConstString, CARecord). Only a family that orders
+  by a key may take that order instead; `ca_order_key` does.
+
+`rake face_parts_check` refuses a flag test or a direct `ca_face_refuse_order`
+outside `ext/ca_obj_face.c`.
+
 ## Two authoring paths
 
 The same substrate supports two implementation styles:

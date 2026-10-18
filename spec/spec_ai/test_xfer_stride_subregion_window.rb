@@ -69,7 +69,7 @@ class TestXferStrideSubregionWindow < Test::Unit::TestCase
   def test_get_window_whole_view
     view = @parent.window(2..@n-3, 2..@n-3, fill_value: -1.0)
     starts = [0, 0]
-    counts = view.dim.dup
+    counts = view.shape.dup
     actual_bytes = CArray.bench_xfer_stride_subregion_get(view, starts, counts, 1)
     expected = view.to_ca  # via xfer_all path
     assert_equal expected.dump_binary, actual_bytes
@@ -80,7 +80,7 @@ class TestXferStrideSubregionWindow < Test::Unit::TestCase
     # shift exceeds dim → view is entirely fill
     view = @parent.shift(@n, 0, fill_value: 42.0)  # shift = dim → no overlap
     starts = [0, 0]
-    counts = view.dim.dup
+    counts = view.shape.dup
     actual_bytes = CArray.bench_xfer_stride_subregion_get(view, starts, counts, 1)
     expected = view.to_ca
     assert_equal expected.dump_binary, actual_bytes

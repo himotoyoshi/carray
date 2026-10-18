@@ -123,6 +123,11 @@ delegating to a vectorised CArray operation. The bulk path then
 bypasses the Ruby dispatch overhead. The contract is the same as for
 `fetch_addr`: both must yield the same value for the same address.
 
+The `data` a bulk hook receives (`copy_data`, `sync_data`, and the
+`copy_block` / `copy_addrs` family below) is the caller's buffer, lent for
+the call only. Once the hook returns it has no cells: an array a hook kept
+reads as empty and raises `IndexError` on `[]`. Copy what you need to keep.
+
 ### Optional: partial-region fast paths (`copy_block` / `copy_addrs`)
 
 Between per-cell `fetch_addr` and whole-view `copy_data` there is a
@@ -415,7 +420,7 @@ otherwise stay inert on a `CAObject`:
 class Square < CAObject
   def initialize(parent)
     @p = parent
-    super(parent.data_type, parent.dim, parent: parent)
+    super(parent.data_type, parent.shape, parent: parent)
   end
 
   private
@@ -479,7 +484,7 @@ stored numbers:
 class CACircular < CAObject
   def initialize(parent_float64, range: :rad)
     @range = range
-    super(CA_FLOAT64, parent_float64.dim,
+    super(CA_FLOAT64, parent_float64.shape,
           parent: parent_float64,
           face:   true)
   end
@@ -514,7 +519,7 @@ storage `data_type`, and the operations compute as on a plain array:
 ```ruby
 class CALatitude < CAObject
   def initialize(parent_float64)
-    super(CA_FLOAT64, parent_float64.dim,
+    super(CA_FLOAT64, parent_float64.shape,
           parent: parent_float64,
           face:   true,
           numeric: true)
@@ -535,7 +540,7 @@ To declare a surface other than these two, pass it as `data_type`
 and name the storage with `:storage`:
 
 ```ruby
-super(CA_FIXLEN, parent_int64.dim,
+super(CA_FIXLEN, parent_int64.shape,
       bytes:   8,
       storage: CA_INT64,
       parent:  parent_int64,

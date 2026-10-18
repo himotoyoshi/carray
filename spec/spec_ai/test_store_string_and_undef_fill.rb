@@ -52,8 +52,8 @@ class TestStoreStringAndUndefFill < Test::Unit::TestCase
   end
 
   # A number that is not a String keeps its C conversion.
-  def test_non_string_store_is_unchanged
-    assert_equal 44, store(:int8, 300)
+  def test_an_integer_the_cell_cannot_hold_is_refused
+    assert_raise(RangeError) { store(:int8, 300) }
   end
 
   def test_every_store_path_agrees

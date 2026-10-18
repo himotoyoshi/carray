@@ -145,6 +145,13 @@ still passes, so nothing else would report it:
   checks that the count is the same after each test as before it. To get
   the check on a single file run by hand, load it with
   `-r ./spec/spec_ai/attach_balance.rb`.
+- **`CArray.__iter_buffers__`** (development build) counts the buffers the
+  kernel iterator took for a walk and has not given back.
+  `spec/spec_ai/test_iter_delivery_detectors.rb` compares it, with the
+  attached views, around every walk of the delivery matrix, and also checks
+  that a read walk creates nothing, that values a walk gathers survive a
+  collection, and that a partial view never asks a lazily backed root for
+  all of it.
 
 ### Fast paths and `rake spec_ai_general`
 
@@ -160,6 +167,21 @@ everywhere. In a release build the C test is the constant 1.
 `rake spec_ai_general` runs spec_ai that way. The two runs together compare
 every fast path with its general path on the whole suite. A test that fails
 in only one of them points at a fault in one of the two paths.
+
+The categorical, segment and group iterators are fast paths of this kind too. Their C kernels (the reduceat, fiber-scatter and scan kernels, and the group engine) are a faster way to what the core answers for each group, and with the fast paths off every group is reduced by the core itself. Only folding a band into a group statistic (`axis: [:group, k]`) has no route but the engine. `spec/spec_ai/test_iterator_kernels_follow_switch.rb` runs one battery both ways in two child processes, checks that no kernel runs with the fast paths off, and compares the answers. It spies the per-group kernels that `utils/dunder_methods.txt` lists, so a kernel added there is covered.
+
+`CARRAY_GENERAL_PATH=2` goes one step further for the kernel iterator. It
+switches the fast paths off as `1` does, and the iterator then delivers
+every source by transfer: the whole view gathered into scratch through the
+view's own `ca_xfer_all`, and on a write the changed cells sent back through
+it. That walk keeps none of the iterator's promises itself — the view's
+transfer keeps them — so it is the reference for the iterator's other
+routes (the CAStride compose-fold, the descriptor walk, the CAStack and
+per-fiber paths). `rake spec_ai_transfer` runs spec_ai that way, and
+`CArray.__iter_by_transfer_only__` tells a test which run it is in.
+`spec/spec_ai/test_iter_delivery_matrix.rb` walks parents × views × mask
+five ways (one of them with two slab axes), read and write, and is the test the three runs are meant to
+compare.
 
 When you write a fast path, add the test to its condition. Leave it off a
 branch that only lends a pointer or drops to `memcpy` (the same code runs

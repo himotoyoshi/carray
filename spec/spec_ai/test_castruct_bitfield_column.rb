@@ -51,7 +51,7 @@ class TestCAStructBitfieldColumn < Test::Unit::TestCase
     col = rs["flag_a"]
     assert_kind_of CArray, col
     assert_equal "CABitfield", col.class.name
-    assert_equal [4],          col.dim
+    assert_equal [4],          col.shape
     assert_equal [true, false, true, false], col.to_a
   end
 
@@ -181,7 +181,7 @@ class TestCAStructBitfieldColumn < Test::Unit::TestCase
                        version: k, payload: 0)
     end
     col = rs["flag_a"]
-    assert_equal [2, 3], col.dim
+    assert_equal [2, 3], col.shape
     assert_equal [[false, true, false], [true, false, true]], col.to_a
   end
 

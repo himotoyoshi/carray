@@ -155,6 +155,19 @@ class TestCAConstStringOrdering < Test::Unit::TestCase
     assert_equal Encoding::Shift_JIS, sj.mask_duplicates.encoding
   end
 
+  # Equal strings keep their order, as CArray's sort does.  The flat forms
+  # go through a native qsort, which is not stable by itself.
+  def test_equal_strings_keep_their_order
+    words = Array.new(400) { |i| %w[b a c a b][i % 5] + (i % 3).to_s }
+    ct = CArray.const_string(words)
+    ref = ct.to_string
+    assert_equal ref.sort_addr.to_a, ct.sort_addr.to_a
+    assert_equal ref.sort_index.to_a, ct.sort_index.to_a
+    grid = ct.reshape(20, 20)
+    assert_equal grid.to_string.sort_index.to_a, grid.sort_index.to_a
+    assert_equal [400], grid.sort_index.shape
+  end
+
   def test_an_n_dimensional_result_keeps_its_shape
     assert_equal [2, 2], @cs.to_string.to_const_string.shape
     assert_equal [2, 2], @cs.partition_copy(1, axis: 0).shape

@@ -60,6 +60,15 @@ ca_object_pool_init (void *ap, int8_t ndim)
   ca->dim = (ca_size_t *) ca->_pool;
 }
 
+/* ca->self is the CAObject's own VALUE, which compaction can move; the
+   hooks call back through it, so follow the object to its new slot. */
+static void
+ca_object_compact (void *ap)
+{
+  CAObject *ca = (CAObject *) ap;
+  ca->self = rb_gc_location(ca->self);
+}
+
 const rb_data_type_t caobject_data_type = {
     .parent = &caview_data_type,
     .wrap_struct_name = "CAObject",
@@ -67,7 +76,7 @@ const rb_data_type_t caobject_data_type = {
         .dmark = ca_mark,
         .dfree = ca_free,
         .dsize = ca_object_dsize,
-        .dcompact = NULL
+        .dcompact = ca_object_compact
     },
     .flags = RUBY_TYPED_FREE_IMMEDIATELY
 };
@@ -84,13 +93,21 @@ ca_objectmask_dsize (const void *ap)
 }
 
 /* The mask reads and writes through its CAObject, and its cache is the
-   CAObject's; it keeps the CAObject alive. */
+   CAObject's; it keeps the CAObject alive, and follows it when compaction
+   moves it. */
 static void
 ca_objmask_mark (void *ap)
 {
   CAObjectMask *ca = (CAObjectMask *) ap;
-  rb_gc_mark(ca->array);
+  rb_gc_mark_movable(ca->array);
   ca_mark(ap);
+}
+
+static void
+ca_objmask_compact (void *ap)
+{
+  CAObjectMask *ca = (CAObjectMask *) ap;
+  ca->array = rb_gc_location(ca->array);
 }
 
 const rb_data_type_t caobjectmask_data_type = {
@@ -100,7 +117,7 @@ const rb_data_type_t caobjectmask_data_type = {
         .dmark = ca_objmask_mark,
         .dfree = ca_free,
         .dsize = ca_objectmask_dsize,
-        .dcompact = NULL
+        .dcompact = ca_objmask_compact
     },
     .flags = RUBY_TYPED_FREE_IMMEDIATELY
 };
@@ -111,6 +128,7 @@ VALUE rb_cCAObjectMask;
 static CAObjectMask *
 ca_objmask_new (VALUE array, int8_t ndim, ca_size_t *dim)
 {
+  /* check: the mask takes the CAObject's own shape, already checked */
   CAObjectMask *ca = ALLOC(CAObjectMask);
   /* CA_OBJ_OBJECT_MASK registers no pool_init, so it lives on the legacy
      ALLOC_N path (dim allocated separately, freed via free_ca_wrap's else
@@ -135,50 +153,74 @@ ca_objmask_mask_data (void *ap)
                     rb_intern("mask"), 0);
 }
 
-/* Calls recv.mid(arg(ap)) with *slot pointing at a caller's buffer for
-   the duration, and puts *slot back however the call leaves.  The bulk
-   bridge lends the buffer this way so that copy_data / sync_data write
-   straight into it; a raise that skipped the restore would leave the
-   array pointing at a buffer its caller is about to free. */
+/* A wrap handed to a hook points at a buffer the caller frees once the
+   hook returns.  Taking it back leaves an array of no cells: a hook that
+   kept it holds something that raises when read, not a pointer into freed
+   memory. */
+static char ca_object_no_cells[16];
+
+static void
+ca_object_empty_wrap (CArray *w)
+{
+  int8_t k;
+  /* Not NULL: an entity whose pointer is NULL reads as detached. */
+  w->ptr      = ca_object_no_cells;
+  w->elements = 0;
+  for ( k = 0; k < w->ndim; k++ ) {
+    w->dim[k] = 0;
+  }
+}
+
+/* Calls copy_data / sync_data with a wrap of a caller's buffer, shaped as
+   the object, and takes the buffer back however the call leaves.  The wrap
+   shares the object's mask (the data's), and whatever mask it holds after
+   the call becomes the data's: a hook that writes masked values masks the
+   object's cells.  The data points at the buffer for the duration too, for
+   a hook that reads the object back while it runs. */
 
 typedef struct {
-  char  **slot;
-  char   *saved;
-  VALUE   recv;
-  ID      mid;
-  VALUE (*arg)(void *);
-  void   *ap;
+  CAObject *ca;
+  char     *saved;
+  ID        mid;
+  VALUE     wrap;
 } ca_object_lend_t;
 
 static VALUE
 ca_object_lend_body (VALUE varg)
 {
   ca_object_lend_t *l = (ca_object_lend_t *) varg;
-  return rb_funcall(l->recv, l->mid, 1, l->arg(l->ap));
+  return rb_funcall(l->ca->self, l->mid, 1, l->wrap);
 }
 
 static VALUE
 ca_object_lend_restore (VALUE varg)
 {
   ca_object_lend_t *l = (ca_object_lend_t *) varg;
-  *l->slot = l->saved;
+  CArray *w = (CArray *) DATA_PTR(l->wrap);
+  l->ca->data->mask = w->mask;
+  w->mask = NULL;
+  ca_object_empty_wrap(w);
+  l->ca->data->ptr = l->saved;
   return Qnil;
 }
 
 static void
-ca_object_call_lending (char **slot, void *ptr, VALUE recv, const char *mid,
-                        VALUE (*arg)(void *), void *ap)
+ca_object_call_lending (CAObject *ca, void *ptr, const char *mid)
 {
   ca_object_lend_t l;
-  l.slot  = slot;
-  l.saved = *slot;
-  l.recv  = recv;
+  CArray *data = ca->data;
+  CAWrap *w;
+  w = ca_wrap_new(data->data_type, data->ndim, data->dim, data->bytes,
+                  NULL, (char *) ptr);
+  l.wrap  = ca_wrap_struct(w);
+  w->mask = data->mask;
+  l.ca    = ca;
+  l.saved = data->ptr;
   l.mid   = rb_intern(mid);
-  l.arg   = arg;
-  l.ap    = ap;
-  *slot = (char *) ptr;
+  data->ptr = (char *) ptr;
   rb_ensure(ca_object_lend_body, (VALUE) &l,
             ca_object_lend_restore, (VALUE) &l);
+  RB_GC_GUARD(l.wrap);
 }
 
 /* Calls recv.mid(*argv), where some of argv are transient wraps of a
@@ -187,8 +229,7 @@ ca_object_call_lending (char **slot, void *ptr, VALUE recv, const char *mid,
    when it returns, and a wrap outlives the call: the collector scans the
    machine stack conservatively and still finds it there, and an object
    wrap is marked cell by cell -- through a buffer that is gone.  A wrap
-   taken back points at nothing; a hook that kept it holds an empty
-   handle, not a stale one. */
+   taken back has no cells (ca_object_empty_wrap). */
 
 typedef struct {
   VALUE        recv;
@@ -212,7 +253,7 @@ ca_object_hook_release (VALUE varg)
   ca_object_hook_t *h = (ca_object_hook_t *) varg;
   int i;
   for ( i = 0; i < h->ntrans; i++ ) {
-    ((CArray *) DATA_PTR(h->trans[i]))->ptr = NULL;
+    ca_object_empty_wrap((CArray *) DATA_PTR(h->trans[i]));
   }
   return Qnil;
 }
@@ -233,11 +274,6 @@ ca_object_call_transient (VALUE recv, const char *mid,
             ca_object_hook_release, (VALUE) &h);
 }
 
-static VALUE
-ca_object_data_of (void *ap)
-{
-  return rb_ivar_get(((CAObject *) ap)->self, rb_intern("__data__"));
-}
 
 
 /* Forward declaration: ca_object_wrap_transient (defined further down,
@@ -710,10 +746,16 @@ ca_object_setup (CAObject *ca,
 
   /* check arguments */
 
-  CA_CHECK_DATA_TYPE(data_type);
-  CA_CHECK_RANK(ndim);
-  CA_CHECK_DIM(ndim, dim);
-  CA_CHECK_BYTES(data_type, bytes);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
+  CA_CHECK_RANK_GIVEN(ndim);
+  CA_CHECK_DIM_GIVEN(ndim, dim);
+  CA_CHECK_BYTES_GIVEN(data_type, bytes);
+
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
 
   /* calculate total number of elements */
 
@@ -745,7 +787,9 @@ ca_object_setup (CAObject *ca,
 static CAObject *
 ca_object_new (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes)
 {
-  CAObject *ca = (CAObject *) ca_array_alloc(CA_OBJ_OBJECT, ndim);
+  CAObject *ca;
+  ca_object_setup(NULL, data_type, ndim, dim, bytes);
+  ca = (CAObject *) ca_array_alloc(CA_OBJ_OBJECT, ndim);
   ca_object_setup(ca, data_type, ndim, dim, bytes);
   return ca;
 }
@@ -755,7 +799,12 @@ free_ca_object (void *ap)
 {
   CAObject *ca = (CAObject *) ap;
   if ( ca != NULL ) {
-    /* ca->mask will be GC-ed by Ruby interpreter */
+    /* A Face's mask is a view over its parent's mask (made by
+       ca_view_func_create_mask) and belongs to this struct.  Otherwise
+       the mask is a Ruby object held in @mask, and the GC frees it. */
+    if ( ca_is_face(ca) ) {
+      ca_free(ca->mask);
+    }
     if ( ca->_pool ) {
       ca_array_free(ca);          /* dim lives in _pool */
     }
@@ -789,6 +838,19 @@ ca_object_mask_bytes (CAObject *ca)
   return (boolean8_t *) ca->mask->ptr;
 }
 
+/* Whether the mask of this object comes from its mask_* hooks.  Then a
+   fetched value says nothing about the mask: a cell the hooks mask stays
+   masked when its value is read, and only a fetcher answering UNDEF marks
+   one.  Without hooks the mask is what the fetches have answered, so a
+   value fetched clears the cell. */
+static int
+ca_object_mask_from_hooks (CAObject *ca)
+{
+  return rb_obj_respond_to(ca->self, rb_intern("mask_fetch_addr"), Qtrue)
+      || rb_obj_respond_to(ca->self, rb_intern("mask_fetch_index"), Qtrue)
+      || rb_obj_respond_to(ca->self, rb_intern("mask_copy_data"), Qtrue);
+}
+
 /* per-cell cores: the addr- and index-primary Ruby-callback bridge logic,
    direction-unified.  The fetch_* / store_* slots below are thin
    forwarders onto these. */
@@ -809,7 +871,7 @@ ca_object_xfer_addr_one (CAObject *ca, ca_size_t addr, void *ptr, int dir)
         }
       }
       else {
-        if ( ca_has_mask(ca) ) {
+        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
           ca_object_mask_bytes(ca)[addr] = 0;
         }
         rb_ca_obj2ptr(ca->self, rval, ptr);
@@ -831,7 +893,7 @@ ca_object_xfer_addr_one (CAObject *ca, ca_size_t addr, void *ptr, int dir)
         }
       }
       else {
-        if ( ca_has_mask(ca) ) {
+        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
           ca_object_mask_bytes(ca)[ca_index2addr(ca->mask, idx)] = 0;
         }
         rb_ca_obj2ptr(ca->self, rval, ptr);
@@ -877,7 +939,7 @@ ca_object_xfer_index_one (CAObject *ca, ca_size_t *idx, void *ptr, int dir)
         }
       }
       else {
-        if ( ca_has_mask(ca) ) {
+        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
           ca_object_mask_bytes(ca)[ca_index2addr(ca->mask, idx)] = 0;
         }
         rb_ca_obj2ptr(ca->self, rval, ptr);
@@ -895,7 +957,7 @@ ca_object_xfer_index_one (CAObject *ca, ca_size_t *idx, void *ptr, int dir)
         }
       }
       else {
-        if ( ca_has_mask(ca) ) {
+        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
           ca_object_mask_bytes(ca)[addr] = 0;
         }
         rb_ca_obj2ptr(ca->self, rval, ptr);
@@ -924,8 +986,8 @@ static void
 ca_object_func_allocate (void *ap)
 {
   CAObject *ca = (CAObject *) ap;
-  /* ca->data->ptr = ALLOC_N(char, ca_length(ca)); */
-  ca->data->ptr = xmalloc(ca_length(ca));  
+  /* cells: seeded with 0, which a copy_data that skips cells leaves visible */
+  ca->data->ptr = xmalloc(ca_length(ca));
   if ( ca_is_object_type(ca->data) ) { /* GC safe */
     VALUE *p = (VALUE *) ca->data->ptr;
     VALUE zero = INT2NUM(0);
@@ -951,12 +1013,51 @@ ca_object_func_allocate (void *ap)
    arithmetic all work via the slow per-element fallback. The fast bulk
    path is opt-in by defining copy_data / sync_data / fill_data. */
 
+/* copy_data of an object whose mask comes from its hooks: the array it is
+   handed must not carry the mask's cache, or a store of its values into it
+   (d[] = src) would clear the cells the hooks mask.  It is handed without a
+   mask, and a mask the call makes on it is dropped. */
+typedef struct {
+  CAObject *ca;
+  void     *ptr;
+  CArray   *mask;
+} ca_object_copy_bare_t;
+
+static VALUE
+ca_object_copy_bare_body (VALUE arg)
+{
+  ca_object_copy_bare_t *c = (ca_object_copy_bare_t *) arg;
+  ca_object_call_lending(c->ca, c->ptr, "copy_data");
+  return Qnil;
+}
+
+static VALUE
+ca_object_copy_bare_restore (VALUE arg)
+{
+  ca_object_copy_bare_t *c = (ca_object_copy_bare_t *) arg;
+  CArray *made = c->ca->data->mask;
+  if ( made != NULL && made != c->mask ) {
+    ca_free(made);
+  }
+  c->ca->data->mask = c->mask;
+  return Qnil;
+}
+
 static void
 ca_object_dispatch_copy (CAObject *ca, void *ptr)
 {
   if ( rb_obj_respond_to(ca->self, rb_intern("copy_data"), Qtrue) ) {
-    ca_object_call_lending(&ca->data->ptr, ptr, ca->self, "copy_data",
-                           ca_object_data_of, ca);
+    if ( ca->data->mask != NULL && ca_object_mask_from_hooks(ca) ) {
+      ca_object_copy_bare_t c;
+      c.ca   = ca;
+      c.ptr  = ptr;
+      c.mask = ca->data->mask;
+      ca->data->mask = NULL;
+      rb_ensure(ca_object_copy_bare_body, (VALUE) &c,
+                ca_object_copy_bare_restore, (VALUE) &c);
+      return;
+    }
+    ca_object_call_lending(ca, ptr, "copy_data");
   }
   else {
     ca_size_t addr;
@@ -971,8 +1072,7 @@ static void
 ca_object_dispatch_sync (CAObject *ca, void *ptr)
 {
   if ( rb_obj_respond_to(ca->self, rb_intern("sync_data"), Qtrue) ) {
-    ca_object_call_lending(&ca->data->ptr, ptr, ca->self, "sync_data",
-                           ca_object_data_of, ca);
+    ca_object_call_lending(ca, ptr, "sync_data");
   }
   else {
     ca_size_t addr;
@@ -1017,7 +1117,7 @@ ca_object_func_attach (void *ap)
     ca_face_attach(ap);
     return;
   }
-  /* ca->data->ptr = ALLOC_N(char, ca_length(ca)); */
+  /* cells: seeded with 0, which a copy_data that skips cells leaves visible */
   ca->data->ptr = xmalloc(ca_length(ca));
   if ( ca_is_object_type(ca->data) ) { /* GC safe */
     VALUE *p = (VALUE *) ca->data->ptr;
@@ -1468,6 +1568,12 @@ rb_ca_object_initialize_copy (VALUE self, VALUE other)
   data = ca_wrap_struct(ca->data);
   rb_ivar_set(self, rb_intern("__data__"), data);
 
+  /* A Face's mask is a C struct owned by the Face, so the copy makes its
+     own from the parent when it is asked for one. */
+  if ( ca_is_face(ca) ) {
+    return self;
+  }
+
   ca_update_mask(cs);
   if ( cs->mask ) {
     ca->mask = cs->mask;
@@ -1567,7 +1673,7 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
   }
 
   Check_Type(rdim, T_ARRAY);
-  CA_CHECK_RANK(RARRAY_LEN(rdim));     /* before dim[] is filled */
+  CA_CHECK_RANK_GIVEN(RARRAY_LEN(rdim));     /* before dim[] is filled */
 
   ndim = RARRAY_LEN(rdim);
   for (i=0; i<ndim; i++) {

@@ -24,18 +24,84 @@ class TestCAFrameConstruction < Test::Unit::TestCase
     assert_equal [10, 20], df.index.to_a
   end
 
+  # types: casts the built frame as from_records does.
+  def test_types_casts_named_columns
+    df = CAFrame.new({ "r" => [1.5, 2.5], "n" => [1, 2], "s" => ["x", "y"] },
+                     types: { "r" => :float32, "n" => :int16 })
+    assert_equal({ "r" => :float32, "n" => :int16, "s" => CAString }, df.data_types)
+    assert_equal [1.5, 2.5], df["r"].to_a
+  end
+
+  def test_types_infer_and_default
+    df = CAFrame.new({ "a" => ["1", "2"], "b" => ["x", "y"] }, types: :infer)
+    assert_equal :int64, df.data_types["a"]
+    df = CAFrame.new({ "a" => [1, 2], "b" => [3, 4] }, types: { default: :float32, "b" => nil })
+    assert_equal({ "a" => :float32, "b" => :int64 }, df.data_types)
+  end
+
+  def test_types_unreadable_cells_follow_on_error
+    df = CAFrame.new({ "s" => ["1", "x"] }, types: { "s" => :int32 })
+    assert_equal [1, UNDEF], df["s"].to_a
+    err = assert_raise(CAFrame::UnreadableColumn) {
+      CAFrame.new({ "s" => ["1", "x"] }, types: { "s" => :int32 }, on_error: :raise)
+    }
+    assert_match(/column "s", row 1 "x" cannot be read as int32/, err.message)
+  end
+
+  def test_types_names_an_unknown_column
+    err = assert_raise(KeyError) { CAFrame.new({ "r" => [1.5] }, types: { "q" => :float32 }) }
+    assert_equal 'types: names no column "q"', err.message
+  end
+
+  # A cast column is a new array: the CArray given for it is no longer the
+  # frame's column, while an uncast one still is.
+  def test_types_casts_a_given_carray_into_a_new_column
+    r = CA_FLOAT64([1.5, 2.5])
+    n = CA_INT32([1, 2])
+    df = CAFrame.new({ "r" => r, "n" => n }, types: { "r" => :float32 })
+    r[0] = 9.0
+    n[0] = 9
+    assert_equal 1.5, df["r"][0]
+    assert_equal 9, df["n"][0]
+  end
+
   def test_bare_symbol_key_rejected
     # Column keys are strings (memo §3.7); a bare symbol key is ambiguous
     # with the :axis_name / :index options, so it is rejected loudly.
-    assert_raise(ArgumentError) { CAFrame.new(a: CA_INT32([1, 2])) }
+    err = assert_raise(TypeError) { CAFrame.new(a: CA_INT32([1, 2])) }
+    assert_equal "CAFrame.new: a column name is a String (got :a); " \
+                 "axis_name:, index:, attrs:, types: and on_error: are the options", err.message
   end
 
-  def test_symbol_key_in_explicit_hash_coerced
-    # An explicit column hash has no option ambiguity; symbol keys become
-    # strings so the internal Hash is uniformly string-keyed.
-    df = CAFrame.new({ a: CA_INT32([1, 2]) })
-    assert_equal ["a"], df.column_names
-    assert_equal [1, 2], df["a"].to_a
+  # Column names are Strings in every verb; a Symbol is refused, in an
+  # explicit column hash as well as in inline pairs.
+  def test_symbol_column_names_are_refused
+    err = assert_raise(TypeError) { CAFrame.new({ a: CA_INT32([1, 2]) }) }
+    assert_equal "CAFrame.new: a column name is a String (got :a)", err.message
+    df = CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_INT32([3, 4]), "s" => CA_OBJECT(["x_y", "z_w"]))
+    {
+      "select"      => -> { df.select(:a) },
+      "drop"        => -> { df.drop(:a) },
+      "rename"      => -> { df.rename("a" => :x) },
+      "append"      => -> { df.append(:c, CA_INT32([1, 2])) },
+      "sort_by_key" => -> { df.sort_by_key([:a, :desc]) },
+      "set_index"   => -> { df.copy.set_index(:a) },
+      "fill"        => -> { df.fill(:a, 0) },
+      "cast"        => -> { df.cast(:a, :float64) },
+      "pivot"       => -> { df.pivot(index: :a, columns: "b", values: "a") },
+      "melt"        => -> { df.melt(id: :a, value_columns: ["b"]) },
+      "join"        => -> { df.join(df.select("a"), on: :a) },
+      "split_column" => -> { df.split_column("s", "_", into: [:x, :y]) },
+      "contrast_columns" => -> { df.contrast_columns(:s) },
+      "verify"      => -> { df.verify(x: ->(f) { f["a"] > 0 }) },
+      "describe"    => -> { df.describe(:a) },
+      "mean"        => -> { df.group_by("s").mean(:a) },
+      "aggregate"   => -> { df.group_by("s").aggregate(x: ["a", :sum]) },
+    }.each do |verb, call|
+      err = assert_raise(TypeError, verb) { call.() }
+      assert_match(/\A#{verb}: a column name is a String \(got :\w+\)\z/, err.message)
+    end
+    assert_equal ["a"], df.select("a").column_names
   end
 
   def test_ruby_array_column_coerced
@@ -667,6 +733,17 @@ class TestCAFrameCopyAndMetadata < Test::Unit::TestCase
     assert_equal ["a", "b"], @df.column_names
   end
 
+  # A Face column is named by its class in data_types and in the frame's
+  # column list: its data_type is the surface its kernels dispatch on.
+  def test_face_columns_are_named_by_their_class
+    df = CAFrame.new("t" => CArray.time(%w[2024-01-01 2024-01-02], unit: :D),
+                     "s" => CArray.const_string(%w[a b]),
+                     "n" => CA_FLOAT64([1, 2]))
+    assert_equal({ "t" => CATime, "s" => CAConstString, "n" => :float64 }, df.data_types)
+    assert_match(/columns=\[t:CATime\[D\], s:CAConstString, n:float64\]/, df.inspect)
+    assert_match(/\A<CAConstString\(2\)/, df["s"].inspect)
+  end
+
   def test_data_types
     assert_equal({ "a" => :int32, "b" => :float64 }, @df.data_types)
   end
@@ -891,5 +968,63 @@ class TestCAFrameRowAndFilterMessages < Test::Unit::TestCase
   def test_filter_refuses_an_nd_mask
     e = assert_raise(ArgumentError) { @df.filter { |f| f["w"] > 2 } }
     assert_equal "filter mask has shape [3, 2], expected [3] (one value per row)", e.message
+  end
+end
+
+# A column given as Ruby Strings is a text column, as from_csv reads text,
+# with the String methods; a mix of kinds stays an object column.
+class TestCAFrameStringColumns < Test::Unit::TestCase
+  def test_strings_make_a_text_column
+    df = CAFrame.new("a" => ["x", nil, "y"], "b" => [1, "x", 2])
+    assert_equal({ "a" => CAString, "b" => :object }, df.data_types)
+    assert_equal ["x", UNDEF, "y"], df["a"].to_a
+    df["a"].upcase!
+    assert_equal ["X", UNDEF, "Y"], df["a"].to_a
+  end
+
+  def test_records_and_table_results_are_text_columns
+    df = CAFrame.from_records([{ "s" => "a" }, { "s" => nil }])
+    assert_equal CAString, df.data_types["s"]
+    t = CAFrame.new("k" => [1, 1, 2]).group_by("k").table { |g| { "s" => "n#{g.nrow}" } }
+    assert_equal CAString, t.data_types["s"]
+  end
+end
+
+class TestCAFrameTimeColumnsFromRecords < Test::Unit::TestCase
+  def test_round_trip_keeps_time_and_duration_columns
+    t = CArray.time(["2024-03-04", "2024-03-05"], unit: :D)
+    df = CAFrame.new("date" => t, "v" => [1, 2])
+    df["dur"] = t - t[0]
+    back = CAFrame.from_records(df.to_records + [{ "date" => nil, "v" => 3, "dur" => nil }])
+    assert_equal({ "date" => CATime, "v" => :int64, "dur" => CATimedelta }, back.data_types)
+    assert_equal :D, back["date"].unit.base
+    assert_equal ["2024-03-04", "2024-03-05"], back["date"][0..1].to_a.map(&:to_s)
+    assert_equal UNDEF, back["date"][2]
+    assert_equal [0, 1], back["dur"][0..1].ticks.to_a
+    assert_equal UNDEF, back["dur"][2]
+  end
+
+  def test_mixed_resolutions_take_the_finest
+    d = CArray.time(["2024-03-04", "2024-03-05"], unit: :D)
+    h = CArray.time(["2024-03-04 01:00"], unit: :h)
+    df = CAFrame.from_records([{ "d" => (d - d[0])[1] }, { "d" => (h - d[0])[0] }])
+    assert_equal CATimedelta, df.data_types["d"]
+    assert_equal :h, df["d"].unit.base
+    assert_equal [24, 1], df["d"].ticks.to_a
+  end
+
+  def test_durations_without_a_common_resolution_stay_objects
+    m = CArray.time(["2024-03"], unit: :M)
+    h = CArray.time(["2024-03-04 01:00"], unit: :h)
+    df = CAFrame.from_records([{ "d" => (m - m[0])[0] }, { "d" => (h - h[0])[0] }])
+    assert_equal :object, df.data_types["d"]
+  end
+
+  def test_table_results_of_times_are_time_columns
+    t = CArray.time(["2024-03-04", "2024-03-05", "2024-03-06"], unit: :D)
+    g = CAFrame.new("k" => [1, 1, 2], "t" => t).group_by("k")
+    r = g.table { |f| { "last" => f["t"][-1] } }
+    assert_equal CATime, r.data_types["last"]
+    assert_equal ["2024-03-05", "2024-03-06"], r["last"].to_a.map(&:to_s)
   end
 end

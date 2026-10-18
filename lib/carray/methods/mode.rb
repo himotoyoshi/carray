@@ -74,7 +74,7 @@ class CArray
   #     reduced CArrays, one per mode rank (per-axis).
   def mode (axis: nil)
     # An error from the methods mode is made of (sort, ...) names mode.
-    CArray.__answer_as__(:mode) { mode_answered(axis) }
+    CArray.__name_errors_after_method__(:mode) { mode_answered(axis) }
   end
 
   private def mode_answered (axis)

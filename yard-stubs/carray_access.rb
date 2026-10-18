@@ -20,7 +20,9 @@ class CArray
   #   - Range — a contiguous (or stepped, via a stepped Range) sub-range.
   #   - boolean CArray — masked selection along that axis.
   #   - Integer CArray — fancy gather (index array); shape follows the
-  #     index array.
+  #     index array.  A masked cell of the index array selects nothing and
+  #     keeps its place: it reads as masked, and a write to it has no cell
+  #     to land in and is discarded.
   #   - `:_` — newaxis: insert a size-1 axis at this position.
   #   - `:%` — repeat / tiling sugar.
   #   - `:>` — slab axis: wrap the result in a `CASlabIterator`.
@@ -45,6 +47,9 @@ class CArray
   #
   #   Assignment through a slab iterator (`:>`) is not supported — use a
   #   block index (e.g. `ca[range, nil] = val`) or `each_slab`.
+  #
+  #   A store that raises may leave part of the destination written: its
+  #   values and its mask after the raise are not specified.
   #   @param index [Array<Integer, Range, nil, CArray, Symbol>] one entry
   #     per axis (or a single flat address).
   #   @param value [Object, Array, CArray] the value(s) to store, or

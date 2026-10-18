@@ -35,11 +35,6 @@ class CArray
   #   @return [Integer]
   def ndim; end
 
-  # @overload rank
-  #   @deprecated Use {#ndim}.
-  #   @return [Integer]
-  def rank; end
-
   # @overload bytes
   #   Returns the byte size of one element. Equals
   #   `CArray.sizeof(data_type)` for numeric types; for fixed-length

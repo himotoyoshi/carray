@@ -55,7 +55,7 @@ class CArray
   #   @return [CAConstString]
   def self.const_string (arg, encoding: Encoding::UTF_8, &block)
     if arg.is_a?(CArray)
-      return string_face_of(arg).to_const_string(encoding: encoding)
+      return string_face_of(arg, "CArray.const_string").to_const_string(encoding: encoding)
     end
     if block
       n = Integer(arg)
@@ -135,7 +135,7 @@ class CAConstString
   def sort_addr (*args, **kw)
     # The native scan has no notion of an incomparable sentinel, so a masked
     # column goes the same way a per-axis one does.
-    return __sort_addr_bytes__ if args.empty? && kw.empty? && ! has_mask?
+    return sort_addr_by_bytes if args.empty? && kw.empty? && ! has_mask?
     to_string.sort_addr(*args, **kw)
   end
 
@@ -143,6 +143,12 @@ class CAConstString
   #   Returns the per-fiber indices that index a sort by string order.
   #   @return [CArray] `:int64` indices.
   def sort_index (*args, **kw)
+    if args.empty? && kw.empty? && ! has_mask?
+      # With no axis the indices are those of the flattened array, which are
+      # its addresses.
+      addr = sort_addr_by_bytes
+      return ndim == 1 ? addr : addr.flatten.copy
+    end
     to_string.sort_index(*args, **kw)
   end
 
@@ -163,7 +169,7 @@ class CAConstString
   #   every cell is masked or the array is empty.
   #   @return [String, CAConstString]
   def min (*args, **kw)
-    return __min_bytes__ || UNDEF if args.empty? && kw.empty?
+    return min_string_by_bytes || UNDEF if args.empty? && kw.empty?
     const_string_lift(to_string.min(*args, **kw))
   end
 
@@ -171,7 +177,7 @@ class CAConstString
   #   Byte-largest counterpart of {#min}.
   #   @return [String, CAConstString]
   def max (*args, **kw)
-    return __max_bytes__ || UNDEF if args.empty? && kw.empty?
+    return max_string_by_bytes || UNDEF if args.empty? && kw.empty?
     const_string_lift(to_string.max(*args, **kw))
   end
 
@@ -319,6 +325,9 @@ class CAConstString
   # @overload categorize(labels: nil, sort_labels: false)
   #   @return [CACategorical] categories keyed on the strings.
   def categorize (labels: nil, sort_labels: false)
+    # Discovery reads the bytes (a String per distinct value only); a given
+    # vocabulary is matched through the strings.
+    return super if labels.nil?
     to_string.categorize(labels: labels, sort_labels: sort_labels)
   end
 
@@ -340,7 +349,7 @@ class CAConstString
   # @!method ge(other)
   #   @return [CArray] boolean, true where self sorts after or equals `other`.
   [:ne, :lt, :le, :gt, :ge].each do |op|
-    define_method(op) { |other| to_string.public_send(op, string_operand(other)) }
+    define_method(op, &Ractor.make_shareable(proc { |other| to_string.public_send(op, string_operand(other)) }))
   end
 
   alias <  lt

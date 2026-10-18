@@ -162,15 +162,19 @@ ca_select_setup (CASelect *ca, CArray *parent, CArray *snapshot)
       if ( s[i] ) count++;
     }
     ca->elements = count;
-    /* Placeholder 1-element allocation when count == 0 to avoid
-       malloc(0) implementation variance; the engine treats
-       elements==0 as a no-op so the contents are irrelevant. */
-    ca->indices  = (ca_size_t *) xmalloc(
-                     sizeof(ca_size_t) * (count > 0 ? count : 1));
+    /* One slot more than count: the loop below writes every position
+       and advances only on TRUE, so a run of FALSE after the last TRUE
+       writes slot `count`.  Writing without a branch keeps a selector
+       with TRUE and FALSE mixed at random from mispredicting on most
+       cells.  The extra slot also keeps count == 0 from malloc(0). */
+    ca->indices  = (ca_size_t *) xmalloc(sizeof(ca_size_t) * (count + 1));
     {
-      ca_size_t j = 0;
-      for (i = 0; i < ca->select->elements; i++) {
-        if ( s[i] ) ca->indices[j++] = i;
+      ca_size_t *ix = ca->indices;
+      ca_size_t n   = ca->select->elements;
+      ca_size_t j   = 0;
+      for (i = 0; i < n; i++) {
+        ix[j] = i;
+        j += ( s[i] != 0 );
       }
     }
     /* Constant-step detection: promotes to STRIDE descriptor kind
@@ -211,6 +215,7 @@ CArray *
 ca_select_new (CArray *parent, CArray *select)
 {
   CArray *snapshot = ca_select_snapshot(select);
+  /* check: the setup checks nothing */
   CASelect *ca = ALLOC(CASelect);
   ca_select_setup(ca, parent, snapshot);
   return (CArray*) ca;
@@ -431,7 +436,7 @@ ca_select_func_allocate (void *ap)
   if ( ! ca_parent_lends_no_memory(ca->parent) ) {
     ca_attach(ca->parent);
   }
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void

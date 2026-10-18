@@ -61,6 +61,7 @@ class TestLazyCmpP41 < Test::Unit::TestCase
   end
 
   def test_lt_xfer_stride_uses_arena_or_leaf_inplace
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     # P.4.3 model: each operand is either pulled into an arena scratch
     # OR consumed via leaf-inplace (= use parent->ptr + offset when the
     # operand is a contig entity at common data_type).  Sum scratch_count +

@@ -40,9 +40,10 @@ class CArray
   # @overload elem_fetch(idx)
   #   Returns the value at position `idx` (cast back to the
   #   appropriate Ruby type). Returns `UNDEF` if the cell is masked.
-  #   Returns `nil` if `self.empty?`.
+  #   A negative index counts from the end.
   #   @param idx [Integer, Array<Integer>]
-  #   @return [Object, nil]
+  #   @return [Object]
+  #   @raise [IndexError] if `idx` names no cell, an empty array included.
   def elem_fetch(idx); end
 
   # @overload elem_incr(idx)
@@ -67,7 +68,10 @@ class CArray
   #   @param idx [Integer, Array<Integer>]
   #   @param v [Numeric]
   #   @return [self]
-  #   @raise [CArray::DataTypeError] for non-numeric `data_type`.
+  #   @raise [CArray::DataTypeError] for a non-numeric or complex
+  #     `data_type` (complex values have no order).
+  #   @raise [RangeError] when `v` wins but does not fit the type, as
+  #     `self[idx] = v` raises.
   def elem_min(idx, v); end
 
   # @overload elem_max(idx, v)
@@ -77,7 +81,9 @@ class CArray
   #   @param idx [Integer, Array<Integer>]
   #   @param v [Numeric]
   #   @return [self]
-  #   @raise [CArray::DataTypeError] for non-numeric `data_type`.
+  #   @raise [CArray::DataTypeError] for a non-numeric or complex
+  #     `data_type`.
+  #   @raise [RangeError] when `v` wins but does not fit the type.
   def elem_max(idx, v); end
 
   # @!endgroup

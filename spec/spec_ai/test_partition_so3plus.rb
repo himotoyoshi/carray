@@ -32,7 +32,7 @@ class TestPartitionSO3Plus < Test::Unit::TestCase
     [5, 3, 1, 4, 2, 7, 6].each_with_index { |v, i| a[i] = v }
     p = a.partition(3, axis: 0)
     assert_equal(CARemap, p.class)
-    assert_equal([7], p.dim.to_a)
+    assert_equal([7], p.shape.to_a)
   end
 
   def test_partition_kth_position_is_exact
@@ -54,9 +54,9 @@ class TestPartitionSO3Plus < Test::Unit::TestCase
     end
     kth = 2
     p = b.partition(kth, axis: 1)
-    b.dim[0].times do |i|
-      row = (0...b.dim[1]).map { |j| p[i, j] }
-      sorted_row = (0...b.dim[1]).map { |j| b[i, j] }.sort
+    b.shape[0].times do |i|
+      row = (0...b.shape[1]).map { |j| p[i, j] }
+      sorted_row = (0...b.shape[1]).map { |j| b[i, j] }.sort
       # Position kth holds the kth-smallest exactly
       assert_equal(sorted_row[kth], row[kth],
                    "row #{i}: kth=#{kth} position should be sorted_row[#{kth}]")
@@ -87,7 +87,7 @@ class TestPartitionSO3Plus < Test::Unit::TestCase
     [5, 3, 1, 4, 2, 7, 6].each_with_index { |v, i| a[i] = v }
     pi = a.partition_index(3, axis: 0)
     assert_kind_of(CArray, pi)
-    assert_equal([7], pi.dim.to_a)
+    assert_equal([7], pi.shape.to_a)
     assert_equal(CA_INT64, pi.data_type)  # CA_SIZE on 64-bit
     # Position kth holds the index of the kth-smallest value
     assert_equal(4, a[pi[3]])  # sorted[3] = 4 in original
@@ -99,7 +99,7 @@ class TestPartitionSO3Plus < Test::Unit::TestCase
       row.each_with_index { |v, j| b[i, j] = v }
     end
     pi = b.partition_index(2, axis: 1)
-    assert_equal([2, 5], pi.dim.to_a)
+    assert_equal([2, 5], pi.shape.to_a)
     # row 0 sorted = [1,2,3,4,5]; kth=2 -> value 3 -> original idx 4
     # row 1 sorted = [6,7,8,9,10]; kth=2 -> value 8 -> original idx 4
     assert_equal(4, pi[0, 2])
@@ -163,11 +163,11 @@ class TestPartitionSO3Plus < Test::Unit::TestCase
     tv = a.transpose                  # shape (4, 3)
     p = tv.partition(1, axis: 1)
     assert_equal(CARemap, p.class)
-    assert_equal([4, 3], p.dim.to_a)
+    assert_equal([4, 3], p.shape.to_a)
     # Each tv row has 3 elements; sorted by column index in a
-    tv.dim[0].times do |i|
-      row_orig = (0...tv.dim[1]).map { |j| tv[i, j] }
-      row_part = (0...tv.dim[1]).map { |j| p[i, j] }
+    tv.shape[0].times do |i|
+      row_orig = (0...tv.shape[1]).map { |j| tv[i, j] }
+      row_part = (0...tv.shape[1]).map { |j| p[i, j] }
       sorted_row = row_orig.sort
       assert_equal(sorted_row[1], row_part[1],
                    "row #{i}: kth=1 position should be sorted_row[1]")

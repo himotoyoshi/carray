@@ -12,16 +12,15 @@ class CArray
   #
   #   Out-of-range positions are filled with `lval` (below-range) and
   #   `uval` (above-range); when `lval` is given alone, it fills
-  #   both. Without either, out-of-range positions are masked.
+  #   both. Without either, out-of-range positions are masked, and so
+  #   they are with a fill of `UNDEF`.
   #
   #   When `self` is a Face (CATime / CATimedelta / CACategorical),
-  #   the result is the same Face type, carrying the unit / labels; the
-  #   gather runs on the underlying storage and misses become UNDEF. Fill
-  #   (`lval` / `uval`) is not supported for a Face and raises ArgumentError
-  #   — omit the fill args to get UNDEF at misses.
+  #   the result is the same Face type, carrying the unit / labels, and a
+  #   fill is one of its values (a time for a CATime).
   #   @param idx [CArray] flat addresses, of any shape.
-  #   @param lval [Object, nil] fill for indices `< 0` (non-Face only).
-  #   @param uval [Object, nil] fill for indices `>= self.elements` (non-Face only).
+  #   @param lval [Object, nil] fill for indices `< 0`.
+  #   @param uval [Object, nil] fill for indices `>= self.elements`.
   #   @return [CArray] a fresh array shaped like `idx`; a Face of the same
   #     type when `self` is a Face.
   #   @raise [ArgumentError] if `lval` / `uval` is given and `self` is a Face.
@@ -97,17 +96,19 @@ class CArray
   #   `method:` selects how ties are ranked:
   #
   #   - `:ordinal` (default) — every cell gets a distinct rank; ties
-  #     are broken by original position (stable). This is a total
-  #     order: no two cells ever compare equal.
-  #   - `:dense` — tied values share one rank (no gaps). Useful as a
-  #     `sort_addr` priority key: an `:ordinal` key never ties, so a
-  #     lower-priority key after it is never consulted; a `:dense` key
+  #     are broken by original position (stable), the earlier cell first
+  #     in both directions. This is a total order: no two cells ever
+  #     compare equal.
+  #   - `:dense` — tied values share one rank (no gaps). Every NaN is
+  #     one value and shares one rank, placed after the numbers. Useful
+  #     as a `sort_addr` priority key: an `:ordinal` key never ties, so
+  #     a lower-priority key after it is never consulted; a `:dense` key
   #     preserves the tie so it is.
   #
-  #   `descending:` negates the rank order (`(n-1) - rank`, `n` =
-  #   fiber element count minus masked cells). This composes correctly
-  #   with `method: :dense`: ties stay tied after the transform, and
-  #   group-to-group order still reverses.
+  #   `descending:` ranks the largest value `0`; NaN comes after the
+  #   numbers in both directions. Tied cells keep their
+  #   original order under `:ordinal` and share a rank under `:dense`, so
+  #   dense ranks stay without gaps.
   #
   #   Masked cells are excluded from ranking (own cell becomes UNDEF,
   #   like `rank_index`); `descending:`/`method:` apply to the
@@ -162,11 +163,21 @@ class CArray
   #
   #   `val` is compared in the type both share, as `self.eq(val)`
   #   compares: an integer array searched with a Float is compared in
-  #   float64 (so `3.9` does not match `3`, and `eps` applies), and an
-  #   Integer that does not fit an integer array raises `RangeError`.
+  #   float64 (so `3.9` does not match `3`, and `eps` applies), a pair of
+  #   mixed sign is compared by value (`-1` does not find `255`), and an
+  #   Integer an integer array cannot hold matches nothing.
   #   The same holds for {#bsearch} and {#search_nearest}. On an
   #   `:object` array a cell matches when it is `==` to `val`, as {#eq}
   #   compares (so `1` matches `1.0`, which {#is_in} does not).
+  #
+  #   An `UNDEF` `val`, or a masked cell of a CArray `val`, finds
+  #   nothing: `nil`, or `UNDEF` in that cell of the result.  The same
+  #   holds for {#bsearch} and {#search_nearest}.
+  #
+  #   A time array (`CATime`, `CATimedelta`) takes a value of another
+  #   unit, a `Time` or a String: when it is off the array's grid the
+  #   two are compared in the finer unit, so it matches nothing (and
+  #   {#search_nearest} finds the nearest cell).
   #
   #   `self` need not be sorted; this is a linear scan. For sorted
   #   data prefer {#bsearch}.

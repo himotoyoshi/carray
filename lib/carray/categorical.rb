@@ -48,6 +48,7 @@
 # ----------------------------------------------------------------------------
 
 require "carray"
+require "carray/methods/is_in"   # refuse_range_set, for the set-valued verbs
 
 # Categorical column: dense integer codes plus a label vocabulary, so each
 # element is an index into a small set of categories.  Structurally the same
@@ -68,6 +69,7 @@ class CACategorical < CAObject
     CA_INT32 => "l", CA_UINT32 => "L",
     CA_INT64 => "q", CA_UINT64 => "Q",
   }.freeze
+  Ractor.make_shareable(UNPACK_FORMAT)
 
   # The exclusion sentinel per codes data_type: the all-ones bit pattern, read
   # as type-max for an unsigned data type and as -1 for a signed one. Either way it
@@ -214,6 +216,34 @@ class CACategorical < CAObject
     end
   end
 
+  # The rows' categorical for key columns of one length (CAFrame#group_by,
+  # #is_duplicate, windows(on:, by:)).  Each column is categorized on its
+  # own, so a component compares as a single key does (NaN is one value,
+  # -0.0 is 0.0, a masked cell matches nothing); with several columns a
+  # row's category is the tuple of its component codes, labelled by the
+  # tuple of the component labels.  One masked component leaves the row in
+  # no category, as a masked single key does.
+  private_class_method def self.from_keys (cols)
+    return cols.first.categorize if cols.size == 1
+    nrow  = cols.first.elements
+    cats  = cols.map(&:categorize)
+    sizes = cats.map { |c| c.labels.size }
+    tuple = if sizes.inject(1, :*) <= 2**62
+              cats.drop(1).inject(cats[0].codes.int64) { |acc, c| acc * c.labels.size + c.codes.int64 }
+            else
+              codes = cats.map(&:codes)
+              t = CArray.object(nrow) { |i| codes.map { |c| c[i] } }
+              nrow.times { |i| t[i] = UNDEF if t[i].any? { |x| UNDEF.equal?(x) } }
+              t
+            end
+    rows = tuple.categorize
+    labels = rows.labels.map do |code|
+      parts = code.is_a?(Array) ? code : sizes.reverse.map { |n| code, d = code.divmod(n); d }.reverse
+      parts.each_with_index.map { |d, j| cats[j].labels[d] }
+    end
+    from_codes(rows.codes, labels)
+  end
+
   # codes : integer CArray, the storage parent, already normalised by the
   #         caller (categorize builds it that way; from_codes rewrites what it
   #         receives). Excluded cells are both masked AND store the type-max
@@ -235,7 +265,7 @@ class CACategorical < CAObject
     # copy first so a caller's array is never frozen as a side effect; the
     # label objects themselves are left untouched (container-level freeze).
     @labels = (labels.respond_to?(:to_a) ? labels.to_a : Array(labels)).dup.freeze
-    super(CA_FIXLEN, codes.dim,
+    super(CA_FIXLEN, codes.shape,
           bytes:     codes.bytes,
           storage:   codes.data_type,
           parent:    codes,
@@ -309,14 +339,6 @@ class CACategorical < CAObject
   # the integer code. The raw codes stay reachable via #codes for code-space
   # work (interop, ML features), but they are not the everyday surface.
 
-  # Boolean mask of cells whose category == label. Excluded cells stay UNDEF
-  # (their category is unknown); an unknown label yields an all-false mask.
-  # @overload eq(label)
-  #   Returns a boolean CArray marking cells whose category equals
-  #   `label`. Excluded cells stay masked; an unknown label yields
-  #   an all-false result.
-  #   @param label [Object] category to match.
-  #   @return [CArray]
   # @overload resize(*newdim, fill_value: UNDEF)
   #   Returns a categorical resized to `newdim` (see {CArray#resize}).
   #   The new cells are excluded (UNDEF) unless `fill_value` names one of
@@ -338,16 +360,28 @@ class CACategorical < CAObject
     CACategorical.from_codes(codes.insert_block(offset, bsize) { fill }, labels)
   end
 
+  # Boolean mask of cells whose category == label. Excluded cells stay UNDEF
+  # (their category is unknown); an unknown label yields an all-false mask.
+  # @overload eq(label)
+  #   Returns a boolean CArray marking cells whose category equals
+  #   `label`. A CArray is compared cell by cell, by label: another
+  #   categorical is matched whatever order its labels are in, and a
+  #   masked cell on either side gives UNDEF. Anything else, a Ruby Array
+  #   included, is one label, as for {CArray#eq}. An unknown label matches
+  #   nothing.
+  #   @param label [Object, CArray] category to match, or one per cell.
+  #   @return [CArray]
   def eq(label)
-    codes.eq(@labels.index(label) || @labels.size)
+    codes.eq(codes_of(label))
   end
 
   # @overload ne(label)
   #   Returns the complement of {#eq}.
-  #   @param label [Object] category to compare against.
+  #   @param label [Object, CArray] category to compare against, or one per
+  #     cell.
   #   @return [CArray]
   def ne(label)
-    codes.ne(@labels.index(label) || @labels.size)
+    codes.ne(codes_of(label))
   end
 
   # @overload count(label)
@@ -446,6 +480,7 @@ class CACategorical < CAObject
   #   @param values [Array, CArray, CACategorical] labels to test against.
   #   @return [CArray]
   def is_in (values)
+    refuse_range_set(values, "is_in")
     wanted = label_list(values).filter_map { |l| @labels.index(l) }
     codes.is_in(CArray.int64(wanted.size) { |i| wanted[i] })
   end
@@ -453,18 +488,21 @@ class CACategorical < CAObject
   # @overload intersection(other, sort: false)
   #   @return [CArray] object CArray of the labels present in both.
   def intersection (other, sort: false)
+    refuse_range_set(other, "intersection")
     unique.intersection(label_array(other), sort: sort)
   end
 
   # @overload difference(other, sort: false)
   #   @return [CArray] object CArray of the labels only `self` has.
   def difference (other, sort: false)
+    refuse_range_set(other, "difference")
     unique.difference(label_array(other), sort: sort)
   end
 
   # @overload union(other, sort: false)
   #   @return [CArray] object CArray of the labels of either side.
   def union (other, sort: false)
+    refuse_range_set(other, "union")
     unique.union(label_array(other), sort: sort)
   end
 
@@ -484,6 +522,24 @@ class CACategorical < CAObject
   # that has none. Every code-to-label path goes through here rather than
   # indexing @labels itself, because two decodes are two chances to disagree,
   # and disagreeing is how #unique came to contradict #to_a on the same cell.
+  # An operand of #eq / #ne as codes of this vocabulary. A value that is not
+  # one of the labels gets labels.size, which no cell holds. A CArray is read
+  # cell by cell, a masked cell staying masked; a categorical goes through its
+  # own codes, so the two vocabularies need not agree. Anything else is one
+  # label, as CArray#eq takes it.
+  def codes_of (other)
+    return @labels.index(other) || @labels.size unless other.is_a?(CArray)
+    if other.is_a?(CACategorical)
+      table = other.labels.map { |l| @labels.index(l) || @labels.size }
+      return CA_INT64(table)[other.codes] unless table.empty?
+    end
+    memo = {}
+    list = other.flatten.to_a.map { |v|
+      UNDEF.equal?(v) ? v : memo.fetch(v) { memo[v] = @labels.index(v) || @labels.size }
+    }
+    CA_INT64(list).reshape(*other.shape)
+  end
+
   # The code a fill value stands for: UNDEF stays UNDEF, a label is its code.
   def code_for_fill (value)
     return UNDEF if UNDEF.equal?(value)
@@ -564,35 +620,17 @@ class CACategorical < CAObject
   # `value.reshape(elements)[cat.sort_addr]` produces the contiguous blocks.
   # Memoised (see the grouping-plan note above): the counting sort is the
   # dominant grouping cost, so it is computed once and shared by every payload
-  # column and by CACategoricalIterator. Do not mutate the returned array.
+  # column and by CACategoricalIterator, and kept for the categorical's
+  # lifetime (an int64 per cell). Do not mutate the returned array.
   # @overload sort_addr
   #   Returns a length-{#elements} integer CArray of flat storage
   #   addresses that order the cells by category (excluded cells last).
   #   @return [CArray]
   def sort_addr
     return @sort_addr if @sort_addr
-    n      = elements
-    k      = @labels.size
-    nvalid = category_sizes.sum
-    cur    = reduceat_index.copy                  # segment starts, consumed as cursor
-    flat   = codes.reshape(n)
-    seq    = CArray.int64(n).seq!                 # source indices, scattered as payload
-    out    = CArray.int64(n)
-    if nvalid == n
-      flat.send(:__categorical_scatter__, seq, cur, out, k) # all valid: scatter straight in
-    else
-      if nvalid > 0
-        valid = CArray.int64(nvalid)              # scatter target must be an entity, not a view
-        flat.send(:__categorical_scatter__, seq, cur, valid, k)
-        out[0...nvalid] = valid
-      end
-      # Excluded = every cell the scatter skips: code out of [0, k), OR masked
-      # (a from_codes pre-masked cell keeps a valid code but is excluded). Both
-      # must be caught or the tail slot count would not add up to n - nvalid.
-      excluded = flat.value.ge(k).or(flat.value.lt(0))
-      excluded = excluded.or(flat.is_masked) if flat.has_mask?
-      out[nvalid..-1] = seq[excluded]             # excluded cells, source order
-    end
+    out = codes.reshape(elements).__send__(:addresses_by_category,
+                                           reduceat_index.copy, @labels.size,
+                                           category_sizes.sum)
     @sort_addr = out
     out
   end
@@ -628,6 +666,75 @@ class CACategorical < CAObject
     # Distinctness rides the codes; only the k labels cross the surface.
     recoded = codes.categorize
     CACategorical.from_codes(recoded.codes, recoded.labels.map { |c| label_at(c) })
+  end
+
+  # The position of +label+ among the labels, found by ==, a NaN label by a
+  # NaN, as join and at match NaN keys; nil when it is not one of them.
+  private def label_position (label)
+    return @labels.index(label) unless label.is_a?(Float) && label.nan?
+    @labels.index { |l| l.is_a?(Float) && l.nan? }
+  end
+
+  # The categorical as numeric columns, one per category, for a model that
+  # takes numbers: row i holds 1 in the column of its category and 0
+  # elsewhere.  With an intercept in the model the k columns would sum to the
+  # intercept's column, so by default the column of the base category is
+  # left out and k - 1 remain; each coefficient then reads as that category
+  # minus the base.  +full: true+ keeps all k (a model without an intercept,
+  # or an input to a learner).
+  #
+  # The columns follow the labels, not the data: a category with no cells
+  # gives a column of zeros, so two categoricals with the same labels give
+  # the same columns.  A masked cell gives a masked row.
+  #
+  # @overload contrast(scheme = :dummy, base: nil, full: false)
+  #   Returns an int8 CArray of shape (n, k - 1), or (n, k) with
+  #   `full: true`, whose columns are the labels in order with the base
+  #   left out.
+  #   @param scheme [Symbol] the coding; only `:dummy` is defined.
+  #   @param base [Object] the label whose column is left out; the first
+  #     label when omitted.
+  #   @param full [Boolean] keep every column.
+  #   @return [CArray]
+  #   @raise [ArgumentError] when `scheme` is not `:dummy`, when `base` is
+  #     not a label, when `base:` and `full: true` are both given, when
+  #     there are no labels to leave one out of, or when the categorical is
+  #     not one-dimensional.
+  def contrast (scheme = :dummy, base: nil, full: false)
+    unless scheme == :dummy
+      raise ArgumentError, "contrast: unknown scheme #{scheme.inspect} (only :dummy is defined)"
+    end
+    unless ndim == 1
+      raise ArgumentError, "contrast: the categorical is #{ndim}-dimensional, not one-dimensional"
+    end
+    k = @labels.size
+    if full
+      raise ArgumentError, "contrast: base: and full: true contradict (full keeps every column)" unless base.nil?
+      kept = (0...k).to_a
+    else
+      raise ArgumentError, "contrast: there are no labels, so no base column to leave out" if k == 0
+      dropped = base.nil? ? 0 : label_position(base)
+      raise ArgumentError, "contrast: #{base.inspect} is not one of the labels #{@labels.inspect}" unless dropped
+      kept = (0...k).to_a - [dropped]
+    end
+    n   = elements
+    m   = kept.size
+    out = CArray.int8(n, m).zero
+    return out if n == 0 || m == 0
+
+    # One pass: each cell's code picks its column through colmap (-1 for the
+    # base), and a 1 is written at row * m + column.
+    colmap = CArray.int64(k) { -1 }
+    kept.each_with_index { |code, j| colmap[code] = j }
+    excluded = codes.has_mask? ? codes.is_masked : CArray.boolean(n) { false }
+    code = codes.value.to_type(CA_INT64)
+    code[excluded] = 0 if excluded.any
+    col  = colmap[code]
+    hit  = col.ge(0) & excluded.not
+    addr = CArray.int64(n).seq! * m + col
+    out.reshape(n * m)[addr[hit]] = 1 if hit.any
+    out[excluded, nil] = UNDEF if excluded.any
+    out
   end
 
   # @overload inspect
@@ -667,14 +774,11 @@ class CArray
   #     duplicates.
   #   @raise [CArray::DataTypeError] when `sort_labels: true` discovers
   #     the labels of a complex array, which have no order.
-  # The order sort_labels: puts two labels in: as sort orders the cells of an
-  # array, a Float NaN after every other value; two labels <=> cannot order
-  # are refused, by name.
+  # The order sort_labels: puts two labels in: the order sort puts the cells
+  # of an array in (object_order_cmp); two labels <=> cannot order are
+  # refused, by name.
   private def label_order(a, b)
-    na = a.is_a?(Float) && a.nan?
-    nb = b.is_a?(Float) && b.nan?
-    return (na ? 1 : 0) - (nb ? 1 : 0) if na || nb
-    c = a <=> b
+    c = CArray.send(:object_order_cmp, a, b)
     if c.nil?
       raise ArgumentError,
             "categorize(sort_labels: true): cannot order the labels " \
@@ -706,7 +810,13 @@ class CArray
       # Sort the k levels as Ruby sorts them, then renumber every code through
       # the rank in one gather. The sentinel of an excluded cell is out of the
       # rank's range, so project makes it UNDEF and from_codes writes it back.
-      order = (0...levels.size).sort { |i, j| label_order(levels[i], levels[j]) }
+      # A boolean label reads as true or false, and sorts as its storage,
+      # false before true, as sort and unique(sort: true) put the cells.
+      order = if boolean?
+                (0...levels.size).sort_by { |i| levels[i] ? 1 : 0 }
+              else
+                (0...levels.size).sort { |i, j| label_order(levels[i], levels[j]) }
+              end
       rank = CArray.new(codes.data_type, [levels.size])
       order.each_with_index { |old, new_code| rank[old] = new_code }
       return CACategorical.from_codes(rank.project(codes), order.map { |i| levels[i] })
@@ -743,4 +853,16 @@ class CArray
 
     CACategorical.from_codes(codes, labels_arr)
   end
+end
+
+# categorize is a conversion: the categories are the values in another
+# representation, so they show the attributes the values show.  Each of the
+# three implementations returns from several places, so the attributes are
+# carried here, around all of them.
+[CArray, CACategorical, CAConstString].each do |klass|
+  klass.prepend(Module.new do
+    def categorize (labels: nil, sort_labels: false)
+      carry_attrs(super)
+    end
+  end)
 end

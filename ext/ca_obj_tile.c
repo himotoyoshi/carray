@@ -116,9 +116,6 @@ ca_tile_setup (CATile *ca, CArray *parent, ca_size_t *reps)
     ca->dim[i]  = parent->dim[i] * reps[i];
   }
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask(ca);
-  }
 
   return 0;
 }
@@ -130,6 +127,7 @@ ca_tile_new (CArray *parent, ca_size_t *reps)
   ca_tile_setup(NULL, parent, reps);
   ca = ALLOC(CATile);
   ca_tile_setup(ca, parent, reps);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -244,6 +242,7 @@ ca_tile_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     ca_size_t idx[CA_RANK_MAX], doff = 0, base = 0;
     for (k = 0; k < ndim; k++) base += starts[k] * tnative[k];
     for (k = 0; k < ndim; k++) idx[k] = 0;
+    /* empty: the slot returns on an empty region at its entry */
     while (1) {
       ca_size_t toff = base, tidx[CA_RANK_MAX];
       for (k = 0; k < ndim; k++) toff += idx[k] * strides[k];
@@ -258,6 +257,7 @@ ca_tile_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   }
 
   for (k = 0; k < ndim; k++) o[k] = 0;
+  /* empty: the slot returns on an empty region at its entry */
   while (1) {
     ca_size_t pbase = 0, doff = 0, i;
     for (k = 0; k < inner; k++) {
@@ -403,7 +403,7 @@ ca_tile_func_allocate (void *ap)
 {
   CATile *ca = (CATile *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -411,7 +411,7 @@ ca_tile_func_attach (void *ap)
 {
   CATile *ca = (CATile *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
   ca_tile_attach_into(ca, ca->ptr);
 }
 
@@ -585,6 +585,7 @@ rb_ca_tile_initialize_copy (VALUE self, VALUE other)
   ca_check_uninitialized(ca);
   TypedData_Get_Struct(other, CATile, &catile_data_type, cs);
   ca_tile_setup(ca, cs->parent, cs->reps);
+  ca_view_inherit_mask((VALUE) ca);
   return self;
 }
 

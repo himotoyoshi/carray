@@ -36,7 +36,7 @@ class TestCAGridRebuild < Test::Unit::TestCase
     a = CArray.int(5).seq
     v = a.grid(nil)
     assert_equal CAGrid, v.class
-    assert_equal [5], v.dim.to_a
+    assert_equal [5], v.shape.to_a
     assert_equal [0, 1, 2, 3, 4], v.to_a
   end
 
@@ -141,18 +141,18 @@ class TestCAGridRebuild < Test::Unit::TestCase
     assert_equal [:stride, 4, 0, 1], desc[1]
   end
 
-  # ---------- masked integer CArray skips masked cells ----------
+  # ---------- a masked index cell is a hole ----------
 
-  def test_masked_integer_array_skips_masked_cells
+  def test_masked_integer_array_keeps_the_position_as_a_hole
     omit "requires CARRAY_DEV_BUILD" unless CAGrid.method_defined?(:_describe_axes)
     a = CArray.int(5).seq + 100
     idx = CArray.int(4).tap { |__a| __a[] = [0, 1, 2, 3] }
     idx.mask = CArray.boolean(4).tap { |__a| __a[] = [0, 1, 0, 0] }  # mask cell 1
     v = a.grid(idx)
     desc = v._describe_axes
-    # Masked cell 1 (= parent index 1) skipped → indices = [0, 2, 3]
-    assert_equal [:index, 3, [0, 2, 3]], desc[0]
-    assert_equal [100, 102, 103], v.to_a
+    # Masked cell 1 keeps its position; its index is 0 and selects nothing.
+    assert_equal [:index, 4, [0, 0, 2, 3]], desc[0]
+    assert_equal [100, UNDEF, 102, 103], v.to_a
   end
 
   # ---------- gather / scatter / fill basic ----------
@@ -181,7 +181,7 @@ class TestCAGridRebuild < Test::Unit::TestCase
     a = CArray.int(4, 5).seq
     v = a.grid(nil, 0..2)
     v[] = -1
-    a.dim[0].times do |i|
+    a.shape[0].times do |i|
       3.times { |j| assert_equal(-1, a[i, j]) }
       (3...5).each { |j| assert_equal i * 5 + j, a[i, j] }
     end
@@ -242,7 +242,7 @@ class TestCAGridRebuild < Test::Unit::TestCase
 
   def test_grid_over_block_view
     # CAGrid over a CABlock parent — parent is non-contig view; tests
-    # mid-chain transparency same as for CASelect/CAMapping.
+    # mid-chain transparency same as for CASelect.
     a = CArray.int(10, 10).seq
     parent_view = a[2..7, nil]   # CABlock 6x10
     v = parent_view.grid(nil, 0..4)

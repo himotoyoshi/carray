@@ -1,6 +1,6 @@
 # Boolean folds all / any / none gain a `skip_masked:` keyword.
 #
-#   skip_masked: true  (default) -- available-case (skipna): masked cells are
+#   skip_masked: true  (default) -- available-case: masked cells are
 #                                    ignored, the result is always true/false.
 #                                    This is the existing behavior; every other
 #                                    keyword (axis:, keep_axis:, ...) forwards
@@ -14,15 +14,15 @@
 #                                    false < unknown < true).
 #
 # The Kleene fold composes from count(true) / count(false) / count_masked, so
-# there is no dedicated kernel; the C reductions keep the skipna semantics
-# under the `__*_skipna__` aliases.
+# there is no dedicated kernel; the C reductions that skip masked cells stay
+# reachable as the private `*_skipping_masked` aliases.
 
 class CArray
 
-  alias_method :__any_skipna__,  :any
-  alias_method :__all_skipna__,  :all
-  alias_method :__none_skipna__, :none
-  private :__any_skipna__, :__all_skipna__, :__none_skipna__
+  alias_method :any_skipping_masked,  :any
+  alias_method :all_skipping_masked,  :all
+  alias_method :none_skipping_masked, :none
+  private :any_skipping_masked, :all_skipping_masked, :none_skipping_masked
 
   # Whether any cell is true.
   #
@@ -36,8 +36,8 @@ class CArray
   #   `keep_axis:`, ...).
   # @return [Boolean, CArray] a scalar, or an array when an axis is given.
   def any (skip_masked: true, **opts)
-    return __any_skipna__(**opts) if skip_masked
-    __kleene_fold(:any, opts)
+    return any_skipping_masked(**opts) if skip_masked
+    kleene_fold(:any, opts)
   end
 
   # Whether every cell is true.
@@ -52,8 +52,8 @@ class CArray
   #   `keep_axis:`, ...).
   # @return [Boolean, CArray] a scalar, or an array when an axis is given.
   def all (skip_masked: true, **opts)
-    return __all_skipna__(**opts) if skip_masked
-    __kleene_fold(:all, opts)
+    return all_skipping_masked(**opts) if skip_masked
+    kleene_fold(:all, opts)
   end
 
   # Whether no cell is true.
@@ -68,8 +68,8 @@ class CArray
   #   `keep_axis:`, ...).
   # @return [Boolean, CArray] a scalar, or an array when an axis is given.
   def none (skip_masked: true, **opts)
-    return __none_skipna__(**opts) if skip_masked
-    __kleene_fold(:none, opts)
+    return none_skipping_masked(**opts) if skip_masked
+    kleene_fold(:none, opts)
   end
 
   private
@@ -79,11 +79,11 @@ class CArray
   # any, a false for all, a true for none); elsewhere a masked cell leaves the
   # answer undetermined.  Going through that reduction checks the data type,
   # the axes and the keywords exactly as `skip_masked: true` does.
-  def __kleene_fold (kind, opts)
+  def kleene_fold (kind, opts)
     r = case kind
-        when :any then __any_skipna__(**opts)
-        when :all then __all_skipna__(**opts)
-        else           __none_skipna__(**opts)
+        when :any then any_skipping_masked(**opts)
+        when :all then all_skipping_masked(**opts)
+        else           none_skipping_masked(**opts)
         end
     cm = count_masked(**opts)
     if r.is_a?(CArray)

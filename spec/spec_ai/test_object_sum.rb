@@ -34,7 +34,7 @@ class TestObjectSum < Test::Unit::TestCase
   def test_all_masked_slab_identity_default
     # ERI.0: under the default min_count, an all-masked slab is the sum
     # over the empty set of unmasked cells = the additive identity (0),
-    # NOT UNDEF.  (skipna semantics: masked cells are excluded, and the
+    # NOT UNDEF.  (Masked cells are excluded, and the
     # sum of no cells is 0.)  UNDEF is opt-in via min_count: 1.
     b = CA_OBJECT([[1,2,3,4,5],[6,7,8,9,10]])
     b[0, nil] = UNDEF

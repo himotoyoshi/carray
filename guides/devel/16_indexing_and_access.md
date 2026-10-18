@@ -58,12 +58,8 @@ construction:
 | `CA_REG_SELECT` | a `CASelect` (boolean / fancy selection) |
 | `CA_REG_GRID` | a `CAGrid` ([ch. 7](07_axis_descriptor_framework.md)) |
 | `CA_REG_REPEAT` | `CARepeat` |
+| `CA_REG_MAPPING` (one index array) | a `CAGrid` over the flattened buffer, reshaped by a `CARefer` when the index array has several axes |
 | `CA_REG_ADDRESS` / `CA_REG_ADDRESS_COMPLEX` | flat addressing into the buffer |
-
-> **Note.** Older reference material still names a `MAPPING` region for an
-> index array of non-grid shape. **CAMapping was retired in 3.0 (R.3)**
-> ([ch. 8](08_view_catalog.md)); an index-array index now builds a
-> `CAGrid`/`CAStride` chain. Trust the code.
 
 ## The scalar boundary
 

@@ -50,7 +50,8 @@
   (Float#eql? treats them equal).  The object lane adds one deviation from Ruby
   Hash, aligning it with the numeric lane: every Float NaN collapses to one
   distinct value (a NaN takes a fixed canonical key and matches any stored Float
-  NaN), where Ruby Hash would keep distinct NaN objects apart.
+  NaN), where Ruby Hash would keep distinct NaN objects apart, and a Complex
+  with a NaN part is one value with any Complex whose parts match it that way.
   __factorize_appearance__ and the discovery members (unique, value_counts,
   mask_duplicates) all cover the numeric / object / fixlen lanes.
 
@@ -77,6 +78,7 @@
 
 #include "carray.h"
 #include "ca_obj_face.h"
+#include "carray_internal.h"   /* ca_object_cells_clear */
 #include <string.h>
 #include <math.h>
 
@@ -175,6 +177,7 @@ fz_complex_key (VALUE self)
   if ( ca_has_mask(ca) ) {
     ca_copy_mask(co, ca);
   }
+  RB_GC_GUARD(self);   /* read through ca after rb_carray_new allocates */
   return out;
 }
 
@@ -206,24 +209,19 @@ fz_face_descend (VALUE self, volatile VALUE *pface, const char *name)
   }
   if ( ca_is_face(ca) ) {
     /* A record is its bytes: two records are the same value exactly when
-       their bytes are, so the fixlen lane answers for it. */
-    if ( ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE)
-         || ca->obj_type == CA_OBJ_RECORD ) {
-      *pface = self;
-      return rb_ca_strip_face_value(self);
+       their bytes are, so the fixlen lane answers for it.  Any other Face
+       is descended only when ORDERABLE.  One that cannot be descended must
+       not flow on undescended: whatever reads it next reads its storage
+       anyway, which is the encoding rather than the values.  A Face in this
+       position normally never arrives -- CAConstString and CACategorical
+       define their own members in Ruby -- but the overrides only fire when
+       the Face is the receiver, and this same helper descends the
+       *reference* for locate_addr, where it is the argument. */
+    if ( ca->obj_type != CA_OBJ_RECORD ) {
+      ca_face_require_orderable(self, name, "compare");
     }
-    /* A Face that cannot be descended must not flow on undescended: whatever
-       reads it next reads its storage anyway, which is the encoding rather
-       than the values.  A Face in this position normally never arrives --
-       CAConstString and CACategorical define their own members in Ruby -- but
-       the overrides only fire when the Face is the receiver, and this same
-       helper descends the *reference* for locate_addr, where it is the
-       argument. */
-    rb_raise(rb_eArgError,
-             "%s: %s is not orderable by storage (a cell encodes the value "
-             "rather than being it); convert it first -- %s -- or pass "
-             ".parent to work in storage space",
-             name, rb_obj_classname(self), ca_face_conversion_hint(self));
+    *pface = self;
+    return rb_ca_strip_face_value(self);
   }
   *pface = Qnil;
   return self;
@@ -250,6 +248,7 @@ fz_face_reconcile (VALUE reference, VALUE operand, const char *name)
     }
     GetCArray(operand, op);
     if ( op->data_type != ca->data_type ) {
+      /* coerce: the callers have met both sides at result_type already */
       operand = rb_ca_to_type(operand, INT2NUM(ca->data_type), Qnil);
     }
     return fz_complex_key(operand);
@@ -402,8 +401,7 @@ fz_hash_alloc (fz_hash *h, ca_size_t cap)
   h->cap  = cap;
   MEMZERO(h->used, uint8_t, cap);
   if ( has_val ) {
-    ca_size_t i;
-    for ( i = 0; i < cap; i++ ) h->val[i] = Qnil;
+    ca_object_cells_clear(h->val, cap);
     fz_tmp_values(h->hbuf, h->val, cap);
   }
 }
@@ -512,25 +510,84 @@ fz_is_float_nan (VALUE v)
   return RB_FLOAT_TYPE_P(v) && isnan(RFLOAT_VALUE(v));
 }
 
+/* True when v holds a NaN that eql? would keep apart from an equal value:
+   a Float NaN, or a Complex with a Float NaN part. */
+static int
+fz_obj_has_nan (VALUE v)
+{
+  if ( fz_is_float_nan(v) ) {
+    return 1;
+  }
+  return RB_TYPE_P(v, T_COMPLEX)
+         && ( fz_is_float_nan(rb_complex_real(v))
+              || fz_is_float_nan(rb_complex_imag(v)) );
+}
+
+/* A part of a NaN-bearing value: every NaN is one value, the rest go by
+   eql?, as in Ruby Hash. */
+static uint64_t
+fz_obj_part_key (VALUE v)
+{
+  return fz_is_float_nan(v) ? FZ_NAN_KEY_DOUBLE : (uint64_t) NUM2LL(rb_hash(v));
+}
+
+static int
+fz_obj_part_eql (VALUE a, VALUE b)
+{
+  if ( fz_is_float_nan(a) || fz_is_float_nan(b) ) {
+    return fz_is_float_nan(a) && fz_is_float_nan(b);
+  }
+  return rb_eql(a, b);
+}
+
+/* The hash key of an object cell.  A NaN-bearing value is keyed part by
+   part with every NaN as one value, so it matches the numeric lane: all
+   NaN are one value, and a complex value is one value when its parts are. */
+static uint64_t
+fz_obj_key (VALUE v, int has_nan)
+{
+  if ( ! has_nan ) {
+    return (uint64_t) NUM2LL(rb_hash(v));
+  }
+  if ( RB_TYPE_P(v, T_COMPLEX) ) {
+    return fz_obj_part_key(rb_complex_real(v)) * 31u
+           ^ fz_obj_part_key(rb_complex_imag(v)) ^ 0x9e3779b97f4a7c15ULL;
+  }
+  return FZ_NAN_KEY_DOUBLE;
+}
+
+/* Whether a stored cell is the same value as v (has_nan from fz_obj_has_nan). */
+static int
+fz_obj_same (VALUE stored, VALUE v, int has_nan)
+{
+  if ( ! has_nan ) {
+    return rb_eql(stored, v);
+  }
+  if ( RB_TYPE_P(v, T_COMPLEX) ) {
+    return RB_TYPE_P(stored, T_COMPLEX)
+           && fz_obj_part_eql(rb_complex_real(stored), rb_complex_real(v))
+           && fz_obj_part_eql(rb_complex_imag(stored), rb_complex_imag(v));
+  }
+  return fz_is_float_nan(stored);
+}
+
 /* Object-lane intern: key = rb_hash(v) (lossy), collision re-check via rb_eql.
    Matches Ruby Hash distinctness (`hash` + `eql?`) element for element, with one
    value-based exception aligning with the numeric lane: every Float NaN collapses
    to a single distinct value (Ruby Hash keeps distinct NaN objects apart via
-   eql?, but the discovery family unifies them).  A NaN takes a fixed canonical
-   key and matches any stored Float NaN, so its second and later occurrences fold
-   into the first. */
+   eql?, but the discovery family unifies them), and so does a Complex whose
+   parts are the same with every NaN as one (fz_obj_key / fz_obj_same). */
 static int32_t
 fz_hash_intern_obj (fz_hash *h, VALUE v, int *is_new)
 {
   if ( (h->n + 1) * 10 >= h->cap * 7 ) { fz_hash_grow(h); }   /* load factor 0.7 */
-  int v_nan = fz_is_float_nan(v);
-  uint64_t key = v_nan ? FZ_NAN_KEY_DOUBLE
-                       : (uint64_t) NUM2LL(rb_hash(v));
+  int v_nan = fz_obj_has_nan(v);
+  uint64_t key = fz_obj_key(v, v_nan);
   ca_size_t mask = h->cap - 1;
   ca_size_t slot = FZ_HOME(h, key);
   while ( h->used[slot] ) {
     if ( h->key[slot] == key &&
-         ( v_nan ? fz_is_float_nan(h->val[slot]) : rb_eql(h->val[slot], v) ) ) {
+         fz_obj_same(h->val[slot], v, v_nan) ) {
       *is_new = 0; return h->code[slot];
     }
     slot = (slot + 1) & mask;
@@ -621,14 +678,13 @@ fz_hash_lookup (fz_hash *h, uint64_t key, int32_t *code_out)
 static int
 fz_hash_lookup_obj (fz_hash *h, VALUE v, int32_t *code_out)
 {
-  int v_nan = fz_is_float_nan(v);
-  uint64_t key = v_nan ? FZ_NAN_KEY_DOUBLE
-                       : (uint64_t) NUM2LL(rb_hash(v));
+  int v_nan = fz_obj_has_nan(v);
+  uint64_t key = fz_obj_key(v, v_nan);
   ca_size_t mask = h->cap - 1;
   ca_size_t slot = FZ_HOME(h, key);
   while ( h->used[slot] ) {
     if ( h->key[slot] == key &&
-         ( v_nan ? fz_is_float_nan(h->val[slot]) : rb_eql(h->val[slot], v) ) ) {
+         fz_obj_same(h->val[slot], v, v_nan) ) {
       if ( code_out ) { *code_out = h->code[slot]; }
       return 1;
     }
@@ -669,9 +725,7 @@ typedef struct {
 static void
 fz_levels_values (fz_levels *l, ca_size_t from)
 {
-  VALUE    *v = (VALUE *) l->p;
-  ca_size_t i;
-  for ( i = from; i < l->cap; i++ ) v[i] = Qnil;
+  ca_object_cells_clear((VALUE *) l->p + from, l->cap - from);
   fz_tmp_values(l->hp, l->p, l->cap);
 }
 
@@ -717,7 +771,13 @@ fz_levels_free (fz_levels *l)
    in the middle of a walk.  The walks' states live in this frame, outside the
    method's body, and ca_iter_ensure finishes them however the body leaves;
    the tables have owners the unwind collects (fz_tmp_alloc).  Slots 0
-   and 1 hold a method's own walks, slot 2 the walk of fz_intern_all. */
+   and 1 hold a method's own walks, slot 2 the walk of fz_intern_all.
+
+   A body that replaces self or an operand with an array it made (complex
+   keys, a Face's storage, an operand brought into self's space) writes the
+   new VALUE back into the frame.  The walks read it only through its
+   CArray *, so a C local alone would leave it to the collector halfway
+   through. */
 
 typedef struct {
   ca_iter_state st[3];
@@ -761,7 +821,7 @@ fz_factorize_appearance_body (VALUE arg)
   VALUE self = fr->self;
   CArray *ca;
   volatile VALUE face;
-  self = fz_face_descend(self, &face, "categorize");
+  fr->self = self = fz_face_descend(self, &face, "categorize");
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   int8_t dt = ca->data_type;
@@ -1132,7 +1192,7 @@ fz_unique_flat_body (VALUE arg)
   VALUE self = fr->self;
   CArray *ca;
   volatile VALUE face;
-  self = fz_face_descend(self, &face, "unique");
+  fr->self = self = fz_face_descend(self, &face, "unique");
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   int8_t dt = ca->data_type;
@@ -1158,8 +1218,6 @@ fz_unique_flat_body (VALUE arg)
   else                        { fz_hash_init(&h); }
   fz_levels_init(&lv, (int) ca->bytes, ca->data_type == CA_OBJECT);
 
-  int8_t axis = (int8_t) (ca->ndim - 1);   /* innermost fiber; hash not reset =
-                                              one seen-set over the whole array */
   ca_iter_state *st_in = &fr->st[0];
   char       *p_in;
   boolean8_t *m;
@@ -1220,7 +1278,7 @@ fz_unique_flat_body (VALUE arg)
       }                                                                        \
     } while (0)
 
-  CA_FOR_EACH_FIBER_MASKED(*st_in, ca, axis, CA_KERNEL_READ, p_in, n, m) {
+  CA_FOR_EACH_WHOLE_MASKED(*st_in, ca, CA_KERNEL_READ, p_in, n, m) {
     switch ( dt ) {
     case CA_INT8:   UQ_LOOP(int8_t,   (int64_t));  break;
     case CA_INT16:  UQ_LOOP(int16_t,  (int64_t));  break;
@@ -1265,7 +1323,7 @@ rb_ca_unique_flat (VALUE self)
 }
 
 /* Intern every non-masked cell of cv into h, one seen-set over the whole array
-   (the hash is not reset between fibers).  When lv is non-NULL, the first-seen
+   walked in row-major order.  When lv is non-NULL, the first-seen
    raw element of each distinct value is pushed to it (appearance order), so the
    same pass builds both a probe set and the distinct-value list.  Dispatches the
    three key lanes exactly as the discovery family: numeric widen with all NaN
@@ -1276,7 +1334,6 @@ static void
 fz_intern_all (ca_iter_state *st_v, fz_hash *h, CArray *cv, fz_levels *lv)
 {
   int8_t dt = cv->data_type;
-  int8_t vaxis = (int8_t) (cv->ndim - 1);
   char       *p_v;
   boolean8_t *mv;
   ca_size_t   nv;
@@ -1329,7 +1386,7 @@ fz_intern_all (ca_iter_state *st_v, fz_hash *h, CArray *cv, fz_levels *lv)
       }                                                                        \
     } while (0)
 
-  CA_FOR_EACH_FIBER_MASKED(*st_v, cv, vaxis, CA_KERNEL_READ, p_v, nv, mv) {
+  CA_FOR_EACH_WHOLE_MASKED(*st_v, cv, CA_KERNEL_READ, p_v, nv, mv) {
     switch ( dt ) {
     case CA_INT8:   FZ_IA(int8_t,   (int64_t));  break;
     case CA_INT16:  FZ_IA(int16_t,  (int64_t));  break;
@@ -1376,8 +1433,8 @@ fz_is_in_body (VALUE arg)
   VALUE rvalues = fr->a;
   CArray *ca, *cv;
   volatile VALUE face;
-  self     = fz_face_descend(self, &face, "is_in");
-  rvalues  = fz_face_reconcile(face, rvalues, "is_in");
+  fr->self = self    = fz_face_descend(self, &face, "is_in");
+  fr->a    = rvalues = fz_face_reconcile(face, rvalues, "is_in");
   GetCArray(self, ca);
 
   int8_t dt = ca->data_type;
@@ -1543,8 +1600,8 @@ fz_locate_addr_body (VALUE arg)
      output is an address, so nothing is lifted back. */
   {
     volatile VALUE ref_face;
-    rref = fz_face_descend(rref, &ref_face, "locate_addr");
-    self = fz_face_reconcile(ref_face, self, "locate_addr");
+    fr->a    = rref = fz_face_descend(rref, &ref_face, "locate_addr");
+    fr->self = self = fz_face_reconcile(ref_face, self, "locate_addr");
   }
   GetCArray(self, ca);
 
@@ -1807,8 +1864,8 @@ fz_set_relation_body (VALUE arg)
   int keep_when_hit = fr->i;
   CArray *ca, *co;
   volatile VALUE face;
-  self   = fz_face_descend(self, &face, "set relation");
-  rother = fz_face_reconcile(face, rother, "set relation");
+  fr->self = self   = fz_face_descend(self, &face, "set relation");
+  fr->a    = rother = fz_face_reconcile(face, rother, "set relation");
   GetCArray(self, ca);
 
   int8_t dt = ca->data_type;
@@ -2002,8 +2059,8 @@ fz_set_union_body (VALUE arg)
   VALUE rother = fr->a;
   CArray *ca, *co;
   volatile VALUE face;
-  self   = fz_face_descend(self, &face, "union");
-  rother = fz_face_reconcile(face, rother, "union");
+  fr->self = self   = fz_face_descend(self, &face, "union");
+  fr->a    = rother = fz_face_reconcile(face, rother, "union");
   GetCArray(self, ca);
 
   int8_t dt = ca->data_type;
@@ -2095,7 +2152,7 @@ fz_value_counts_flat_body (VALUE arg)
   VALUE self = fr->self;
   CArray *ca;
   volatile VALUE face;
-  self = fz_face_descend(self, &face, "value_counts");
+  fr->self = self = fz_face_descend(self, &face, "value_counts");
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   int8_t dt = ca->data_type;
@@ -2255,10 +2312,10 @@ rb_ca_value_counts_flat (VALUE self)
 
 /* @overload __nunique__(axis, keep_axis)
 
-   INTERNAL (CArray#nunique). Count the distinct values along axis, one linear
-   pass per fiber with an independent seen-set. Returns a reduced
-   CA_INT64 CArray of self.shape with axis removed (or kept as length-1 when
-   keep_axis). Masked cells do not participate; an all-masked fiber counts 0
+   INTERNAL (CArray#nunique). Count the distinct values along axis (an Integer
+   or an Array of them), one linear pass per fiber with an independent
+   seen-set. Returns a reduced CA_INT64 CArray of self.shape with the axes
+   removed (or kept as length-1 when keep_axis). Masked cells do not participate; an all-masked fiber counts 0
    (an empty set has zero distinct values, not UNDEF -- nunique has identity 0).
    Numeric distinctness collapses all NaN to one value and treats -0.0 == +0.0;
    object keys on rb_hash + rb_eql and fixlen on a byte-hash + memcmp, reproducing
@@ -2290,14 +2347,11 @@ fz_nunique_body (VALUE arg)
     rb_raise(rb_eRuntimeError, "__nunique__: need ndim >= 1");
   }
 
-  int axis = NUM2INT(vaxis);
-  if ( axis < 0 || axis >= ca->ndim ) {
-    rb_raise(rb_eArgError, "__nunique__: axis %d out of range", axis);
-  }
+  int8_t axes[CA_RANK_MAX];
+  int8_t naxes = rb_ca_parse_reduce_axes_kw_ctx(vaxis, ca, axes, "nunique");
   int keep_axis = RTEST(vkeep);
 
-  int8_t ax = (int8_t) axis;
-  VALUE vout = rb_ca_new_reduced(self, &ax, 1, CA_INT64, keep_axis);
+  VALUE vout = rb_ca_new_reduced(self, axes, naxes, CA_INT64, keep_axis);
   CArray *cout;
   TypedData_Get_Struct(vout, CArray, &carray_data_type, cout);
   int64_t *op = (int64_t *) cout->ptr;
@@ -2308,7 +2362,7 @@ fz_nunique_body (VALUE arg)
   else                        { fz_hash_init(&h); }
 
   ca_iter_state *st = &fr->st[0];
-  int rc = ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, &ax, 1, 0);
+  int rc = ca_iter_state_init_l2(st, ca, CA_SLAB_AXES, axes, naxes, 0);
   if ( rc != CA_ITER_OK ) {
     fz_hash_free(&h);
     rb_raise(rb_eRuntimeError, "__nunique__: kernel_iterator init failed rc=%d", rc);
@@ -2641,7 +2695,7 @@ fz_mode_axis_body (VALUE arg)
   VALUE vaxis = fr->a;
   CArray *ca;
   volatile VALUE face;
-  self = fz_face_descend(self, &face, "mode");
+  fr->self = self = fz_face_descend(self, &face, "mode");
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   int8_t dt = ca->data_type;

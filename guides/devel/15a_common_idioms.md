@@ -132,6 +132,38 @@ Use `rb_ca_wrap_writable` (or `ca_wrap_writable`) when the wrapped view
 must accept writes. This is rare — most kernels write only to outputs
 they allocated themselves.
 
+When the target is not a fixed type but the type of another operand, do
+not cast one side to the other's type: settle a common type with
+`CArray.result_type` and bring both sides to it (or let a binary operator
+do it).  `rake one_sided_cast_check` asks for a `/* coerce: reason */` note
+on any cast whose target is an array's data type, for the cases where one
+side really is the authority (a store into the receiver).
+
+### Walk an extent that may be empty
+
+A walk over several axes is often written as an odometer: handle the cell
+at the current index, then carry the index forward and stop when the carry
+runs off the first axis.
+
+```c
+for ( k = 0; k < ndim; k++ ) idx[k] = 0;
+/* empty: the function returns on an empty region at its entry */
+while ( 1 ) {
+  /* ... the cell at idx ... */
+  k = ndim - 1;
+  while ( k >= 0 ) { if ( ++idx[k] < counts[k] ) break; idx[k] = 0; k--; }
+  if ( k < 0 ) break;
+}
+```
+
+It handles its first cell before it looks at any count, so an axis of
+length 0 makes it read and write a cell that is not there. Return before
+the walk when the extent is empty (`ca_region_is_empty(ndim, counts)`, or
+`elements == 0` for a whole array), or rely on a caller that does, and say
+which in an `/* empty: ... */` comment on the loop line or just above it.
+`rake empty_walk_check` (`utils/check_empty_walks.rb`, run before
+`rake spec_ai`) asks every such walk for one.
+
 ### Validate shapes
 
 Raise on mismatch — these are the canonical checks
@@ -423,6 +455,40 @@ An index into `n` places goes through `ca_index_in_range(idx, n, "index")`
 (`carray_internal.h`): a negative index counts from the end, and one
 outside after that raises `IndexError` naming the method the user called.
 `spec/spec_ai/test_index_out_of_range.rb` lists the doors.
+
+A Ruby value stored into an integer cell goes through
+`ca_obj2integer_fitting(v, data_type)` (`carray_internal.h`): it is read as an
+Integer (`Integer()` for a Float) and refused with `RangeError` when it does
+not fit the cell, as an operator refuses the same scalar. The generated store
+readers (`carray_cast_func.rb`) and record members call it; an array cast
+(`to_type`) keeps the C conversion. `rake integer_store_check`
+(`utils/check_integer_store_narrowing.rb`) reports a C cast that narrows a
+Ruby value into a cell without saying why it fits.
+
+"The method the user called" is `ca_calling_method_name()`
+(`carray_internal.h`). It walks the frames out from where the error is
+raised and returns the last frame of the library -- a Ruby method under
+`lib/`, a C method of a CA* class, a `CA_*` conversion -- before the user's
+own code (a block included); a core C method on the way (`Array#map`,
+`Class#new`) is passed through. So a Ruby method written over a C one is
+named without doing anything, and `CArray.__name_errors_after_method__(name)
+{ ... }` is only for a method that answers under another name. A method
+made by `define_method` is the exception: its frame does not carry its
+name, so when the walk meets one it gives up and the innermost C method is
+named, as it was before the walk. A family of methods is therefore made by
+`CArray.define_named_methods(mod, names, :helper)` (`lib/carray/runtime.rb`),
+which writes one `def` per name handing its name to a private helper
+(`super_block: true` also hands it the method it overrides as a block). `rake
+define_method_check` keeps each file of `lib/` from gaining a
+`define_method`; one that stays says why with `# define_method:`. The walk
+costs about 0.1 us, so call it where the message is built, not on entry.
+`rake method_naming_check` refuses `rb_frame_this_func` outside
+`carray_utils.c`. A new raise opens with `"%s: "` and
+`ca_calling_method_name()`, a shared part included, since the part finds
+the name itself; inside the library the checks of `carray.h` are the
+`CA_CHECK_*_GIVEN` forms in `carray_internal.h`, which do. `rake
+unnamed_raise_check` keeps each file of `ext/` from gaining a raise that
+does not.
 
 The `ArgError` / `TypeError` / `IndexError` / `RangeError` distinction
 matches Ruby convention. A data_type an operation cannot take is

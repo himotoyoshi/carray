@@ -354,11 +354,18 @@ class CAFrame
     end
 
     # Read one record. With no argument it becomes the column names; with a
-    # name it is a secondary header (e.g. units) -- read, returned, not used as
-    # names. Returns the record's fields either way.
+    # name it is a secondary header (e.g. units): its field j becomes the
+    # attribute +name+ of column j (an empty field gives none). Returns the
+    # record's fields either way.
     def header(name = nil)
-      fields = @tok.read(@io)
+      # A named header of a file with at most one column may be an empty
+      # line: that is how to_csv writes a column without the attribute, so
+      # the line is the header's, as an empty line is a row in the data.
+      blank_is_row = !name.nil? && !@names.nil? && @names.size <= 1
+      fields = @tok.read(@io, blank_is_row: blank_is_row)
       if fields.nil?
+        # A file with no columns has nothing to give a named header.
+        return [] if !name.nil? && @names&.empty?
         # An input with no record at all is a table with no columns: that is
         # what to_csv writes for a frame without columns or index.  Once lines
         # have been skipped to reach the header, a missing header is an error.
@@ -372,11 +379,18 @@ class CAFrame
                                           lineno: @tok.lineno + 1)
       end
       if name.nil?
-        @names = fields.map(&:to_s)
+        # An empty field names no column: the column takes the name a file
+        # without a header gives it, from its place in the line.
+        @names = fields.each_with_index.map { |f, j| f.to_s.empty? ? "c#{j}" : f.to_s }
         @header_line = @tok.record_line
         @names_to_check = nil
       else
-        (@named_headers ||= {})[name.to_s] = fields
+        key = name.to_s
+        @named_headers ||= {}
+        if @named_headers.key?(key)
+          raise ArgumentError, "from_csv: header(#{name.inspect}) is read twice"
+        end
+        @named_headers[key] = [fields, @tok.record_line, name]
       end
       fields
     end
@@ -388,6 +402,9 @@ class CAFrame
     # one.
     def column_names(*names)
       names = names.flatten.map(&:to_s)
+      if names.include?("")
+        raise ArgumentError, "from_csv: column_names: a column name can not be empty"
+      end
       if @header_line
         check_column_names(names, @names.size, @header_line)
       else
@@ -401,13 +418,24 @@ class CAFrame
     # indexes of the file's columns from 0 (Integers or Ranges), in the order
     # the frame is to have them. The fields of the others are read past, so
     # a few columns of a wide file cost little more than a narrow file.
+    #
+    # A Hash selects by its keys, as above (a name or an index, not a Range),
+    # and names the columns read with its values:
+    #
+    #   r.columns(2 => "code", "c7" => "area1")
     def columns(*selection)
+      @renames = nil
+      if selection.size == 1 && selection[0].is_a?(Hash)
+        @renames = column_renames(selection[0])
+        selection = selection[0].keys
+      end
       selection = selection.flatten
       if selection.empty?
         raise ArgumentError, "from_csv: columns: names no column"
       end
       selection.each do |c|
         next if c.is_a?(String)
+        CAFrame.__send__(:column_key, c, "from_csv", "columns: a column name") if c.is_a?(Symbol)
         next if c.is_a?(Integer) && c >= 0
         next if c.is_a?(Range) && (c.begin.nil? || (c.begin.is_a?(Integer) && c.begin >= 0)) &&
                 (c.end.nil? || c.end.is_a?(Integer))
@@ -418,6 +446,24 @@ class CAFrame
       self
     end
 
+    # The new names a Hash given to +columns+ holds, checked.
+    private def column_renames(map)
+      map.each do |key, name|
+        if key.is_a?(Range)
+          raise ArgumentError, "from_csv: columns: a Hash selects one column per key, " \
+                               "not a Range (got #{key.inspect})"
+        end
+        CAFrame.__send__(:column_key, name, "from_csv", "columns: a column name",
+                         hint: "given for #{key.inspect}")
+        if name.empty?
+          raise ArgumentError, "from_csv: columns: a column name can not be empty " \
+                               "(given for #{key.inspect})"
+        end
+      end
+      CAFrame.__send__(:refuse_repeated_names, map.values, "from_csv", "columns: names")
+      map.values
+    end
+
     # The indexes of the selected columns, in the order asked for, among
     # ncol columns named +names+ (nil: by index only). nil when ncol is not
     # known yet and the selection needs it.
@@ -425,8 +471,12 @@ class CAFrame
       indexes = @selection.flat_map do |c|
         case c
         when String
-          j = names&.index(c)
-          raise KeyError, "from_csv: columns: names no column #{c.inspect}" if j.nil?
+          # Without a header the columns are named c0, c1, ... by position.
+          j = names ? names.index(c) : c[/\Ac(0|[1-9]\d*)\z/, 1]&.to_i
+          if j.nil?
+            raise KeyError, "from_csv: columns: names no column #{c.inspect}" +
+                            (names ? "" : " (with no header the columns are c0, c1, ...)")
+          end
           j
         when Integer then c
         else
@@ -438,10 +488,7 @@ class CAFrame
           (first..last).to_a
         end
       end
-      dup = indexes.tally.select { |_, k| k > 1 }.keys
-      unless dup.empty?
-        raise ArgumentError, "from_csv: columns: selects column #{dup.first} more than once"
-      end
+      CAFrame.__send__(:refuse_repeated_names, indexes, "from_csv", "columns: selects column")
       if ncol && (bad = indexes.find { |j| j >= ncol })
         raise ArgumentError, "from_csv: columns: #{bad} is past the #{ncol} columns of the file"
       end
@@ -484,22 +531,29 @@ class CAFrame
     # or to none (false) when column_names: is given; data: is the first line
     # of the data or a Range of lines, by default from the line after the
     # header. A record that starts within data: is read whole.
-    def layout(header: nil, data: nil, column_names: nil, columns: nil)
+    def layout(header: nil, data: nil, column_names: nil, columns: nil, attrs: nil)
       header = column_names ? false : 0 if header.nil?
       unless header == false || (header.is_a?(Integer) && header >= 0)
         raise ArgumentError, "from_csv: header: takes the index of a line, from 0, " \
                              "or false (got #{header.inspect})"
       end
+      attr_keys = attrs.nil? ? [] : CAFrame.send(:csv_attr_keys, attrs, "from_csv")
+      if !header && !attr_keys.empty?
+        raise ArgumentError, "from_csv: attrs: reads the lines below the header, " \
+                             "so it needs a header line"
+      end
       first, last = CSVReader.data_lines(data)
       if header
         skip(header - @tok.lineno) if header > @tok.lineno
         self.header
+        attr_keys.each { |key| self.header(key.to_sym) }
       end
       column_names(*column_names) if column_names
       self.columns(*(columns.is_a?(Array) ? columns : [columns])) if columns
       first ||= @tok.lineno
       if first < @tok.lineno
-        raise ArgumentError, "from_csv: data: #{first} does not come after header: #{header}"
+        raise ArgumentError, "from_csv: data: #{first} does not come after header: #{header}" +
+                             (attr_keys.empty? ? "" : " and the #{attr_keys.size} attrs: lines")
       end
       skip(first - @tok.lineno)
       read_data(last && last + 1)
@@ -575,7 +629,7 @@ class CAFrame
     private def read_body_into_const_string_columns
       ncol = @names && !@names_to_check ? @names.size : 0
       keep = columns_to_read
-      text = @io.read || ""
+      text = read_rest
       n, buffer, pairs, records = CArray.__csv_read_body_as_const_string_columns__(text, @tok.sep, @tok.quote, ncol, keep)
       unless buffer
         @rows = []
@@ -609,7 +663,7 @@ class CAFrame
       loop do
         text = if chunked then next_chunk(chunk_bytes)
                elsif last then lines_through(last)
-               else @io.read || ""
+               else read_rest
                end
         break if text.nil?
         n, flat, records = CArray.__csv_read_body_as_string_cells__(text, @tok.sep, @tok.quote, ncol, keep)
@@ -675,6 +729,20 @@ class CAFrame
       buf
     end
 
+    # The rest of the input, in the IO's encoding. Read in pieces when the IO
+    # does not transcode: IO#read without a length checks the text's encoding
+    # as it reads, and the C reader checks it again faster.
+    private def read_rest
+      unless @io.respond_to?(:internal_encoding) && @io.internal_encoding.nil?
+        return @io.read || ""
+      end
+      buf = +""
+      while (piece = @io.read(CHUNK_BYTES))
+        buf << piece
+      end
+      buf.force_encoding(@io.external_encoding || Encoding.default_external)
+    end
+
     # The next chunk_bytes of the input, read on to the end of its line and
     # past any quoted field still open, in the IO's encoding; nil at EOF.
     private def next_chunk(chunk_bytes)
@@ -690,6 +758,32 @@ class CAFrame
       buf
     end
 
+    # The attributes the named headers give the columns +result+ returns, as
+    # [{key => value}, ...] in the same order. A column of the file the
+    # selection left out takes no part.
+    def column_attrs (ncol)
+      return nil unless @named_headers
+      indexes = @selection ? selected_indexes(@names, ncol) : (0...ncol).to_a
+      attrs = indexes.map { {} }
+      @named_headers.each do |key, (fields, line, name)|
+        if fields.size > ncol
+          raise ArgumentError, "from_csv: header(#{name.inspect}) on line #{line} " \
+                               "has #{fields.size} fields for the #{ncol} columns"
+        end
+        indexes.each_with_index do |j, k|
+          value = fields[j]
+          attrs[k][key] = value unless value.nil?
+        end
+      end
+      attrs
+    end
+
+    # The number of columns of the file, once the data is read.
+    def file_ncol
+      return @table_ncol if @table
+      @names ? @names.size : ((@rows || []).map(&:size).max || 0)
+    end
+
     # [names_or_nil, rows] for CAFrame.from_csv to build from. names is nil when
     # neither header nor column_names ran (positional names are generated).
     def result
@@ -703,7 +797,7 @@ class CAFrame
       return [@names, rows] unless @selection
       ncol = @names ? @names.size : (rows.map(&:size).max || 0)
       indexes = selected_indexes(@names, ncol)
-      names = indexes.map { |j| @names ? @names[j] : "c#{j}" }
+      names = @renames || indexes.map { |j| @names ? @names[j] : "c#{j}" }
       [names, rows.map { |r| r.values_at(*indexes) }]
     end
 
@@ -711,7 +805,7 @@ class CAFrame
     private def table_result
       return [@names, @table] unless @selection
       indexes = selected_indexes(@names, @table_ncol)
-      names = indexes.map { |j| @names ? @names[j] : "c#{j}" }
+      names = @renames || indexes.map { |j| @names ? @names[j] : "c#{j}" }
       kept = @table_keep || (0...@table_ncol).to_a
       order = indexes.map { |j| kept.index(j) }
       table =

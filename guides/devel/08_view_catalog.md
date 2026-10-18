@@ -57,9 +57,6 @@ strides).
 | CASelectAxis | (runtime) | `ca_obj_select_axis.c` | descriptor | per-axis selection |
 | CARemap | (runtime) | `ca_obj_remap.c` | own | address remap (sort/partition consumption) |
 
-> **CAMapping was retired in 3.0 (R.3).** `a[mapper]` now builds a CAGrid/CAStride
-> chain instead. Do not reference `CAMapping` in new code or docs.
-
 ## Bounds-fill views
 
 Shifted/windowed access with an out-of-bounds policy. Connected to the descriptor
@@ -204,6 +201,19 @@ a Range-typed axis emits a STRIDE
 descriptor, so a `nil`-only axis costs no ALLOC. `rb_ca_grid(*args)` is
 the Ruby method.
 
+A masked cell of an index array selects nothing and keeps its position: it
+becomes a **hole** of the INDEX axis (`cag_axis_t.holes`). A hole reads as
+masked (the grid's mask grid returns true there) and takes no write. The
+descriptor engine has no hole, so a grid with holes is delivered through its
+own transfers (one batch of parent addresses with the holes left out of a
+write), declines `fold_stride`, and is routed to the kernel iterator as
+`SRC_ATTACH` (`ca_grid_has_holes`). Showing the holes gives a parent that has
+no mask none: the mask grid reads an all-false stand-in held by the grid, and
+gives way to the parent's own mask once the parent has one or a true is
+written outside the holes ([ch. 5](05_mask_and_undef.md), "Stand-ins"). A new door that takes integer positions
+answers the same way: the read gives `UNDEF` at the masked position, the
+write leaves it alone, as `project` and `gather_nd` do.
+
 **CASelectAxis** (runtime) — per-axis selection. Drives the descriptor
 framework via `ca_select_axis_describe_axes`. `rb_ca_select_axis(*args)`
 / `rb_ca_select_axis_eligible_p` (predicate).
@@ -213,11 +223,6 @@ partition family (`sort_addr` emits CARemap addresses); its access
 pattern is "permutation of parent->elements" expressed as a flat
 address list. Not a kernel-author surface; do not construct
 CARemap directly.
-
-> **CAMapping was retired in 3.0 (R.3).** `a[mapper]` now builds a
-> CAGrid / CAStride normalize chain instead. Do not reference
-> `CAMapping` in new code or docs; the `camapping_data_type` extern
-> is gone.
 
 ### Bounds-fill views
 

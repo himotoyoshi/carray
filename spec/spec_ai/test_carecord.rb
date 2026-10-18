@@ -27,21 +27,21 @@ class TestCARecord < Test::Unit::TestCase
   def test_ac1_construct_1d
     a = CARecord.new(GeoCoord, 5)
     assert_kind_of CARecord, a
-    assert_equal [5], a.dim
+    assert_equal [5], a.shape
     assert_equal 5, a.elements
     assert_equal GeoCoord, a.data_class
   end
 
   def test_ac1_construct_2d
     a = CARecord.new(GeoCoord, 3, 4)
-    assert_equal [3, 4], a.dim
+    assert_equal [3, 4], a.shape
     assert_equal 12, a.elements
     assert_equal GeoCoord, a.data_class
   end
 
   def test_ac1_construct_nd
     a = CARecord.new(GeoCoord, 2, 3, 4)
-    assert_equal [2, 3, 4], a.dim
+    assert_equal [2, 3, 4], a.shape
     assert_equal 24, a.elements
   end
 
@@ -95,7 +95,7 @@ class TestCARecord < Test::Unit::TestCase
     f = a["lat"]
     assert_kind_of CAField, f
     assert_equal :float64, f.data_type_name rescue assert_equal(CA_FLOAT64, f.data_type)
-    assert_equal [3], f.dim
+    assert_equal [3], f.shape
   end
 
   def test_ac2_field_projects_on_parent
@@ -182,7 +182,7 @@ class TestCARecord < Test::Unit::TestCase
     arr = klass.new(7)
     assert_kind_of klass, arr
     assert_equal GeoCoord, arr.data_class
-    assert_equal [7], arr.dim
+    assert_equal [7], arr.shape
   end
 
   def test_ac4_subclass_dsl_multi_dim
@@ -190,7 +190,7 @@ class TestCARecord < Test::Unit::TestCase
       data_class GeoCoord
     end
     arr = klass.new(3, 4)
-    assert_equal [3, 4], arr.dim
+    assert_equal [3, 4], arr.shape
   end
 
   def test_ac4_subclass_dsl_getter
@@ -671,7 +671,7 @@ class TestCARecord < Test::Unit::TestCase
     w = CARecord.wrap(ent, GeoCoord)
     assert_kind_of CARecord, w
     assert_equal GeoCoord, w.data_class
-    assert_equal [5], w.dim
+    assert_equal [5], w.shape
   end
 
   def test_ac13_wrap_parent_aliases_entity
@@ -724,10 +724,10 @@ class TestCARecord < Test::Unit::TestCase
     a = CARecord.new(GeoCoord, 2, 3)
     a["lat"][] = CArray.float64(2, 3).seq
     tr = a.transpose
-    assert_equal [3, 2], tr.dim
+    assert_equal [3, 2], tr.shape
     f = tr["lat"]
     assert_kind_of CAField, f
-    assert_equal [3, 2], f.dim
+    assert_equal [3, 2], f.shape
     # Transpose of seq(2,3) [[0,1,2],[3,4,5]] -> [[0,3],[1,4],[2,5]]
     assert_equal [[0.0, 3.0], [1.0, 4.0], [2.0, 5.0]], f.to_a
   end

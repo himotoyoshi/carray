@@ -88,7 +88,7 @@ class TestPortablePartitionP9 < Test::Unit::TestCase
       [2, 15, 16, 17, 32, 100].each do |n|
         kth = n / 2
         arr = CArray.send(ctor, n) { |i|
-          v = (i * 97 + 13) % (ctor == :int8 ? 100 : 1000)
+          v = (i * 97 + 13) % ([:int8, :uint8].include?(ctor) ? 100 : 1000)
           is_float ? v.to_f : v
         }
         arr_in = arr.to_a

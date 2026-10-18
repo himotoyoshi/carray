@@ -91,7 +91,7 @@ class TestWsumWmeanPerFiber < Test::Unit::TestCase
     w_1d = CArray.float64(4) { |j| 1.0 }   # uniform weights
     # uniform weights -> wmean == mean(axis=1)
     r = a.wmean(w_1d, axis: 1)
-    assert_equal(3, r.dim[0])
+    assert_equal(3, r.shape[0])
     expected = a.mean(axis: 1).to_a
     r.to_a.each_with_index do |v, i|
       assert_in_delta(expected[i], v, 1e-12)
@@ -102,7 +102,7 @@ class TestWsumWmeanPerFiber < Test::Unit::TestCase
     a = CArray.float64(2, 3, 4) { |i, j, k| (i * 100 + j * 10 + k).to_f }
     w_1d = CArray.float64(4) { |k| 1.0 + k }   # [1, 2, 3, 4] along axis 2
     r = a.wsum(w_1d, axis: -1)
-    assert_equal([2, 3], r.dim)
+    assert_equal([2, 3], r.shape)
     # verify: r[i, j] = sum_k a[i,j,k] * w[k]
     2.times do |i|
       3.times do |j|

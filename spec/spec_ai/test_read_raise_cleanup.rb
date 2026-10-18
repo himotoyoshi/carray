@@ -11,8 +11,11 @@
 #   a reduction over CArray.stack the per-parent pointer table; the raise
 #                                 the caller sees is the hook's own
 #
-# Each buffer is made large (128 KB to 2 MB), so a leak shows far above
-# the 4 KB threshold of utils/measure_leak.rb (macOS only).
+# Each buffer is made large (128 KB or more), so a leak shows far above
+# the threshold, measured by utils/measure_leak.rb (macOS only).  Buffers
+# of 1.5 to 8 MB are avoided: macOS keeps a few freed blocks of that size
+# in use, which reads as several kilobytes per call even when nothing
+# leaks.
 
 require "test/unit"
 require "carray"
@@ -53,7 +56,7 @@ class TestReadRaiseCleanup < Test::Unit::TestCase
 
   def test_sort_copy_stable
     assert_leaves_nothing "a.sort_copy(kind: :stable, axis: 0)",
-      "a = NthRead.new(CArray.float64(1 << 18).seq, 1)", calls: 1000
+      "a = NthRead.new(CArray.float64(1 << 14).seq, 1)", calls: 1000
   end
 
   KLEENE = <<~RUBY
@@ -132,7 +135,7 @@ class TestReadRaiseCleanup < Test::Unit::TestCase
     omit "development build only" unless CArray.respond_to?(:caf_slab_bench_sort_copy_f64)
     assert_raise(ArgumentError) { CArray.caf_slab_bench_sort_copy_f64(CArray.float64(4), 5) }
     assert_leaves_nothing "CArray.caf_slab_bench_sort_copy_f64(a, 0)",
-      "a = NthRead.new(CArray.float64(1 << 18).seq, 1)", calls: 1000
+      "a = NthRead.new(CArray.float64(1 << 14).seq, 1)", calls: 1000
   end
 
   # --- CArray.stack: the hook's own exception reaches the caller ---------

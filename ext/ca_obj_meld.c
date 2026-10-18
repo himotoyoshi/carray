@@ -152,6 +152,20 @@ ca_meld_setup (CAMeld *ca, int32_t n_parents, CArray **parents, int8_t meld_axis
   int32_t i;
   int8_t  a;
 
+  /* ca == NULL asks for the checks only, so that a constructor can run
+     them before it allocates.  They see the parents as the setup will,
+     one Face level down, without changing the caller's list. */
+  if ( ca == NULL ) {
+    volatile VALUE holder = 0;
+    CArray **seen = ALLOCV_N(CArray *, holder, n_parents > 0 ? n_parents : 1);
+    for ( i = 0; i < n_parents; i++ ) {
+      seen[i] = ca_is_face(parents[i]) ? CAVIEW(parents[i])->parent : parents[i];
+    }
+    ca_meld_check_uniform(n_parents, seen, meld_axis);
+    ALLOCV_END(holder);
+    return 0;
+  }
+
   /* Pre-strip Face parents one level to storage, as CAStack does, so a
      melded Face lifts to a single-Face chain (CATime[CAMeld[entity, ...]])
      rather than a Face sitting on Face parents.  One level, not a full walk,
@@ -211,7 +225,9 @@ ca_meld_setup (CAMeld *ca, int32_t n_parents, CArray **parents, int8_t meld_axis
 CAMeld *
 ca_meld_new (int32_t n_parents, CArray **parents, int8_t meld_axis)
 {
-  CAMeld *ca = ALLOC(CAMeld);
+  CAMeld *ca;
+  ca_meld_setup(NULL, n_parents, parents, meld_axis);
+  ca = ALLOC(CAMeld);
   ca_meld_setup(ca, n_parents, parents, meld_axis);
   return ca;
 }
@@ -285,12 +301,12 @@ ca_meld_tail_elements (const CAMeld *ca)
 /* On the mask of a CAMeld: let its stand-ins give way to the parents' own
    masks (see ca_multi_parent_mask_refresh). */
 static void
-ca_meld_mask_refresh (CAMeld *ca, int for_write)
+ca_meld_mask_refresh (CAMeld *ca)
 {
   CAMeld *o = (CAMeld *) ca->mask_owner;
   if ( o != NULL ) {
     ca_multi_parent_mask_refresh((CArray *) ca, o->parents, o->mask_standins,
-                                 o->n_parents, for_write);
+                                 o->n_parents);
   }
 }
 
@@ -308,7 +324,7 @@ static void
 ca_meld_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
   CAMeld *ca = (CAMeld *) ap;
-  ca_meld_mask_refresh(ca, dir == CA_XFER_PUT);
+  ca_meld_mask_refresh(ca);
   int8_t   ma = ca->meld_axis;
   ca_size_t v = idx[ma];
   int32_t   k;
@@ -343,7 +359,7 @@ ca_meld_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
                          void *data, int dir)
 {
   CAMeld *ca = (CAMeld *) ap;
-  ca_meld_mask_refresh(ca, dir == CA_XFER_PUT);
+  ca_meld_mask_refresh(ca);
   int8_t   ma = ca->meld_axis;
   ca_size_t bytes = ca->bytes;
   ca_size_t view_div[CA_RANK_MAX];   /* row-major divisor per view axis */
@@ -559,6 +575,7 @@ ca_meld_xfer_stride_ma_internal (CAMeld *ca, ca_size_t *starts,
         else                      memcpy(buf, d + voff, chunk_bytes);
       }
       else if ( dir == CA_XFER_GET ) {
+        /* empty: the slot (ca_meld_func_xfer_stride) returns on an empty region; a parent the request does not reach returns above */
         while ( 1 ) {
           memcpy(d + voff, buf + paddr, chunk_bytes);
           paddr += chunk_bytes;
@@ -572,6 +589,7 @@ ca_meld_xfer_stride_ma_internal (CAMeld *ca, ca_size_t *starts,
           if ( i < 0 ) break;
         }
       } else {
+        /* empty: as above */
         while ( 1 ) {
           memcpy(buf + paddr, d + voff, chunk_bytes);
           paddr += chunk_bytes;
@@ -619,6 +637,7 @@ ca_meld_xfer_stride_per_cell (CAMeld *ca, ca_size_t *starts, ca_size_t *counts,
   for ( i = 0; i < ndim; i++ ) base += starts[i] * native[i];
   for ( i = 0; i < ndim; i++ ) idx[i] = 0;
 
+  /* empty: the slot (ca_meld_func_xfer_stride) returns on an empty region */
   while ( 1 ) {
     ca_size_t toff = base;
     for ( i = 0; i < ndim; i++ ) toff += idx[i] * strides[i];
@@ -641,7 +660,7 @@ ca_meld_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 {
   if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAMeld *ca = (CAMeld *) ap;
-  ca_meld_mask_refresh(ca, dir == CA_XFER_PUT);
+  ca_meld_mask_refresh(ca);
   int8_t   ma = ca->meld_axis;
   ca_size_t native[CA_RANK_MAX];
   ca_size_t s;
@@ -787,6 +806,7 @@ ca_meld_xfer_all_ma_internal (CAMeld *ca, void *data, int dir,
       else                      memcpy(buf, d + voff, chunk_bytes);
     }
     else if ( dir == CA_XFER_GET ) {
+      /* empty: the slot returns on an empty view; the outer axes are the view's, and a parent empty along the meld axis copies chunks of 0 bytes */
       while ( 1 ) {
         memcpy(d + voff, buf + paddr, chunk_bytes);
         paddr += chunk_bytes;
@@ -801,6 +821,7 @@ ca_meld_xfer_all_ma_internal (CAMeld *ca, void *data, int dir,
       }
     }
     else {
+      /* empty: as above */
       while ( 1 ) {
         memcpy(buf + paddr, d + voff, chunk_bytes);
         paddr += chunk_bytes;
@@ -835,7 +856,8 @@ ca_meld_xfer_parents (CAMeld *ca, void *data, int dir, int into_buffers)
 static void
 ca_meld_func_xfer_all (void *ap, void *data, int dir)
 {
-  ca_meld_mask_refresh((CAMeld *) ap, dir == CA_XFER_PUT);
+  if ( ((CArray *) ap)->elements == 0 ) return;
+  ca_meld_mask_refresh((CAMeld *) ap);
   ca_meld_xfer_parents((CAMeld *) ap, data, dir, 0);
 }
 
@@ -847,9 +869,9 @@ static void
 ca_meld_func_allocate (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
-  ca_meld_mask_refresh(ca, 0);
+  ca_meld_mask_refresh(ca);
   ca_attach_all(ca->parents, ca->n_parents);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static VALUE
@@ -863,23 +885,18 @@ static void
 ca_meld_func_attach (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
-  ca_meld_mask_refresh(ca, 0);
-  int32_t k;
-  int     tag = 0;
+  ca_meld_mask_refresh(ca);
   ca_attach_all(ca->parents, ca->n_parents);
-  rb_protect(ca_meld_attach_owned, (VALUE) ca, &tag);
-  if ( tag ) {
-    for ( k = 0; k < ca->n_parents; k++ ) {
-      ca_detach(ca->parents[k]);
-    }
-    rb_jump_tag(tag);
-  }
+  ca_fill_or_detach(ca->n_parents, ca->parents, ca_meld_attach_owned, (VALUE) ca);
 }
+
+static void ca_meld_mask_refuse_sync (CAMeld *ca);
 
 static void
 ca_meld_func_sync (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
+  ca_meld_mask_refuse_sync(ca);
   ca_meld_xfer_parents(ca, ca->ptr, CA_XFER_PUT, 1);
   ca_sync_all(ca->parents, ca->n_parents);
   ca_meld_mask_settle(ca);
@@ -905,7 +922,7 @@ static void
 ca_meld_func_fill_data (void *ap, void *ptr)
 {
   CAMeld *ca = (CAMeld *) ap;
-  ca_meld_mask_refresh(ca, 1);
+  ca_meld_mask_refresh(ca);
   int32_t k;
   for ( k = 0; k < ca->n_parents; k++ ) {
     ca_fill(ca->parents[k], ptr);
@@ -953,54 +970,172 @@ ca_meld_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
 /* operation table                                                      */
 /* ------------------------------------------------------------------- */
 
-/* The table's write slots: after a write, refuse a true that reached the
-   stand-in of a value array or a mask array (ca_multi_parent_mask_check).
-   Only the mask of a CAMeld has stand-ins to check. */
-static void
-ca_meld_mask_check (CAMeld *ca)
+/* The table's write slots: after a write that may have put a true into a
+   stand-in, the true goes on to the parent's mask, or is refused for a
+   value array or a mask array (ca_mask_standin_settle).  Only the mask of
+   a CAMeld has stand-ins. */
+/* A write to the mask of a CAMeld, run once against blank masks first
+   (ca_multi_parent_mask_refuse_first), so that a write refused for a value
+   array or mask array part changes no other part. */
+enum { CA_MELD_PUT_INDEX, CA_MELD_PUT_ADDRS, CA_MELD_PUT_STRIDE, CA_MELD_PUT_ALL,
+       CA_MELD_PUT_FILL, CA_MELD_PUT_SYNC, CA_MELD_PUT_FILL_ADDRS,
+       CA_MELD_PUT_FILL_STRIDE };
+
+typedef struct {
+  int        slot;
+  void      *ap;
+  ca_size_t *idx;
+  ca_size_t  n;
+  ca_size_t *addrs;
+  ca_size_t *starts;
+  ca_size_t *counts;
+  ca_size_t *strides;
+  void      *data;
+  ca_size_t  base;
+  int8_t     ndim;
+  ca_size_t *steps;
+} ca_meld_put_t;
+
+static VALUE
+ca_meld_put_body (VALUE arg)
 {
-  CAMeld *o = (CAMeld *) ca->mask_owner;
+  ca_meld_put_t *a = (ca_meld_put_t *) arg;
+  switch ( a->slot ) {
+  case CA_MELD_PUT_INDEX:
+    ca_meld_func_xfer_index(a->ap, a->idx, a->data, CA_XFER_PUT); break;
+  case CA_MELD_PUT_ADDRS:
+    ca_meld_func_xfer_addrs(a->ap, a->n, a->addrs, a->data, CA_XFER_PUT); break;
+  case CA_MELD_PUT_STRIDE:
+    ca_meld_func_xfer_stride(a->ap, a->starts, a->counts, a->strides, a->data,
+                             CA_XFER_PUT); break;
+  case CA_MELD_PUT_ALL:
+    ca_meld_func_xfer_all(a->ap, a->data, CA_XFER_PUT); break;
+  case CA_MELD_PUT_FILL:
+    ca_meld_func_fill_data(a->ap, a->data); break;
+  case CA_MELD_PUT_FILL_ADDRS:
+    ca_fill_addrs_default(a->ap, a->n, a->addrs, a->data); break;
+  case CA_MELD_PUT_FILL_STRIDE:
+    ca_fill_stride_default(a->ap, a->base, a->ndim, a->counts, a->steps,
+                           a->data); break;
+  case CA_MELD_PUT_SYNC:
+    ca_meld_xfer_parents((CAMeld *) a->ap, ((CArray *) a->ap)->ptr, CA_XFER_PUT, 1);
+    break;
+  }
+  return Qnil;
+}
+
+static void
+ca_meld_mask_refuse_first (ca_meld_put_t *a)
+{
+  CAMeld *o = (CAMeld *) ((CAMeld *) a->ap)->mask_owner;
   if ( o != NULL ) {
-    ca_multi_parent_mask_check((CArray *) ca, o->parents, o->mask_standins,
-                               o->n_parents);
+    ca_multi_parent_mask_refuse_first((CArray *) a->ap, o->parents,
+                                      o->mask_standins, o->n_parents,
+                                      ca_meld_put_body, (VALUE) a);
+  }
+}
+
+static void
+ca_meld_mask_refuse_sync (CAMeld *ca)
+{
+  ca_meld_put_t a = { CA_MELD_PUT_SYNC, ca, NULL, 0, NULL, NULL, NULL, NULL, NULL };
+  ca_meld_mask_refuse_first(&a);
+}
+
+/* After a write of n cells of `data` to the mask of a CAMeld: a true
+   that went into a stand-in goes on to its parent's mask. */
+static void
+ca_meld_mask_settle_after (CAMeld *ca, const void *data, ca_size_t n)
+{
+  if ( ca->mask_owner != NULL && ca_mask_any_true(data, n) ) {
+    ca_meld_mask_settle(ca);
   }
 }
 
 static void
 ca_meld_put_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
+  if ( dir == CA_XFER_PUT ) {
+    ca_meld_put_t a = { CA_MELD_PUT_INDEX, ap, idx, 0, NULL, NULL, NULL, NULL, data };
+    ca_meld_mask_refuse_first(&a);
+  }
   ca_meld_func_xfer_index(ap, idx, data, dir);
-  if ( dir == CA_XFER_PUT ) ca_meld_mask_check((CAMeld *) ap);
+  if ( dir == CA_XFER_PUT ) ca_meld_mask_settle_after((CAMeld *) ap, data, 1);
 }
 
 static void
 ca_meld_put_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data,
                          int dir)
 {
+  if ( dir == CA_XFER_PUT ) {
+    ca_meld_put_t a = { CA_MELD_PUT_ADDRS, ap, NULL, n, addrs, NULL, NULL, NULL, data };
+    ca_meld_mask_refuse_first(&a);
+  }
   ca_meld_func_xfer_addrs(ap, n, addrs, data, dir);
-  if ( dir == CA_XFER_PUT ) ca_meld_mask_check((CAMeld *) ap);
+  if ( dir == CA_XFER_PUT ) ca_meld_mask_settle_after((CAMeld *) ap, data, n);
 }
 
 static void
 ca_meld_put_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir)
 {
+  if ( dir == CA_XFER_PUT ) {
+    ca_meld_put_t a = { CA_MELD_PUT_STRIDE, ap, NULL, 0, NULL, starts, counts, strides, data };
+    ca_meld_mask_refuse_first(&a);
+  }
   ca_meld_func_xfer_stride(ap, starts, counts, strides, data, dir);
-  if ( dir == CA_XFER_PUT ) ca_meld_mask_check((CAMeld *) ap);
+  if ( dir == CA_XFER_PUT ) {
+    ca_meld_mask_settle_after((CAMeld *) ap, data,
+                               ca_shape_elements(((CArray *) ap)->ndim, counts, 1));
+  }
 }
 
 static void
 ca_meld_put_xfer_all (void *ap, void *data, int dir)
 {
+  if ( dir == CA_XFER_PUT ) {
+    ca_meld_put_t a = { CA_MELD_PUT_ALL, ap, NULL, 0, NULL, NULL, NULL, NULL, data };
+    ca_meld_mask_refuse_first(&a);
+  }
   ca_meld_func_xfer_all(ap, data, dir);
-  if ( dir == CA_XFER_PUT ) ca_meld_mask_check((CAMeld *) ap);
+  if ( dir == CA_XFER_PUT ) {
+    ca_meld_mask_settle_after((CAMeld *) ap, data, ((CArray *) ap)->elements);
+  }
 }
 
 static void
 ca_meld_put_fill_data (void *ap, void *ptr)
 {
+  {
+    ca_meld_put_t a = { CA_MELD_PUT_FILL, ap, NULL, 0, NULL, NULL, NULL, NULL, ptr };
+    ca_meld_mask_refuse_first(&a);
+  }
   ca_meld_func_fill_data(ap, ptr);
-  ca_meld_mask_check((CAMeld *) ap);
+  ca_meld_mask_settle_after((CAMeld *) ap, ptr, 1);
+}
+
+/* A fill of part of the mask goes cell by cell through xfer_index; run
+   the whole of it against blank masks first, so that a cell refused late
+   does not leave the cells before it written. */
+static void
+ca_meld_put_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
+{
+  ca_meld_put_t a = { CA_MELD_PUT_FILL_ADDRS, ap, NULL, n, addrs, NULL, NULL,
+                     NULL, ptr };
+  ca_meld_mask_refuse_first(&a);
+  ca_fill_addrs_default(ap, n, addrs, ptr);
+  ca_meld_mask_settle_after((CAMeld *) ap, ptr, 1);
+}
+
+static void
+ca_meld_put_fill_stride (void *ap, ca_size_t base, int8_t ndim,
+                         ca_size_t *counts, ca_size_t *steps, void *ptr)
+{
+  ca_meld_put_t a = { CA_MELD_PUT_FILL_STRIDE, ap, NULL, 0, NULL, NULL, counts,
+                     NULL, ptr, base, ndim, steps };
+  ca_meld_mask_refuse_first(&a);
+  ca_fill_stride_default(ap, base, ndim, counts, steps, ptr);
+  ca_meld_mask_settle_after((CAMeld *) ap, ptr, 1);
 }
 
 ca_operation_function_t ca_meld_func = {
@@ -1099,8 +1234,8 @@ rb_ca_meld_initialize (int argc, VALUE *argv, VALUE self)
     VALUE first = rb_ary_entry(list, 0);
     rb_check_carray_object(first);
     TypedData_Get_Struct(first, CArray, &carray_data_type, ref);
-    meld_axis = (int8_t) rb_ca_normalize_axis_for_ndim(
-        NUM2LONG(axis_val), (int) ref->ndim, "CAMeld.new");
+    meld_axis = (int8_t) ca_normalize_axis_arg(
+        axis_val, (int) ref->ndim, "CAMeld.new");
   }
   TypedData_Get_Struct(self, CAMeld, &cameld_data_type, ca);
   ca_check_uninitialized(ca);
@@ -1196,6 +1331,9 @@ Init_ca_obj_meld (void)
 
   rb_cCAMeld     = rb_define_class("CAMeld", rb_cCAView);
   rb_cCAMeldMask = rb_define_class("CAMeldMask", rb_cCAMeld);
+
+  ca_meld_func.fill_addrs  = ca_meld_put_fill_addrs;
+  ca_meld_func.fill_stride = ca_meld_put_fill_stride;
 
   CA_OBJ_MELD = ca_install_obj_type(rb_cCAMeld,
                                     &cameld_data_type,

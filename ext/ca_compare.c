@@ -14,7 +14,7 @@
 #include "ruby.h"
 #include "carray.h"
 #include "ca_compare.h"
-#include "carray_internal.h"   /* ca_obj_cmp, CA_OBJ_ISNAN */
+#include "carray_internal.h"   /* CA_FLOAT_ORDER_CMP, ca_obj_order_cmp */
 #include <math.h>
 
 #define DEFINE_ELEM_CMP(type)                          \
@@ -28,18 +28,14 @@ elem_cmp_## type (const void *va, const void *vb)      \
   return 0;                                            \
 }
 
-/* Float order: NaN sorts last (matches the sort kernels' NaN-at-end). */
+/* Float order: NaN after every number (CA_FLOAT_ORDER_CMP). */
 #define DEFINE_ELEM_CMP_FLOAT(type)                    \
 static int                                             \
 elem_cmp_## type (const void *va, const void *vb)      \
 {                                                      \
-  const type *a = (const type *) va;                   \
-  const type *b = (const type *) vb;                   \
-  if ( isnan(*a) && ( ! isnan(*b) ) ) return  1;       \
-  if ( isnan(*b) && ( ! isnan(*a) ) ) return -1;       \
-  if ( *a > *b ) return  1;                            \
-  if ( *a < *b ) return -1;                            \
-  return 0;                                            \
+  const type a = *(const type *) va;                   \
+  const type b = *(const type *) vb;                   \
+  return CA_FLOAT_ORDER_CMP(a, b);                     \
 }
 
 DEFINE_ELEM_CMP(boolean8_t)
@@ -54,18 +50,11 @@ DEFINE_ELEM_CMP(uint64_t)
 DEFINE_ELEM_CMP_FLOAT(float32_t)
 DEFINE_ELEM_CMP_FLOAT(float64_t)
 
-/* CA_OBJECT: compare by `<=>`, as sort orders object cells: a Float NaN
-   after every other value, and a pair `<=>` cannot order raises
-   "comparison of A with B failed". */
+/* CA_OBJECT: the object order (ca_obj_order_cmp). */
 static int
 elem_cmp_VALUE (const void *va, const void *vb)
 {
-  const VALUE *a = (const VALUE *) va;
-  const VALUE *b = (const VALUE *) vb;
-  int nan_a = CA_OBJ_ISNAN(*a);
-  int nan_b = CA_OBJ_ISNAN(*b);
-  if ( nan_a || nan_b ) return nan_a - nan_b;
-  return ca_obj_cmp(*a, *b);
+  return ca_obj_order_cmp(*(const VALUE *) va, *(const VALUE *) vb);
 }
 
 /* FIXLEN / retired / otherwise unorderable data_types: callers must handle

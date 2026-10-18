@@ -63,6 +63,10 @@ class TestAddressBasis < Test::Unit::TestCase
     source[CArray.boolean(4, 4) { 1 }].reshape(4, 4)
   end
 
+  def xfer_view_of (source)
+    source[CArray.boolean(*source.shape) { 1 }].reshape(*source.shape)
+  end
+
   # --- classify ---------------------------------------------------------
 
   def test_classify_tiers
@@ -263,6 +267,31 @@ class TestAddressBasis < Test::Unit::TestCase
     end
   end
 
+  # The mask takes the array's box: a tier-3 mask moves the cells asked for.
+  def test_a_boxed_mask_moves_only_the_box
+    a = CArray.int32(100, 100).seq!
+    a[0, 0] = UNDEF
+    view = xfer_view_of(a)
+    AB.open([view], [false], [[0, 0]], [[2, 3]]) do |bases|
+      assert_equal [3, 1], bases.first[:mask_strides]
+      mask = Fiddle::Pointer.new(bases.first[:mask_pointer], 6)[0, 6].bytes
+      assert_equal [1, 0, 0, 0, 0, 0], mask
+    end
+  end
+
+  def test_a_boxed_mask_writes_back_inside_the_box
+    a = CArray.int32(4, 4).seq!
+    a[0, 0] = UNDEF
+    view = xfer_view(a)
+    AB.open([view], [true], [[1, 1]], [[2, 2]]) do |bases|
+      b = bases.first
+      Fiddle::Pointer.new(b[:mask_pointer] + 2 * b[:mask_strides][0] +
+                          2 * b[:mask_strides][1], 1)[0, 1] = "\x01"
+    end
+    assert_equal [[0, 0], [2, 2]], (0...4).flat_map { |i| (0...4).map { |j| [i, j] } }
+                                          .select { |i, j| a.is_masked[i, j] }
+  end
+
   def test_an_unmasked_array_reports_no_mask
     AB.open([entity], [false]) do |bases|
       assert_nil bases.first[:mask_pointer]
@@ -404,6 +433,79 @@ class TestAddressBasis < Test::Unit::TestCase
     AB.open([view], [false]) do |bases|
       assert_equal 5, read_int32(bases.first, [1, 1])
     end
+  end
+
+  # --- whose exception it is ---------------------------------------------
+  #
+  # An exception raised while the arrays are checked, lent or taken back
+  # carries AB::Failure; one raised by the block does not.  Something that
+  # hands the bases to code of its own tells the two apart by it.
+
+  def test_a_refusal_is_marked_as_a_failure
+    f = CArray.float64(4).seq!
+    f[1] = UNDEF
+    error = assert_raise(ArgumentError) do
+      AB.open([f.refer(CA_INT32, [8])], [false]) { }
+    end
+    assert_kind_of AB::Failure, error
+  end
+
+  def test_an_array_that_cannot_be_read_is_marked_as_a_failure
+    error = assert_raise(IOError) { AB.open([FailingRead.new], [false]) { } }
+    assert_kind_of AB::Failure, error
+  end
+
+  FAILING_WRITE = <<~RUBY
+    class FailingWrite < CAObject
+      def initialize; super(CA_FLOAT64, [4]); end
+      private
+      def fetch_addr (addr) = 1.0
+      def store_addr (addr, value) = raise(IOError, "the backing store failed")
+      def create_mask; end
+    end
+  RUBY
+  eval(FAILING_WRITE)
+
+  def test_a_write_back_that_fails_is_marked_as_a_failure
+    error = assert_raise(IOError) do
+      AB.open([FailingWrite.new], [true]) do |bases|
+        Fiddle::Pointer.new(bases.first[:pointer], 8)[0, 8] = [2.0].pack("d")
+      end
+    end
+    assert_kind_of AB::Failure, error
+  end
+
+  def test_what_the_block_raises_is_not_marked
+    error = assert_raise(RuntimeError) do
+      AB.open([entity], [false]) { raise "the kernel gave up" }
+    end
+    assert_not_kind_of AB::Failure, error
+  end
+
+  def test_a_mistake_in_the_request_is_not_marked
+    error = assert_raise(ArgumentError) do
+      AB.open([entity], [false], [[5, 0]], [[2, 1]]) { }
+    end
+    assert_not_kind_of AB::Failure, error
+  end
+
+  # tier answers what classify reports as :tier, without the Hash.
+  def test_tier_is_the_tier_classify_reports
+    lazy = (entity.lazy + 1)
+    [entity, stride_view, xfer_view, entity[1..2, 1..2], lazy,
+     CArray.float64(4).seq!.fake(:int32)].each do |a|
+      assert_equal AB.classify(a)[:tier], AB.tier(a), a.class.to_s
+    end
+    assert_equal [AB::TIER_ENTITY, AB::TIER_STRIDE, AB::TIER_XFER],
+                 [AB.tier(entity), AB.tier(stride_view), AB.tier(xfer_view)]
+  end
+
+  def test_classify_reports_why_an_array_would_be_refused
+    f = CArray.float64(4).seq!
+    f[1] = UNDEF
+    assert_nil AB.classify(f)[:refusal]
+    assert_match(/element size/, AB.classify(f.refer(CA_INT32, [8]))[:refusal])
+    assert_match(/object/, AB.classify(CArray.object(3))[:refusal])
   end
 
   def test_a_block_that_is_not_given_is_still_a_closed_open

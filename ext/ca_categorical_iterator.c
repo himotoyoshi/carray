@@ -1,120 +1,109 @@
 /* ---------------------------------------------------------------------------
 
-  ca_categorical_iterator.c — counting-sort scatter for CACategoricalIterator.
+  ca_categorical_iterator.c — kernels for CACategorical and CACategoricalIterator.
 
-  __categorical_scatter__ lays a flat payload out as a category-contiguous
-  copy in a single pass, driven by the categorical codes and a per-category
-  write cursor (a mutable copy of reduceat_index's segment starts).  No
-  permutation array is built; O(n), stable (ascending scan keeps each
-  category's members in source order).  It is the discrete, value-carrying
-  sibling of histogram_scatter_ki (ext/carray_histogram.c): where the histogram
-  scatters a +1 into counts, this scatters the payload cell into grouped.
+  addresses_by_category orders the cells of a categorical by category, the
+  counting sort behind CACategorical#sort_addr: one pass over the codes
+  writes each cell's address at its category's cursor (a mutable copy of the
+  segment starts), so every cell of category 0 comes first, then 1, ..., in
+  source order within a category (stable). A cell in no category -- a masked
+  code, or a code outside 0...k -- is written in the same pass at a second
+  cursor that starts after the last category, so the excluded cells follow
+  in source order.
 
-  Two masks meet here and are kept distinct:
-    - the CODES mask is authoritative for exclusion — a masked code cell does
-      not join any group (the sentinel value never has to be read; `c < k` is a
-      defensive assert only).
-    - the VALUE mask propagates into grouped, so a group with a masked payload
-      cell reduces as CArray does (the cell is skipped by mask-aware reductions).
+  The output position depends on the code, which the aligned kernel_iterator
+  macros do not model, so the codes are materialised here: ca_attach aliases a
+  contiguous entity and gathers a view.
 
-  The output position is data-dependent (cursor[code]++), which the aligned
-  kernel_iterator macros do not model, so the flat inputs are materialised here:
-  ca_attach aliases a contiguous entity (codes / a contiguous value) and gathers
-  a view.  Codes dispatch on their native integer type (no coercion); the value
-  move is a bytes-wide memcpy (grouped shares the value data type, so no value-type
-  dispatch is needed).
-
-  Surface (private): codes.__categorical_scatter__(value, cursor, grouped, k)
+  Surface (private): codes.addresses_by_category(cursor, k, nvalid)
     self    = codes   (integer, carries the exclusion mask), read flat
-    value   = payload (any data type, may carry a mask), read flat, same length
     cursor  = int64 length-k segment starts (mutated in place, consumed)
-    grouped = pre-allocated contiguous entity of the value data type, length nvalid
     k       = number of categories
-  Returns grouped.
+    nvalid  = number of cells in a category (where the excluded cells start)
+  Returns a new int64 CArray of codes.elements addresses.
 
 --------------------------------------------------------------------------- */
 
 #include "carray.h"
 #include "carray_internal.h"   /* CA_EXTREMUM_REPLACES */
+#include "ca_sort_kernels.h"   /* ca_partition_nan_f64 */
 #include <stdlib.h>   /* qsort */
 #include <math.h>     /* floor */
 
-#define CATEGORICAL_SCATTER_BODY(CODE_T)                                        \
+#define ADDRESSES_BY_CATEGORY_BODY(CODE_T)                                      \
   do {                                                                          \
     const CODE_T *cp = (const CODE_T *) codes->ptr;                             \
     for ( j = 0; j < n; j++ ) {                                                 \
-      if ( cmask && cmask[j] ) continue;          /* excluded by codes mask */  \
       c = (int64_t) cp[j];                                                      \
-      if ( c < 0 || c >= k ) continue;            /* defensive */               \
-      pos = (ca_size_t) cur[c];                                                 \
-      cur[c] = (int64_t) (pos + 1);                                            \
-      memcpy(gp + pos * bytes, vp + j * bytes, (size_t) bytes);                 \
-      if ( vmask && vmask[j] ) gmask[pos] = 1;    /* propagate value mask */    \
+      if ( ( cmask && cmask[j] ) || c < 0 || c >= k ) {                         \
+        if ( tail >= (int64_t) n ) { overrun = 1; break; }                      \
+        out[tail++] = (int64_t) j;              /* in no category */            \
+        continue;                                                               \
+      }                                                                         \
+      if ( cur[c] < 0 || cur[c] >= nvalid ) { overrun = 1; break; }             \
+      out[cur[c]++] = (int64_t) j;                                              \
     }                                                                           \
   } while (0)
 
 static VALUE
-rb_ca_categorical_scatter (VALUE self, VALUE rvalue, VALUE rcursor,
-                           VALUE rgrouped, VALUE rk)
+rb_ca_addresses_by_category (VALUE self, VALUE rcursor, VALUE rk, VALUE rnvalid)
 {
-  CArray     *codes, *value, *cursor, *grouped;
-  int64_t     k, c, *cur;
-  ca_size_t   n, j, pos, bytes;
-  boolean8_t *cmask, *vmask, *gmask = NULL;
-  char       *gp, *vp;
+  CArray     *codes, *cursor, *result;
+  VALUE       rresult;
+  int64_t     k, c, *cur, *out, tail, nvalid;
+  ca_size_t   n, j, dim;
+  int         overrun = 0;
+  boolean8_t *cmask;
 
-  GetCArray(self,     codes);
-  GetCArray(rvalue,   value);
-  GetCArray(rcursor,  cursor);
-  GetCArray(rgrouped, grouped);
-  k = (int64_t) NUM2LL(rk);
+  GetCArray(self,    codes);
+  GetCArray(rcursor, cursor);
+  k      = (int64_t) NUM2LL(rk);
+  nvalid = (int64_t) NUM2LL(rnvalid);
+  n      = codes->elements;
 
-  n     = codes->elements;
-  bytes = value->bytes;
-  if ( value->elements != n ) {
-    rb_raise(rb_eArgError,
-             "__categorical_scatter__: value length %lld != codes length %lld",
-             (long long) value->elements, (long long) n);
+  if ( cursor->data_type != CA_INT64 || cursor->elements != k ||
+       ! ca_is_entity(cursor) ) {
+    rb_raise(rb_eArgError, "addresses_by_category: cursor must be an int64[k] entity");
   }
-  if ( cursor->data_type != CA_INT64 || cursor->elements != k ) {
-    rb_raise(rb_eArgError, "__categorical_scatter__: cursor must be int64[k]");
+  if ( nvalid < 0 || nvalid > (int64_t) n ) {
+    rb_raise(rb_eArgError, "addresses_by_category: nvalid %lld out of 0..%lld",
+             (long long) nvalid, (long long) n);
   }
-  if ( grouped->bytes != bytes ) {
-    rb_raise(rb_eArgError, "__categorical_scatter__: grouped/value data type mismatch");
-  }
-
-  ca_attach_n(2, codes, value);   /* window: detached before each raise inside */
-  cmask = ca_mask_ptr(codes);
-  vmask = ca_mask_ptr(value);
-  cur   = (int64_t *) cursor->ptr;
-  gp    = grouped->ptr;
-  vp    = value->ptr;
-
-  if ( vmask ) {                        /* grouped needs a mask to receive it */
-    ca_create_mask(grouped);
-    gmask = (boolean8_t *) grouped->mask->ptr;
-  }
-
   switch ( codes->data_type ) {
-  case CA_INT8:   CATEGORICAL_SCATTER_BODY(int8_t);   break;
-  case CA_UINT8:  CATEGORICAL_SCATTER_BODY(uint8_t);  break;
-  case CA_INT16:  CATEGORICAL_SCATTER_BODY(int16_t);  break;
-  case CA_UINT16: CATEGORICAL_SCATTER_BODY(uint16_t); break;
-  case CA_INT32:  CATEGORICAL_SCATTER_BODY(int32_t);  break;
-  case CA_UINT32: CATEGORICAL_SCATTER_BODY(uint32_t); break;
-  case CA_INT64:  CATEGORICAL_SCATTER_BODY(int64_t);  break;
-  case CA_UINT64: CATEGORICAL_SCATTER_BODY(uint64_t); break;
+  case CA_INT8: case CA_UINT8: case CA_INT16: case CA_UINT16:
+  case CA_INT32: case CA_UINT32: case CA_INT64: case CA_UINT64:
+    break;
   default:
-    ca_detach(codes);
-    ca_detach(value);
     rb_raise(rb_eCADataTypeError,
-             "__categorical_scatter__: integer codes required (got data_type %d)",
+             "addresses_by_category: integer codes required (got data_type %d)",
              codes->data_type);
   }
 
+  dim     = n;
+  rresult = rb_carray_new(CA_INT64, 1, &dim, 0, NULL);
+  GetCArray(rresult, result);
+  out  = (int64_t *) result->ptr;
+  cur  = (int64_t *) cursor->ptr;
+  tail = nvalid;
+
+  ca_attach(codes);   /* window: nothing below raises */
+  cmask = ca_mask_ptr(codes);
+  switch ( codes->data_type ) {
+  case CA_INT8:   ADDRESSES_BY_CATEGORY_BODY(int8_t);   break;
+  case CA_UINT8:  ADDRESSES_BY_CATEGORY_BODY(uint8_t);  break;
+  case CA_INT16:  ADDRESSES_BY_CATEGORY_BODY(int16_t);  break;
+  case CA_UINT16: ADDRESSES_BY_CATEGORY_BODY(uint16_t); break;
+  case CA_INT32:  ADDRESSES_BY_CATEGORY_BODY(int32_t);  break;
+  case CA_UINT32: ADDRESSES_BY_CATEGORY_BODY(uint32_t); break;
+  case CA_INT64:  ADDRESSES_BY_CATEGORY_BODY(int64_t);  break;
+  case CA_UINT64: ADDRESSES_BY_CATEGORY_BODY(uint64_t); break;
+  }
   ca_detach(codes);
-  ca_detach(value);
-  return rgrouped;
+  if ( overrun ) {
+    rb_raise(rb_eArgError,
+             "addresses_by_category: the cursor and nvalid do not match the codes");
+  }
+  return rresult;
 }
 
 /* ---------------------------------------------------------------------------
@@ -151,7 +140,22 @@ rb_ca_categorical_scatter (VALUE self, VALUE rvalue, VALUE rcursor,
 #define CAT_NAN_NEVER(v)  (0)
 #define CAT_NAN_CHECK(v)  ((v) != (v))
 
-#define REDUCEAT_MOMENTS_BODY(T)                                                 \
+/* Whether v takes the place of the accumulator acc: never when v is NaN,
+   always when acc is NaN and v is not. */
+#define CAT_REPLACES(v, acc, CMP, ISNAN) \
+  ( ! ISNAN(v) && ( ISNAN(acc) || (v) CMP (acc) ) )
+
+/* A segment without masked cells of at least CAT_LANES_FROM cells is read
+   with eight independent sums and eight min / max lanes, so no add or
+   compare waits on the one before it; a shorter one would spend more on
+   setting up and merging the lanes than it saves.
+   Each lane starts from the segment's first value; a lane can end on NaN
+   only if every value it saw was NaN, so merging the lanes with the same
+   rule gives the answer one lane would. The sums are added in a different
+   order than the cells, which is the license every float reduction has. */
+#define CAT_LANES_FROM 64
+
+#define REDUCEAT_MOMENTS_BODY(T, ISNAN, LANES_FROM)                             \
   do {                                                                          \
     const T *gp = (const T *) grouped->ptr;                                     \
     T *minv = (T *) minp, *maxv = (T *) maxp;                                   \
@@ -161,16 +165,95 @@ rb_ca_categorical_scatter (VALUE self, VALUE rvalue, VALUE rcursor,
       ca_size_t j, cnt = 0;                                                     \
       double sacc = 0.0;                                                        \
       T mn = 0, mx = 0; int seen = 0;                                           \
-      for ( j = lo; j < hi; j++ ) {                                             \
-        if ( gm && gm[j] ) continue;            /* masked value cell */         \
-        { T v = gp[j];                                                          \
-          sacc += (double) v;                                                   \
-          if ( ! seen ) { mn = v; mx = v; seen = 1; }                           \
-          else {                                                                \
-            if ( CA_EXTREMUM_REPLACES(v, mn, <) ) mn = v;                       \
-            if ( CA_EXTREMUM_REPLACES(v, mx, >) ) mx = v;                       \
+      if ( ! gm && hi - lo < (ca_size_t) (LANES_FROM) ) {                       \
+        if ( hi > lo ) {                                                        \
+          mn = mx = gp[lo];                                                     \
+          for ( j = lo; j < hi; j++ ) {                                         \
+            T v = gp[j];                                                        \
+            sacc += (double) v;                                                 \
+            if ( CAT_REPLACES(v, mn, <, ISNAN) ) mn = v;                        \
+            if ( CAT_REPLACES(v, mx, >, ISNAN) ) mx = v;                        \
           }                                                                     \
-          cnt++; }                                                              \
+          cnt = hi - lo; seen = 1;                                              \
+        }                                                                       \
+      }                                                                         \
+      else if ( ! gm ) {                                                        \
+        {                                                                       \
+          double s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, s5 = 0, s6 = 0, s7 = 0; \
+          T n0, n1, n2, n3, n4, n5, n6, n7, x0, x1, x2, x3, x4, x5, x6, x7;     \
+          n0 = n1 = n2 = n3 = n4 = n5 = n6 = n7 = gp[lo];                       \
+          x0 = x1 = x2 = x3 = x4 = x5 = x6 = x7 = gp[lo];                       \
+          for ( j = lo; j + 8 <= hi; j += 8 ) {                                 \
+            T v0 = gp[j],   v1 = gp[j+1], v2 = gp[j+2], v3 = gp[j+3];           \
+            T v4 = gp[j+4], v5 = gp[j+5], v6 = gp[j+6], v7 = gp[j+7];           \
+            s0 += (double) v0; s1 += (double) v1;                               \
+            s2 += (double) v2; s3 += (double) v3;                               \
+            s4 += (double) v4; s5 += (double) v5;                               \
+            s6 += (double) v6; s7 += (double) v7;                               \
+            if ( CAT_REPLACES(v0, n0, <, ISNAN) ) n0 = v0;                      \
+            if ( CAT_REPLACES(v1, n1, <, ISNAN) ) n1 = v1;                      \
+            if ( CAT_REPLACES(v2, n2, <, ISNAN) ) n2 = v2;                      \
+            if ( CAT_REPLACES(v3, n3, <, ISNAN) ) n3 = v3;                      \
+            if ( CAT_REPLACES(v4, n4, <, ISNAN) ) n4 = v4;                      \
+            if ( CAT_REPLACES(v5, n5, <, ISNAN) ) n5 = v5;                      \
+            if ( CAT_REPLACES(v6, n6, <, ISNAN) ) n6 = v6;                      \
+            if ( CAT_REPLACES(v7, n7, <, ISNAN) ) n7 = v7;                      \
+            if ( CAT_REPLACES(v0, x0, >, ISNAN) ) x0 = v0;                      \
+            if ( CAT_REPLACES(v1, x1, >, ISNAN) ) x1 = v1;                      \
+            if ( CAT_REPLACES(v2, x2, >, ISNAN) ) x2 = v2;                      \
+            if ( CAT_REPLACES(v3, x3, >, ISNAN) ) x3 = v3;                      \
+            if ( CAT_REPLACES(v4, x4, >, ISNAN) ) x4 = v4;                      \
+            if ( CAT_REPLACES(v5, x5, >, ISNAN) ) x5 = v5;                      \
+            if ( CAT_REPLACES(v6, x6, >, ISNAN) ) x6 = v6;                      \
+            if ( CAT_REPLACES(v7, x7, >, ISNAN) ) x7 = v7;                      \
+          }                                                                     \
+          for ( ; j < hi; j++ ) {                                               \
+            T v = gp[j];                                                        \
+            s0 += (double) v;                                                   \
+            if ( CAT_REPLACES(v, n0, <, ISNAN) ) n0 = v;                        \
+            if ( CAT_REPLACES(v, x0, >, ISNAN) ) x0 = v;                        \
+          }                                                                     \
+          sacc = ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7));             \
+          mn = n0;                                                              \
+          if ( CAT_REPLACES(n1, mn, <, ISNAN) ) mn = n1;                        \
+          if ( CAT_REPLACES(n2, mn, <, ISNAN) ) mn = n2;                        \
+          if ( CAT_REPLACES(n3, mn, <, ISNAN) ) mn = n3;                        \
+          if ( CAT_REPLACES(n4, mn, <, ISNAN) ) mn = n4;                        \
+          if ( CAT_REPLACES(n5, mn, <, ISNAN) ) mn = n5;                        \
+          if ( CAT_REPLACES(n6, mn, <, ISNAN) ) mn = n6;                        \
+          if ( CAT_REPLACES(n7, mn, <, ISNAN) ) mn = n7;                        \
+          mx = x0;                                                              \
+          if ( CAT_REPLACES(x1, mx, >, ISNAN) ) mx = x1;                        \
+          if ( CAT_REPLACES(x2, mx, >, ISNAN) ) mx = x2;                        \
+          if ( CAT_REPLACES(x3, mx, >, ISNAN) ) mx = x3;                        \
+          if ( CAT_REPLACES(x4, mx, >, ISNAN) ) mx = x4;                        \
+          if ( CAT_REPLACES(x5, mx, >, ISNAN) ) mx = x5;                        \
+          if ( CAT_REPLACES(x6, mx, >, ISNAN) ) mx = x6;                        \
+          if ( CAT_REPLACES(x7, mx, >, ISNAN) ) mx = x7;                        \
+          /* Of equal values a lane keeps its first, but the merge does not   \
+             know which lane saw its value first in cell order.  Only 0.0 and \
+             -0.0 are equal and tell apart: take the first zero, as one loop  \
+             over the cells does. */                                          \
+          if ( mn == 0 ) {                                                      \
+            for ( j = lo; j < hi; j++ ) { if ( gp[j] == 0 ) { mn = gp[j]; break; } } \
+          }                                                                     \
+          if ( mx == 0 ) {                                                      \
+            for ( j = lo; j < hi; j++ ) { if ( gp[j] == 0 ) { mx = gp[j]; break; } } \
+          }                                                                     \
+          cnt = hi - lo; seen = 1;                                              \
+        }                                                                       \
+      }                                                                         \
+      else {                                                                    \
+        for ( j = lo; j < hi && gm[j]; j++ ) ;  /* skip to the first present */ \
+        if ( j < hi ) { mn = mx = gp[j]; seen = 1; }                            \
+        for ( ; j < hi; j++ ) {                                                 \
+          T v = gp[j];                                                          \
+          if ( gm[j] ) continue;                /* masked value cell */         \
+          sacc += (double) v;                                                   \
+          cnt++;                                                                \
+          if ( CAT_REPLACES(v, mn, <, ISNAN) ) mn = v;                          \
+          if ( CAT_REPLACES(v, mx, >, ISNAN) ) mx = v;                          \
+        }                                                                       \
       }                                                                         \
       countp[c] = (int64_t) cnt;                                                \
       sump[c]   = sacc;                                                         \
@@ -221,16 +304,16 @@ rb_ca_reduceat_moments (VALUE self, VALUE roffsets, VALUE rcounts,
   maxm = (boolean8_t *) maxs->mask->ptr;
 
   switch ( grouped->data_type ) {
-  case CA_INT8:    REDUCEAT_MOMENTS_BODY(int8_t);    break;
-  case CA_UINT8:   REDUCEAT_MOMENTS_BODY(uint8_t);   break;
-  case CA_INT16:   REDUCEAT_MOMENTS_BODY(int16_t);   break;
-  case CA_UINT16:  REDUCEAT_MOMENTS_BODY(uint16_t);  break;
-  case CA_INT32:   REDUCEAT_MOMENTS_BODY(int32_t);   break;
-  case CA_UINT32:  REDUCEAT_MOMENTS_BODY(uint32_t);  break;
-  case CA_INT64:   REDUCEAT_MOMENTS_BODY(int64_t);   break;
-  case CA_UINT64:  REDUCEAT_MOMENTS_BODY(uint64_t);  break;
-  case CA_FLOAT32: REDUCEAT_MOMENTS_BODY(float32_t); break;
-  case CA_FLOAT64: REDUCEAT_MOMENTS_BODY(float64_t); break;
+  case CA_INT8:    REDUCEAT_MOMENTS_BODY(int8_t, CAT_NAN_NEVER, CA_LENGTH_MAX);    break;
+  case CA_UINT8:   REDUCEAT_MOMENTS_BODY(uint8_t, CAT_NAN_NEVER, CA_LENGTH_MAX);   break;
+  case CA_INT16:   REDUCEAT_MOMENTS_BODY(int16_t, CAT_NAN_NEVER, CA_LENGTH_MAX);   break;
+  case CA_UINT16:  REDUCEAT_MOMENTS_BODY(uint16_t, CAT_NAN_NEVER, CA_LENGTH_MAX);  break;
+  case CA_INT32:   REDUCEAT_MOMENTS_BODY(int32_t, CAT_NAN_NEVER, CA_LENGTH_MAX);   break;
+  case CA_UINT32:  REDUCEAT_MOMENTS_BODY(uint32_t, CAT_NAN_NEVER, CA_LENGTH_MAX);  break;
+  case CA_INT64:   REDUCEAT_MOMENTS_BODY(int64_t, CAT_NAN_NEVER, CA_LENGTH_MAX);   break;
+  case CA_UINT64:  REDUCEAT_MOMENTS_BODY(uint64_t, CAT_NAN_NEVER, CA_LENGTH_MAX);  break;
+  case CA_FLOAT32: REDUCEAT_MOMENTS_BODY(float32_t, CAT_NAN_CHECK, CAT_LANES_FROM); break;
+  case CA_FLOAT64: REDUCEAT_MOMENTS_BODY(float64_t, CAT_NAN_CHECK, CAT_LANES_FROM); break;
   default:
     rb_raise(rb_eCADataTypeError,
              "__reduceat_moments__: numeric value required (got data_type %d)",
@@ -294,19 +377,12 @@ ca_nth_element_double (double *a, ca_size_t n, ca_size_t kth)
       { double f = (double) (m - 1) * p / 100.0;                               \
         ca_size_t ki = (ca_size_t) floor(f);                                   \
         double vlo, vhi;                                                        \
-        /* Push NaN to the tail, which is where CArray's sort puts it, so the  \
-           ki-th element here is the ki-th of the sorted segment. Selection    \
-           runs on the numeric prefix, since a comparison-based quickselect    \
-           has nothing to say about a NaN; a position or an upper neighbour    \
-           landing in the tail is NaN. The blend is CArray#percentile's, so    \
-           both answer alike for NaN and infinities. */                        \
-        ca_size_t nnum = m, t0 = 0;                                            \
-        while ( t0 < nnum ) {                                                  \
-          if ( scratch[t0] != scratch[t0] ) {                                  \
-            double tmp = scratch[--nnum];                                      \
-            scratch[nnum] = scratch[t0]; scratch[t0] = tmp;                    \
-          } else t0++;                                                         \
-        }                                                                      \
+        /* NaN to the tail, where CArray's sort puts it (ca_partition_nan),   \
+           so the ki-th element here is the ki-th of the sorted segment.       \
+           Selection runs on the numeric prefix; a position or an upper        \
+           neighbour landing in the tail is NaN. The blend is                  \
+           CArray#percentile's, so both answer alike for NaN and infinities. */\
+        ca_size_t nnum = ca_partition_nan_f64(scratch, m);                     \
         if ( ki < nnum ) {                                                     \
           ca_nth_element_double(scratch, nnum, ki); /* scratch[ki] = ki-th */  \
           vlo = scratch[ki];                                                   \
@@ -316,9 +392,7 @@ ca_nth_element_double (double *a, ca_size_t n, ca_size_t kth)
           for ( t = ki + 2; t < nnum; t++ ) if ( scratch[t] < mn ) mn = scratch[t]; \
           vhi = mn;                                                            \
         } else vhi = (double) NAN;                                             \
-        { double r = f - (double) ki;                                          \
-          outp[c] = ( r == 0.0 || ki + 1 >= m ) ? vlo                          \
-                                                : vlo * (1.0 - r) + vhi * r; } } \
+        outp[c] = ca_percentile_linear(vlo, vhi, f - (double) ki, ki, m); }    \
     }                                                                           \
   } while (0)
 
@@ -693,19 +767,16 @@ cmp_double (const void *a, const void *b)
         scratch[m++] = (double) gp[jj];                                         \
       }                                                                         \
       if ( m == 0 ) { for ( t = 0; t < 5; t++ ) { outp[t][c] = 0.0; outm[t][c] = 1; } continue; } \
+      /* NaN sorts last, as in the core's sort, so a position or an upper   \
+         neighbour in the tail is NaN, as the core answers. */                \
       qsort(scratch, (size_t) m, sizeof(double), cmp_double);                   \
-      { ca_size_t nnum = m;                                                     \
-        while ( nnum > 0 && scratch[nnum-1] != scratch[nnum-1] ) nnum--;        \
       for ( t = 0; t < 5; t++ ) {                                               \
         double f = (double) (m - 1) * P[t] / 100.0;                            \
         ca_size_t ki = (ca_size_t) floor(f);                                   \
-        double vlo = scratch[ki];                                              \
-        /* Clamp the upper neighbour into the numeric prefix: with NaN sorted  \
-           last, a position whose neighbour is a NaN interpolates against      \
-           itself, which is what the core answers. */                          \
-        double vhi = (ki + 1 < nnum) ? scratch[ki+1] : vlo;                    \
-        outp[t][c] = vlo + (f - (double) ki) * (vhi - vlo);                     \
-      } }                                                                       \
+        double vhi = (ki + 1 < m) ? scratch[ki+1] : scratch[ki];               \
+        outp[t][c] = ca_percentile_linear(scratch[ki], vhi, f - (double) ki,   \
+                                          ki, m);                              \
+      }                                                                         \
     }                                                                           \
   } while (0)
 
@@ -857,7 +928,7 @@ rb_ca_reduceat_wsum_wmean (VALUE self, VALUE roffsets, VALUE rwg,
 
   Not aligned kernel_iterator: output position depends on the codes value
   (data-dependent scatter), so ca_attach materialises the inputs into
-  contiguous flat buffers — same pattern as sibling __categorical_scatter__.
+  contiguous flat buffers — same pattern as sibling addresses_by_category.
 
   Surface (private):
     h.__fiber_scatter_moments__(codes, axis, K, counts_out, sums_out)
@@ -1397,8 +1468,8 @@ rb_ca_fiber_scatter_wsum_wmean (VALUE self, VALUE rcodes, VALUE rweights,
 void
 Init_ca_categorical_iterator (void)
 {
-  rb_define_private_method(rb_cCArray, "__categorical_scatter__",
-                           rb_ca_categorical_scatter, 4);
+  rb_define_private_method(rb_cCArray, "addresses_by_category",
+                           rb_ca_addresses_by_category, 3);
   rb_define_private_method(rb_cCArray, "__fiber_scatter_moments__",
                            rb_ca_fiber_scatter_moments, 7);
   rb_define_private_method(rb_cCArray, "__fiber_scatter_prod__",

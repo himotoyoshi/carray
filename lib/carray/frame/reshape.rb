@@ -62,23 +62,25 @@ class CAFrame
   #   unknown reduction or a multi-dimensional value column with it, or when
   #   two output columns would share a name.
   def pivot(index:, columns:, values:, aggregate: nil)
-    plan = pivot_plan(index.to_s, columns.to_s, aggregate, "pivot")
+    plan = pivot_plan(column_key(index, "pivot"), column_key(columns, "pivot"), aggregate, "pivot")
     labels = Array.new(plan[:nc]) { |j| plan[:clab][j].to_s }
-    value_names = values.is_a?(Array) ? values.map(&:to_s) : nil
+    if labels.include?("") && !values.is_a?(Array)
+      raise ArgumentError,
+            "pivot: a value of columns: #{columns.inspect} is the empty string, " \
+            "which cannot name a column; recode it first"
+    end
+    value_names = values.is_a?(Array) ? column_keys(values, "pivot") : nil
     names =
       if value_names
         value_names.flat_map { |v| labels.map { |l| "#{v}_#{l}" } }
       else
         labels
       end
-    dup = names.tally.select { |_, count| count > 1 }.keys
-    unless dup.empty?
-      raise ArgumentError, "pivot: output columns would share the names #{dup.inspect}"
-    end
+    CAFrame.__send__(:refuse_repeated_names, names, "pivot", "the output columns would name")
 
     source = plan[:source].reshape(plan[:nr], plan[:nc])
     cols = {}
-    (value_names || [values.to_s]).each_with_index do |value, k|
+    (value_names || [column_key(values, "pivot")]).each_with_index do |value, k|
       val = pivot_value(plan, value)
       plan[:nc].times do |j|
         cols[names[k * plan[:nc] + j]] = project_rows(val, source[nil, j])
@@ -108,8 +110,8 @@ class CAFrame
   #   and the axis-1 key values; the grid is new, not a view of +self+.
   # @raise [ArgumentError] as {#pivot}.
   def pivot_grid(index:, columns:, values:, aggregate: nil)
-    plan = pivot_plan(index.to_s, columns.to_s, aggregate, "pivot_grid")
-    val  = pivot_value(plan, values.to_s)
+    plan = pivot_plan(column_key(index, "pivot_grid"), column_key(columns, "pivot_grid"), aggregate, "pivot_grid")
+    val  = pivot_value(plan, column_key(values, "pivot_grid"))
     grid = project_rows(val, plan[:source]).reshape(plan[:nr], plan[:nc], *val.shape[1..])
     [grid, plan[:rlab], plan[:clab]]
   end
@@ -118,12 +120,14 @@ class CAFrame
   # in order (nil beside numbers, numbers beside strings) are refused,
   # naming the key.
   private def pivot_sorted_keys(key, kw, name, verb)
-    key.unique(sort: true)
+    # The keys label rows or columns, so they show the key column's
+    # attributes, as a group index does.
+    CAFrame.__send__(:key_labels, key, key.unique(sort: true))
   rescue ArgumentError => e
-    raise unless e.message.start_with?("sort:")
+    why = e.message[/\A[^:]+: (comparison of .+ failed)\z/, 1] or raise
     raise ArgumentError,
           "#{verb}: #{kw}: #{name.inspect} holds values that cannot be put in order " \
-          "(#{e.message.sub(/\Asort: /, "")}); its keys are sorted to make the " \
+          "(#{why}); its keys are sorted to make the " \
           "#{kw == "index" ? "rows" : "columns"}"
   end
 
@@ -131,13 +135,9 @@ class CAFrame
   # sorted keys and, for each of the nr * nc cells, the address of the row
   # (or with +aggregate:+, of the reduced pair) that fills it.
   private def pivot_plan(index, columns, aggregate, verb)
-    rkey = column_or_index(index)
-    ckey = column_or_index(columns)
-    { "index" => [index, rkey], "columns" => [columns, ckey] }.each do |kw, (name, key)|
-      next if key.ndim == 1
-      raise ArgumentError,
-            "#{verb}: #{kw}: #{name.inspect} has shape #{key.shape.inspect}, not one value per row"
-    end
+    CAFrame.__send__(:refuse_repeated_names, [index, columns], verb, "index: and columns: name")
+    rkey = key_column(index, verb)
+    ckey = key_column(columns, verb)
     rlab = pivot_sorted_keys(rkey, "index", index, verb)
     clab = pivot_sorted_keys(ckey, "columns", columns, verb)
     nr = rlab.elements
@@ -145,6 +145,8 @@ class CAFrame
 
     r = rkey.locate_addr(rlab)
     c = ckey.locate_addr(clab)
+    rlab = pivot_key_kind(rkey, rlab)
+    clab = pivot_key_kind(ckey, clab)
     placed = r.is_not_masked & c.is_not_masked
     cell = r[placed] * nc + c[placed]
     source = CArray.int64(nr * nc)
@@ -160,6 +162,7 @@ class CAFrame
       source[CA_INT64(pairs.labels)] = CArray.int64(pairs.labels.size).seq
     else
       if cell.nunique != cell.elements
+        # names-check: two rows for one cell of the grid
         first = cell.to_a.tally.find { |_, count| count > 1 }.first
         raise ArgumentError,
               "pivot: more than one row for #{index}=#{rlab[first / nc].inspect}, " \
@@ -168,6 +171,15 @@ class CAFrame
       source[cell] = CArray.int64(nrow).seq[placed]
     end
     plan
+  end
+
+  # The distinct values of a categorical key come back as its label values;
+  # the keys that label the result are a categorical again, with the key's
+  # labels, as a group index keeps a categorical key.
+  private def pivot_key_kind(key, sorted)
+    return sorted unless key.is_a?(CACategorical)
+    CAFrame.__send__(:key_labels, key,
+                     sorted.to_type(:object).categorize(labels: key.labels))
   end
 
   # The column the plan's addresses point into: the value column itself, or
@@ -189,8 +201,8 @@ class CAFrame
 
   # Gather a wide frame into a long one.  The +value_columns+ are stacked one
   # after another into a single +value_name+ column, a +var_name+ column says
-  # which of them each row came from, and every +id+ column repeats once per
-  # value column.
+  # which of them each row came from (a text column), and every +id+ column
+  # repeats once per value column.
   #
   #   wide.melt(id: "time")     # time / variable / value
   #
@@ -212,9 +224,9 @@ class CAFrame
   # @raise [ArgumentError] when there is nothing to melt, or the value
   #   columns differ in data type.
   def melt(id: [], value_columns: nil, var_name: "variable", value_name: "value")
-    ids = Array(id).map(&:to_s)
+    ids = column_keys(Array(id), "melt")
     ids.each { |name| self[name] }
-    vars = (value_columns || column_names - ids).map(&:to_s)
+    vars = column_keys(value_columns || column_names - ids, "melt")
     raise ArgumentError, "melt: no columns to melt" if vars.empty?
     overlap = vars & ids
     unless overlap.empty?
@@ -240,12 +252,13 @@ class CAFrame
     out[@axis_name] = CArray.meld(Array.new(k, @index)) if @index
     ids.each { |name| out[name] = CArray.meld(Array.new(k, self[name])) }
     [var_name, value_name].each do |name|
+      column_name_arg(name, "melt")
       if out.key?(name)
         raise ArgumentError, "melt: #{name.inspect} is already an id column"
       end
     end
     n = nrow
-    out[var_name]   = CArray.object(n * k) { |i| vars[i / n] }
+    out[var_name]   = CArray.string(Array.new(n * k) { |i| vars[i / n] })
     out[value_name] = CArray.meld(pieces)
     CAFrame.new(out)
   end
@@ -291,8 +304,9 @@ class CAFrame
   # @param on [String, nil] the column whose values line the rows up.
   # @return [CAFrame] one row per group, indexed by the group labels.
   def stack_rows(by:, on: nil)
-    keys = (by.is_a?(Array) ? by : [by]).map { |k| k.is_a?(Symbol) ? k.to_s : k }
+    keys = (by.is_a?(Array) ? by : [by]).map { |k| k.is_a?(Symbol) ? column_key(k, "stack_rows") : k }
     raise ArgumentError, "stack_rows: by: names no key" if keys.empty?
+    CAFrame.__send__(:refuse_repeated_names, keys.grep(String), "stack_rows", "by: names")
     frame = @index ? CAFrame.new({ @axis_name => @index }.merge(@columns)) : self
     keys.each { |k| frame.__send__(:key_column, k, "stack_rows") }
     # With nothing but the key there is no column to stack, and the result
@@ -322,6 +336,7 @@ class CAFrame
             "stack_rows: every row has to belong to a group; " \
             "the key has no value for #{frame.nrow - stacked} of #{frame.nrow} rows"
     end
+    # names-check: equal sizes, not names
     unless sizes.uniq.size <= 1
       # One group of each size, so the message says where to look.
       examples = sizes.each_with_index.uniq { |n, _| n }.map do |n, g|
@@ -354,10 +369,7 @@ class CAFrame
     if keys.include?(on)
       raise ArgumentError, "stack_rows: #{on.inspect} is a key; on: names another column"
     end
-    place = frame[on]
-    unless place.ndim == 1
-      raise ArgumentError, "stack_rows: on: #{on.inspect} has shape #{place.shape.inspect}, not one value per row"
-    end
+    place = frame.__send__(:key_column, on, "stack_rows")
     grouped = frame.group_by(*keys)
     bounds  = grouped.__send__(:group_bounds).to_a
     groups  = bounds.size - 1
@@ -423,6 +435,7 @@ class CAFrame
       raise ArgumentError, "unstack_rows: the frame has no N-D column to unstack"
     end
     lengths = stacked.transform_values { |c| c.shape[1] }
+    # names-check: equal lengths, not names
     unless lengths.values.uniq.size == 1
       raise ArgumentError,
             "unstack_rows: the N-D columns differ in length along their first axis #{lengths}"
@@ -439,10 +452,4 @@ class CAFrame
     CAFrame.new(cols, axis_name: @axis_name, index: @index && @index[repeat])
   end
 
-  # A column, or the index when +name+ is the row axis name (pivot and resample
-  # keys may be either).
-  private def column_or_index(name)
-    return @index if @index && !@columns.key?(name) && @axis_name == name
-    self[name]
-  end
 end

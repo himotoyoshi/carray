@@ -13,6 +13,7 @@ class TestLazyMonopP13 < Test::Unit::TestCase
   ## ====== Inspect / dump_tree (no materialise) ===========================
 
   def test_inspect_does_not_materialise
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(5).seq + 1.0
     v = a.lazy.sqrt.sin.exp
 
@@ -27,6 +28,7 @@ class TestLazyMonopP13 < Test::Unit::TestCase
   end
 
   def test_to_s_does_not_materialise
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(5).seq + 1.0
     v = a.lazy.sqrt
 
@@ -37,6 +39,7 @@ class TestLazyMonopP13 < Test::Unit::TestCase
   end
 
   def test_dump_tree_does_not_materialise
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(5).seq + 1.0
     v = a.lazy.sqrt.sin.exp
 
@@ -63,6 +66,7 @@ class TestLazyMonopP13 < Test::Unit::TestCase
   end
 
   def test_marker_inspect_and_dump_tree
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(5).seq + 1.0
     m = a.lazy
     CAMonOp.__reset_materialise_counter__
@@ -75,6 +79,7 @@ class TestLazyMonopP13 < Test::Unit::TestCase
   ## ====== §3.4 Enumerable receivers materialise on first touch ==========
 
   def test_each_materialises_on_lazy
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(10).seq + 1.0
     v = a.lazy.sqrt
 
@@ -91,6 +96,7 @@ class TestLazyMonopP13 < Test::Unit::TestCase
   end
 
   def test_to_a_materialises_on_lazy
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(10).seq + 1.0
     v = a.lazy.sqrt
 
@@ -101,6 +107,7 @@ class TestLazyMonopP13 < Test::Unit::TestCase
   end
 
   def test_sort_materialises_on_lazy
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(10).seq + 1.0
     v = a.lazy.neg                   # negate -> [-1, -2, -3, ...]
 
@@ -113,6 +120,7 @@ class TestLazyMonopP13 < Test::Unit::TestCase
   end
 
   def test_manual_reduction_via_each
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     # CArray doesn't include Enumerable, so `inject` isn't on the
     # taxonomy table directly.  But user-side reductions written via
     # each must still materialise once (the each override calls to_ca).

@@ -74,10 +74,10 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   ca_size_t s;
   int8_t i;
 
-  CA_CHECK_DATA_TYPE(data_type);
-  CA_CHECK_RANK(ndim);
-  CA_CHECK_DIM(ndim, dim);
-  CA_CHECK_BYTES(data_type, bytes);
+  CA_CHECK_DATA_TYPE_GIVEN(data_type);
+  CA_CHECK_RANK_GIVEN(ndim);
+  CA_CHECK_DIM_GIVEN(ndim, dim);
+  CA_CHECK_BYTES_GIVEN(data_type, bytes);
 
   /* An object cell is a VALUE the GC marks: reading other bytes as one
      marks garbage, and reading one as bytes exposes an address. */
@@ -88,6 +88,14 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   if (! ca_is_object_type(parent) && data_type == CA_OBJECT) {
     rb_raise(rb_eCADataTypeError,
              "non-object array can't be referred as object data type");
+  }
+  /* A boolean cell holds 0 or 1, and a view that reads other bytes as
+     boolean cannot keep them so: the parent is written as what it is. */
+  if (data_type == CA_BOOLEAN && parent->data_type != CA_BOOLEAN) {
+    rb_raise(rb_eCADataTypeError,
+             "%s: a %s array can't be referred as boolean (its bytes need not "
+             "be 0 or 1); compare it instead, e.g. ne(0)",
+             ca_calling_method_name(), ca_type_name[parent->data_type]);
   }
   if (parent->elements && bytes > parent_bytes * parent->elements) {
     rb_raise(rb_eArgError, "bytes exceeds the data size of referent");
@@ -129,14 +137,13 @@ ca_refer_setup (CARefer *ca, CArray *parent,
     return 0;
   }
 
-  /* CAREFUL: initialise mask0 before ca_stride_setup — the setup
-     may dispatch to ca_refer_func_create_mask, which writes to
-     mask0.  Leaving it uninitialised risks freeing a garbage
-     pointer during error unwind. */
+  /* mask0 is written by ca_refer_func_create_mask when the constructor
+     takes the parent's mask, and freed on error unwind, so it starts
+     NULL. */
   ca->mask0 = NULL;
 
-  ca_stride_setup((CAStride *) ca, CA_OBJ_REFER, parent,
-                  data_type, bytes, ndim, dim, strides, base_offset);
+  ca_stride_setup_view((CAStride *) ca, CA_OBJ_REFER, parent,
+                       data_type, bytes, ndim, dim, strides, base_offset);
 
   if (ca_is_scalar(parent)) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -153,6 +160,7 @@ ca_refer_new (CArray *parent,
   ca_refer_setup(NULL, parent, data_type, ndim, dim, bytes, offset);
   ca = (CARefer *) ca_array_alloc(CA_OBJ_REFER, ndim);
   ca_refer_setup(ca, parent, data_type, ndim, dim, bytes, offset);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -260,6 +268,7 @@ rb_ca_refer_initialize_copy (VALUE self, VALUE other)
      unusual mod-bytes alignments. */
   ca_refer_setup(ca, cs->parent, cs->data_type, cs->ndim, cs->dim,
                  cs->bytes, cs->base_offset / cs->parent->bytes);
+  ca_view_inherit_mask((VALUE) ca);
   return self;
 }
 
@@ -488,7 +497,7 @@ rb_ca_refer_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
       }
     }
     Check_Type(rdim, T_ARRAY);
-    CA_CHECK_RANK(RARRAY_LEN(rdim));   /* before dim[] is filled */
+    CA_CHECK_RANK_GIVEN(RARRAY_LEN(rdim));   /* before dim[] is filled */
     ndim = RARRAY_LEN(rdim);
     for (i = 0; i < ndim; i++) dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
     if (! NIL_P(roffset)) offset = NUM2SIZE(roffset);
@@ -610,9 +619,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  if (argc < 0 || argc > CA_RANK_MAX) {
-    rb_raise(rb_eArgError, "reshape: invalid number of dims (%d)", argc);
-  }
+  ca_check_rank_fits(argc, "reshape");
 
   /* Locate the (at most one) auto-infer placeholder.  `-1` is the
      conventional spelling; `:~` is the unified auto-fill sigil
@@ -775,7 +782,7 @@ rb_ca_flatten (VALUE self)
      before axis 0 twice              -> [1, 1, 2, 3]
 
    Returns a CARefer view (zero-copy alias to +self+'s data, via reshape).
-   Bound to the internal name __insert_axis_size1__; the user-facing
+   Bound to the private method insert_size_one_axes; the user-facing
    insert_axis (with the repeat: keyword) is the Ruby method in
    lib/carray/basics.rb, which builds on this primitive.
 
@@ -795,11 +802,7 @@ rb_ca_insert_axis (int argc, VALUE *argv, VALUE self)
 
   ndim     = (int) ca->ndim;
   new_ndim = ndim + argc;
-  if (new_ndim > CA_RANK_MAX) {
-    rb_raise(rb_eArgError,
-             "insert_axis: resulting ndim %d exceeds CA_RANK_MAX %d",
-             new_ndim, CA_RANK_MAX);
-  }
+  ca_check_rank_fits(new_ndim, "insert_axis");
 
   ngap = ndim + 1;   /* gaps live in [0, ndim] (ndim = the end gap) */
 
@@ -809,12 +812,7 @@ rb_ca_insert_axis (int argc, VALUE *argv, VALUE self)
     gap_count[i] = 0;
   }
   for (i = 0; i < argc; i++) {
-    int raw = (int) ca_axis_integer(argv[i], "insert_axis");
-    int g   = (raw < 0) ? raw + ngap : raw;
-    if (g < 0 || g >= ngap) {
-      rb_raise(rb_eArgError,
-               "insert_axis: axis %d out of range for ndim %d", raw, ndim);
-    }
+    int g = ca_normalize_axis_arg(argv[i], ngap, "insert_axis");
     gap_count[g]++;
   }
 
@@ -858,7 +856,7 @@ Init_ca_obj_refer (void)
   /* The bare size-1 primitive.  The user-facing `insert_axis` (with its
      `repeat:` keyword) is the Ruby method in lib/carray/basics.rb, which
      owns the name and calls this primitive. */
-  rb_define_method(rb_cCArray, "__insert_axis_size1__", rb_ca_insert_axis, -1);
+  rb_define_private_method(rb_cCArray, "insert_size_one_axes", rb_ca_insert_axis, -1);
   rb_define_alloc_func(rb_cCARefer, rb_ca_refer_s_allocate);
   rb_define_method(rb_cCARefer, "initialize_copy",
                                        rb_ca_refer_initialize_copy, 1);

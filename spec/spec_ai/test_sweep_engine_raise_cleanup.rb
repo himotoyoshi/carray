@@ -86,6 +86,7 @@ class TestSweepEngineRaiseCleanup < Test::Unit::TestCase
   end
 
   def test_raising_callback_returns_arena_slots
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     before = CArray.__lazy_arena_slot_in_use_count__
     5.times do
       _, out = column_output
@@ -105,6 +106,7 @@ class TestSweepEngineRaiseCleanup < Test::Unit::TestCase
   end
 
   def test_chunked_failure_returns_arena_slots
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     before = CArray.__lazy_arena_slot_in_use_count__
     5.times do
       _, out = column_output

@@ -5,9 +5,9 @@
 #  Treats the trailing K axes of `indices.shape = (..., K)` as coordinate tuples
 #  and consumes the first K axes of params while carrying the remaining axes (= rest).
 #
-#  Implementation goes through a CAMapping view of the flattened array:
+#  Implementation goes through an index view (CAGrid) of the flattened array:
 #  `params.flatten[flat_addr]`.  Pure Ruby, no additional framework, composed
-#  entirely from existing indexers as in `take_along_axis`.  Since CAMapping is
+#  entirely from existing indexers as in `take_along_axis`.  Since the view is
 #  writable, write-through via `put_nd` uses last-write-wins semantics (= last
 #  value wins on duplicate indices, same contract as `put_along_axis`).  For
 #  accumulate semantics, route to the `scatter_*!` family instead.
@@ -63,7 +63,7 @@ class CArray
   def gather_nd (indices)
     flat_addr, outer, rest = gather_nd_flat_addr(indices, "gather_nd")
     out_shape = outer + rest
-    # flatten + 1-D fancy indexing -> CAMapping view -> materialise via .copy.
+    # flatten + 1-D fancy indexing -> CAGrid view -> materialise via .copy.
     # A masked coordinate reads as UNDEF: project carries the address mask.
     result = flat_addr.has_mask? ? flatten.project(flat_addr) : self.flatten[flat_addr].copy
     out_shape.empty? ? result : result.reshape(*out_shape)
@@ -91,10 +91,19 @@ class CArray
   #   @raise [ArgumentError] on the same conditions as {#gather_nd}.
   #   @raise [IndexError] when a coordinate is out of range on any axis.
   def put_nd (indices, values)
+    # The write goes through a flattened view, which carries a frozen
+    # array's read-only flag but not its frozenness; say what the array is.
+    raise FrozenError.new("can't modify frozen #{self.class}", receiver: self) if frozen?
     flat_addr, _outer, _rest = gather_nd_flat_addr(indices, "put_nd")
     if flat_addr.has_mask?
-      # A masked coordinate writes nothing: scatter_replace! skips it.
-      flatten.scatter_replace!(flat_addr, values)
+      # A masked coordinate writes nothing.  The values are laid out over
+      # the coordinates by the store itself, so they mean what they mean
+      # unmasked, and only the cells at unmasked coordinates are written.
+      flat = flatten
+      vals = flat.project(flat_addr)
+      vals[] = values
+      sel  = flat_addr.is_not_masked
+      flat[flat_addr[sel]] = vals[sel]
     else
       self.flatten[flat_addr] = values
     end

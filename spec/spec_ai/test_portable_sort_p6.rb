@@ -61,8 +61,12 @@ class TestPortableSortP6 < Test::Unit::TestCase
       srand(20260700 + idx)
       n = 512
       is_float = [:float32, :float64].include?(ctor)
+      # Values the type can hold: a store refuses one it cannot.
+      span, base = { int8: [256, -128], uint8: [256, 0] }.fetch(ctor) {
+        ctor.to_s.start_with?("u") ? [1000, 0] : [1000, -500]
+      }
       arr = CArray.send(ctor, n) { |i|
-        is_float ? (rand * 1000.0 - 500.0) : (rand(1000) - (ctor == :int8 ? 50 : 500))
+        is_float ? (rand * 1000.0 - 500.0) : (rand(span) + base)
       }
       expected = arr.to_a.sort
       assert_equal expected, arr.sort_copy(kind: :quick).to_a,

@@ -278,8 +278,15 @@ class CArray
   # boolean array has no string reading and is rejected -- stringify explicitly
   # with #format / CArray.format.  (This mirrors the numeric gate that rejects
   # numeric reductions on a String Face.)
-  def self.string_face_of (ca)
+  def self.string_face_of (ca, verb = "CArray.string")
     return ca if ca.is_a?(CArray::StringOperationMixin)
+    # Another Face's storage is not its text: a CATime's fixlen surface
+    # holds ticks, a categorical's codes.
+    if ca.face?
+      raise TypeError,
+            "#{verb}: a #{ca.class} is not text " \
+            "(convert its values to Strings first)"
+    end
     case ca.data_type
     when :object then CAString.wrap(ca)
     when :fixlen then CAFixlenString.wrap(ca)

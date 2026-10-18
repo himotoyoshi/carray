@@ -1,6 +1,7 @@
 # CAFrame CSV input/output (memo §11.2, §6-2).
 
 require "carray/frame/csv_parser"
+require "carray/inspect"   # CArray::Inspector.face_label, for the column list
 
 class CAFrame
   # Read a CSV into a frame. The header row supplies column names (Strings,
@@ -14,6 +15,7 @@ class CAFrame
   #   CAFrame.from_csv("obs.csv", types: :infer)
   #   CAFrame.from_csv("obs.csv", types: { default: :infer, "code" => :int32, "id" => nil })
   #   CAFrame.from_csv("obs.csv", types: { default: :float64, "station" => nil })
+  #   CAFrame.from_csv("obs.csv", types: { "station" => :categorical })
   #
   # +source+ is a path, or an open IO -- anything answering +gets+, which a
   # StringIO is. So CSV that is already in memory does not have to go to a
@@ -40,7 +42,8 @@ class CAFrame
   #             Japanese.
   #   parser:   a callable source -> [headers, rows] to inject another parser
   #             (e.g. the stdlib +csv+, or a typed-table source); when given,
-  #             sep/quote/strip/encoding and any block are that parser's concern.
+  #             sep/quote/strip/encoding and any block are that parser's concern,
+  #             and header:/data:/column_names:/columns:/attrs: are refused.
   #   on_error: what a +types:+ cast does with a cell that does not read
   #             (:mask default, :warn, :raise); see +cast+.
   #
@@ -55,13 +58,23 @@ class CAFrame
   #             header then defaults to none
   #   columns:  the columns to read, by name or by index from 0 (Integers
   #             and Ranges), in the order the frame has them; the others are
-  #             read past without a String made for their fields
+  #             read past without a String made for their fields. Without a
+  #             header the columns are named c0, c1, ..., and those names
+  #             select too. A Hash selects by its keys and names the columns
+  #             with its values: { 2 => "code", "c7" => "area" }; types: and
+  #             missing: then use the new names
+  #   attrs:    attribute keys for the lines right below the header, one
+  #             key per line: field j of a line becomes that attribute of
+  #             column j (an empty field gives none). The data then starts
+  #             below them. What to_csv(attrs:) writes, it reads back
   #
   #   CAFrame.from_csv("obs.csv", header: 2)            # a title above
   #   CAFrame.from_csv("obs.csv", header: 0, data: 3)   # units on lines 1-2
   #   CAFrame.from_csv("big.csv", data: 1..100)         # the first 100 lines
   #   CAFrame.from_csv("raw.csv", column_names: %w[date temp rh])
   #   CAFrame.from_csv("wide.csv", columns: %w[date temp])
+  #   CAFrame.from_csv("raw.csv", header: false, columns: { 0 => "date", 3 => "temp" })
+  #   CAFrame.from_csv("obs.csv", attrs: [:units])      # units on line 1
   #
   # A block, given the reader, reads in any other order with +skip+ /
   # +header+ / +header(name)+ / +column_names+ / +columns+ / +data+ (see
@@ -97,13 +110,18 @@ class CAFrame
   # independent frame.
   def self.from_csv(source, types: nil, on_error: :mask, missing: nil,
                     header: nil, data: nil, column_names: nil, columns: nil,
-                    sep: ",", quote: '"', strip: false,
+                    attrs: nil, sep: ",", quote: '"', strip: false,
                     encoding: "bom|utf-8", parser: nil, &block)
     layout = { header: header, data: data, column_names: column_names,
-               columns: columns }.compact
+               columns: columns, attrs: attrs }.compact
     if block && !layout.empty?
       raise ArgumentError, "from_csv: give #{layout.keys.map { |k| "#{k}:" }.join(', ')} " \
                            "or a reading block, not both"
+    end
+    # The parser reads the header, the data and the columns itself.
+    if parser && !layout.empty?
+      raise ArgumentError, "from_csv: give #{layout.keys.map { |k| "#{k}:" }.join(', ')} " \
+                           "or parser:, not both"
     end
     if block && block.arity != 1
       raise ArgumentError, "from_csv: the reading block takes the reader as its " \
@@ -116,7 +134,7 @@ class CAFrame
     # body goes straight to Strings. missing: masks text in place, which
     # wants the Strings first, so it takes that path too.
     read_text_as_const_string = !types.nil? && missing.nil?
-    names, rows =
+    names, rows, column_attrs =
       if parser
         parser.call(source)
       elsif source.respond_to?(:gets)
@@ -140,6 +158,9 @@ class CAFrame
     mask_missing_tokens(frame, missing) if missing
     frame.cast(types, on_error: on_error, option_name: :types) unless types.nil?
     convert_const_string_columns_to_castring(frame)
+    column_attrs&.each_with_index do |attrs, j|
+      frame[frame.column_names[j]].set_attrs(attrs) unless attrs.empty?
+    end
     frame
   end
 
@@ -166,11 +187,9 @@ class CAFrame
     missing.each do |key, value|
       case key
       when :default then default = value
-      when String   then per_column[key] = value
       else
-        raise ArgumentError,
-              "#{verb}: missing: takes column names (Strings) and :default " \
-              "as keys (got #{key.inspect})"
+        per_column[CAFrame.__send__(:column_key, key, verb, "missing: a column name",
+                                    hint: ":default is the only Symbol key")] = value
       end
     end
     [default, per_column]
@@ -205,18 +224,40 @@ class CAFrame
     end
   end
 
-  private_class_method :split_missing, :missing_tokens, :mask_missing_tokens
+  # The attribute keys an +attrs:+ argument names, as Strings: an Array of
+  # Symbols or Strings, none twice.
+  def self.csv_attr_keys(attrs, verb)
+    unless attrs.is_a?(Array)
+      raise TypeError, "#{verb}: attrs: takes an Array of attribute keys " \
+                       "(got #{attrs.inspect})"
+    end
+    keys = attrs.map do |key|
+      unless key.is_a?(Symbol) || key.is_a?(String)
+        raise TypeError, "#{verb}: attrs: an attribute key is a Symbol or String " \
+                         "(got #{key.inspect})"
+      end
+      key.to_s
+    end
+    # names-check: attribute keys, not column names
+    dup = keys.tally.find { |_, n| n > 1 }
+    raise ArgumentError, "#{verb}: attrs: names #{dup.first.inspect} twice" if dup
+    keys
+  end
+
+  private_class_method :split_missing, :missing_tokens, :mask_missing_tokens,
+                       :csv_attr_keys
 
   # Drive the reading-control DSL over one open IO and hand back
-  # [names, rows]. Shared by the path and the IO source, so the two cannot
-  # come to read a file differently.
+  # [names, rows, column_attrs]. Shared by the path and the IO source, so the
+  # two cannot come to read a file differently.
   def self.read_csv (io, sep:, quote:, strip:, layout:, read_text_as_const_string: false, &block)
     reader = CSVReader.new(io, sep: sep, quote: quote, strip: strip,
                            read_text_as_const_string: read_text_as_const_string)
     reader.reporting do
       block ? block.call(reader) : reader.layout(**layout)
     end
-    reader.result
+    names, rows = reader.result
+    [names, rows, reader.column_attrs(reader.file_ncol)]
   end
 
   private_class_method :read_csv
@@ -281,13 +322,26 @@ class CAFrame
   #
   #   df.to_csv("out.csv", missing: "-999")
   #   df.to_csv("out.csv", missing: { default: "-999", "comment" => "" })
+  #
+  # +attrs:+ writes, below the name row, one line per attribute key given,
+  # in that order: field j is +attr(key)+ of column j (the index's for the
+  # index column). A column without the attribute gets an empty field, an
+  # empty String a quoted "", and a number its +to_s+.
+  # +from_csv(attrs:)+ with the same keys reads them back, as Strings.
+  #
+  #   df.to_csv("out.csv", attrs: [:units, :long_name])
   def to_csv(path = nil, sep: ",", quote: '"', header: true, index: true,
-             encoding: nil, missing: nil)
+             encoding: nil, missing: nil, attrs: [])
     default, per_column = CAFrame.send(:split_missing, missing, "to_csv")
     [default, *per_column.values].each do |text|
       next if text.nil? || text.is_a?(String)
       raise ArgumentError, "to_csv: missing: is the String written for a masked " \
                            "cell (got #{text.inspect})"
+    end
+    attr_keys = attrs.nil? ? [] : CAFrame.send(:csv_attr_keys, attrs, "to_csv")
+    if !header && !attr_keys.empty?
+      raise ArgumentError, "to_csv: attrs: writes lines below the name row, " \
+                           "so it needs header: true"
     end
     nd = @columns.find { |_, c| c.ndim != 1 }
     if nd
@@ -308,13 +362,19 @@ class CAFrame
 
     names     = []
     formatted = []
+    written   = []
     if index && @index
       names     << @axis_name
       formatted << format_csv_column(@index)
+      written   << @index
     end
     @columns.each do |name, col|
       names     << name
       formatted << format_csv_column(col)
+      written   << col
+    end
+    attr_rows = attr_keys.map do |key|
+      written.each_with_index.map { |col, j| csv_attr_text(col, key, names[j]) }
     end
     unknown = per_column.keys - names
     raise KeyError, "to_csv: missing: names no column #{unknown.first.inspect}" unless unknown.empty?
@@ -331,7 +391,7 @@ class CAFrame
     end
 
     out = begin
-      csv_text(names, formatted, header, sep, quote)
+      csv_text(names, attr_rows, formatted, header, sep, quote)
     rescue Encoding::CompatibilityError
       nil
     end
@@ -340,17 +400,22 @@ class CAFrame
     # UTF-8 text pays nothing for the check.
     unless out && out.encoding == Encoding::UTF_8 && out.valid_encoding?
       names = names.each_with_index.map { |t, j| csv_text_in_utf8(t, "the name of column #{j}") }
+      attr_rows = attr_rows.each_with_index.map do |row, k|
+        row.each_with_index.map do |t, j|
+          csv_text_in_utf8(t, "attribute #{attr_keys[k].inspect} of #{names[j].inspect}")
+        end
+      end
       formatted = formatted.each_with_index.map do |fcol, j|
         fcol.each_with_index.map { |t, i| csv_text_in_utf8(t, "row #{i} of #{names[j].inspect}") }
       end
-      out = csv_text(names, formatted, header, sep, quote)
+      out = csv_text(names, attr_rows, formatted, header, sep, quote)
     end
 
     if encoding
       out = begin
         out.encode(encoding)
       rescue Encoding::UndefinedConversionError => e
-        raise csv_unwritable_cell(names, formatted, encoding) || e
+        raise csv_unwritable_cell(names, attr_keys, attr_rows, formatted, encoding) || e
       end
     end
 
@@ -403,7 +468,10 @@ class CAFrame
   # middle-elided table.
   # @return [String]
   def inspect
-    parts = @columns.map { |k, v| "#{k}:#{v.data_type}#{v.ndim > 1 ? v.shape[1..].inspect : ''}" }
+    parts = @columns.map do |k, v|
+      type = CArray::Inspector.type_label(v)
+      "#{k}:#{type}#{v.ndim > 1 ? v.shape[1..].inspect : ''}"
+    end
     idx = @index ? " index=#{@axis_name.inspect}" : ""
     head = "#<CAFrame nrow=#{@nrow} columns=[#{parts.join(', ')}]#{idx}>"
     # The table counts the index as a column, so a frame whose only data is its
@@ -479,9 +547,11 @@ class CAFrame
     0xF900..0xFAFF, 0xFE10..0xFE19, 0xFE30..0xFE6F, 0xFF00..0xFF60,
     0xFFE0..0xFFE6, 0x1F300..0x1F64F, 0x1F900..0x1F9FF, 0x20000..0x3FFFD,
   ].freeze
+  Ractor.make_shareable(WIDE_CHAR_RANGES)
   private_constant :WIDE_CHAR_RANGES
 
   COMBINING_RANGES = [0x0300..0x036F, 0x1AB0..0x1AFF, 0x20D0..0x20F0].freeze
+  Ractor.make_shareable(COMBINING_RANGES)
   private_constant :COMBINING_RANGES
 
   private def display_width(text)
@@ -547,7 +617,7 @@ class CAFrame
     # from_csv reads back as the same value, not as the double it widens
     # to ("0.10000000149011612"); cmplx64 has that in each part.
     if !col.face? && (col.data_type == CA_FLOAT32 || col.data_type == CA_CMPLX64)
-      col = col.__shortest_float64__
+      col = col.__widen_keeping_shortest_decimal__
     end
     # A boolean goes out as 0 / 1, as it does in every other serialization;
     # from_csv reads it back with types: { name => :boolean }.
@@ -565,15 +635,31 @@ class CAFrame
     end
   end
 
-  private def csv_text(names, formatted, header, sep, quote)
+  private def csv_text(names, attr_rows, formatted, header, sep, quote)
     out = +""
     if header
       out << names.map { |t| quote_csv_field(t, sep, quote) }.join(sep) << "\n"
+    end
+    attr_rows.each do |row|
+      out << row.map { |t| quote_csv_field(t, sep, quote) }.join(sep) << "\n"
     end
     @nrow.times do |i|
       out << formatted.map { |fcol| quote_csv_field(fcol[i], sep, quote) }.join(sep) << "\n"
     end
     out
+  end
+
+  # The field +to_csv(attrs:)+ writes for attribute +key+ of +col+: nil for
+  # none (the empty field), the String itself, or a scalar's to_s.
+  private def csv_attr_text(col, key, name)
+    value = col.attr(key)
+    case value
+    when nil, String then value
+    when Array, Hash
+      raise ArgumentError, "to_csv: attribute #{key.inspect} of #{name.inspect} is " \
+                           "#{value.class}, which a CSV field cannot hold"
+    else value.to_s
+    end
   end
 
   # The text of a cell as UTF-8, the encoding the CSV is built in: text in
@@ -611,8 +697,13 @@ class CAFrame
   end
 
   # The error for the first cell (or name) +encoding+ cannot hold, or nil.
-  private def csv_unwritable_cell(names, formatted, encoding)
+  private def csv_unwritable_cell(names, attr_keys, attr_rows, formatted, encoding)
     cells = names.each_with_index.map { |t, j| [t, "the name of column #{j}"] }
+    attr_rows.each_with_index do |row, k|
+      row.each_with_index do |t, j|
+        cells << [t, "attribute #{attr_keys[k].inspect} of #{names[j].inspect}"] if t
+      end
+    end
     formatted.each_with_index do |fcol, j|
       fcol.each_with_index { |t, i| cells << [t, "row #{i} of #{names[j].inspect}"] if t }
     end
@@ -654,13 +745,9 @@ class CAFrame
     names ||= Array.new(ncol) { |j| "c#{j}" }
     # A frame holds one column per name, so a repeated one would keep only
     # the last of its columns.
-    dup = names.tally.select { |_, count| count > 1 }.keys
-    unless dup.empty?
-      raise ArgumentError,
-            "the header names #{dup.map(&:inspect).join(', ')} more than once; " \
-            "name the columns yourself: from_csv(path, header: 0, " \
-            "column_names: [...])"
-    end
+    CAFrame.__send__(:refuse_repeated_names, names, "from_csv", "the header row names",
+                     hint: "pass header: false for the default column names " \
+                           "(c0, c1, ...), or name the columns with column_names:")
 
     cols = {}
     # Columns the C reader built as CAConstStrings over the text, for

@@ -7,13 +7,14 @@ class CArray
     # @!group MemoryView interop
 
     # @overload memory_view_available?(obj)
-    #   Returns `true` if `obj` exposes the Ruby `rb_memory_view`
-    #   protocol and a view can be acquired from it. Lightweight probe
-    #   used to gate {.from_memory_view} / {.wrap_memory_view} calls.
+    #   Returns `true` if `obj` is a MemoryView producer (Ruby's
+    #   `rb_memory_view_available_p`). Lightweight probe used to gate
+    #   {.from_memory_view} / {.wrap_memory_view} calls; it does not
+    #   acquire a view.
     #
-    #   Returning `true` does not guarantee acquisition will succeed —
-    #   a producer may still refuse a particular flag combination at
-    #   acquisition time.
+    #   Returning `true` does not guarantee the import succeeds — the
+    #   producer may still refuse the view, or offer a format CArray
+    #   does not read.
     #   @param obj [Object] any object (typically a foreign array such
     #     as `Numo::NArray`, `Arrow::Array`, a `bytearray`, or a
     #     CArray).
@@ -26,6 +27,7 @@ class CArray
     # @overload memory_view_reject_reason(obj)
     #   Returns a String explaining why CArray's MemoryView producer
     #   refuses to export `obj`, or `nil` if no problem is detected.
+    #   For an object that is not a CArray it returns `nil`.
     #
     #   Diagnostic only; useful when {.memory_view_available?} returns
     #   `false` on a CArray and the generic "memory view not available"
@@ -34,8 +36,8 @@ class CArray
     #   (mask propagation, non-contiguous strided view, etc.) call this
     #   to print a human-readable reason.
     #   @param obj [Object]
-    #   @return [String, nil] reason text, or `nil` when acquisition
-    #     would succeed.
+    #   @return [String, nil] reason text, or `nil` when the export
+    #     would succeed or `obj` is not a CArray.
     def memory_view_reject_reason(obj); end
 
     # @overload from_memory_view(src, data_type: nil, mask: nil)
@@ -46,15 +48,20 @@ class CArray
     #
     #   For typeless producers (format `nil`, e.g. byte blobs from
     #   `IO#read`), `data_type:` is required and the byte buffer is
-    #   reinterpreted as that data type with `ndim = 1`. For typed
+    #   reinterpreted as that data type with `ndim = 1`; a typeless
+    #   producer whose own layout is strided is refused. For typed
     #   producers `data_type:` is optional; when given it must match
     #   the producer's format.
     #
     #   `mask:` accepts a paired buffer-protocol source whose shape
-    #   matches `src` and whose item size is 1 (PEP 3118 `?` / `B` /
-    #   `b`). The mask bytes are copied into the canonical
+    #   matches `src` and whose item size is 1 (`?` / `B` / `C` /
+    #   `b` / `c`). The mask bytes are copied into the canonical
     #   `CA_BOOLEAN` mask slot with non-zero coerced to `1`. The copy
-    #   is independent of both buffers after the call.
+    #   is independent of both buffers after the call. A boolean
+    #   producer's bytes other than 0 and 1 are read as true.
+    #
+    #   The result is a plain `CArray` whatever the receiver; a
+    #   receiver other than `CArray` or a `CAWrap` raises `TypeError`.
     #   @param src [Object] any MemoryView producer.
     #   @param data_type [Symbol, Integer, Class, nil] target data
     #     type. Required for typeless producers; optional (must match
@@ -63,7 +70,11 @@ class CArray
     #     source. Must match `src.shape` and use a 1-byte/element
     #     format.
     #   @return [CArray] independent copy; not a `CAWrap`.
+    #   @raise [TypeError] if the receiver is neither `CArray` nor a
+    #     `CAWrap`.
     #   @raise [ArgumentError] if `src` is not a MemoryView producer,
+    #     if its shape is negative, too large, or does not fit in the
+    #     bytes it reports,
     #     if `data_type:` is missing for a typeless source, if
     #     `data_type:` conflicts with the producer's format, or if
     #     the supplied `mask:` fails shape / data type / contiguity
@@ -92,19 +103,23 @@ class CArray
     #   when the wrap is garbage-collected.
     #
     #   Contiguous typed producers return a `CAWrap`. Strided typed
-    #   producers return a `CAStride` layered on an inner `CAWrap` of
-    #   the producer's first byte, preserving the full stride pattern
+    #   producers return a `CAStride` over a byte `CAWrap` of the
+    #   bytes its elements reach, preserving the full stride pattern
     #   (including negative strides where the producer offers them).
     #   Typeless producers (format `nil`) require `data_type:` and are
-    #   reinterpreted with `ndim = 1`.
+    #   reinterpreted with `ndim = 1`; a strided typeless producer is
+    #   refused. A boolean producer must hold 0 or 1 in every byte.
     #
     #   `mask:` accepts a paired buffer-protocol source whose shape
-    #   matches `src` and whose item size is 1 (PEP 3118 `?` / `B` /
-    #   `b`). The mask buffer is borrowed; writes to either side
-    #   propagate, and the mask MemoryView is released when the wrap
-    #   is collected. In this release, `mask:` requires a row-major
-    #   contiguous data source and a row-major contiguous mask
-    #   buffer.
+    #   matches `src` and whose item size is 1 (`?` / `B` / `C` /
+    #   `b` / `c`), holding 0 or 1 in every byte. The mask buffer is
+    #   borrowed; writes to either side propagate, and the mask
+    #   MemoryView is released when the wrap is collected. In this
+    #   release, `mask:` requires a row-major contiguous data source
+    #   and a row-major contiguous mask buffer that shares no bytes
+    #   with the data. A read-only mask makes the whole array
+    #   read-only, since a store writes the mask cell of each element
+    #   it stores.
     #
     #   The receiver picks the class of the result. Called on `CArray`
     #   it builds a `CAWrap`; called on a subclass of `CAWrap` it
@@ -132,10 +147,12 @@ class CArray
     #   @raise [TypeError] if the receiver is neither `CArray` nor a
     #     subclass of `CAWrap`.
     #   @raise [ArgumentError] if `src` is not a MemoryView producer,
-    #     if `data_type:` is missing for a typeless source, if
+    #     if its shape is negative, too large, or does not fit in the
+    #     bytes it reports, if a boolean buffer holds a byte other than
+    #     0 and 1, if `data_type:` is missing for a typeless source, if
     #     `data_type:` conflicts with the producer's format, or if
     #     the supplied `mask:` fails validation (shape / ndim /
-    #     data type / item_size / contiguity). Also raises when `mask:`
+    #     data type / item_size / contiguity / overlap with the data). Also raises when `mask:`
     #     is combined with a strided data source — that combination
     #     is not supported in this release.
     #   @example Zero-copy write propagation

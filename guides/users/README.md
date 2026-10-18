@@ -2,23 +2,9 @@
 
 An introduction to Ruby/CArray 3.0, written for readers new to it. No prior knowledge of CArray 2.0 is assumed; familiarity with NumPy or Numo::NArray may help but is not required.
 
-The tone is plain and example-driven, introducing one topic at a time. Only settled, confirmed methods are shown.
-
-## How this guide is written
-
-A few editorial principles guide these chapters. They are worth stating up front, both to set reader expectations and to keep later revisions consistent.
-
-- **Complete explanation, not a quick tutorial.** Each chapter aims to cover its topic in full for a CArray user — including reference tables of every operator, function, or form available, so a reader can see the whole surface in one place. Breadth in the chapter is deliberate; do not thin a chapter out into a "getting started" sketch and push the rest to a separate reference.
-
-- **CArray is described in its own vocabulary, on its own terms.** The behaviour of a method is stated as CArray's behaviour — not as "the same as" or "following" NumPy, pandas, or Numo. CArray grew as its own system; framing it as a port of another library subordinates it and, because the vocabularies differ in subtle ways, misleads. Concretely:
-  - Do **not** write that CArray "follows" or "conforms to" pandas/numpy for ordinary behaviour. Describe the rule directly (e.g. the time algebra of "instant ± duration", not "the rules follow pandas").
-  - A neutral *equivalence pointer* for readers who happen to know another library ("equivalent to `np.concatenate`") is fine as wayfinding and need not be purged — but it is a signpost, not the definition.
-  - Deliberate conformance to an external *standard* is different and should be stated plainly: the MemoryView format follows PEP 3118 because that is an intentional interop contract.
-  - A dedicated NumPy/Numo → CArray migration table, if wanted, belongs in its own separate document — not woven through the teaching chapters.
-
 ## Reading order
 
-[Introduction](introduction.md) comes first: what CArray is, and how the guide is arranged. It carries no number, because it is front matter rather than chapter zero — the `rake pdf:*` task names it explicitly and places it ahead of the numbered chapters, which sort into reading order on their own.
+[Introduction](introduction.md) comes first: what CArray is, and how the guide is arranged.
 
 The first eight chapters are the core walkthrough — read them in order to learn CArray from scratch.
 
@@ -38,7 +24,7 @@ These can be read in any order, once the core walkthrough is comfortable. Each i
 9. [Lazy evaluation](09_lazy.md) — building unevaluated expression trees and materialising on demand. Full reference: `docs/topics/Lazy.md`.
 10. [Composition](10_composition.md) — combining arrays along existing or new axes (`meld`, `stack`, `montage`, `concatenate`, `mosaic`, `tabulate`). Full reference: `docs/topics/Composition.md`.
 11. [Slab iteration](11_slab_iteration.md) — iterating per-axis with `each_slab` / `map_slab` / `reduce_slab`. Full reference: `docs/topics/SlabIterator.md`.
-12. [Faces and extended data types](12_faces.md) — giving raw numbers an interpretation (dates, times, units), with `CATime` as the worked example. Chapter 26 covers the time arrays themselves in full. Full reference: `docs/topics/CAFace.md` and `docs/topics/CATime.md`.
+12. [Faces](12_faces.md) — arrays read as something other than numbers (times, categories, strings): what every Face has in common, the Faces that come with CArray, and writing one of your own in Ruby. Chapters 14, 24 and 26 cover the individual Faces. Full reference: `docs/topics/CAFace.md`.
 13. [Object arrays](13_object_arrays.md) — arrays of arbitrary Ruby objects. Full reference: `docs/topics/CAObject.md`.
 14. [Text, fixed-length strings, and records](14_text_and_fixlen.md) — the string-array family (`CAString`, `CAFixlenString`, `CAConstString`, raw `CA_FIXLEN`) side by side with construction, string operations, ordering, conversions, and interop; plus `CARecord`, the array of structs with named fields. Full reference: `docs/topics/StringArrays.md`, `docs/objects/CAConstString.md`, `docs/objects/CARecord.md`.
 15. [MemoryView interop](15_memory_view.md) — zero-copy exchange with Numo::NArray, Apache Arrow, PyCall, fiddle. Full reference: `docs/interop/MemoryView.md`.
@@ -61,6 +47,10 @@ These can be read in any order, once the core walkthrough is comfortable. Each i
 ## Reference
 
 * [Vocabulary](08_vocabulary.md) — CArray-specific terms (entity/view, address, mask/UNDEF, data_type, Face), with a NumPy/Numo correspondence table. Can be read first or used as a glossary.
+
+## Companion guide
+
+* The CAFrame User's Guide ([../dataframe/README.md](../dataframe/README.md)) — analysing tables with `CAFrame`, the data frame whose columns are CArrays.
 
 ## Out of scope
 

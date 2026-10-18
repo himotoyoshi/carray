@@ -448,4 +448,22 @@ class TestCAConstString < Test::Unit::TestCase
     assert_equal 1, cs.nunique
     assert_equal %w[ab], cs.unique.to_a
   end
+
+  # categorize discovers the strings from the bytes; it agrees with the
+  # String path on views, masks and sort_labels:.
+  def test_categorize_agrees_with_to_string
+    src = CArray.string(CA_OBJECT(["b", "", "\u3042", "b", "a\0c", "a", "\u3042", ""]))
+    src[3] = UNDEF
+    cs = src.to_const_string
+    [cs, cs[1..-1], cs[CA_INT64([7, 5, 3, 1])], cs.reshape(4, 2)].each do |v|
+      [false, true].each do |sort|
+        got  = v.categorize(sort_labels: sort)
+        want = v.to_string.categorize(sort_labels: sort)
+        assert_equal want.labels, got.labels
+        assert_equal want.to_a, got.to_a
+        assert_equal want.codes.data_type, got.codes.data_type
+      end
+    end
+    assert_equal ["a", "b"], cs.categorize(labels: ["a", "b"]).labels
+  end
 end

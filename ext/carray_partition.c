@@ -14,7 +14,7 @@
 
 #include "ruby.h"
 #include "carray.h"
-#include "carray_internal.h"   /* ca_axis_integer */
+#include "carray_internal.h"   /* ca_normalize_axis_arg */
 #include "ca_kernel_iterator.h"   /* CA_FOR_EACH_FIBER_INOUT */
 #include "ca_obj_face.h"          /* CA_FACE_LIFT_IF_FACE */
 #include "ca_sort_kernels.h"      /* ca_partition_quick_* / ca_partition_nan_* */
@@ -155,7 +155,7 @@ rb_ca_partition_copy_c (VALUE self, VALUE vkth, VALUE vaxis)
   }
 
   /* Normalize axis. */
-  int axis = rb_ca_normalize_axis_for_ndim(ca_axis_integer(vaxis, NULL), cat->ndim, NULL);
+  int axis = ca_normalize_axis_arg(vaxis, cat->ndim, NULL);
 
   ca_size_t fiber_n = cat->dim[axis];
   ca_size_t kth = partition_kth(fiber_n, vkth);
@@ -166,14 +166,9 @@ rb_ca_partition_copy_c (VALUE self, VALUE vkth, VALUE vaxis)
    * but the cost is the per-pair rb_funcall, not an architectural
    * penalty. */
   if ( cat->data_type == CA_OBJECT ) {
-    static ID id_partition_index_ki = 0;
-    static ID id_take_along_axis    = 0;
-    static ID id_axis_sym           = 0;
-    if ( !id_partition_index_ki ) {
-      id_partition_index_ki = rb_intern("partition_index_ki");
-      id_take_along_axis    = rb_intern("take_along_axis");
-      id_axis_sym           = rb_intern("axis");
-    }
+    ID id_partition_index_ki = rb_intern("partition_index_ki");
+    ID id_take_along_axis    = rb_intern("take_along_axis");
+    ID id_axis_sym           = rb_intern("axis");
     VALUE idx = rb_funcall(target, id_partition_index_ki, 2,
                            INT2NUM(axis), SIZET2NUM(kth));
     VALUE kw = rb_hash_new();
@@ -297,8 +292,7 @@ rb_ca_partition_copy_c_mp (VALUE self, VALUE vkth, VALUE vaxis, int masked_last)
   /* Check axis and kth here, so a bad one is reported as partition_copy's
      rather than as the partition this delegates to. */
   {
-    int axis = rb_ca_normalize_axis_for_ndim(ca_axis_integer(vaxis, NULL),
-                                             ca->ndim, NULL);
+    int axis = ca_normalize_axis_arg(vaxis, ca->ndim, NULL);
     partition_kth(ca->dim[axis], vkth);
   }
   /* rb_ca_partitioned_view's rb_scan_args "1:" pattern needs call-frame
@@ -337,26 +331,30 @@ rb_ca_partition_copy_body (int argc, VALUE *argv, VALUE self)
   int masked_last = NIL_P(vmasked_position) ? 1
     : ca_symbol_choice(vmasked_position, "masked_position", "first", "last", NULL);
 
-  /* Face gate, the same policy as the sort family's: a fixlen storage
-     partitions by memcmp, a numeric storage only when ORDERABLE (its order
-     is the surface order).  The selection runs on the storage and the Face
-     is put back on the result.  Without this the surface fixlen bytes were
-     selected by memcmp, which is not the order of a little-endian integer
-     (CATime) and not the label order of a code (CACategorical). */
+  /* Face gate, the same policy as the sort family's.  An ORDERABLE Face
+     is selected on its storage and put back on the result.  A Face that
+     orders by itself (ca_face_orders_by_itself) is partitioned by the view,
+     which orders by that order (ca_order_key), and its copy is the answer.
+     Any other Face raises. */
   volatile VALUE face = Qnil;
   {
     CArray *ca;
     TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
     if ( ca_is_face(ca) ) {
-      VALUE st = rb_ca_strip_face_value(self);
-      CArray *sc;
-      TypedData_Get_Struct(st, CArray, &carray_data_type, sc);
-      if ( sc->data_type != CA_FIXLEN
-           && ! ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-        ca_face_refuse_order("partition_copy", self, "order");
+      if ( ca_face_orders_by_itself(self) ) {
+        VALUE kw = rb_hash_new();
+        VALUE pv_argv[2];
+        rb_hash_aset(kw, ID2SYM(rb_intern("axis")), vaxis);
+        rb_hash_aset(kw, ID2SYM(rb_intern("masked_position")),
+                     masked_last ? ID2SYM(rb_intern("last")) : ID2SYM(rb_intern("first")));
+        pv_argv[0] = vkth;
+        pv_argv[1] = kw;
+        return rb_ca_copy(rb_funcallv_kw(self, rb_intern("partition"), 2, pv_argv,
+                                         RB_PASS_KEYWORDS));
       }
+      ca_face_require_orderable(self, "partition_copy", "order");
       face = self;
-      self = st;
+      self = rb_ca_strip_face_value(self);
     }
   }
 
@@ -418,7 +416,8 @@ rb_ca_partitioned_view (int argc, VALUE *argv, VALUE self)
      suitable for direct ca_remap_new wrap; the remap gather carries
      target's mask bits through so masked cells stay masked at their
      clustered position (no extra output-mask step needed here). */
-  volatile VALUE sigma_addr = rb_ca_partition_addr_ki_mp(target, vaxis, vkth, masked_last);
+  volatile VALUE sigma_addr =
+    rb_ca_partition_addr_ki_mp(target, vaxis, vkth, masked_last);
   {
     VALUE obj = rb_ca_remap_new(target, sigma_addr);
     CA_FACE_LIFT_IF_FACE(obj, self, ca);
@@ -443,7 +442,9 @@ static VALUE
 rb_ca_partition_copy (int argc, VALUE *argv, VALUE self)
 {
   pc_call_t c = { argc, argv, self };
-  return ca_answer_as_caller(pc_answer_body, (VALUE) &c);
+  VALUE out = ca_answer_as_caller(pc_answer_body, (VALUE) &c);
+  rb_ca_inherit_attr(out, self);
+  return out;
 }
 
 void

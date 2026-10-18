@@ -42,6 +42,7 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
 
   # How many arena levels one raising call leaves behind.
   def arena_levels_left (setup, expr)
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     status, out = run_child(<<~RUBY)
       #{setup}
       d0 = CArray.__lazy_arena_depth__
@@ -85,6 +86,7 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
   # The chunked run acquires an alias operand by attaching it; a raise in
   # the kernel must still detach it.
   def test_chunked_triop_detaches_an_alias_operand
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     status, out = run_child(<<~RUBY)
       #{CHUNKED}
       av = CArray.object(10) { 1 }[0..9]

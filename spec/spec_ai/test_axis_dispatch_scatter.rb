@@ -59,7 +59,7 @@ class TestAxisDispatchScatterCSA < Test::Unit::TestCase
     a = CArray.int(4, 3).seq
     m = CArray.boolean(4).tap { |__a| __a[] = [1, 0, 1, 1] }
     payload = CArray.int(3, 1).tap { |__a| __a[] = [100, 101, 102] }
-    assert_scatter_matches(a, ->(b) { b[m, 1] }, payload)
+    assert_scatter_matches(a, ->(b) { b[m, 1..1] }, payload)
   end
 
   def test_2d_negative_range
@@ -94,7 +94,7 @@ class TestAxisDispatchScatterCSA < Test::Unit::TestCase
     a = CArray.int(3, 4, 2).seq
     m = CArray.boolean(3).tap { |__a| __a[] = [1, 0, 1] }
     payload = CArray.int(2, 2, 1).tap { |__a| __a[] = [10, 20, 30, 40] }
-    assert_scatter_matches(a, ->(b) { b[m, 1..2, 0] }, payload)
+    assert_scatter_matches(a, ->(b) { b[m, 1..2, 0..0] }, payload)
   end
 
   def test_2d_float_data_type

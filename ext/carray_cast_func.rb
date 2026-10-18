@@ -1,4 +1,5 @@
 data_type = []
+type_const = {}
 %w[
   CA_FIXLEN
   CA_BOOLEAN
@@ -20,6 +21,7 @@ data_type = []
 ].each_with_index do |name, i|
   eval("#{name} = #{i}")
   data_type.push(i)
+  type_const[i] = name
 end
 
 ctype = {
@@ -300,7 +302,8 @@ puts
                  *p2 = q;
                }
                else {
-                 rb_raise(rb_eRangeError, "out of range to cast to boolean (0 or 1)");
+                 rb_raise(rb_eRangeError, "%s: out of range to cast to boolean (0 or 1)",
+                          ca_calling_method_name());
                }
              }
              p1++; p2++; m++;
@@ -313,7 +316,8 @@ puts
                *p2 = q;
              }
              else {
-               rb_raise(rb_eRangeError, "out of range to cast to boolean (0 or 1)");
+               rb_raise(rb_eRangeError, "%s: out of range to cast to boolean (0 or 1)",
+                          ca_calling_method_name());
              }
              p1++; p2++; 
            }
@@ -332,7 +336,34 @@ puts
     ctype1 = ctype[type1]
     ctype2 = ctype[type2]
     CA_CAST_TABLE[type1][type2] = "ca_cast_#{ctype1}_#{ctype2}"
-    puts <<-END_DEF  .gsub(/^ {6}/, '')
+    # float / complex -> integer: a NaN has no integer and C leaves its
+    # conversion undefined.  A cell that is not masked refuses it before
+    # anything is written.  #to_type masks NaN cells first (UNDEF), so
+    # only a store, a view and a single cell reach the raise.
+    nan_check = ""
+    if (FLOAT+[CA_CMPLX64, CA_CMPLX128]).include?(type1) && INTEGER.include?(type2)
+      isnan = if [CA_CMPLX64, CA_CMPLX128].include?(type1)
+                "( isnan(creal(q1[k])) || isnan(cimag(q1[k])) )"
+              else
+                "isnan(q1[k])"
+              end
+      nan_check = <<-END_CHECK.gsub(/^ {6}/, '')
+         for (k=0; k<n; k++) {
+           if ( ( ! m || ! m[k] ) && #{isnan} ) {
+             rb_raise(rb_eFloatDomainError, "%s: NaN cannot be converted to %s",
+                      ca_calling_method_name(), ca_type_name[#{type_const[type2]}]);
+           }
+         }
+      END_CHECK
+    end
+    # int64 / uint64 -> float32 / cmplx64 goes through double, as a Ruby
+    # Integer stored into a float32 cell does (Integer#to_f).  Converting in
+    # one step rounds once where the compiler keeps the loop scalar and twice
+    # where it vectorises it through double, so the answer for a value past
+    # 2**53 would depend on its place in the array.
+    via = ( [CA_INT64, CA_UINT64].include?(type1) &&
+            [CA_FLOAT32, CA_CMPLX64].include?(type2) ) ? "(double) " : ""
+    puts <<-END_DEF.gsub(/^ {6}/, '').sub("@@NAN_CHECK@@\n", nan_check).gsub("@@VIA@@", via)
       static void
       ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
       {
@@ -341,6 +372,7 @@ puts
          #{ctype2} *q2 = ptr2;
          #{ctype2} *p2 = q2;
          ca_size_t k;
+      @@NAN_CHECK@@
          if ( m ) {
            boolean8_t *pm = m;
            for (k=0; k<n; k++) {
@@ -348,7 +380,7 @@ puts
              if ( ! *pm ) { 
                p1 = q1 + k;
                p2 = q2 + k;
-               *p2 = (#{ctype2}) *p1;
+               *p2 = (#{ctype2}) @@VIA@@*p1;
              }
            }
          }
@@ -356,7 +388,7 @@ puts
            for (k=0; k<n; k++) {
              p1 = q1 + k;
              p2 = q2 + k;
-             *p2 = (#{ctype2}) *p1;
+             *p2 = (#{ctype2}) @@VIA@@*p1;
            }
          }
          return;
@@ -478,9 +510,17 @@ OBJECT.each do |type1|
         read_ok   = "( RB_TYPE_P(*p1, T_STRING) ? " \
                     "ca_decimal_string_to(*p1, #{type_name}, p2) : " \
                     "( #{conv_ok}(*p1, &tmp) ? ( *p2 = (#{ctype2}) tmp, 1 ) : 0 ) )"
+        # A store refuses an integer the cell cannot hold
+        # (ca_obj2integer_fitting); to_type, above, keeps the C conversion.
+        store_conv = if INTEGER.include?(type2)
+                       num = [CA_UINT8, CA_UINT16, CA_UINT32, CA_UINT64].include?(type2) ? "rb_num2ull" : "NUM2LL"
+                       "#{num}(ca_obj2integer_fitting(*p1, #{type_name}))"
+                     else
+                       "#{conv}(*p1)"
+                     end
         read      = "if ( RB_TYPE_P(*p1, T_STRING) ) { " \
                     "ca_decimal_string_store(*p1, #{type_name}, p2); } " \
-                    "else { *p2 = (#{ctype2}) #{conv}(*p1); }"
+                    "else { *p2 = (#{ctype2}) #{store_conv}; }"
       else
         read_ok   = "( #{conv_ok}(*p1, &tmp) ? ( *p2 = (#{ctype2}) tmp, 1 ) : 0 )"
         read      = "*p2 = (#{ctype2}) #{conv}(*p1);"

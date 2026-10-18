@@ -193,7 +193,7 @@ VALUE rb_cCAByteSwap;
 int
 ca_byte_swap_setup (CAByteSwap *ca, CArray *parent, VALUE data_class)
 {
-  CA_CHECK_DATA_TYPE(parent->data_type);
+  CA_CHECK_DATA_TYPE_GIVEN(parent->data_type);
 
   if ( parent->data_type == CA_OBJECT ) {
     rb_raise(rb_eCADataTypeError, "object array can't be byte-swapped");
@@ -223,9 +223,6 @@ ca_byte_swap_setup (CAByteSwap *ca, CArray *parent, VALUE data_class)
   ca->nosync    = 0;
   ca->data_class = data_class;   /* Qnil if parent has no data_class */
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask(ca);
-  }
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
   }
@@ -240,6 +237,7 @@ ca_byte_swap_new (CArray *parent, VALUE data_class)
   ca_byte_swap_setup(NULL, parent, data_class);
   ca = (CAByteSwap *) ca_array_alloc(CA_OBJ_BYTE_SWAP, parent->ndim);
   ca_byte_swap_setup(ca, parent, data_class);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -464,7 +462,7 @@ ca_byte_swap_func_allocate (void *ap)
 {
   CAByteSwap *ca = (CAByteSwap *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -472,7 +470,7 @@ ca_byte_swap_func_attach (void *ap)
 {
   CAByteSwap *ca = (CAByteSwap *) ap;
   ca_attach(ca->parent);
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
   memcpy(ca->ptr, ca->parent->ptr, ca_length(ca));
   ca_byte_swap_apply(ca, ca->ptr);
 }
@@ -664,6 +662,7 @@ rb_ca_byte_swap_initialize_copy (VALUE self, VALUE other)
     ca_array_pool_alloc(ca, CA_OBJ_BYTE_SWAP, cs->parent->ndim);
   }
   ca_byte_swap_setup(ca, cs->parent, cs->data_class);
+  ca_view_inherit_mask((VALUE) ca);
   return self;
 }
 

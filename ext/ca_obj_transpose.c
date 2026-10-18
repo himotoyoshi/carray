@@ -7,6 +7,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_view_inherit_mask */
 #include "ca_obj_face.h"  /* CA_FACE_LIFT_IF_FACE */
 
 extern ca_operation_function_t ca_stride_func;
@@ -64,9 +65,9 @@ ca_trans_setup (CAStride *ca, CArray *parent, ca_size_t *imap)
     return 0;
   }
 
-  ca_stride_setup(ca, CA_OBJ_TRANSPOSE, parent,
-                  parent->data_type, parent->bytes,
-                  ndim, newdim, strides, 0);
+  ca_stride_setup_view(ca, CA_OBJ_TRANSPOSE, parent,
+                       parent->data_type, parent->bytes,
+                       ndim, newdim, strides, 0);
   return 0;
 }
 
@@ -77,6 +78,7 @@ ca_trans_new (CArray *parent, ca_size_t *imap)
   ca_trans_setup(NULL, parent, imap);
   ca = (CAStride *) ca_array_alloc(CA_OBJ_TRANSPOSE, parent->ndim);
   ca_trans_setup(ca, parent, imap);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 

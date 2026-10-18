@@ -57,7 +57,7 @@ class TestAxisDispatchFillValueCSA < Test::Unit::TestCase
   def test_2d_mask_with_scalar
     a = CArray.int(4, 3).seq
     m = CArray.boolean(4).tap { |__a| __a[] = [1, 0, 1, 1] }
-    assert_fill_matches(a, ->(b) { b[m, 1] }, -9)
+    assert_fill_matches(a, ->(b) { b[m, 1..1] }, -9)
   end
 
   def test_2d_all_true_mask
@@ -81,7 +81,7 @@ class TestAxisDispatchFillValueCSA < Test::Unit::TestCase
   def test_3d_mask_with_partial_ap_nested
     a = CArray.int(3, 4, 2).seq
     m = CArray.boolean(3).tap { |__a| __a[] = [1, 0, 1] }
-    assert_fill_matches(a, ->(b) { b[m, 1..2, 0] }, 88)
+    assert_fill_matches(a, ->(b) { b[m, 1..2, 0..0] }, 88)
   end
 
   def test_2d_float_data_type

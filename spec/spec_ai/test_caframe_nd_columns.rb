@@ -100,7 +100,7 @@ class TestCAFrameNDColumns < Test::Unit::TestCase
   def test_pivot_refuses_an_nd_key
     df = CAFrame.new("k" => CA_FLOAT64([[1, 2], [3, 4]]), "v" => CA_INT32([1, 2]))
     e = assert_raise(ArgumentError) { df.pivot(index: "k", columns: "v", values: "v") }
-    assert_match(/\Apivot: index:/, e.message)
+    assert_match(/\Apivot: the key "k" has shape \[2, 2\], not one value per row/, e.message)
   end
 
   def test_stack_rows_names_itself_in_its_key_errors

@@ -106,4 +106,17 @@ class TestY3CAFakeXferAddrs < Test::Unit::TestCase
     got = CArray.bench_xfer_addrs_get_addrs(fake, addrs, 1)
     assert_equal fake.to_ca.dump_binary, got
   end
+
+  # A refer that reads the same bytes as another type is not the root's
+  # cells: a fake over it converts from the refer's type on every path.
+  def test_fake_over_a_reinterpreting_refer
+    a = CArray.float32(4) { |i| i + 1.5 }
+    f = a.refer(:int32, [4]).fake(:float64)
+    want = a.refer(:int32, [4]).to_a.map(&:to_f)
+    assert_equal want, f.copy.to_a
+    assert_equal want, f[CA_INT64([0, 1, 2, 3])].to_a
+    assert_equal want, f[CA_BOOLEAN([1, 1, 1, 1])].to_a
+    f[CA_INT64([0, 1, 2, 3])] = CA_FLOAT64([7, 8, 9, 10])
+    assert_equal [7, 8, 9, 10], a.refer(:int32, [4]).to_a
+  end
 end

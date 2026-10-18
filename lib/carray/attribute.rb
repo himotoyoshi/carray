@@ -31,11 +31,35 @@
 #    The walk stops at a lazy operation view (CAMonOp / CABinOp /
 #    CATriOp / CAMonCmp / CABinCmp): its cells are computed, not the
 #    parent's cells, so the parent's attributes do not describe them.
-#    `a.lazy` itself (CALazyMarker) is a view of `a` and walks through.
+#    `a.lazy` itself (CALazyMarker) is a view of `a` and walks through,
+#    and so does a lazy type conversion (the cast lane `promote_list`
+#    and `wrap_readonly` build), for the reason `to_type` carries them.
+#    A view of a Face shows the attributes of the Face it was taken
+#    from (the walk goes to that Face, which the view's own parent
+#    chain skips).
+#    A view of several arrays (CAStack / CAMeld, so `stack`, `meld` and
+#    `montage`) shows, below its own @attr, the keys every one of its
+#    arrays shows with the same value; a key they disagree on, or one
+#    some of them lack, is not shown.
 #
-#  Copies: `copy` and `to_type` give the new array the attributes the
-#  source shows, as its own Hash.  Arithmetic and reductions do not
-#  carry them -- the result is a different quantity.
+#  Stored values are frozen copies, nested Arrays and Hashes included, so
+#  an attribute changes only through set_attr / set_attrs: a value read
+#  back cannot be changed in place, and a copy that shares it with its
+#  source cannot change the source.  A frozen array takes no new
+#  attribute.
+#
+#  A mask array (`a.mask`) holds no attributes: set_attr / set_attrs raise.
+#
+#  Copies: `dup` and `clone` give the new array its own Hash of the
+#  receiver's own attributes.  `copy` and `to_type` give the new array the attributes the
+#  source shows, as its own Hash; `concatenate`, `mosaic` and `tabulate`
+#  give it the keys every piece shows with the same value, as the views
+#  do.  A conversion to another type or representation (`to_type`,
+#  `categorize`, a CAFrame `cast` / `parse_to_time` / `to_time`) carries
+#  them.  Arithmetic and reductions do not -- the result is a different
+#  quantity -- including those that pick a value (`first`, `last`, `min`,
+#  `max`, `unique`).  A CAFrame index built from a key column's values
+#  (group and pivot) shows the key column's attributes.
 
 class CArray
 
@@ -63,9 +87,15 @@ class CArray
   #   store.
   #   @param key [Symbol, String] attribute key.
   #   @param value [Object] JSON-compatible value.
-  #   @return [Object] the coerced stored value.
+  #   The value is stored as a frozen copy (nested Arrays and Hashes
+  #   too).
+  #   @return [Object] the stored value.
   #   @raise [TypeError] when `key` or `value` is not accepted.
+  #   @raise [ArgumentError] when `value` nests more than 32 levels.
+  #   @raise [FrozenError] when `self` is frozen.
+  #   @raise [TypeError] when `self` is a mask array.
   def set_attr (key, value)
+    attr_check_writable
     attr_validate_value(value)
     (@attr ||= {})[attr_normalize_key(key)] = attr_coerce_value(value)
   end
@@ -79,7 +109,11 @@ class CArray
   #   @param hash [Hash{Symbol, String => Object}] attributes to set.
   #   @return [CArray] self.
   #   @raise [TypeError] when a key or a value is not accepted.
+  #   @raise [ArgumentError] when a value nests more than 32 levels.
+  #   @raise [FrozenError] when `self` is frozen.
+  #   @raise [TypeError] when `self` is a mask array.
   def set_attrs (hash)
+    attr_check_writable
     unless hash.is_a?(Hash)
       raise TypeError, "set_attrs takes a Hash (got #{hash.class})"
     end
@@ -94,8 +128,23 @@ class CArray
     self
   end
 
+  # @overload delete_attr(key)
+  #   Removes attribute `key` from `self` (not from any parent) and
+  #   returns its value, or `nil` when `self` has no such key. A key a
+  #   view shows from its parent stays visible after this, as `set_attr`
+  #   writes to `self` only.
+  #   @param key [Symbol, String] attribute key.
+  #   @return [Object, nil] the removed value.
+  #   @raise [FrozenError] when `self` is frozen.
+  def delete_attr (key)
+    k = attr_normalize_key(key)
+    return nil unless instance_variable_defined?(:@attr) && @attr
+    attr_check_not_frozen
+    @attr.delete(k)
+  end
+
   # @overload attrs
-  #   Returns a frozen shallow Hash of all attributes visible on
+  #   Returns a frozen Hash of all attributes visible on
   #   `self`, merged along the parent chain (deeper writes shadow
   #   shallower ones on a per-key basis).
   #   @return [Hash{String => Object}]
@@ -135,32 +184,85 @@ class CArray
   private
 
   # Yield each non-nil @attr Hash along the parent chain (self first).
-  # Bounded to MAX_CHAIN_DEPTH for paranoia against unexpected cycles;
-  # real CArray view chains rarely exceed a handful of levels.
-  MAX_CHAIN_DEPTH = 64
-  private_constant :MAX_CHAIN_DEPTH
-
+  # The chain has no fixed bound; an array seen twice ends the walk.
   def attr_each_chain
     ca = self
-    MAX_CHAIN_DEPTH.times do
+    seen = nil
+    loop do
       if ca.instance_variable_defined?(:@attr)
         h = ca.instance_variable_get(:@attr)
         yield(h) if h
       end
       return nil if attr_computing_view?(ca)
-      parent = ca.respond_to?(:parent) ? ca.parent : nil
-      return nil if parent.nil? || parent.equal?(ca)
+      if ca.is_a?(CAStack) || ca.is_a?(CAMeld)
+        shared = CArray.__send__(:attrs_shared_by, ca.parents)
+        yield(shared) unless shared.empty?
+        return nil
+      end
+      parent = ca.is_a?(CArray) ? ca.__send__(:attribute_parent) : nil
+      return nil if parent.nil?
+      seen ||= {}.compare_by_identity
+      return nil if seen.key?(parent)
+      seen[ca] = true
       ca = parent
     end
-    nil
   end
 
+  def attr_check_not_frozen
+    raise FrozenError.new("can't modify frozen #{self.class}: attributes", receiver: self) if frozen?
+  end
+
+  def attr_check_writable
+    attr_check_not_frozen
+    raise TypeError, "a mask array holds no attributes" if mask_array?
+  end
+
+  # Give `out`, a new array holding self's values in another type or
+  # representation, the attributes self shows; returns `out`.  A view of
+  # self that already shows them is left alone.
+  def carry_attrs (out)
+    return out if out.equal?(self)
+    shown = attrs
+    out.set_attrs(shown) unless shown.empty? || out.attrs == shown
+    out
+  end
+
+  # Remove what `out`, a new array a reduction made, holds of self's
+  # attributes; returns `out`.
+  def drop_carried_attrs (out)
+    out.remove_instance_variable(:@attr) if out.instance_variable_defined?(:@attr)
+    out
+  end
+
+  # The attributes every array in `list` shows with the same value.
+  def self.attrs_shared_by (list)
+    first, *rest = list.map(&:attrs)
+    return {} if first.nil?
+    first.select { |k, v| rest.all? { |h| h.key?(k) && h[k] == v } }
+  end
+  private_class_method :attrs_shared_by
+
   def attr_computing_view? (ca)
-    ca.is_a?(CAMonOp) || ca.is_a?(CABinOp) || ca.is_a?(CATriOp) ||
+    return ca.__op_id__ < CAMonOp::CAST_BASE if ca.is_a?(CAMonOp)
+    ca.is_a?(CABinOp) || ca.is_a?(CATriOp) ||
       ca.is_a?(CAMonCmp) || ca.is_a?(CABinCmp)
   end
 
   def attr_normalize_key (key)
+    CArray.__send__(:attr_normalize_key, key)
+  end
+
+  def attr_validate_value (v)
+    CArray.__send__(:attr_validate_value, v)
+  end
+
+  def attr_coerce_value (v)
+    CArray.__send__(:attr_coerce_value, v)
+  end
+
+  # The key and value rules, as class methods so that CAFrame's attributes
+  # follow the same ones.
+  def self.attr_normalize_key (key)
     case key
     when String then key
     when Symbol then key.to_s
@@ -169,7 +271,7 @@ class CArray
     end
   end
 
-  def attr_validate_value (v, depth = 0)
+  def self.attr_validate_value (v, depth = 0)
     raise ArgumentError, "attribute value nests too deep" if depth > 32
     case v
     when String, Integer, Float, true, false, nil, Symbol
@@ -189,17 +291,19 @@ class CArray
     end
   end
 
-  def attr_coerce_value (v)
+  def self.attr_coerce_value (v)
     case v
-    when Symbol then v.to_s
-    when Array  then v.map { |e| attr_coerce_value(e) }
+    when Symbol then v.to_s.freeze
+    when String then v.frozen? ? v : v.dup.freeze
+    when Array  then v.map { |e| attr_coerce_value(e) }.freeze
     when Hash
       v.each_with_object({}) do |(k, vv), h|
-        h[k.is_a?(Symbol) ? k.to_s : k] = attr_coerce_value(vv)
-      end
+        h[(k.is_a?(Symbol) ? k.to_s : k.dup).freeze] = attr_coerce_value(vv)
+      end.freeze
     else
       v
     end
   end
+  private_class_method :attr_normalize_key, :attr_validate_value, :attr_coerce_value
 
 end

@@ -82,7 +82,8 @@ ca_check_same_data_type (void *ap1, void *ap2)
 {
   CArray *ca1 = (CArray *) ap1;
   CArray *ca2 = (CArray *) ap2;
-  if ( ca1->data_type != ca2->data_type ) {
+  if ( ca1->data_type != ca2->data_type ||
+       ( ca1->data_type == CA_FIXLEN && ca1->bytes != ca2->bytes ) ) {
     rb_raise(rb_eCADataTypeError, "data_type mismatch");
   }
 }
@@ -200,8 +201,9 @@ rb_ca_is_type (VALUE arg, int type)
    live in ca_obj_record.c; signatures stay in carray.h for cross-file
    extern use. */
 
-/* CArray#valid_index?(*idx) — 1 if the index tuple is in range, else 0.
- * The number of indices must equal ndim (raises otherwise). */
+/* CArray#valid_index?(*idx) -- whether self[*idx] names a cell: a negative
+ * index counts from the end of its axis, as it does at every door.  The
+ * number of indices must equal ndim (raises otherwise). */
 static VALUE
 rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
 {
@@ -217,6 +219,9 @@ rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
   }
   for (i=0; i<ca->ndim; i++) {
     idx = NUM2SIZE(argv[i]);
+    if ( idx < 0 ) {
+      idx += ca->dim[i];
+    }
     if ( idx < 0 || idx >= ca->dim[i] ) {
       return Qfalse;
     }
@@ -225,7 +230,8 @@ rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
   return Qtrue;
 }
 
-/* CArray#valid_addr?(addr) — 1 if addr is in range 0...elements, else 0. */
+/* CArray#valid_addr?(addr) -- whether addr names a cell: a negative address
+ * counts from the end. */
 static VALUE
 rb_ca_is_valid_addr (VALUE self, VALUE raddr)
 {
@@ -234,6 +240,9 @@ rb_ca_is_valid_addr (VALUE self, VALUE raddr)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   addr = NUM2SIZE(raddr);
+  if ( addr < 0 ) {
+    addr += ca->elements;
+  }
   if ( addr < 0 || addr >= ca->elements ) {
     return Qfalse;
   }
@@ -249,6 +258,7 @@ rb_ca_has_same_shape (VALUE self, VALUE other)
 {
   CArray *ca, *cb;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  /* coerce: only the shape is compared */
   cb = ca_wrap_readonly(other, ca->data_type);
   return ca_has_same_shape(ca, cb) ? Qtrue : Qfalse;
 }
@@ -684,8 +694,19 @@ rb_ca_modify (VALUE self)
   rb_check_frozen(self);
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( ca_is_readonly(ca) ) {
-    rb_raise(rb_eRuntimeError, "can not modify read-only array");
+    ca_refuse_read_only();
   }
+}
+
+/* The refusal of a write into a read-only array that is not frozen (a
+   frozen one is Ruby's FrozenError, from rb_check_frozen): every guard
+   raises it, the entry points through rb_ca_modify and the transfers and
+   fills below them, which are the last line when an entry is missed. */
+void
+ca_refuse_read_only (void)
+{
+  rb_raise(rb_eRuntimeError, "%s: can not modify read-only array",
+           ca_calling_method_name());
 }
 
 /* CArray#freeze — freeze self and set CA_FLAG_READ_ONLY so subsequent

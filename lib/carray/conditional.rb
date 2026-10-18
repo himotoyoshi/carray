@@ -28,13 +28,18 @@ class CArray
   #   The result's data type is the common type of the two branches; a
   #   branch given as `UNDEF` masks its cells and leaves the type to the
   #   other branch (`cond.then_else(a, UNDEF)` has `a`'s data type).
+  #   String branches make the result a {CAString}
+  #   (`cond.then_else("yes", "no")`, also with `UNDEF` for one of them).
+  #   A Symbol branch, or a String beside a value of another kind, makes
+  #   the result an object array.
   #   When `self` or a branch is a lazy view, the result is a lazy view
   #   (read-only) that joins the expression around it; `copy` makes an
   #   array of it.  An object result is always computed at once.
   #   @param x [CArray, Numeric, Object] true-branch value(s).
   #   @param y [CArray, Numeric, Object] false-branch value(s).
-  #   @return [CArray] new array with the same shape as `self`, or a
-  #     lazy view (CATriOp) when an operand is lazy.
+  #   @return [CArray] new array with the same shape as `self` (a
+  #     {CAString} for String branches), or a lazy view (CATriOp) when an
+  #     operand is lazy.
   #   @raise [ArgumentError] when `self` is not a boolean CArray, or when
   #     an array branch's shape does not pair with `self`'s as an
   #     operator's operands would (equal, or size-1 axes of the same ndim;
@@ -52,15 +57,10 @@ class CArray
     face = [x, y].find { |v| v.is_a?(CArray) && !v.scalar? && v.face? }
     if face
       refuse_branch_shape(x, y) if reshaped
+      refuse_branch_mix(x, y, face)
       return face_then_else(x, y, face)
     end
-    # Promote data_type from both branches via CArray.result_type, which
-    # lets a scalar branch take the type of an array branch as an operator
-    # does (cond.then_else(0, int32_array) is int32).  UNDEF is a missing
-    # value, not a value of some type: a branch that is UNDEF leaves the
-    # type to the other.
-    typed = [x, y].reject { |v| v.equal?(UNDEF) }
-    dt = typed.empty? ? CA_OBJECT : CArray.result_type(*typed)
+    dt = CArray.send(:selection_type, [x, y])
     return lazy_then_else(x, y, dt) if lazy_then_else?(x, y, dt)
     # A branch shaped unlike the condition goes through the lazy select,
     # which pairs the shapes by the operator rule (equal, or size-1 axes
@@ -84,7 +84,7 @@ class CArray
     if self.has_mask?
       result[self.is_masked] = UNDEF
     end
-    result
+    CArray.send(:selection_text?, [x, y]) ? CAString.wrap(result) : result
   end
 
   # A lazy receiver or branch makes the selection a lazy node (CATriOp
@@ -93,7 +93,7 @@ class CArray
   # a CScalar of it, UNDEF a masked one.
   private def lazy_then_else? (x, y, dt)
     return false if scalar? || dt == CA_OBJECT || dt == CA_FIXLEN
-    [self, x, y].any? { |v| v.is_a?(CArray) && v.__lazy_view__? }
+    [self, x, y].any? { |v| v.is_a?(CArray) && v.lazy_view? }
   end
 
   # The types the lazy select cannot carry keep the strict form: a full
@@ -102,6 +102,22 @@ class CArray
     bad = [x, y].find { |v| v.is_a?(CArray) && !v.scalar? && v.shape != shape }
     raise ArgumentError,
           "then_else: branch shape #{bad.shape.inspect} does not match the condition's #{shape.inspect}"
+  end
+
+  # An array branch beside a Face branch must be a Face of the same kind
+  # (the same obj_type, so a CARecord subclass and a CARecord of one data
+  # class pair, as their store takes): the Face decides what a cell means,
+  # so a plain array would be read as its storage (an integer as a time's
+  # ticks) and the result would take the class of whichever branch came
+  # second.  A scalar branch is a value and goes through the Face's store.
+  private def refuse_branch_mix (x, y, face)
+    arrays = [x, y].select { |v| v.is_a?(CArray) && !v.scalar? }
+    return if arrays.all? { |v| v.face? && v.obj_type == face.obj_type }
+    hint = face.is_a?(CAString) ?
+      " (CArray.string(a) makes a CAString of an object array of Strings)" : ""
+    raise ArgumentError,
+          "then_else: cannot mix Face and non-Face arrays, or arrays of " \
+          "different Face classes; convert them first to one Face class or to no Face" + hint
   end
 
   private def lazy_then_else (x, y, dt)
@@ -178,7 +194,9 @@ class CArray
   #   Scalar returns from a callable (e.g. `->(v) { 0 }`) broadcast
   #   to the subset shape. The result `data_type` is the promotion
   #   of the two subset results via `CArray.result_type`, or
-  #   `data_type` when given. Masked cells in `cond` propagate to
+  #   `data_type` when given. A String result is a value (not the name
+  #   of a data type); when both callables give Strings or {CAString}s
+  #   the result is a {CAString}. Masked cells in `cond` propagate to
   #   `UNDEF` in the result.
   #
   #   @param cond [CArray] boolean selector; same shape as `self`.
@@ -205,18 +223,19 @@ class CArray
     x_else = self[cond.not]
     y_then = then_fn.call(x_then)
     y_else = else_fn.call(x_else)
+    text = !data_type && CArray.send(:selection_text?, [y_then, y_else])
 
     # A callable that returns a scalar (e.g. `->(v) { 0 }`) broadcasts
     # to the subset shape; wrap it here so the scatter step below sees a
     # same-length CArray.
     unless y_then.is_a?(CArray)
-      y_then = CArray.new(data_type || CArray.result_type(y_then), x_then.shape).fill(y_then)
+      y_then = CArray.new(data_type || CArray.send(:selection_type, [y_then]), x_then.shape).fill(y_then)
     end
     unless y_else.is_a?(CArray)
-      y_else = CArray.new(data_type || CArray.result_type(y_else), x_else.shape).fill(y_else)
+      y_else = CArray.new(data_type || CArray.send(:selection_type, [y_else]), x_else.shape).fill(y_else)
     end
 
-    dt  = data_type || CArray.result_type(y_then, y_else)
+    dt  = data_type || CArray.send(:selection_type, [y_then, y_else])
     out = CArray.new(dt, self.shape)
     out[cond]     = y_then
     out[cond.not] = y_else
@@ -225,7 +244,7 @@ class CArray
     # positions, so both scatters leave the cell untouched — an explicit
     # fix-up is required.
     out[cond.is_masked] = UNDEF if cond.has_mask?
-    out
+    text ? CAString.wrap(out) : out
   end
 
   # @overload select(condlist, choicelist, default: 0, data_type: nil)
@@ -238,7 +257,9 @@ class CArray
   #   Each `choicelist[k]` is either a same-shape CArray or a scalar
   #   broadcast to every cell. The result `data_type` is the promotion
   #   of every choice plus `default` via `CArray.result_type`, or
-  #   `data_type` when given.
+  #   `data_type` when given. A String choice is a value (not the name of
+  #   a data type); when every choice and `default` is a String or a
+  #   {CAString}, the result is a {CAString}.
   #
   #   @param condlist [Array<CArray>] boolean selectors.
   #   @param choicelist [Array<CArray, Numeric, Object>] values, one
@@ -274,7 +295,7 @@ class CArray
     end
     shape = first.shape
 
-    dt = data_type || CArray.result_type(*choicelist, default)
+    dt = data_type || selection_type(choicelist + [default])
     # `default` can be either a same-shape CArray (per-cell fallback) or a
     # scalar (broadcast to every cell).
     default_full = default.is_a?(CArray) && !default.scalar?
@@ -297,7 +318,35 @@ class CArray
       v = choicelist[k]
       out[c] = v.is_a?(CArray) ? v[c] : v
     end
+    if !data_type && selection_text?(choicelist + [default])
+      out = CAString.wrap(out)
+    end
     out
   end
+
+  # The data type a selection among `values` writes into: their common type,
+  # by the rule an operator promotes its operands by (a scalar takes the
+  # type of an array beside it).  UNDEF is a missing value, not a value of
+  # some type, so it leaves the type to the others.  A String or Symbol is a
+  # value, which CArray.result_type would read as the name of a data type
+  # ("int32"), so it makes the result object.
+  def self.selection_type (values)
+    typed = values.reject { |v| v.equal?(UNDEF) }
+    if typed.empty? || typed.any? { |v| v.is_a?(String) || v.is_a?(Symbol) }
+      CA_OBJECT
+    else
+      CArray.result_type(*typed)
+    end
+  end
+  private_class_method :selection_type
+
+  # Whether a selection among `values` gives text: every value that is not
+  # UNDEF is a String or a CAString, and there is at least one.  The result
+  # is then a CAString rather than an object array of Strings.
+  def self.selection_text? (values)
+    present = values.reject { |v| v.equal?(UNDEF) }
+    !present.empty? && present.all? { |v| v.is_a?(String) || v.is_a?(CAString) }
+  end
+  private_class_method :selection_text?
 
 end

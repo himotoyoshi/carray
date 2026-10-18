@@ -14,7 +14,7 @@ class TestFaceStoreConvertsOnce < Test::Unit::TestCase
     class << self; attr_accessor :calls; end
     self.calls = 0
     def initialize(parent)
-      super(parent.data_type, parent.dim, parent: parent, face: true,
+      super(parent.data_type, parent.shape, parent: parent, face: true,
             orderable_storage: true)
     end
     def storage_to_element(raw) = Elem.new(raw / 10.0)

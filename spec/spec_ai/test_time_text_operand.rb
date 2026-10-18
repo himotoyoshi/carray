@@ -24,11 +24,14 @@ class TestTimeTextOperand < Test::Unit::TestCase
     assert_equal [true, false, false], d.is_in([d[0]]).to_a
   end
 
-  def test_off_grid_instant_raises_instead_of_flooring
+  def test_off_grid_instant_is_compared_as_it_is_not_floored
     d = days
-    assert_raise(ArgumentError) { d.eq("2024-01-02 09:00") }
-    assert_raise(ArgumentError) { d.eq(Time.utc(2024, 1, 2, 9)) }
+    assert_equal [false, false, false], d.eq("2024-01-02 09:00").to_a
+    assert_equal [false, false, false], d.eq(Time.utc(2024, 1, 2, 9)).to_a
+    assert_equal [true, true, false], (d < Time.utc(2024, 1, 2, 9)).to_a
     assert_equal [false, true, false], d.eq(Time.utc(2024, 1, 2)).to_a
+    # an assignment has to land on the grid, so it still refuses
+    assert_raise(ArgumentError) { d.copy[0] = "2024-01-02 09:00" }
   end
 
   def test_precision_and_offset_are_read_from_the_text

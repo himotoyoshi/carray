@@ -154,6 +154,21 @@ rb_ca_time_element_initialize (VALUE self, VALUE value, VALUE unit)
   return self;
 }
 
+/* dup / clone copy the value and the unit (the allocator leaves both 0). */
+static VALUE
+rb_ca_time_element_initialize_copy (VALUE self, VALUE orig)
+{
+  CATimeElement *s, *o;
+  if ( self == orig ) {
+    return self;
+  }
+  rb_check_frozen(self);
+  TypedData_Get_Struct(self, CATimeElement, &catime_element_data_type, s);
+  TypedData_Get_Struct(orig, CATimeElement, &catime_element_data_type, o);
+  *s = *o;
+  return self;
+}
+
 static VALUE
 rb_ca_time_element_value (VALUE self)
 {
@@ -216,9 +231,6 @@ ca_time_setup (CATime *ca, CArray *parent, int8_t unit, int64_t count)
   ca->unit      = unit;
   ca->count     = count;
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask((CArray *) ca);
-  }
 
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -238,6 +250,7 @@ ca_time_new (CArray *parent, int8_t unit, int64_t count)
   ca_time_setup(NULL, parent, unit, count);
   ca = (CATime *) ca_array_alloc(CA_OBJ_TIME, parent->ndim);
   ca_time_setup(ca, parent, unit, count);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -398,7 +411,7 @@ rb_ca_time_wrap (VALUE parent_val, int8_t unit, int64_t count)
   return obj;
 }
 
-/* __wrap__(raw, unit_spec) — primitive; unit_spec is Symbol / String /
+/* wrap_storage(raw, unit_spec) — primitive; unit_spec is Symbol / String /
    Resolution / nil (normalized here). */
 static VALUE
 rb_ca_time_wrap_method (VALUE klass, VALUE raw, VALUE unit_spec)
@@ -479,6 +492,7 @@ rb_ca_time_initialize_copy (VALUE self, VALUE other)
     ca_array_pool_alloc(ca, CA_OBJ_TIME, cs->parent->ndim);
   }
   ca_time_setup(ca, cs->parent, cs->unit, cs->count);
+  ca_view_inherit_mask((VALUE) ca);
   return self;
 }
 
@@ -512,8 +526,8 @@ Init_ca_obj_time (void)
   rb_define_method(rb_cCATime, "initialize_copy",
                                      rb_ca_time_initialize_copy, 1);
 
-  rb_define_singleton_method(rb_cCATime, "__wrap__",
-                                     rb_ca_time_wrap_method, 2);
+  rb_define_private_method(rb_singleton_class(rb_cCATime), "wrap_storage",
+                           rb_ca_time_wrap_method, 2);
   rb_define_method(rb_cCATime, "unit", rb_ca_time_unit, 0);
   rb_define_method(rb_cCATime, "storage_to_element",
                                      rb_ca_time_storage_to_element, 1);
@@ -539,6 +553,8 @@ Init_ca_obj_time (void)
                        rb_ca_time_element_s_allocate);
   rb_define_method(rb_cCATimeElement, "initialize",
                    rb_ca_time_element_initialize, 2);
+  rb_define_method(rb_cCATimeElement, "initialize_copy",
+                   rb_ca_time_element_initialize_copy, 1);
   rb_define_method(rb_cCATimeElement, "value",
                    rb_ca_time_element_value, 0);
   rb_define_method(rb_cCATimeElement, "unit",

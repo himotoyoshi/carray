@@ -22,6 +22,11 @@
 #                      `acc ^= v` lane is that mod-2 addition, not a separate
 #                      XOR operation.  `sum` remains the widening
 #                      count-of-trues (u64).
+#                      An accumulate along an axis keeps boolean so that a
+#                      second accumulate along another axis is still mod 2:
+#                      folding the axes one by one gives the parity of the
+#                      whole.  Folding everything at once has nothing left to
+#                      fold into, so it answers as a number, 0 or 1.
 
 require "test/unit"
 require "carray"
@@ -131,6 +136,15 @@ class TestBooleanNumericExt < Test::Unit::TestCase
     out = m.accumulate(axis: 1)
     assert_equal CA_BOOLEAN, out.data_type
     assert_equal [true, true], out.to_a   # row0: 3 trues -> 1; row1: 1 true -> 1
+  end
+
+  # Folding the axes one at a time is the parity of the whole. Each row here
+  # holds an odd number of trues, so the second fold is only a parity when
+  # the first one stayed boolean (as numbers the three 1s would add to 3).
+  def test_accumulate_along_two_axes
+    m = CA_BOOLEAN([[true, false], [true, false], [false, true]])
+    assert_equal 1, m.accumulate
+    assert_equal 1, m.accumulate(axis: 1).accumulate(axis: 0)
   end
 
   def test_accumulate_all_masked_identity

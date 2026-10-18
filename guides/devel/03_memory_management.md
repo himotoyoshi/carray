@@ -154,6 +154,24 @@ calling `rb_gc_mark` on each — so the contained Ruby objects survive
 collection. For numeric arrays there is nothing to mark; `ca_mark`
 returns immediately. The mask sibling is also marked (cascade).
 
+`rb_gc_mark` trusts what it is given, and `ca_mark` marks a view's
+`ca->ptr` from the moment the pointer is set. A fresh buffer that will
+hold object cells must therefore contain valid `VALUE`s before it is
+published, even if the code that fills it never calls Ruby today:
+
+- a buffer for an array's cells is allocated with `ca_alloc_cells(ca)`
+  (`carray_internal.h`), which starts object cells as `nil`. `rake
+  cell_buffer_check` (`utils/check_cell_buffers.rb`) reports a `ptr`
+  assigned straight from an allocator unless it carries a
+  `/* cells: ... */` note saying why its cells are valid;
+- any other fresh `VALUE` buffer is cleared with `ca_object_cells_clear`
+  before it is held (`ca_gc_hold_push` for a hold nested in the current
+  call, `ca_gc_hold_buffer` for one released in any order).
+
+`spec/spec_ai/test_object_cells_gc_matrix.rb` lists every view class,
+either with a recipe that builds it with object cells or with the reason
+it has none, and runs the recipes under `GC.stress`.
+
 `ca_free` dispatches to `ca_func[obj_type].free_object`. The four
 variants you see across `ca_obj_*.c`:
 
@@ -210,6 +228,44 @@ VALUE   rb_ca_template_n          (int n, ...);
 `rb_ca_template_n` is the multi-input broadcast template: pass N input
 VALUEs, get an output sized by their broadcast shape. Used internally
 by `call_cfunc` ([ch. 14](14_call_cfunc.md)).
+
+## A raise between allocating and handing over
+
+A constructor checks its arguments before it allocates: `*_setup(NULL,
+...)` runs the setup's checks and returns, and the constructor calls it
+first. `rake setup_before_alloc_check` (`utils/check_setup_before_alloc.rb`)
+reports a constructor that allocates without it, unless a
+`/* check: ... */` note says why nothing the setup checks can fail.
+
+A struct returned by `carray_new`, `ca_template` or a view's `*_new`
+belongs to no Ruby object until `ca_wrap_struct`. If anything between
+the allocation and the hand-over can raise, what was allocated is lost.
+Calls that can raise are not always visible at the allocation:
+asking an array for its mask (`ca_has_mask`, `ca_create_mask`,
+`ca_setup_mask`) or for its cells runs Ruby when the array is a
+`CAObject`, and a MemoryView producer can build its export in Ruby.
+
+- Take every buffer first, then do the step that can raise under
+  `ca_fill_or_free(ca, step, arg)`, which frees `ca` before the raise
+  propagates. `carray_new` copies a source mask this way.
+- A view takes its parent's mask in its constructor, after the setup:
+  `ca_fill_or_free(ca, ca_view_inherit_mask, (VALUE) ca)`, and an
+  `initialize_copy`, whose struct Ruby owns, calls `ca_view_inherit_mask`
+  directly. A view's `*_setup` does not ask; `rake view_setup_mask_check`
+  (`utils/check_view_setup_mask.rb`) reports a call that does. The
+  in-tree CAStride subclasses use `ca_stride_setup_view`; the public
+  `ca_stride_setup` still takes the mask, for extensions that call it.
+- A buffer that is not yet part of a struct goes through
+  `ca_fill_or_xfree(buf, step, arg)`, or is taken with `ALLOCV`; arrays
+  attached for the step go through `ca_fill_or_detach(n, list, step, arg)`.
+  `rake protect_parts_check` (`utils/check_protect_parts.rb`) asks a
+  hand-written `rb_protect` outside the files that implement these parts
+  to say, in a `/* protect: ... */` note, why it is not one of them.
+
+`rake leak_matrix` (`utils/leak_matrix.rb`, macOS) runs every public
+method over a `CAObject` source whose hooks raise and reports the calls
+that leave memory behind; `utils/measure_leak.rb` measures one expression
+in a fresh process.
 
 ## What about `CARRAY_DEV`?
 

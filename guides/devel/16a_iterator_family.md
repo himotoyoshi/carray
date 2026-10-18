@@ -286,11 +286,11 @@ The split of responsibilities is deliberate:
   factorised label view), reduce-plan assembly and output-axis permutation.
   Plain O(ndim) metadata, off the hot path, so Ruby is the right place.
 - **`ext/ca_axis_group.c`** — the O(N) compute kernel
-  `__axis_group_reduce__` (and `__axis_group_scan__`), taking pre-built code
+  `__reduce_by_axis_groups__` (and `__scan_by_axis_groups__`), taking pre-built code
   bundles so it is independent of how the classifier was constructed.
 
 A registration handshake keeps the hot path free: `lib/carray/axis_group.rb`
-calls `CArray.__register_axis_group_classes__(CACategorical, AxisGroup)` at
+calls `CArray.register_axis_group_classes(CACategorical, AxisGroup)` at
 load time, storing the class objects in C statics (GC-registered). Until the
 classes are loaded the statics are `Qnil` and the `[]` type-gate scan
 short-circuits — a normal index pays **nothing** (not even a `kind_of?`) for
@@ -298,7 +298,7 @@ the feature's existence.
 
 ### The compute kernel
 
-`__axis_group_reduce__` is a showcase of the kernel iterator used from
+`__reduce_by_axis_groups__` is a showcase of the kernel iterator used from
 inside the library:
 
 - `CA_FOR_EACH_SLAB` pins the **union of grouped source axes** as the slab
@@ -360,12 +360,24 @@ A new member (or a companion gem adding one) must keep:
 7. **Take `min_count:` and `fill_value:` wherever the core reduction does,
    and decide them as the core does.** Pass them to the core when you
    delegate (`CAIterator.reduce_keywords` refuses only `axis:`). A member
-   that reduces on its own asks `CArray.__min_count_need__(op, min_count,
+   that reduces on its own asks `CArray.__present_cells_needed_per_result_cell__(op, min_count,
    least)` for the number of cells a piece needs and fills with
-   `CArray.__reduce_fill__(result, fill_value)`; both are the C parts every
+   `CArray.__fill_undefined_result_cells__(result, fill_value)`; both are the C parts every
    core reduction uses (`ca_too_few_present`, `ca_min_count_arg`,
    `ca_reduce_fill`), so a member does not write the rule a second time.
    A count of the mask reads every cell of a piece, so its `min_count:`
    compares with the piece size. `spec/spec_ai/test_reduce_present_count_matrix.rb`
    checks every member against the core and fails for a member it cannot
    build.
+8. **Take an output type from the core, never from a table of your own.**
+   A member that answers by a route of its own (a fused kernel, a fold by
+   offset) builds its output in the type the core gives for the same
+   reduction, asked of `CAIterator.core_probe(value)` — a one-cell array of
+   the values' kind, which for a Face is a view of the values themselves —
+   so the route and the core cannot drift apart. Reading the class of the
+   core's answer, not only its data type, matters for a Face: a `CATime`'s
+   spread comes back a `CATimedelta`. `each` yields a piece of a Face as
+   that Face. `spec/spec_ai/test_iterator_answers_core.rb` compares every
+   reduction of every member with the core over each piece `each` yields
+   (values and data type, across payloads, masks and empty pieces), and
+   fails for a member it cannot build.

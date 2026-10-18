@@ -35,9 +35,14 @@ typedef struct {
   /* INDEX-only.  Owned in the non-share case (xfree'd by free_ca_grid),
      aliased in the share case (parent owns; CA_FLAG_SHARE_INDEX). */
   ca_size_t       *indices;
+  /* INDEX-only, NULL when no cell is a hole.  holes[i] marks a position
+     whose index cell was masked: it selects no parent cell.  Its entry in
+     indices is 0 and is never range-checked.  Owned and aliased as
+     indices is. */
+  uint8_t         *holes;
 } cag_axis_t;
 
-typedef struct {
+typedef struct _CAGrid {
   int16_t   obj_type;
   int8_t    data_type;
   int8_t    ndim;
@@ -53,6 +58,18 @@ typedef struct {
   uint8_t   nosync;
   /* -------------*/
   cag_axis_t  *axes;     /* [ndim], owned (non-share) or aliased (share) */
+  /* A grid with holes (cag_axis_t.holes): set on its mask grid, whose
+     holes read as masked.  The data grid's holes read the cell at index 0
+     of each holed axis, as project and gather_nd do. */
+  int8_t       holes_read_masked;
+  /* A grid with holes over a parent that has no mask: the all-false mask
+     its mask grid reads instead, so that showing the holes gives the
+     parent no mask.  Owned by this grid; NULL otherwise. */
+  CArray      *mask_standin;
+  /* On a mask grid: the grid whose mask it is, which holds the stand-in
+     and the parent whose mask replaces it.  A Ruby copy of the mask keeps
+     that grid alive (rb_ca_mask_array sets masked_array). */
+  struct _CAGrid *mask_owner;
 } CAGrid;
 
 static size_t
@@ -69,6 +86,9 @@ ca_grid_dsize (const void *ap)
   for (k = 0; k < ca->ndim; k++) {
     if (ca->axes[k].kind == CAG_AXIS_INDEX && ca->axes[k].indices) {
       total += ca->axes[k].count * sizeof(ca_size_t);
+    }
+    if (ca->axes[k].kind == CAG_AXIS_INDEX && ca->axes[k].holes) {
+      total += ca->axes[k].count;
     }
   }
   return total;
@@ -160,13 +180,15 @@ ca_grid_check_protos (CArray *parent, int8_t ndim, const cag_axis_t *protos)
     if (protos[k].kind == CAG_AXIS_STRIDE) {
       ca_size_t first = protos[k].start;
       ca_size_t last  = first + (protos[k].count - 1) * protos[k].step;
-      CA_CHECK_INDEX(first, parent->dim[k]);
-      if (protos[k].count > 1) CA_CHECK_INDEX(last, parent->dim[k]);
+      ca_index_in_range_at(first, parent->dim[k], k);
+      if (protos[k].count > 1) ca_index_in_range_at(last, parent->dim[k], k);
     }
     else {
       for (j = 0; j < protos[k].count; j++) {
-        ca_size_t v = protos[k].indices[j];
-        CA_CHECK_INDEX(v, parent->dim[k]);
+        if ( protos[k].holes && protos[k].holes[j] ) {
+          continue;
+        }
+        ca_index_in_range_at(protos[k].indices[j], parent->dim[k], k);
       }
     }
   }
@@ -207,6 +229,9 @@ ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
+  ca->holes_read_masked = 0;
+  ca->mask_standin      = NULL;
+  ca->mask_owner        = NULL;
 
   for (k = 0; k < ndim; k++) ca->dim[k] = protos[k].count;
 
@@ -225,42 +250,104 @@ ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
         ca->axes[k].start   = protos[k].start;
         ca->axes[k].step    = protos[k].step;
         ca->axes[k].indices = NULL;
+        ca->axes[k].holes   = NULL;
       } else {
         ca->axes[k].start   = 0;
         ca->axes[k].step    = 0;
         ca->axes[k].indices = ALLOC_N(ca_size_t,
                                       protos[k].count > 0 ? protos[k].count : 1);
+        ca->axes[k].holes   = NULL;
         ca_size_t j;
+        if ( protos[k].holes ) {
+          for (j = 0; j < protos[k].count && ! protos[k].holes[j]; j++) ;
+          if ( j < protos[k].count ) {
+            ca->axes[k].holes = ALLOC_N(uint8_t, protos[k].count);
+            memcpy(ca->axes[k].holes, protos[k].holes, protos[k].count);
+          }
+        }
         for (j = 0; j < protos[k].count; j++) {
           ca_size_t v = protos[k].indices[j];
+          if ( ca->axes[k].holes && ca->axes[k].holes[j] ) {
+            ca->axes[k].indices[j] = 0;
+            continue;
+          }
           ca->axes[k].indices[j] = ( v < 0 ) ? v + parent->dim[k] : v;
         }
       }
     }
   }
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask(ca);
-  }
-
   return 0;
+}
+
+/* Whether any position of the grid is a hole (cag_axis_t.holes). */
+static int
+cag_has_holes (const CAGrid *ca)
+{
+  int8_t k;
+  for (k = 0; k < ca->ndim; k++) {
+    if ( ca->axes[k].kind == CAG_AXIS_INDEX && ca->axes[k].holes ) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+int
+ca_grid_has_holes (void *ap)
+{
+  return cag_has_holes((const CAGrid *) ap);
+}
+
+/* A grid with holes has a mask from the start: its holes read as masked
+   whatever the parent holds.  A mask grid (holes_read_masked) takes none.
+   A view of a value array or a mask array can never carry a mask, so it
+   can not show a hole. */
+static VALUE
+ca_grid_inherit_mask (VALUE view)
+{
+  CAGrid *ca = (CAGrid *) view;
+  if ( cag_has_holes(ca) && ! ca->holes_read_masked ) {
+    if ( ca_is_value_array(ca) || ca_is_mask_array(ca) ) {
+      rb_raise(rb_eArgError,
+               "a masked index cell reads as masked, which a view of the %s "
+               "array can not hold", ca_is_value_array(ca) ? "value" : "mask");
+    }
+    ca_create_mask((CArray *) ca);
+    return Qnil;
+  }
+  return ca_view_inherit_mask(view);
+}
+
+/* holes_read_masked is the copied grid's: a copy of a mask grid is one. */
+static CAGrid *
+ca_grid_new_as (CArray *parent, int8_t ndim, cag_axis_t *protos,
+                int8_t holes_read_masked, CAGrid *mask_owner)
+{
+  CAGrid *ca;
+  ca_grid_check_protos(parent, ndim, protos);
+  /* check: ca_grid_check_protos above */
+  ca = (CAGrid *) ca_array_alloc(CA_OBJ_GRID, ndim);
+  ca_grid_setup(ca, parent, ndim, protos, 0);
+  ca->holes_read_masked = holes_read_masked;
+  ca->mask_owner        = mask_owner;
+  ca_fill_or_free((CArray *) ca, ca_grid_inherit_mask, (VALUE) ca);
+  return ca;
 }
 
 CAGrid *
 ca_grid_new (CArray *parent, int8_t ndim, cag_axis_t *protos)
 {
-  CAGrid *ca;
-  ca_grid_check_protos(parent, ndim, protos);
-  ca = (CAGrid *) ca_array_alloc(CA_OBJ_GRID, ndim);
-  ca_grid_setup(ca, parent, ndim, protos, 0);
-  return ca;
+  return ca_grid_new_as(parent, ndim, protos, 0, NULL);
 }
 
 CAGrid *
 ca_grid_new_share (CArray *parent, int8_t ndim, cag_axis_t *protos)
 {
+  /* check: the mask grid copies its own grid's checked axes */
   CAGrid *ca = (CAGrid *) ca_array_alloc(CA_OBJ_GRID, ndim);
   ca_grid_setup(ca, parent, ndim, protos, 1);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -270,11 +357,15 @@ free_ca_grid (void *ap)
   CAGrid *ca = (CAGrid *) ap;
   if ( ca != NULL ) {
     ca_free(ca->mask);
+    ca_free(ca->mask_standin);
     if ( ! (ca->flags & CA_FLAG_SHARE_INDEX) ) {
       int8_t k;
       for (k = 0; k < ca->ndim; k++) {
         if ( ca->axes[k].kind == CAG_AXIS_INDEX && ca->axes[k].indices ) {
           xfree(ca->axes[k].indices);
+        }
+        if ( ca->axes[k].kind == CAG_AXIS_INDEX && ca->axes[k].holes ) {
+          xfree(ca->axes[k].holes);
         }
       }
       xfree(ca->axes);
@@ -301,7 +392,8 @@ static void *
 ca_grid_func_clone (void *ap)
 {
   CAGrid *ca = (CAGrid *) ap;
-  return ca_grid_new(ca->parent, ca->ndim, ca->axes);
+  return ca_grid_new_as(ca->parent, ca->ndim, ca->axes, ca->holes_read_masked,
+                        ca->mask_owner);
 }
 
 /* Per-axis parent-index lookup.  STRIDE = one multiply, INDEX = one
@@ -313,6 +405,124 @@ cag_parent_index_for (const cag_axis_t *ax, ca_size_t i)
     return ax->start + i * ax->step;
   }
   return ax->indices[i];
+}
+
+/* A mask grid over its owner's stand-in (ca_mask_standin_current): what
+   it reads from now on. */
+static void
+cag_mask_current (CAGrid *m)
+{
+  CAGrid *o = m->mask_owner;
+  if ( o != NULL ) {
+    m->parent = ca_mask_standin_current((CArray *) m, m->parent, o->parent,
+                                        o->mask_standin);
+  }
+}
+
+/* After a write of n cells of `data` to a mask grid: a true that went
+   into the stand-in goes on to the parent's mask. */
+static void
+cag_mask_settle_after (CAGrid *m, const void *data, ca_size_t n)
+{
+  CAGrid *o = m->mask_owner;
+  if ( o != NULL && m->parent == o->mask_standin && ca_mask_any_true(data, n) ) {
+    ca_mask_standin_settle(o->parent, o->mask_standin);
+  }
+}
+
+/* What the GET of a hole writes when it reads no parent cell: true in a
+   mask grid, an empty cell otherwise (a parent with no cell to read). */
+static void
+cag_hole_cells (const CAGrid *ca, char *data, ca_size_t n)
+{
+  ca_size_t i;
+  if ( ca->holes_read_masked ) {
+    memset(data, 1, (size_t) n);
+  }
+  else if ( ca->data_type == CA_OBJECT ) {
+    for (i = 0; i < n; i++) ((VALUE *) data)[i] = INT2FIX(0);
+  }
+  else {
+    memset(data, 0, (size_t) (n * ca->bytes));
+  }
+}
+
+/* The parent address of the view cell at idx.  A hole takes index 0 on its
+   holed axes; the return says whether the cell is one. */
+static int
+cag_parent_addr (const CAGrid *ca, const ca_size_t *idx, ca_size_t *paddr)
+{
+  ca_size_t pa = 0;
+  int hole = 0;
+  int8_t k;
+  for (k = 0; k < ca->ndim; k++) {
+    const cag_axis_t *ax = &ca->axes[k];
+    if ( ax->kind == CAG_AXIS_INDEX && ax->holes && ax->holes[idx[k]] ) {
+      hole = 1;
+    }
+    pa = pa * ca->parent->dim[k] + cag_parent_index_for(ax, idx[k]);
+  }
+  *paddr = pa;
+  return hole;
+}
+
+/* The transfer of a grid with holes, for the view cells at addrs (NULL:
+   the whole view in order).  The parent is asked for one batch of
+   addresses.  A GET reads every cell, a hole reading the cell at index 0
+   of its holed axes (in a mask grid it is then set true); a PUT leaves
+   the holes out. */
+static void
+ca_grid_holed_xfer (CAGrid *ca, ca_size_t n, const ca_size_t *addrs,
+                    char *data, int dir)
+{
+  CArray        *parent;
+  ca_size_t      bytes  = ca->bytes;
+  volatile VALUE h_addr = 0, h_hole = 0, h_data = 0;
+  ca_size_t     *paddrs;
+  uint8_t       *hole;
+  ca_size_t      i, m, idx[CA_RANK_MAX];
+
+  if ( n <= 0 ) {
+    return;
+  }
+  cag_mask_current(ca);
+  parent = ca->parent;
+  paddrs = ALLOCV_N(ca_size_t, h_addr, n);
+  hole   = ALLOCV_N(uint8_t, h_hole, n);
+  for (i = 0; i < n; i++) {
+    ca_addr2index((CArray *) ca, addrs ? addrs[i] : i, idx);
+    hole[i] = (uint8_t) cag_parent_addr(ca, idx, &paddrs[i]);
+  }
+
+  if ( dir == CA_XFER_GET ) {
+    if ( parent->elements == 0 ) {
+      cag_hole_cells(ca, data, n);   /* every cell is a hole */
+    }
+    else {
+      ca_xfer_addrs(parent, n, paddrs, data, CA_XFER_GET);
+      if ( ca->holes_read_masked ) {
+        for (i = 0; i < n; i++) {
+          if ( hole[i] ) cag_hole_cells(ca, data + i * bytes, 1);
+        }
+      }
+    }
+  }
+  else {
+    char *pdata = ALLOCV_N(char, h_data, n * bytes);
+    for (i = 0, m = 0; i < n; i++) {
+      if ( hole[i] ) continue;
+      paddrs[m] = paddrs[i];
+      memcpy(pdata + m * bytes, data + i * bytes, (size_t) bytes);
+      m++;
+    }
+    if ( m > 0 ) {
+      ca_xfer_addrs(parent, m, paddrs, pdata, CA_XFER_PUT);
+      cag_mask_settle_after(ca, pdata, m);
+    }
+    ALLOCV_END(h_data);
+  }
+  ALLOCV_END(h_hole);
+  ALLOCV_END(h_addr);
 }
 
 /* per-cell logic lives in ca_grid_func_xfer_index; forward-declared for
@@ -327,10 +537,28 @@ ca_grid_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   CAGrid *ca = (CAGrid *) ap;
   ca_size_t idx0[CA_RANK_MAX];
   int8_t i;
+  int hole = 0;
   for (i = 0; i < ca->ndim; i++) {
-    idx0[i] = cag_parent_index_for(&ca->axes[i], idx[i]);
+    const cag_axis_t *ax = &ca->axes[i];
+    idx0[i] = cag_parent_index_for(ax, idx[i]);
+    if ( ax->kind == CAG_AXIS_INDEX && ax->holes && ax->holes[idx[i]] ) {
+      hole = 1;
+    }
   }
+  if ( hole ) {
+    if ( dir == CA_XFER_PUT ) {
+      return;
+    }
+    if ( ca->holes_read_masked || ca->parent->elements == 0 ) {
+      cag_hole_cells(ca, (char *) data, 1);
+      return;
+    }
+  }
+  cag_mask_current(ca);
   ca_xfer_index(ca->parent, idx0, data, dir);
+  if ( dir == CA_XFER_PUT ) {
+    cag_mask_settle_after(ca, data, 1);
+  }
 }
 
 /* Batched address gather/scatter.  Per-axis index remap
@@ -353,6 +581,11 @@ ca_grid_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
   ca_size_t  i, base;
   int8_t     k;
   volatile VALUE holder;
+
+  if ( cag_has_holes(ca) ) {
+    ca_grid_holed_xfer(ca, n, addrs, (char *) data, dir);
+    return;
+  }
 
   /* Opportunistic fast path.  ca_resolve_attached_root_via_identity lifts
      parent->ptr through an identity CAStride compose-fold (handles a
@@ -409,8 +642,9 @@ ca_grid_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
   int8_t    k;
 
   for (k = 0; k < g->ndim; k++) {
-    if (g->axes[k].kind == CAG_AXIS_INDEX && g->axes[k].count != 1) {
-      return 0;   /* multi-INDEX axis -> true gather, decline */
+    if (g->axes[k].kind == CAG_AXIS_INDEX
+        && (g->axes[k].count != 1 || g->axes[k].holes)) {
+      return 0;   /* multi-INDEX axis -> true gather, decline; a hole is no stride */
     }
   }
 
@@ -505,8 +739,9 @@ ca_grid_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   /* The request is over the view's addresses, so a transposed / flat request
      is legal and must not be composed axis-by-axis; see
      ca_xfer_stride_request_is_axis_box (carray.h). */
-  if ( ! ca_xfer_stride_request_is_axis_box(g, starts, counts, strides) ) {
-    aligned = 0;
+  if ( cag_has_holes(g)
+       || ! ca_xfer_stride_request_is_axis_box(g, starts, counts, strides) ) {
+    aligned = 0;   /* a grid with holes goes cell by cell (xfer_index) */
   }
   else {
     for (k = 0; k < ndim; k++) {
@@ -519,6 +754,7 @@ ca_grid_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     ca_size_t idx[CA_RANK_MAX], doff = 0, base = 0;
     for (k = 0; k < ndim; k++) base += starts[k] * gnative[k];
     for (k = 0; k < ndim; k++) idx[k] = 0;
+    /* empty: the slot returns on an empty region at its entry */
     while (1) {
       ca_size_t goff = base, gidx[CA_RANK_MAX];
       for (k = 0; k < ndim; k++) goff += idx[k] * strides[k];
@@ -607,6 +843,7 @@ ca_grid_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
      ca_xfer_stride/ca_xfer_addrs. */
   for (k = 0; k < ndim; k++) o[k] = 0;
 
+  /* empty: the slot returns on an empty region at its entry */
   while (1) {
     ca_size_t pbase = 0, doff = 0;
     for (k = 0; k < inner; k++) {
@@ -659,14 +896,22 @@ ca_grid_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
    The predicate asks what the parent is, not whether it is attached now,
    so attach, sync and detach all take the same branch. */
 
+/* A grid with holes fills and writes back its buffer through its own
+   transfers too: the descriptor engine has no hole. */
+static int
+cag_owns_buffer (CAGrid *ca)
+{
+  return cag_has_holes(ca) || ca_parent_lends_no_memory(ca->parent);
+}
+
 static void
 ca_grid_func_allocate (void *ap)
 {
   CAGrid *ca = (CAGrid *) ap;
-  if ( ! ca_parent_lends_no_memory(ca->parent) ) {
+  if ( ! cag_owns_buffer(ca) ) {
     ca_attach(ca->parent);
   }
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -676,7 +921,7 @@ ca_grid_func_attach (void *ap)
   ca_axis_desc_t desc[CA_RANK_MAX];
   ca_size_t      pdims[CA_RANK_MAX];
 
-  if ( ca_parent_lends_no_memory(ca->parent) ) {
+  if ( cag_owns_buffer(ca) ) {
     ca_axis_view_attach_owned(ca);
     return;
   }
@@ -694,7 +939,7 @@ ca_grid_func_sync (void *ap)
   ca_axis_desc_t desc[CA_RANK_MAX];
   ca_size_t      pdims[CA_RANK_MAX];
 
-  if ( ca_parent_lends_no_memory(ca->parent) ) {
+  if ( cag_owns_buffer(ca) ) {
     ca_axis_view_sync_owned(ca);
     return;
   }
@@ -711,7 +956,7 @@ ca_grid_func_detach (void *ap)
   CAGrid *ca = (CAGrid *) ap;
   xfree(ca->ptr);
   ca->ptr = NULL;
-  if ( ! ca_parent_lends_no_memory(ca->parent) ) {
+  if ( ! cag_owns_buffer(ca) ) {
     ca_detach(ca->parent);
   }
 }
@@ -736,7 +981,39 @@ ca_grid_func_run_fast_path (void *ap, char *data, int dir)
 static void
 ca_grid_func_xfer_all (void *ap, void *data, int dir)
 {
+  CAGrid *ca = (CAGrid *) ap;
+  if ( cag_has_holes(ca) ) {
+    ca_grid_holed_xfer(ca, ca->elements, NULL, (char *) data, dir);
+    return;
+  }
   ca_axis_view_xfer_all(ap, ca_grid_func_run_fast_path, 1, data, dir);
+}
+
+/* The fill of a grid with holes: the parent cells of the positions that
+   are not holes, as one address batch. */
+static void
+ca_grid_holed_fill (CAGrid *ca, void *ptr)
+{
+  volatile VALUE holder = 0;
+  ca_size_t *paddrs;
+  ca_size_t  i, m = 0, pa, idx[CA_RANK_MAX];
+
+  if ( ca->elements <= 0 ) {
+    return;
+  }
+  cag_mask_current(ca);
+  paddrs = ALLOCV_N(ca_size_t, holder, ca->elements);
+  for (i = 0; i < ca->elements; i++) {
+    ca_addr2index((CArray *) ca, i, idx);
+    if ( ! cag_parent_addr(ca, idx, &pa) ) {
+      paddrs[m++] = pa;
+    }
+  }
+  if ( m > 0 ) {
+    ca_fill_addrs(ca->parent, m, paddrs, ptr);
+    cag_mask_settle_after(ca, ptr, 1);
+  }
+  ALLOCV_END(holder);
 }
 
 static void
@@ -745,6 +1022,11 @@ ca_grid_func_fill_data (void *ap, void *ptr)
   CAGrid *ca = (CAGrid *) ap;
   ca_axis_desc_t desc[CA_RANK_MAX];
   ca_size_t      pdims[CA_RANK_MAX];
+
+  if ( cag_has_holes(ca) ) {
+    ca_grid_holed_fill(ca, ptr);
+    return;
+  }
 
   ca_grid_describe_axes(ca, desc, pdims);
 
@@ -765,15 +1047,32 @@ ca_grid_func_fill_data (void *ap, void *ptr)
   ca_sync_detach(ca->parent);
 }
 
+/* The mask is a grid over the parent's mask with the same axes, holes
+   included; there the holes read as masked. */
 static void
 ca_grid_func_create_mask (void *ap)
 {
   CAGrid *ca = (CAGrid *) ap;
+  CArray *mparent;
+  int     holed = cag_has_holes(ca);
 
-  ca_create_mask(ca->parent);
+  /* A grid with holes shows them without giving a parent that has no mask
+     one: its mask grid reads an all-false stand-in until a true is written
+     outside the holes (ca_mask_standin_new). */
+  if ( holed && ! ca_has_mask(ca->parent) ) {
+    if ( ! ca->mask_standin ) {
+      ca->mask_standin = ca_mask_standin_new(ca->parent);
+    }
+    mparent = ca->mask_standin;
+  }
+  else {
+    ca_create_mask(ca->parent);
+    mparent = ca->parent->mask;
+  }
 
-  ca->mask = (CArray *) ca_grid_new_share(ca->parent->mask,
-                                          ca->ndim, ca->axes);
+  ca->mask = (CArray *) ca_grid_new_share(mparent, ca->ndim, ca->axes);
+  ((CAGrid *) ca->mask)->holes_read_masked = (int8_t) holed;
+  ((CAGrid *) ca->mask)->mask_owner = holed ? ca : NULL;
 }
 
 ca_operation_function_t ca_grid_func = {
@@ -810,41 +1109,6 @@ rb_ca_grid_new (VALUE cary, int8_t ndim, cag_axis_t *protos)
   return obj;
 }
 
-/* Detect a plain Ruby Range (Integer first/last, exclude_end?, step=1
-   implicit) and convert it to STRIDE (start, count, step=1).
-   Returns 1 on success (fills *out_start, *out_count), 0 on fallback
-   (caller should materialise to INDEX).  Negative endpoints are
-   normalised against dim_size like everywhere else in CArray. */
-static int
-cag_range_to_stride (VALUE range, ca_size_t dim_size,
-                     ca_size_t *out_start, ca_size_t *out_count)
-{
-  VALUE rb_first, rb_last;
-  ca_size_t first, last, count;
-  int exclude_end;
-
-  if ( ! rb_obj_is_kind_of(range, rb_cRange) ) return 0;
-  rb_first = rb_funcall(range, rb_intern("first"), 0);
-  rb_last  = rb_funcall(range, rb_intern("last"),  0);
-  if ( ! FIXNUM_P(rb_first) || ! FIXNUM_P(rb_last) ) return 0;
-  exclude_end = RTEST(rb_funcall(range, rb_intern("exclude_end?"), 0));
-
-  first = NUM2SIZE(rb_first);
-  last  = NUM2SIZE(rb_last);
-  if (first < 0) first += dim_size;
-  if (last  < 0) last  += dim_size;
-  if (exclude_end) last -= 1;
-
-  if (first < 0 || first >= dim_size) return 0;
-  if (last  < first - 1)              return 0;   /* empty range */
-  if (last  >= dim_size)              return 0;
-  count = last - first + 1;
-
-  *out_start = first;
-  *out_count = count;
-  return 1;
-}
-
 /* The INDEX axes of rb_ca_grid, read with their index arrays attached,
    and the view built from them. */
 
@@ -859,90 +1123,96 @@ static VALUE
 ca_grid_build_body (VALUE arg)
 {
   ca_grid_build_ctx_t *c = (ca_grid_build_ctx_t *) arg;
-  volatile VALUE holders[CA_RANK_MAX];
-  volatile VALUE obj;
   int8_t i;
 
   for (i = 0; i < c->ca->ndim; i++) {
     CArray *ci = c->ci[i];
-    holders[i] = Qfalse;
     if ( ! ci ) {
       continue;
     }
-    c->protos[i].kind = CAG_AXIS_INDEX;
+    c->protos[i].kind    = CAG_AXIS_INDEX;
+    c->protos[i].count   = ci->elements;
+    c->protos[i].indices = (ca_size_t *) ci->ptr;
+    c->protos[i].holes   = NULL;
     if ( ca_is_any_masked(ci) ) {
-      /* mask-filtered snapshot: skip masked cells.  setup copies the
-         indices into its own buffer, so the snapshot only has to live
-         until ca_grid_new returns. */
-      ca_size_t gsize = ci->elements - ca_count_masked(ci);
-      ca_size_t *src  = (ca_size_t *) ci->ptr;
-      boolean8_t *m   = (boolean8_t *) ci->mask->ptr;
-      ca_size_t *tmp  = ALLOCV_N(ca_size_t, holders[i], gsize > 0 ? gsize : 1);
-      ca_size_t j, n = 0;
-      for (j = 0; j < ci->elements; j++) {
-        if ( ! m[j] ) tmp[n++] = src[j];
-      }
-      c->protos[i].count   = gsize;
-      c->protos[i].indices = tmp;
-    } else {
-      c->protos[i].count   = ci->elements;
-      c->protos[i].indices = (ca_size_t *) ci->ptr;
+      /* A masked index cell selects nothing: its position stays, as a hole
+         (masked on read, skipped on write).  setup copies the mask into
+         its own buffer. */
+      c->protos[i].holes = (uint8_t *) ci->mask->ptr;
     }
     c->protos[i].start = 0;
     c->protos[i].step  = 0;
   }
 
-  obj = rb_ca_grid_new(c->self, c->ca->ndim, c->protos);
-
-  for (i = 0; i < c->ca->ndim; i++) {
-    if ( c->ci[i] && holders[i] != Qfalse ) {
-      ALLOCV_END(holders[i]);
-    }
-  }
-  return obj;
+  return rb_ca_grid_new(c->self, c->ca->ndim, c->protos);
 }
 
+/* A scalar key (an Integer or a Float) picks one cell along its axis, and that axis is
+   not in the result -- as it is not in a block reference.  The view is
+   built with the axis at length 1 and the axis then dropped. */
+static VALUE
+ca_grid_drop_scalar_axes (VALUE obj, int argc, VALUE *argv)
+{
+  VALUE idx[CA_RANK_MAX];
+  int i, any = 0;
+  for (i = 0; i < argc; i++) {
+    if ( ca_index_key_is_scalar(argv[i]) ) {
+      idx[i] = INT2FIX(0);
+      any = 1;
+    }
+    else {
+      idx[i] = Qnil;
+    }
+  }
+  if ( ! any ) {
+    return obj;
+  }
+  return rb_ca_fetch2(obj, argc, idx);
+}
+
+/* ca[k0, k1, ...] with a CArray among the keys.  An integer CArray picks
+   the cells it lists along its axis, a boolean one the cells it marks (it
+   must be as long as the axis).  Every other key is read as the indexer
+   reads it (ca_index_axis_key): an Integer picks one cell and drops the
+   axis, a Range / ArithmeticSequence / Array form a run, nil the axis. */
 VALUE
 rb_ca_grid (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE obj, ridx, rval;
+  volatile VALUE obj, rval;
   volatile VALUE list = rb_ary_new();
   CArray *ca;
   CArray *ci[CA_RANK_MAX];          /* CAWrap holders for INDEX axes; NULL for STRIDE */
   cag_axis_t protos[CA_RANK_MAX];
+  VALUE expanded[CA_RANK_MAX];
+  long n;
   ca_size_t i;
-
-  /* Dispatch hook: route mixed AP + single boolean to CASelectAxis
-     (slab-copy optimised path).  Falls through to per-cell CAGrid gather
-     when not eligible (integer index, multiple INDIRECT axes, indirect
-     not on axis 0).  Inline argv[0] type check avoids the function call
-     when axis 0 is nil/Integer (most patterns with INDIRECT on inner axes). */
-  extern int ca_csa_dispatch_bypass;
-  if ( ! ca_csa_dispatch_bypass && argc > 0 && TYPE(argv[0]) == T_DATA ) {
-    if ( rb_ca_select_axis_eligible_p(argc, argv, self) ) {
-      return rb_ca_select_axis(argc, argv, self);
-    }
-  }
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  ridx = rb_ary_new4(argc, argv);
+  n = ca_index_expand_rubber(ca->ndim, argc, argv, expanded);
+  if ( n >= 0 ) {
+    argc = (int) n;
+    argv = expanded;
+  }
 
-  if ( RARRAY_LEN(ridx) > ca->ndim ) {
+  if ( argc > ca->ndim ) {
     rb_raise(rb_eArgError, "# of arguments doesn't equal to the ndim");
   }
-  else if ( RARRAY_LEN(ridx) < ca->ndim ) {
+  else if ( argc < ca->ndim ) {
     volatile VALUE ref;
     CArray *cv;
     ca_size_t rdim[CA_RANK_MAX];
-    ca_size_t rndim = RARRAY_LEN(ridx);
+    ca_size_t rndim = argc;
     ca_size_t j = 0, k;
     for (i=0; i<rndim; i++) {
-      rval = rb_ary_entry(ridx, i);
+      rval = argv[i];
       if ( rb_obj_is_carray(rval) ) {
         TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
         rdim[i] = 1;
         for (k=0; k<cv->ndim; k++) {
+          if ( j >= ca->ndim ) {
+            rb_raise(rb_eArgError, "invalid total ndim of args");
+          }
           rdim[i] *= ca->dim[j];
           j += 1;
         }
@@ -959,42 +1229,43 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
     return rb_ca_grid(argc, argv, ref);
   }
 
-  /* Build per-axis protos:
-     nil    -> STRIDE(0, parent.dim, 1), no CArray
-     Range  -> STRIDE if plain integer Range, else fall through to INDEX
-     CArray -> INDEX with indices = (ca_size_t*)ca_wrap_readonly(...)->ptr */
+  /* Dispatch hook: route a boolean on axis 0 with plain keys elsewhere to
+     CASelectAxis (slab-copy optimised path).  Falls through to CAGrid when
+     not eligible.  The inline argv[0] type check avoids the call when axis
+     0 is nil / Integer (most patterns with the CArray on an inner axis). */
+  extern int ca_csa_dispatch_bypass;
+  if ( ! ca_csa_dispatch_bypass && argc > 0 && TYPE(argv[0]) == T_DATA ) {
+    if ( rb_ca_select_axis_eligible_p(argc, argv, self) ) {
+      return ca_grid_drop_scalar_axes(rb_ca_select_axis(argc, argv, self),
+                                      argc, argv);
+    }
+  }
+
   for (i = 0; i < ca->ndim; i++) {
     ca_size_t dim_size = ca->dim[i];
-    rval = rb_ary_entry(ridx, i);
+    rval = argv[i];
     ci[i] = NULL;
-    if ( NIL_P(rval) ) {
+    if ( ! rb_obj_is_carray(rval) ) {
+      ca_size_t start, count, step;
+      ca_index_axis_key(rval, dim_size, (int) i, &start, &count, &step);
       protos[i].kind    = CAG_AXIS_STRIDE;
-      protos[i].count   = dim_size;
-      protos[i].start   = 0;
-      protos[i].step    = 1;
+      protos[i].count   = count;
+      protos[i].start   = start;
+      protos[i].step    = step;
       protos[i].indices = NULL;
+      protos[i].holes   = NULL;
       continue;
     }
-    if ( rb_obj_is_kind_of(rval, rb_cRange) ) {
-      ca_size_t start, count;
-      if ( cag_range_to_stride(rval, dim_size, &start, &count) ) {
-        protos[i].kind    = CAG_AXIS_STRIDE;
-        protos[i].count   = count;
-        protos[i].start   = start;
-        protos[i].step    = 1;
-        protos[i].indices = NULL;
-        continue;
+    if ( rb_ca_is_boolean_type(rval) ) {
+      CArray *cb;
+      TypedData_Get_Struct(rval, CArray, &carray_data_type, cb);
+      if ( cb->elements != dim_size ) {
+        rb_raise(rb_eArgError,
+                 "mismatch of # of elements ( %lld <=> %lld ) in reference "
+                 "by selection on axis %d",
+                 (long long) cb->elements, (long long) dim_size, (int) i);
       }
-      /* fallback: materialise to integer array */
-      rval = rb_funcall(rb_mKernel, rb_intern("CA_SIZE"), 1, rval);
-    }
-    else if ( rb_obj_is_carray(rval) ) {
-      if ( rb_ca_is_boolean_type(rval) ) {
-        rval = rb_ca_where(rval);
-      }
-    }
-    else if ( TYPE(rval) == T_ARRAY ) {
-      rb_raise(rb_eTypeError, "grid: an axis is an Integer, a Range, nil or a CArray of indices (got Array)");
+      rval = rb_ca_where(rval);
     }
 
     /* INDEX axis: converted here, read once the window below opens */
@@ -1020,7 +1291,7 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
                            (VALUE) &c);
   }
 
-  return obj;
+  return ca_grid_drop_scalar_axes(obj, argc, argv);
 }
 
 static VALUE
@@ -1044,6 +1315,9 @@ rb_ca_grid_initialize_copy (VALUE self, VALUE other)
   }
   /* Copy the axes: the source may be collected before the copy. */
   ca_grid_setup(ca, cs->parent, cs->ndim, cs->axes, 0);
+  ca->holes_read_masked = cs->holes_read_masked;
+  ca->mask_owner        = cs->mask_owner;
+  ca_grid_inherit_mask((VALUE) ca);
 
   return self;
 }

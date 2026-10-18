@@ -6,12 +6,14 @@
 # devel/MEMO_DATAFRAME_ON_CARRAY.md for the design.
 
 require 'carray/frame/frame'
+require 'carray/frame/column_verbs'
 require 'carray/frame/verbs'
 require 'carray/frame/convert'
 require 'carray/frame/io'
 require 'carray/frame/records'
 require 'carray/frame/group'
 require 'carray/frame/join'
+require 'carray/frame/windows'
 require 'carray/frame/concat'
 require 'carray/frame/sort'
 require 'carray/frame/reshape'

@@ -27,7 +27,7 @@ class TestLazyBinopP24 < Test::Unit::TestCase
     col = CArray.float64(3, 1).seq * 10
     v = row.lazy + col
     e = row + col
-    assert_equal [3, 4], v.dim
+    assert_equal [3, 4], v.shape
     assert_equal e.dump_binary, v.to_ca.dump_binary
   end
 
@@ -37,7 +37,7 @@ class TestLazyBinopP24 < Test::Unit::TestCase
     col = CArray.float64(3, 1).seq + 100
     v = a.lazy + col
     e = a + col
-    assert_equal [3, 4], v.dim
+    assert_equal [3, 4], v.shape
     assert_equal e.dump_binary, v.to_ca.dump_binary
   end
 
@@ -47,7 +47,7 @@ class TestLazyBinopP24 < Test::Unit::TestCase
     row = CArray.float64(1, 4).seq + 50
     v = a.lazy + row
     e = a + row
-    assert_equal [3, 4], v.dim
+    assert_equal [3, 4], v.shape
     assert_equal e.dump_binary, v.to_ca.dump_binary
   end
 
@@ -117,6 +117,7 @@ class TestLazyBinopP24 < Test::Unit::TestCase
   # ----------------------- broadcast preserves scratch=1/node --
 
   def test_broadcast_scratch_count_per_node
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(64, 64).seq
     b = CArray.float64(64, 1).seq + 10
     CABinOp.__reset_scratch_counter__

@@ -74,10 +74,7 @@ typedef struct CABinCmp {
                                 target of both left & right, also the
                                 kernel lookup key) */
   double    eps;             /* Runtime tolerance slot for IS_CLOSE /
-                                IS_EQUIV; ignored for other ops.  The
-                                `eps` name is retained to keep the
-                                `__eps__` Ruby accessor stable across
-                                the dual purpose. */
+                                IS_EQUIV; ignored for other ops. */
   int8_t    sign_fix;        /* 0, or the side (1 left, 2 right) of an
                                 int64 operand compared with a uint64 one:
                                 the kernel compares both as uint64 and
@@ -179,6 +176,7 @@ ca_bincmp_setup (CABinCmp *ca, CArray *left, CArray *right, uint16_t op_id,
 CABinCmp *
 ca_bincmp_new (CArray *left, CArray *right, uint16_t op_id, double eps)
 {
+  /* check: the setup checks nothing */
   CABinCmp *ca = (CABinCmp *) ca_array_alloc(CA_OBJ_BINCMP, left->ndim);
   ca_bincmp_setup(ca, left, right, op_id, eps);
   return ca;
@@ -226,7 +224,7 @@ ca_bincmp_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   int8_t    k;
 
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinCmp is read-only (xfer_index PUT)");
+    ca_refuse_read_only();
   }
 
   for ( k = ca->ndim - 1; k >= 0; k-- ) {
@@ -412,7 +410,7 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
                "CABinCmp: kernel not implemented (op_id=%u data_type=%d)",
                (unsigned) bc->op_id, (int) bc->common_dt);
     }
-    if ( bc->common_dt == CA_OBJECT ) {
+    if ( ca_op_raises_on_cell(CA_OP_KIND_BINCMP, bc->op_id, bc->common_dt) ) {
       slab_mask = ca_lazy_req_mask(req, 2, bc->operands);
     }
     fn(slab_n, slab_mask,
@@ -446,7 +444,7 @@ ca_bincmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   ca_lazy_req_t req;
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinCmp is read-only (xfer_stride PUT)");
+    ca_refuse_read_only();
   }
   ca_lazy_req_region(&req, ap, starts, counts, strides);
   ca_bincmp_eval((CABinCmp *) ap, &req, data);
@@ -459,7 +457,7 @@ ca_bincmp_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
 {
   ca_lazy_req_t req;
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CABinCmp is read-only (xfer_addrs PUT)");
+    ca_refuse_read_only();
   }
   ca_lazy_req_addrs(&req, n, addrs);
   ca_bincmp_eval((CABinCmp *) ap, &req, data);
@@ -482,7 +480,7 @@ static void
 ca_bincmp_func_allocate (void *ap)
 {
   CABinCmp *ca = (CABinCmp *) ap;
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -499,7 +497,7 @@ ca_bincmp_func_attach (void *ap)
   int8_t    k;
   ca_size_t s;
 
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 
   s = ca->bytes;
   for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
@@ -525,7 +523,7 @@ NORETURN(static void ca_bincmp_func_fill_data (void *ap, void *ptr));
 static void
 ca_bincmp_func_fill_data (void *ap, void *ptr)
 {
-  rb_raise(rb_eRuntimeError, "CABinCmp is read-only (fill_data)");
+  ca_refuse_read_only();
 }
 
 /* mask = left.mask | right.mask, computed on each read (CAMaskOfOperands). */
@@ -580,6 +578,14 @@ rb_ca_bincmp_new (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
   rb_check_carray_object(r_cary);
   TypedData_Get_Struct(l_cary, CArray, &carray_data_type, l);
   TypedData_Get_Struct(r_cary, CArray, &carray_data_type, r);
+  /* No kernel for the type the builder cast to: refuse as the eager
+     comparison does, before anything is allocated. */
+  {
+    ca_bincmp_func_t fn = ca_bincmp_kernel_lookup(op_id, l->data_type);
+    if ( fn == NULL || fn == ca_bincmp_not_implement ) {
+      ca_op_refuse_unimplemented(l_cary, l->data_type, rb_eTypeError);
+    }
+  }
   ca  = ca_bincmp_new(l, r, op_id, eps);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, l_cary);
@@ -711,6 +717,7 @@ rb_ca_bincmp_s_build (int argc, VALUE *argv, VALUE klass)
   double eps = 0.0;
   (void) klass;
   rb_scan_args(argc, argv, "31", &l_cary, &r_cary, &op_id_val, &eps_val);
+  /* fits: an operation number from the library's own table */
   op_id = (uint16_t) NUM2UINT(op_id_val);
   if ( argc >= 4 ) eps = NUM2DBL(eps_val);
   return rb_ca_bincmp_build(l_cary, r_cary, op_id, eps);
@@ -724,7 +731,8 @@ rb_ca_bincmp_trapping (VALUE self)
 {
   CABinCmp *bc;
   TypedData_Get_Struct(self, CABinCmp, &cabincmp_data_type, bc);
-  return ( bc->common_dt == CA_OBJECT ) ? Qtrue : Qfalse;
+  return ca_op_raises_on_cell(CA_OP_KIND_BINCMP, bc->op_id, bc->common_dt)
+         ? Qtrue : Qfalse;
 }
 
 static VALUE
@@ -741,14 +749,7 @@ rb_ca_bincmp_right (VALUE self)
   return rb_ivar_get(self, rb_intern("__bincmp_right__"));
 }
 
-static VALUE
-rb_ca_bincmp_eps (VALUE self)
-{
-  CABinCmp *bc;
-  TypedData_Get_Struct(self, CABinCmp, &cabincmp_data_type, bc);
-  return rb_float_new(bc->eps);
-}
-
+#ifdef CARRAY_DEV_BUILD
 static VALUE
 rb_ca_bincmp_s_reset_scratch_counter (VALUE klass)
 {
@@ -793,6 +794,7 @@ rb_ca_bincmp_s_leaf_inplace_count (VALUE klass)
   (void) klass;
   return SIZE2NUM(ca_bincmp_leaf_inplace_count);
 }
+#endif /* CARRAY_DEV_BUILD */
 
 static VALUE
 rb_ca_bincmp_s_allocate (VALUE klass)
@@ -853,8 +855,8 @@ Init_ca_obj_bincmp (void)
   rb_define_method(rb_cCABinCmp, "__trapping__", rb_ca_bincmp_trapping, 0);
   rb_define_method(rb_cCABinCmp, "__bincmp_right__",
                                   rb_ca_bincmp_right, 0);
-  rb_define_method(rb_cCABinCmp, "__eps__",       rb_ca_bincmp_eps, 0);
 
+#ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCABinCmp, "__reset_scratch_counter__",
                              rb_ca_bincmp_s_reset_scratch_counter, 0);
   rb_define_singleton_method(rb_cCABinCmp, "__scratch_count__",
@@ -867,4 +869,5 @@ Init_ca_obj_bincmp (void)
                              rb_ca_bincmp_s_reset_leaf_inplace_counter, 0);
   rb_define_singleton_method(rb_cCABinCmp, "__leaf_inplace_count__",
                              rb_ca_bincmp_s_leaf_inplace_count, 0);
+#endif
 }

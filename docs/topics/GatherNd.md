@@ -173,5 +173,5 @@ folding onto duplicate coordinates, compute the flat addresses yourself
 | a single fixed coordinate | `gather_nd([2, 3])` or `gather_nd(CA_INT64([2, 3]))` |
 
 Both forms go through the same flat-address computation and a writable
-`CAMapping` view of the flattened array, so they cost the same once the
+index view (`CAGrid`) of the flattened array, so they cost the same once the
 coordinates are CArrays.

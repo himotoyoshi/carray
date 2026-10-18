@@ -25,14 +25,15 @@ mechanically pins the frozen names.
 
 **Frozen** (never rename / re-arity / change semantics — additions only):
 
-- the author macros — `CA_FOR_EACH_SLAB` and the `_FIBER` family; the
+- the author macros — `CA_FOR_EACH_SLAB`, the `_FIBER` family and the
+  `_WHOLE` pair; the
   `CA_SLAB_REDUCE_T*` / `CA_SLAB_MAP_T` / `CA_SLAB_SCAN_T` / `CA_SLAB_SCAN_TA`
   suites; `CA_L2_FOR_EACH` and its UNMASKED variant; the `CA_FOR_EACH_UNMASKED`
   family;
 - the raw entry points the macros expand to — `ca_iter_state_init_l1`,
   `ca_iter_state_init_l2`, `ca_iter_state_next_slab`,
-  `ca_iter_state_next_slab_strided`, `ca_iter_state_next_slab_axes`,
-  `ca_iter_state_sync_slab`, `ca_iter_state_finish`;
+  `ca_iter_state_next_slab_axes`, `ca_iter_state_sync_slab`,
+  `ca_iter_state_finish`;
 - the tokens authors write literally — `CA_SLAB_AXES`, `CA_SLAB_WHOLE`,
   `CA_SLAB_FREE`, `CA_KERNEL_WRITE`, `CA_KERNEL_NO_MASK`,
   `CA_KERNEL_FIBER_CONTIG`, `CA_KERNEL_CHUNK_HINT`, `CA_ITER_OK`,
@@ -46,7 +47,7 @@ mechanically pins the frozen names.
   (accumulator), `idx` (flat slab index), `first` (first-unmasked flag).
 
 **Internal** (refactor freely): the state-machine bodies (`init_l1` /
-`next_slab` / `next_slab_strided` / `ca_iter_route_source` /
+`next_slab` / `ca_iter_route_source` /
 `ca_iter_can_alias` internals), the `alias_mode` / `src_kind` routing
 constants (`CA_ITER_ALIAS_*` / `CA_ITER_SRC_*`), and every non-frozen
 `ca_iter_state` field (scratch, fiber-cache, descriptor cache, stack-tile
@@ -57,9 +58,20 @@ macro variant, a new catalog macro). Changing a frozen name is a 3.x
 breaking change — update the doc contract and the guard in the same
 commit.
 
-## Fiber vs slab: the two grains
+## Whole, fiber, slab: the three grains
 
-The iterator delivers data at one of two granularities:
+The iterator delivers data at one of three granularities:
+
+- **`CA_FOR_EACH_WHOLE`** hands you the whole array as one contiguous
+  run, in row-major order: `p[i]` for `i` in `0...n`, and the body runs
+  once. It is the grain for a kernel that wants every cell and no axes —
+  a whole-array scan, a hash of the values, a copy into a library
+  buffer. Contiguity is kept by copying when it has to be: a source that
+  does not lend contiguous memory (a transpose, a strided block, a
+  selection, a converting view) is gathered first. A reduction that also
+  runs per axis is better written once with `CA_FOR_EACH_SLAB` over the
+  chosen axes, every axis for the whole array — which also reads a
+  strided source in place.
 
 - **`CA_FOR_EACH_SLAB`** hands you a contiguous *multi-dimensional*
   sub-block (a **slab**) per outer-axis position. You read it through the
@@ -105,6 +117,15 @@ CA_FOR_EACH_SLAB_INOUT(st_in, st_out, ca_in, ca_out,
                        p_in, p_out, m_in, m_out)
 ```
 
+The whole-array pair — the whole array as one contig run:
+
+```c
+CA_FOR_EACH_WHOLE       (st, ca, flags, p, n);
+CA_FOR_EACH_WHOLE_MASKED(st, ca, flags, p, n, m);
+        /* ca_iter_state st; char *p; ca_size_t n; boolean8_t *m;
+           m is NULL when the source has no mask */
+```
+
 The fiber family — contig 1-D delivery, axis pinned to a single value:
 
 ```c
@@ -132,14 +153,13 @@ needed). The INOUT and PAIR macros require their two arrays to have the
 same shape (`ndim` and every `dim[k]`) and raise `ArgumentError` before
 opening either walk when they do not.
 
-L2 inner-loop helpers — fast-path contig within a strided callback:
+L2 inner-loop helper — fast-path contig within a strided callback:
 
 ```c
-CA_L2_FOR_EACH         (T, ptr, n, stride, p, body);
-CA_L2_FOR_EACH_UNMASKED(T, ptr, mask, n, stride, p, body);
+CA_L2_FOR_EACH(T, ptr, n, stride, p, body);
 ```
 
-These wrap an L2 callback signature `(ptr, n, stride_bytes)` with a
+It wraps an L2 callback signature `(ptr, n, stride_bytes)` with a
 `stride == sizeof(T)` fast-path branch. When the runtime stride matches
 the element size, `body` runs against a `T *p` that the compiler can
 autovectorise; otherwise `p` is recomputed per iteration.
@@ -219,12 +239,6 @@ int  ca_iter_state_next_slab         (ca_iter_state *st,
                                       boolean8_t   **out_mask,
                                       ca_size_t     *out_n);
 
-int  ca_iter_state_next_slab_strided (ca_iter_state *st,
-                                      char         **out_ptr,
-                                      boolean8_t   **out_mask,
-                                      ca_size_t     *out_n,
-                                      ca_size_t     *out_stride_bytes);
-
 int  ca_iter_state_next_slab_axes    (ca_iter_state *st,
                                       char         **out_ptr,
                                       boolean8_t   **out_mask);
@@ -248,26 +262,25 @@ int  ca_iter_can_alias (void *ap, int level);   /* level = 1 | 2 | 3 */
   buffer); descriptor views and `CA_ITER_SRC_ATTACH` views → scratch;
   a source the classifier does not recognise → `CA_ITER_ERR_NOT_CHEAP`.
   `init_l1` takes `CA_SLAB_WHOLE` only.
-- **`init_l2`** prepares an **L2 strided** walk. The kernel sees per-slab
-  pointers with an explicit byte stride argument. Source routing covers
-  entity / CAStride contig (alias, stride = `bytes`), CAStride non-contig
-  (alias, multi-slab walk over prefix axes, no scratch), and the
-  descriptor-framework views (CAGrid / CASelect / CAMapping / CAWindow /
-  CAShift / CSA) via the per-axis-descriptor engine.
+- **`init_l2`** prepares an **L2 strided** walk over the axes you name.
+  The kernel sees per-slab pointers and reads the byte strides from the
+  state. Source routing covers entity / CAStride contig (alias),
+  CAStride non-contig (strided over the root, no scratch, when the root
+  lends memory; a gathered scratch when it does not), and the
+  descriptor-framework views (CAGrid / CASelect / CAWindow / CAShift / CSA) via the
+  per-axis-descriptor engine. `init_l2` takes `CA_SLAB_AXES` only; to
+  walk the array one strided row at a time, name the last axis.
 
 `init_l2` is the entry point modern kernels use; `init_l1` is kept for
 strictly contig-only paths.
 
-### The three `next_slab*` callees
+### The two `next_slab*` callees
 
-The three pull variants correspond to three slab grains. **Use the one
+The two pull variants correspond to two slab grains. **Use the one
 that matches your init**:
 
 - `ca_iter_state_next_slab` — paired with `init_l1`. Yields one whole
   contig 1-D slab (the whole array in step 1; later phases may chunk it).
-- `ca_iter_state_next_slab_strided` — paired with `init_l2` for the
-  legacy strided walk: the kernel walks `*out_n` cells stepping
-  `*out_stride_bytes` per cell, mask in lockstep.
 - `ca_iter_state_next_slab_axes` — paired with `init_l2(... CA_SLAB_AXES,
   axes, naxes, ...)`. This is the K-D slab API: the kernel reads
   `st.slab_dims[]` / `st.slab_strides[]` (constant across the walk) and
@@ -284,7 +297,18 @@ After each `next_slab*` + body, the caller invokes `sync_slab`
 - READ walk (`!(flags & CA_KERNEL_WRITE)`) → no-op.
 - alias path (no scratch) → no-op; the kernel wrote to parent storage
   directly through `alias_ptr`.
-- scratch path → scatter back via `ca_sync_data(src, scratch)`.
+- scratch path → send back the cells the kernel changed in the scratch.
+
+A view can show one root cell more than once: a repeated index
+(`a[CA_INT64([0, 0, 2]), nil]`), a `tile`, a stack or meld that holds the
+same parent twice. When a kernel writes such a view, which of the values
+written to the repeated positions the root cell ends with is not
+specified. It depends on the route the walk takes, and a value equal to
+the one the kernel was given is not sent back. The same holds for a view
+that reads several root cells as one, such as the mask of a `refer` to a
+wider type (each of its cells is the OR of the cells under it): a cell
+written with the value it was given is not sent back, so what its root
+cells end with is not specified.
 
 `finish` releases everything: scratch buffers, attached parents, fiber
 caches, the K-parent ptr cache for CAStack, the per-tile cache, the
@@ -367,7 +391,7 @@ the same walk in three lines.
 
 ## Slab policies
 
-`policy` to `init_l2`:
+`policy` to `init_l1` / `init_l2`:
 
 ```c
 typedef enum {
@@ -378,8 +402,9 @@ typedef enum {
 ```
 
 `CA_SLAB_AXES` is the workhorse — it is what gives reductions / scans /
-maps their per-axis semantics. `CA_SLAB_WHOLE` is the L1 entry point for
-"give me everything as one contig run". `CA_SLAB_FREE` is reserved for
+maps their per-axis semantics, and the only policy `init_l2` takes.
+`CA_SLAB_WHOLE` is the L1 entry point for "give me everything as one
+contig run"; `init_l2` refuses it with `CA_ITER_ERR_POLICY`. `CA_SLAB_FREE` is reserved for
 a chunk-hinted walk; init returns `CA_ITER_ERR_POLICY` for it.
 
 ## Kernel flags
@@ -452,15 +477,6 @@ CA_SLAB_REDUCE_T(T, st, p, m, acc, INIT, REDUCE);
                        if (v == target) acc += 1      (count_equal) */
 ```
 
-Convenience aliases for the four common load types:
-
-```c
-CA_SLAB_REDUCE_F64(st, p, m, acc, INIT, REDUCE);   /* T = double  */
-CA_SLAB_REDUCE_F32(st, p, m, acc, INIT, REDUCE);   /* T = float   */
-CA_SLAB_REDUCE_I32(st, p, m, acc, INIT, REDUCE);   /* T = int32_t */
-CA_SLAB_REDUCE_I64(st, p, m, acc, INIT, REDUCE);   /* T = int64_t */
-```
-
 The "EX" form exposes a `masked_cnt` lvalue that the macro increments on
 every skipped cell — needed when a kernel's mask policy depends on the
 count of masked cells (e.g. variance's `min_count` policy):
@@ -471,17 +487,18 @@ CA_SLAB_REDUCE_T_EX(T, st, p, m, acc, INIT, REDUCE, masked_cnt);
 
 ### SIMD-licensed reductions
 
-Each base reducer has a kind-specific variant that licenses the
-compiler to reassociate the accumulator (= ε-close, not bit-exact):
+A sum has a variant that licenses the compiler to reassociate the
+accumulator (= ε-close, not bit-exact):
 
 ```c
-CA_SLAB_REDUCE_T_PLUS(T, st, p, m, acc, INIT, REDUCE);  /* #pragma omp simd reduction(+:acc) */
-CA_SLAB_REDUCE_T_MIN (T, st, p, m, acc, INIT, REDUCE);  /* reduction(min:acc) */
-CA_SLAB_REDUCE_T_MAX (T, st, p, m, acc, INIT, REDUCE);  /* reduction(max:acc) */
-CA_SLAB_REDUCE_T_STAR(T, st, p, m, acc, INIT, REDUCE);  /* reduction(*:acc) */
+CA_SLAB_REDUCE_T_PLUS_EX(T, st, p, m, acc, INIT, REDUCE, masked_cnt);
+        /* #pragma omp simd reduction(+:acc) */
 ```
 
-The `_EX` variants are again the masked-count-exposing forms. There is a
+Pass a throwaway `ca_size_t` for `masked_cnt` when the count is not
+needed. The min / max / product counterparts (`_MIN_EX` / `_MAX_EX` /
+`_STAR_EX`) are emitted by the kernel generator for kernels that do not
+take its 8-way form, and are not part of the author surface. There is a
 `CA_SLAB_REDUCE_T_VAR_EX` stub for future multi-accumulator output-buffered
 work; currently it forwards to PLUS_EX (clang recognises sumsq as a
 derived reduction).
@@ -512,7 +529,6 @@ CA_SLAB_MAP_T(T_IN, T_OUT, st_in, p_in, st_out, p_out, MAP_EXPR);
         /* MAP_EXPR: statement binding `r` (T_OUT lvalue) given `v` (T_IN).
            e.g.  r = sqrt(v)
                  r = (T_OUT)(v * v + 1) */
-CA_SLAB_MAP_F64(st_in, p_in, st_out, p_out, MAP_EXPR);   /* T_IN = T_OUT = double */
 ```
 
 Both states must share slab geometry. The macro hoists the inner contig
@@ -598,19 +614,16 @@ then rejects a masked source with `CA_ITER_ERR_MASK_NOT_ALLOWED`. The
 `_FIBER` forms without MASKED in the name hand out no mask cursor, so
 without `CA_KERNEL_NO_MASK` they read masked cells as values.
 
-### Mask helper macros
+### Mask helper macro
 
 For kernels that read the mask directly:
 
 ```c
-#define CA_MASK_GET(mask, i)            /* 0 if mask == NULL, else mask[i] */
-#define CA_FOR_EACH_UNMASKED(p, mask, n, body)            /* skip masked cells */
-#define CA_FOR_EACH_INDEX_UNMASKED(p, mask, n, i, body)   /* + iteration index */
-#define CA_COUNT_UNMASKED(mask, n)      /* GCC statement-expr, returns cnt */
+#define CA_FOR_EACH_UNMASKED(p, mask, n, body)   /* skip masked cells */
 ```
 
-These are used by all the slab body macros internally; reach for them in
-hand-written kernels when the body-macro suite doesn't fit.
+`mask` may be `NULL` (every cell runs `body`). Reach for it in hand-written kernels when the body-macro suite
+doesn't fit.
 
 ## The WRITE path in detail
 
@@ -622,7 +635,7 @@ A kernel that writes back declares `CA_KERNEL_WRITE`. The engine then:
    if the kernel can write directly through parent storage; scratch if
    the view's access pattern requires gather + scatter).
 3. After the kernel's body, `sync_slab` either is a no-op (alias) or
-   scatters the slab back via `ca_sync_data` (scratch path).
+   sends back the cells the kernel changed in the slab (scratch path).
 4. On `finish`, any remaining scratch is freed and the parent is detached.
 
 The CA_KERNEL_FIBER_CONTIG path additionally caches a per-fiber data
@@ -660,7 +673,7 @@ INTERNAL routing keys you might see in the engine and in `ca_iter_state`:
 
 ```c
 CA_ITER_SRC_CASTRIDE             /* entity, CAStride family */
-CA_ITER_SRC_DESCRIPTOR           /* CAGrid / CASelect / CAMapping / CAWindow / CAShift / CSA */
+CA_ITER_SRC_DESCRIPTOR           /* CAGrid / CASelect / CAWindow / CAShift / CSA */
 CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE
 CA_ITER_SRC_ATTACH               /* CAFake / CAByteSwap / CABitfield / CABitarray / CAReduce /
                                     CAObject / CATile / CARoll / CAStack / CAMeld / CARemap /
@@ -670,7 +683,8 @@ CA_ITER_SRC_ATTACH               /* CAFake / CAByteSwap / CABitfield / CABitarra
 The classifier reads these off the source's op table, which only works for the
 view classes compiled into the engine. A class installed from outside declares
 its kind with `ca_iter_register_source_kind(obj_type, CA_ITER_SRC_ATTACH)` in its
-`Init_`; without it the source is delivered the same way, by attaching it, so the
+`Init_`; without it the source is delivered the same way, by the transfer walk through its
+xfer slots, so the
 declaration states the routing rather than changing it. It is the one part of
 this routing an external author touches, so it is additive rather than
 free-to-refactor. See [ch. 8](08_view_catalog.md), "Adding a
@@ -697,7 +711,7 @@ territory; the right knob is almost certainly a higher-level flag (set
 
 ## Block-form macros (one-screen kernels)
 
-The `CA_FOR_EACH_SLAB` and `CA_FOR_EACH_FIBER*` macros are wrappers around
+The `CA_FOR_EACH_SLAB`, `CA_FOR_EACH_FIBER*` and `CA_FOR_EACH_WHOLE*` macros are wrappers around
 the state-machine entry points; they handle `init` / `next` / `sync` /
 `finish` so the kernel body shrinks to its essential statement.
 
@@ -717,7 +731,8 @@ Constraints (the same across the family):
   source's transfer slots), but the body runs in the caller's frame,
   where the engine has no hold on it. A body that can raise — an
   object-lane body calling back into Ruby — runs through `ca_iter_ensure`
-  (below).
+  (below). In a write walk, the cells written before the raise stay where
+  the walk lends the array's memory and are lost where it gathered a copy.
 - The macros are not statement-equivalent — they expand to nested `for`
   constructs. Don't follow them with `else`.
 - INOUT macros require the same shape for input and output (`ndim` and

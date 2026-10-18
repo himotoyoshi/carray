@@ -80,7 +80,7 @@ class TestSearchKi < Test::Unit::TestCase
     3.times { |i| 4.times { |j| b[i, j] = (i * 10 + j).to_f } }
     # search val=11.0 per row: only row 1 has it at col 1
     r = b.search_ki(11.0, 1)
-    assert_equal [3],          r.dim
+    assert_equal [3],          r.shape
     assert_equal [UNDEF, 1, UNDEF],  r.to_a   # S1: no-match -> UNDEF
   end
 
@@ -89,7 +89,7 @@ class TestSearchKi < Test::Unit::TestCase
     3.times { |i| 4.times { |j| b[i, j] = (i * 10 + j).to_f } }
     # col 0 = [0, 10, 20]; search 10 → row 1
     r = b.search_ki(10.0, 0)
-    assert_equal [4],             r.dim
+    assert_equal [4],             r.shape
     assert_equal [1, UNDEF, UNDEF, UNDEF], r.to_a
   end
 
@@ -110,7 +110,7 @@ class TestSearchKi < Test::Unit::TestCase
     val = CArray.float64(3)
     val[0] = 1.0; val[1] = 11.0; val[2] = 21.0
     r = b.search_ki(val, 1)
-    assert_equal [3, 3], r.dim
+    assert_equal [3, 3], r.shape
   end
 
   def test_case_b_append
@@ -119,7 +119,7 @@ class TestSearchKi < Test::Unit::TestCase
     val = CArray.float64(5)
     val[0] = 0.0; val[1] = 5.0; val[2] = 11.0; val[3] = 22.0; val[4] = 99.0
     r = b.search_ki(val, 1)
-    assert_equal [3, 5], r.dim
+    assert_equal [3, 5], r.shape
     # row 0 = [0,1,2,3], search [0,5,11,22,99] -> [0,-1,-1,-1,-1]
     assert_equal [0, UNDEF, UNDEF, UNDEF, UNDEF],  r[0, nil].to_a
     # row 1 = [10,11,12,13], search [0,5,11,22,99] -> [-1,-1,1,-1,-1]

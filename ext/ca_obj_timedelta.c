@@ -133,6 +133,21 @@ rb_ca_timedelta_element_initialize (VALUE self, VALUE value, VALUE unit)
   return self;
 }
 
+/* dup / clone copy the value and the unit (the allocator leaves both 0). */
+static VALUE
+rb_ca_timedelta_element_initialize_copy (VALUE self, VALUE orig)
+{
+  CATimedeltaElement *s, *o;
+  if ( self == orig ) {
+    return self;
+  }
+  rb_check_frozen(self);
+  TypedData_Get_Struct(self, CATimedeltaElement, &catimedelta_element_data_type, s);
+  TypedData_Get_Struct(orig, CATimedeltaElement, &catimedelta_element_data_type, o);
+  *s = *o;
+  return self;
+}
+
 static VALUE
 rb_ca_timedelta_element_value (VALUE self)
 {
@@ -197,9 +212,6 @@ ca_timedelta_setup (CATimedelta *ca, CArray *parent, int8_t unit, int64_t count)
   ca->unit      = unit;
   ca->count     = count;
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask((CArray *) ca);
-  }
 
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -219,6 +231,7 @@ ca_timedelta_new (CArray *parent, int8_t unit, int64_t count)
   ca_timedelta_setup(NULL, parent, unit, count);
   ca = (CATimedelta *) ca_array_alloc(CA_OBJ_TIMEDELTA, parent->ndim);
   ca_timedelta_setup(ca, parent, unit, count);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -293,7 +306,7 @@ rb_ca_timedelta_wrap (VALUE parent_val, int8_t unit, int64_t count)
   return obj;
 }
 
-/* __wrap__(raw, unit_spec) — primitive; unit_spec is Symbol / String /
+/* wrap_storage(raw, unit_spec) — primitive; unit_spec is Symbol / String /
    Resolution / nil (normalized here). */
 static VALUE
 rb_ca_timedelta_wrap_method (VALUE klass, VALUE raw, VALUE unit_spec)
@@ -333,6 +346,7 @@ rb_ca_timedelta_initialize_copy (VALUE self, VALUE other)
     ca_array_pool_alloc(ca, CA_OBJ_TIMEDELTA, cs->parent->ndim);
   }
   ca_timedelta_setup(ca, cs->parent, cs->unit, cs->count);
+  ca_view_inherit_mask((VALUE) ca);
   return self;
 }
 
@@ -403,8 +417,8 @@ Init_ca_obj_timedelta (void)
   rb_define_method(rb_cCATimedelta, "initialize_copy",
                                     rb_ca_timedelta_initialize_copy, 1);
 
-  rb_define_singleton_method(rb_cCATimedelta, "__wrap__",
-                                    rb_ca_timedelta_wrap_method, 2);
+  rb_define_private_method(rb_singleton_class(rb_cCATimedelta), "wrap_storage",
+                           rb_ca_timedelta_wrap_method, 2);
   rb_define_method(rb_cCATimedelta, "unit", rb_ca_timedelta_unit, 0);
   rb_define_method(rb_cCATimedelta, "storage_to_element",
                                     rb_ca_timedelta_storage_to_element, 1);
@@ -428,6 +442,8 @@ Init_ca_obj_timedelta (void)
                        rb_ca_timedelta_element_s_allocate);
   rb_define_method(rb_cCATimedeltaElement, "initialize",
                    rb_ca_timedelta_element_initialize, 2);
+  rb_define_method(rb_cCATimedeltaElement, "initialize_copy",
+                   rb_ca_timedelta_element_initialize_copy, 1);
   rb_define_method(rb_cCATimedeltaElement, "value",
                    rb_ca_timedelta_element_value, 0);
   rb_define_method(rb_cCATimedeltaElement, "unit",

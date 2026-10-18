@@ -50,7 +50,7 @@ class TestBsearchKi < Test::Unit::TestCase
     3.times { |i| 4.times { |j| b[i, j] = (i*10 + j).to_f } }
     # Search val=12 per row: only row 1 has it at col 2
     r = b.bsearch_ki(12.0, 1)
-    assert_equal [3],          r.dim
+    assert_equal [3],          r.shape
     # S1 (PROPOSAL_SEARCH_SEMANTICS_UNIFY): per-fiber no-match -> UNDEF
     assert_equal [UNDEF, 2, UNDEF], r.to_a
     assert_equal [true, false, true],         r.is_masked.to_a
@@ -62,7 +62,7 @@ class TestBsearchKi < Test::Unit::TestCase
     # Per column, axis=0 values: col j = [j, 10+j, 20+j] -- sorted
     # Search val=10: col 0 = [0, 10, 20], match at row 1
     r = b.bsearch_ki(10.0, 0)
-    assert_equal [4],            r.dim
+    assert_equal [4],            r.shape
     assert_equal [1, UNDEF, UNDEF, UNDEF], r.to_a
   end
 
@@ -81,7 +81,7 @@ class TestBsearchKi < Test::Unit::TestCase
     # = sorted ascending
     # Search val=101 in axis=1: at i=1, k=0, j=1 (= 100+1+0)
     r = a.bsearch_ki(101.0, 1)
-    assert_equal [2, 4], r.dim
+    assert_equal [2, 4], r.shape
     assert_equal [UNDEF, UNDEF, UNDEF, UNDEF], r[0, nil].to_a
     assert_equal [1, UNDEF, UNDEF, UNDEF],     r[1, nil].to_a
   end
@@ -99,7 +99,7 @@ class TestBsearchKi < Test::Unit::TestCase
     val = CArray.float64(3)
     val[0] = 2.0; val[1] = 12.0; val[2] = 23.0
     r = b.bsearch_ki(val, 1)
-    assert_equal [3, 3], r.dim   # A2 shared (rev5)
+    assert_equal [3, 3], r.shape   # A2 shared (rev5)
   end
 
   # ----------------------------------------------------------------
@@ -112,7 +112,7 @@ class TestBsearchKi < Test::Unit::TestCase
     val = CArray.float64(5)
     val[0] = 0.0; val[1] = 5.0; val[2] = 12.0; val[3] = 22.0; val[4] = 99.0
     r = b.bsearch_ki(val, 1)
-    assert_equal [3, 5], r.dim
+    assert_equal [3, 5], r.shape
     # S1: no-match cells -> UNDEF (case B array query)
     # row 0 = [0,1,2,3], search val [0,5,12,22,99] -> [0,x,x,x,x]
     assert_equal [0, UNDEF, UNDEF, UNDEF, UNDEF],  r[0, nil].to_a
@@ -180,7 +180,7 @@ class TestBsearchKi < Test::Unit::TestCase
     a = CArray.float64(10).seq!(0, 1)
     val = CArray.int32(3).seq!(1, 1)   # [1, 2, 3]
     r = a.bsearch_ki(val, 0)
-    assert_equal [3],       r.dim
+    assert_equal [3],       r.shape
     assert_equal [1, 2, 3], r.to_a
   end
 end

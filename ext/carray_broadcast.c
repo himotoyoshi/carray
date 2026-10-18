@@ -30,6 +30,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"   /* ca_check_rank_fits */
 #include "ca_obj_face.h"  /* CA_WRAPPER_LIFT */
 
 NORETURN(static void ca_broadcast_refuse_write (VALUE dst, VALUE src));
@@ -41,10 +42,11 @@ ca_broadcast_refuse_write (VALUE dst, VALUE src)
   volatile VALUE dst_s = rb_inspect(rb_funcall(dst, rb_intern("shape"), 0));
   volatile VALUE src_s = rb_inspect(rb_funcall(src, rb_intern("shape"), 0));
   rb_raise(rb_eArgError,
-           "shape mismatch writing to carray (%s <- %s); shapes must agree "
+           "%s: shape mismatch writing to carray (%s <- %s); shapes must agree "
            "once size-1 axes are dropped, or one side must be 1-D, or the "
            "source must be smaller and broadcastable -- use .flatten to "
            "write the values in the order they lie",
+           ca_calling_method_name(),
            StringValueCStr(dst_s), StringValueCStr(src_s));
 }
 
@@ -87,7 +89,11 @@ ca_broadcast_to_destination (VALUE dst, volatile VALUE *src)
     return;
   }
 
-  if ( cs->elements < cd->elements && cs->ndim == cd->ndim ) {
+  /* A size-1 axis repeated onto an axis of length 0 leaves the source
+     larger than an empty destination; the axes say it is a repeat all
+     the same. */
+  if ( ( cs->elements < cd->elements || cd->elements == 0 )
+       && cs->ndim == cd->ndim ) {
     int i;
     for ( i = 0; i < cd->ndim; i++ ) {
       if ( cs->dim[i] != cd->dim[i] && cs->dim[i] != 1 ) break;
@@ -196,10 +202,11 @@ ca_broadcast_refuse (VALUE self, VALUE other)
 
   if (ca->ndim != cb->ndim) {
     rb_raise(rb_eArgError,
-             "shape mismatch between operands (%s and %s): the operands "
+             "%s: shape mismatch between operands (%s and %s): the operands "
              "have different numbers of axes, and axes are not added "
              "implicitly -- add size-1 axes with :_ so both have the same "
              "number (x[:_, nil] makes a 1-D x a row, x[nil, :_] a column)%s",
+             ca_calling_method_name(),
              StringValueCStr(self_s), StringValueCStr(other_s),
              flatten_hint);
   }
@@ -210,10 +217,10 @@ ca_broadcast_refuse (VALUE self, VALUE other)
     }
   }
   rb_raise(rb_eArgError,
-           "shape mismatch between operands (%s and %s): axis %d has "
+           "%s: shape mismatch between operands (%s and %s): axis %d has "
            "sizes %lld and %lld; each axis must have the same size, or "
            "size 1 on one side%s",
-           StringValueCStr(self_s), StringValueCStr(other_s), i,
+           ca_calling_method_name(), StringValueCStr(self_s), StringValueCStr(other_s), i,
            (long long) ca->dim[i], (long long) cb->dim[i], flatten_hint);
 }
 
@@ -295,9 +302,7 @@ rb_ca_broadcast_to (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, cs);
 
-  if (argc < 0 || argc > CA_RANK_MAX) {
-    rb_raise(rb_eArgError, "broadcast_to: invalid number of dims (%d)", argc);
-  }
+  ca_check_rank_fits(argc, "broadcast_to");
   target_ndim = (int8_t) argc;
 
   if (target_ndim < cs->ndim) {

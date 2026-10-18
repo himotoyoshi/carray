@@ -234,6 +234,7 @@ class TestLazyCmpP45Property < Test::Unit::TestCase
   # === arena lifecycle invariant under property load ===
 
   def test_arena_depth_balances_through_random_trees
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     # After 50 random tree materialisations, depth + in_use must be 0
     CArray.__lazy_arena_reset_counters__
     50.times do |seed_offset|

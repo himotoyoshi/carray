@@ -132,6 +132,7 @@ ca_moncmp_setup (CAMonCmp *ca, CArray *parent, uint16_t op_id)
 CAMonCmp *
 ca_moncmp_new (CArray *parent, uint16_t op_id)
 {
+  /* check: the setup checks nothing */
   CAMonCmp *ca = (CAMonCmp *) ca_array_alloc(CA_OBJ_MONCMP, parent->ndim);
   ca_moncmp_setup(ca, parent, op_id);
   return ca;
@@ -179,7 +180,7 @@ ca_moncmp_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   int8_t    k;
 
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CAMonCmp is read-only (xfer_index PUT)");
+    ca_refuse_read_only();
   }
   for ( k = ca->ndim - 1; k >= 0; k-- ) {
     starts[k]  = idx[k];
@@ -282,7 +283,7 @@ ca_moncmp_eval (CAMonCmp *mc, const ca_lazy_req_t *req, void *data)
                "CAMonCmp: kernel not implemented (op_id=%u data_type=%d)",
                (unsigned) mc->op_id, (int) mc->parent->data_type);
     }
-    if ( mc->parent->data_type == CA_OBJECT ) {
+    if ( ca_op_raises_on_cell(CA_OP_KIND_MONCMP, mc->op_id, mc->parent->data_type) ) {
       slab_mask = ca_lazy_req_mask(req, 1, &mc->parent);
     }
     fn(slab_n, slab_mask,
@@ -301,7 +302,7 @@ ca_moncmp_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   ca_lazy_req_t req;
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CAMonCmp is read-only (xfer_stride PUT)");
+    ca_refuse_read_only();
   }
   ca_lazy_req_region(&req, ap, starts, counts, strides);
   ca_moncmp_eval((CAMonCmp *) ap, &req, data);
@@ -314,7 +315,7 @@ ca_moncmp_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
 {
   ca_lazy_req_t req;
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CAMonCmp is read-only (xfer_addrs PUT)");
+    ca_refuse_read_only();
   }
   ca_lazy_req_addrs(&req, n, addrs);
   ca_moncmp_eval((CAMonCmp *) ap, &req, data);
@@ -337,7 +338,7 @@ static void
 ca_moncmp_func_allocate (void *ap)
 {
   CAMonCmp *ca = (CAMonCmp *) ap;
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -353,7 +354,7 @@ ca_moncmp_func_attach (void *ap)
   int8_t    k;
   ca_size_t s;
 
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 
   s = ca->bytes;
   for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
@@ -379,7 +380,7 @@ NORETURN(static void ca_moncmp_func_fill_data (void *ap, void *ptr));
 static void
 ca_moncmp_func_fill_data (void *ap, void *ptr)
 {
-  rb_raise(rb_eRuntimeError, "CAMonCmp is read-only (fill_data)");
+  ca_refuse_read_only();
 }
 
 /* The parent's mask cell for cell, read-only as the comparison is. */
@@ -436,6 +437,14 @@ rb_ca_moncmp_new (VALUE p_cary, uint16_t op_id)
   CAMonCmp *ca;
   rb_check_carray_object(p_cary);
   TypedData_Get_Struct(p_cary, CArray, &carray_data_type, p);
+  /* No kernel for the parent's type: refuse as the eager comparison does,
+     before anything is allocated. */
+  {
+    ca_moncmp_func_t fn = ca_moncmp_kernel_lookup(op_id, p->data_type);
+    if ( fn == NULL || fn == ca_moncmp_not_implement ) {
+      ca_op_refuse_unimplemented(p_cary, p->data_type, rb_eCADataTypeError);
+    }
+  }
   ca  = ca_moncmp_new(p, op_id);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, p_cary);
@@ -452,6 +461,7 @@ rb_ca_moncmp_build (VALUE p_cary, uint16_t op_id)
 static VALUE
 rb_ca_moncmp_s_build (VALUE klass, VALUE p_cary, VALUE op_id_val)
 {
+  /* fits: an operation number from the library's own table */
   uint16_t op_id = (uint16_t) NUM2UINT(op_id_val);
   (void) klass;
   return rb_ca_moncmp_build(p_cary, op_id);
@@ -465,7 +475,8 @@ rb_ca_moncmp_trapping (VALUE self)
 {
   CAMonCmp *mc;
   TypedData_Get_Struct(self, CAMonCmp, &camoncmp_data_type, mc);
-  return ( mc->parent->data_type == CA_OBJECT ) ? Qtrue : Qfalse;
+  return ca_op_raises_on_cell(CA_OP_KIND_MONCMP, mc->op_id, mc->parent->data_type)
+         ? Qtrue : Qfalse;
 }
 
 static VALUE
@@ -476,6 +487,7 @@ rb_ca_moncmp_op_id (VALUE self)
   return UINT2NUM(mc->op_id);
 }
 
+#ifdef CARRAY_DEV_BUILD
 static VALUE
 rb_ca_moncmp_s_reset_scratch_counter (VALUE klass)
 {
@@ -520,6 +532,7 @@ rb_ca_moncmp_s_leaf_inplace_count (VALUE klass)
   (void) klass;
   return SIZE2NUM(ca_moncmp_leaf_inplace_count);
 }
+#endif /* CARRAY_DEV_BUILD */
 
 static VALUE
 rb_ca_moncmp_s_allocate (VALUE klass)
@@ -573,6 +586,7 @@ Init_ca_obj_moncmp (void)
   rb_define_method(rb_cCAMonCmp, "__op_id__", rb_ca_moncmp_op_id, 0);
   rb_define_method(rb_cCAMonCmp, "__trapping__", rb_ca_moncmp_trapping, 0);
 
+#ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCAMonCmp, "__reset_scratch_counter__",
                              rb_ca_moncmp_s_reset_scratch_counter, 0);
   rb_define_singleton_method(rb_cCAMonCmp, "__scratch_count__",
@@ -585,4 +599,5 @@ Init_ca_obj_moncmp (void)
                              rb_ca_moncmp_s_reset_leaf_inplace_counter, 0);
   rb_define_singleton_method(rb_cCAMonCmp, "__leaf_inplace_count__",
                              rb_ca_moncmp_s_leaf_inplace_count, 0);
+#endif
 }

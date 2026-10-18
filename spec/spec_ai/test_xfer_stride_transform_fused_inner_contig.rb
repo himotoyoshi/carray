@@ -114,8 +114,8 @@ class TestXferStrideTransformFusedInnerContig < Test::Unit::TestCase
     ].each do |view|
       mat = view.to_ca
       assert_equal view.dim, mat.dim
-      view.dim[0].times do |i|
-        view.dim[1].times do |j|
+      view.shape[0].times do |i|
+        view.shape[1].times do |j|
           assert_equal view[i, j], mat[i, j]
         end
       end

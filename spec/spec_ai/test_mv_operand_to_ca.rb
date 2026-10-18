@@ -84,7 +84,7 @@ class TestMVOperandToCa < Test::Unit::TestCase
     td = CATimedelta.wrap(CArray.int64(2) { 10 }, unit: :ms)
     assert_equal([15, 17], (td + duration_producer).ticks.to_a)
     assert_equal([5, 3], (td - duration_producer).ticks.to_a)
-    assert_equal([2, 1], (td / duration_producer).to_a)
+    assert_equal([2.0, 10 / 7.0], (td / duration_producer).to_a)
   end
 
   def test_time_operators_take_the_operand_through_to_ca

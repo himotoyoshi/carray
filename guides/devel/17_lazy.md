@@ -120,6 +120,15 @@ path, `ca_obj_monop.c`). So "adding a lazy op" is really "give the existing
 op-id a lazy node", and once the kernel table exists the work is table-wiring, not
 new gather code.
 
+A builder refuses a type its table has no kernel for when the node is built,
+through the eager operators' own part, `ca_op_refuse_unimplemented(operand,
+data_type, eclass)` (`carray_internal.h`), naming the type eager would look in
+(a boolean read as int64, an integer taken to float64 by a unary op), so the
+two say the same; `spec/spec_ai/test_lazy_refuses_as_eager.rb` runs every
+operator of the lazy tables over the types. The Ruby side of each operator is
+a `def` written by `CArray.define_named_methods` from a template, so a refusal
+inside it names the operator.
+
 Taking a unary op as the example (the binary side is symmetric across
 `ca_binop_dispatch.{h,c}` and `ca_obj_binop.c`):
 
@@ -205,6 +214,11 @@ An `Op` carries `kind` (`:monop`, `:binop`, `:triop`, `:moncmp`, `:bincmp`),
 `CArray.__kernel_body__`, with `#1`, `#2`, ... for the operands and the next
 number for the result), `mask` (`:pass`, `:union`, `:kleene_or`,
 `:kleene_and`, `:select`) and `trapping` (a masked cell must not be computed).
+`trapping` is what `ca_op_raises_on_cell` answers for the node, the same
+part the eager operators and the lazy views skip masked cells by: any op on
+an object cell, an integer division, remainder or reciprocal by zero, and an
+integer power of zero to a negative exponent. A new kernel that can raise on
+a cell is added there and nowhere else (`rake cell_raise_check`).
 A conversion between data types is a `:monop` named `cast_<type>` for the
 type it converts to, its body keyed by the type it converts from. A lazy
 `then_else` is the `:triop` `select`, masked where its condition is or where
@@ -214,10 +228,17 @@ the branch the condition chooses is (`:select`).
 the meaning they have. New ones are added; none is renamed or changes meaning.
 An evaluator that meets something it does not know **declines** — its `call`
 returns false and the walk computes the answer. It must not raise: an
-evaluator that raises is unregistered for the rest of the process. Declining
+evaluator that raises is unregistered for the rest of the process. An
+exception CArray raises while lending the arrays (one carrying
+`CArray::AddressBasis::Failure`, see ch. 21) is not the evaluator's, and does
+not unregister it; nor does a destination that cannot hold the mask, which is
+left to the walk without asking. Declining
 is what lets CArray add to the plan without a new evaluator being released at
 the same time — when the integer power became the node `ipow`, an older
 carray-jit declined it and the walk answered.
+
+A decline may come after the evaluator has written part of the destination (it
+met a zero divisor half way), and the walk that follows may then raise. A store that raises may leave part of the destination written: its values and its mask after the raise are not specified.
 
 Adding a lazy op therefore has one more step on this side: give it a spelling
 the plan reads (the `*_BY_ID` tables in `fusion.rb`) and a body in

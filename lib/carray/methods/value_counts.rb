@@ -52,17 +52,10 @@ class CArray
       [ values[CArray.int64(order.size) { |i| order[i] }],
         counts[CArray.int64(order.size) { |i| order[i] }] ]
     when :value
-      # Ascending value; NaN (numeric) or non-comparable last. Build the
-      # permutation with an explicit NaN-last key so float NaN doesn't blow up
-      # the Ruby sort, then gather both arrays through it.
-      v = values.to_a
-      order = (0...v.size).sort_by do |i|
-        x = v[i]
-        nan = x.is_a?(Float) && x.nan?
-        [nan ? 1 : 0, nan ? 0 : x, i]
-      end
-      [ values[CArray.int64(order.size) { |i| order[i] }],
-        counts[CArray.int64(order.size) { |i| order[i] }] ]
+      # Ascending value in the order sort uses (NaN after every number),
+      # then gather both arrays through it.
+      order = values.sort_index
+      [values[order], counts[order]]
     else
       [values, counts]
     end

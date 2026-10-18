@@ -75,7 +75,8 @@ class CArray
   #   Reads `ca_length(self)` bytes from `io` and overwrites the
   #   element data of `self` in row-major order. `io` may be a
   #   `String` of the exact size, or any object responding to
-  #   `read(n, buf = nil)`.
+  #   `read(n, buf = nil)`. Into a boolean array, a non-zero byte is
+  #   read as 1 (true).
   #   @param io [String, IO, #read]
   #   @return [self]
   #   @raise [RuntimeError] on a short read.

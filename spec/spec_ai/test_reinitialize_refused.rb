@@ -6,7 +6,7 @@
 # and the shape arrays it owns without freeing them (524 KB per call for a
 # 64 K float64).  `dup`, `clone` and `new` are unaffected.
 #
-# Also here: CArray.__register_axis_group_classes__ adds its GC roots once,
+# Also here: CArray.register_axis_group_classes adds its GC roots once,
 # not on every call (32 bytes per call before).
 
 require "test/unit"
@@ -107,7 +107,7 @@ class TestReinitializeRefused < Test::Unit::TestCase
 
   def test_axis_group_class_registration_adds_no_root
     bytes = LeakMeter.bytes_per_call(
-      "CArray.__register_axis_group_classes__(CACategorical, AxisGroup)",
+      "CArray.send(:register_axis_group_classes, CACategorical, AxisGroup)",
       setup: "CACategorical ; AxisGroup", calls: 20000)
     omit "malloc zone statistics unavailable" if bytes.nil?
     assert_operator bytes, :<, 8

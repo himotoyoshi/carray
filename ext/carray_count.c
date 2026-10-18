@@ -82,8 +82,16 @@ ca_count_each_body (VALUE arg)
     /* Extract vk as a scalar VALUE via flat addr.  rb_ca_fetch_addr
        takes a ca_size_t addr (not a Ruby VALUE). */
     VALUE vk = rb_ca_fetch_addr(c->rval, k);
-    inner_argv[0] = vk;
-    VALUE sub = rb_ca_count(inner_call_argc, inner_argv, c->self);
+    VALUE sub;
+    /* A masked query cell asks nothing: its count is masked.  Passing it
+       on would ask count(UNDEF), the count of self's masked cells. */
+    if ( vk == CA_UNDEF ) {
+      sub = CA_UNDEF;
+    }
+    else {
+      inner_argv[0] = vk;
+      sub = rb_ca_count(inner_call_argc, inner_argv, c->self);
+    }
 
     /* Place sub into output[..., k] slot.
        Output stride for v-axis = 1, base stride = v_elements. */
@@ -169,15 +177,21 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
       rval = ca_face_element_to_storage(self, src, rval);
     }
     else {
-      if ( src->obj_type != CA_OBJ_RECORD
-           && ! ca_test_flag(src, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-        ca_face_refuse_order("count(v)", self, "count");
+      if ( src->obj_type != CA_OBJ_RECORD ) {
+        ca_face_require_orderable(self, "count(v)", "count");
       }
-      rval = ca_face_reconcile_operand(self, rval, "count(v)");
-      /* to_comparable lifts a scalar query to a length-1 array; unwrap it so
+      {
+        volatile VALUE ref = self, query = rval;
+        ca_face_reconcile_pair(&ref, &query, "count(v)");
+        self = ref;
+        rval = query;
+      }
+      /* The reconcile lifts a scalar query to a length-1 array; unwrap it so
          a scalar query still answers with a count rather than a length-1
-         array from the broadcast branch below. */
-      if ( query_was_scalar && rb_obj_is_carray(rval) ) {
+         array from the broadcast branch below.  A Ruby Array is a list of
+         queries and stays one, like a CArray query. */
+      if ( query_was_scalar && ! RB_TYPE_P(argv[0], T_ARRAY)
+           && rb_obj_is_carray(rval) ) {
         rval = rb_ca_fetch_addr(rval, 0);
       }
     }
@@ -210,12 +224,11 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     CArray *cv;
     GetCArray(rval, cv);
 
-    /* A query of a wider type than an integer array is counted in the type
-       the two share, as `eq` compares: each v[k] below is then a value of
-       that type, not one truncated to the array's. */
-    if ( ca_is_integer_type(src) &&
-         ( ca_is_integer_type(cv) || ca_is_float_type(cv) ) ) {
-      int8_t qt = ca_promote_type(src->data_type, cv->data_type);
+    /* The array is counted in the type it and v match in, as `eq` compares
+       (ca_query_match_type): each v[k] below is then a value of that type,
+       not one cut to the array's. */
+    if ( ca_query_match_applies(src, rval) ) {
+      int8_t qt = ca_query_match_type(src->data_type, rval);
       if ( qt != src->data_type ) {
         self = rb_ca_wrap_readonly(self, INT2NUM(qt));
         GetCArray(self, src);
@@ -341,11 +354,28 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
                "count(v) on numeric array: v must be numeric, got %s",
                rb_obj_classname(rval));
     }
-    /* A Float query on an integer array is compared as a float, as `eq`
-       compares and `search` searches: 1.5 must not match 1.  An Integer
-       query keeps the array's type and is refused when it does not fit. */
-    if ( ca_is_integer_type(src) && RB_FLOAT_TYPE_P(rval) ) {
-      self = rb_ca_wrap_readonly(self, INT2NUM(CA_FLOAT64));
+    /* The query is compared in the type it and the array match in, as `eq`
+       compares (ca_query_match_type): 1.5 does not match 1, and an Integer
+       the array's type cannot hold matches nothing. */
+    if ( ca_is_integer_type(src) && ! RB_INTEGER_TYPE_P(rval)
+         && ! RB_FLOAT_TYPE_P(rval) && ! RB_TYPE_P(rval, T_COMPLEX)
+         && rb_obj_is_kind_of(rval, rb_cNumeric) ) {
+      /* A Rational or BigDecimal query: an integral one is the Integer it
+         equals; any other is compared as a float, like a Float query,
+         rather than cut to the array's type. */
+      VALUE ival = rb_funcall(rval, rb_intern("to_i"), 0);
+      VALUE *nargv = ALLOCA_N(VALUE, argc);
+      MEMCPY(nargv, argv, VALUE, argc);
+      nargv[0] = RTEST(rb_funcall(rval, rb_intern("=="), 1, ival))
+               ? ival : rb_funcall(rval, rb_intern("to_f"), 0);
+      argv = nargv;
+      rval = nargv[0];
+    }
+    if ( ca_query_match_applies(src, rval) ) {
+      int8_t qt = ca_query_match_type(src->data_type, rval);
+      if ( qt != src->data_type ) {
+        self = rb_ca_wrap_readonly(self, INT2NUM(qt));
+      }
     }
     /* Pass full argv; count_equal_ki pops argv[0] as value_arg. */
     return rb_ca_count_equal_ki(argc, argv, self);

@@ -32,6 +32,11 @@ Every result is a length-`k` CArray aligned to `cat.labels` (`k` = number of
 groups, available as `#ngroups`): result cell `i` is the statistic of the cells
 whose category is `labels[i]`. The category vocabulary is `#labels`.
 
+Grouping by a categorical computes the order of its cells by category (an int64
+per cell) once and keeps it on the categorical, so grouping several payload
+columns by the same categorical pays for it once. It is freed with the
+categorical.
+
 ## The reductions
 
 Each one is the core `CArray` reduction lifted to the category, so the result
@@ -61,6 +66,8 @@ itself, not restated here.
 | `min_addr` / `max_addr` | int64 | flat source address of the min / max (indexes back into the raveled source) |
 | `sort_addr` | int64 | length-`nvalid` flat source addresses that sort each group, group-major (see below) |
 | `all` / `any` | boolean | boolean value data type only (as for `CArray#all` / `#any`) |
+| `first` / `last` | as `CArray#first` / `#last` | the first / last present member, in source order; `UNDEF` for a category with none |
+| `nunique` | int64 | distinct present members, as `CArray#nunique` counts them; 0 for a category with none |
 
 `prod`, `all`, `any`, and `count(v)` are currently per-group fallbacks (they
 delegate to the CArray reduction over each category's members); a fused kernel
@@ -262,6 +269,33 @@ members: the data type is the core's (`cumsum` of a boolean is uint64), a Face
 keeps its Face (`cummin` of a `CATime` column is a `CATime`), and a scan the
 core refuses (`cumsum` of a `CATime` column) is refused here, in the core's
 words.
+
+`lag(n)` gives each cell the value `n` steps earlier among its category's
+members, in source order, as `CArray#lag` does along an axis: a cell with no
+such member is `UNDEF`, so a lag never reaches into another category. A
+negative `n` looks ahead. With `axis:` the categorical classifies the
+positions along that axis, as for the scans.
+
+```ruby
+v   = CA_FLOAT64([10, 20, 11, 21, 12])
+grp = v.group_by_category(CA_OBJECT(%w[a b a b a]).categorize)
+grp.lag        #  => [UNDEF, UNDEF, 10.0, 20.0, 11.0]
+v - grp.lag    #  => the change since the previous member of the same category
+```
+
+`strip_mask(method: :ffill)` / `strip_mask(method: :bfill)` fill each masked
+cell from its category's members (the last present one before it, or the next
+one after it), never from another category; a cell with nothing to carry
+stays masked, and the value itself is not modified.
+
+`order` ranks each cell among its category's members (int64, `0` the
+smallest), with the keywords of `CArray#order` (`descending:`, `method:
+:ordinal` or `:dense`, `kind:`); a masked cell, and a cell in no category, is
+`UNDEF`.
+
+```ruby
+grp.order      #  => [0, 0, 1, 1, 2]
+```
 
 ## N-dimensional value and categorical
 

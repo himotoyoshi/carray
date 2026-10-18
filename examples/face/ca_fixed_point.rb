@@ -47,7 +47,7 @@ class CAFixedPoint < CAObject
     raise ArgumentError, "scale must be positive Integer" unless scale.is_a?(Integer) && scale > 0
     @scale = scale
     @frac_digits = Math.log10(scale).round
-    super(CA_INT64, parent_int64.dim, parent: parent_int64, face: true)
+    super(CA_INT64, parent_int64.shape, parent: parent_int64, face: true)
   end
 
   attr_reader :scale, :frac_digits

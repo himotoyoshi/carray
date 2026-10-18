@@ -132,10 +132,18 @@ rb_ca_face_template (VALUE original_face, CArray *new_parent,
   TypedData_Get_Struct(original_face, CArray, &carray_data_type, src);
   tdata = ca_typeddata[src->obj_type];
 
-  /* Actual subclass size (incl. tail) — via TypedData's dsize callback */
-  size = (tdata && tdata->function.dsize)
-            ? tdata->function.dsize(src)
-            : sizeof(CAView);
+  /* The struct with its subclass tail.  struct_size is the struct alone;
+     a dsize callback also counts the buffers the struct points to (dim),
+     so it is only the fallback for a type registered without struct_size,
+     and copying that many bytes reads past the struct. */
+  if ( ca_func[src->obj_type].struct_size ) {
+    size = ca_func[src->obj_type].struct_size;
+  }
+  else {
+    size = (tdata && tdata->function.dsize)
+              ? tdata->function.dsize(src)
+              : sizeof(CAView);
+  }
 
   dst = (CArray *) xmalloc(size);
   /* CAREFUL: the whole-struct memcpy is how a C-tail Face
@@ -196,6 +204,23 @@ ca_face_relift_entity (VALUE face, VALUE result)
     rb_funcall(lifted, id_copy_state, 1, face);
   }
   return lifted;
+}
+
+/* A lift moves a view built on a wrapper (a Face or the lazy marker) one
+ * level down, onto what the wrapper wraps, so the view no longer keeps the
+ * wrapper alive.  The view's mask was built over the wrapper's mask, which
+ * the wrapper owns and frees with itself; move it down the same level.
+ * The wrapper's mask is a same-shape refer of its parent's mask, so the
+ * mask view addresses the same cells there. */
+static void
+ca_lift_move_mask_down (CArray *view_ca, CArray *wp)
+{
+  CArray *below = ((CAView *) wp)->parent;
+  if ( view_ca->mask && wp->mask && ca_is_view(wp->mask)
+       && ((CAView *) wp->mask)->parent == below->mask
+       && ((CAView *) view_ca->mask)->parent == wp->mask ) {
+    ((CAView *) view_ca->mask)->parent = below->mask;
+  }
 }
 
 /* ca_face_lift(view, face_parent) — at the tail of user-facing entry
@@ -260,6 +285,7 @@ ca_face_lift (VALUE view, VALUE face_parent)
          && ! ca_test_flag(view_ca, CA_FLAG_MULTI_PARENTS) ) {
       ((CAView *) view_ca)->parent = ((CAView *) fp)->parent;   /* C pointer: one level */
       rb_ca_set_parent(view, rb_ca_parent(face_parent));        /* @parent ivar: lockstep */
+      ca_lift_move_mask_down(view_ca, fp);
     }
   }
 
@@ -269,6 +295,12 @@ ca_face_lift (VALUE view, VALUE face_parent)
   lifted = rb_ca_face_template(face_parent, view_ca, view_ca->dim);
   /* Pin view as a GC root of lifted so the slice is not collected. */
   rb_ca_set_parent(lifted, view);
+  /* The Face the view was taken from is off the parent chain now; keep it
+     for the attributes set on it.  A fresh result the ordering kernels
+     re-wrap is not a view of it and takes none. */
+  if ( ca_is_view(view_ca) ) {
+    rb_ca_set_lifted_from(lifted, face_parent);
+  }
 
   /* Optional Ruby callback for ivar / state carry.  Faces holding
      semantic state in the struct tail (CATime / CATimedelta
@@ -346,6 +378,7 @@ ca_lazy_marker_lift (VALUE view, VALUE marker)
        && ! ca_test_flag(view_ca, CA_FLAG_MULTI_PARENTS) ) {
     ((CAView *) view_ca)->parent = ((CAView *) mp)->parent;  /* C pointer */
     rb_ca_set_parent(view, rb_ca_parent(marker));            /* @parent ivar */
+    ca_lift_move_mask_down(view_ca, mp);
   }
 
   return rb_ca_lazy_marker_new(view);
@@ -522,15 +555,10 @@ ca_face_register_state_compatible (int obj_type, ca_face_state_compatible_fn fn)
 static int
 ca_face_has_ruby_state_check (VALUE va)
 {
-  static ID id_face_state_compatible_p = 0;
-  static ID id_method = 0;
-  static ID id_owner  = 0;
+  ID id_face_state_compatible_p = rb_intern("face_state_compatible?");
+  ID id_method                  = rb_intern("method");
+  ID id_owner                   = rb_intern("owner");
   VALUE m, owner;
-  if ( id_face_state_compatible_p == 0 ) {
-    id_face_state_compatible_p = rb_intern("face_state_compatible?");
-    id_method                  = rb_intern("method");
-    id_owner                   = rb_intern("owner");
-  }
   m = rb_funcall(va, id_method, 1, ID2SYM(id_face_state_compatible_p));
   owner = rb_funcall(m, id_owner, 0);
   return ( owner != rb_cCArray ) ? 1 : 0;
@@ -650,16 +678,11 @@ ca_face_register_state_portable (int obj_type, int portable)
 static int
 ca_face_class_has_portable_method (VALUE klass)
 {
-  static ID id_face_state_portable_p = 0;
-  static ID id_method = 0;
-  static ID id_owner  = 0;
+  ID id_face_state_portable_p = rb_intern("face_state_portable?");
+  ID id_method                = rb_intern("method");
+  ID id_owner                 = rb_intern("owner");
   VALUE m, owner;
   if ( NIL_P(klass) ) return 0;
-  if ( id_face_state_portable_p == 0 ) {
-    id_face_state_portable_p = rb_intern("face_state_portable?");
-    id_method                = rb_intern("method");
-    id_owner                 = rb_intern("owner");
-  }
   if ( !rb_respond_to(klass, id_face_state_portable_p) ) return 0;
   m = rb_funcall(klass, id_method, 1, ID2SYM(id_face_state_portable_p));
   owner = rb_funcall(m, id_owner, 0);
@@ -680,18 +703,88 @@ ca_face_conversion_hint (VALUE face)
     : "to_type(:object) gives its values";
 }
 
+/* The method that gives the storage under a Face, for a refusal to point
+   at: #ticks for a time or a duration, #codes for a categorical.  NULL for
+   a Face that names its storage some other way, or not at all. */
+const char *
+ca_face_storage_method (VALUE face)
+{
+  static const char *names[] = { "ticks", "codes" };
+  size_t i;
+  for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    if ( rb_respond_to(face, rb_intern(names[i])) ) {
+      return names[i];
+    }
+  }
+  return NULL;
+}
+
+/* ca.face_storage_method -- the name of the method that gives the storage
+   under ca (ca_face_storage_method), as a String, or nil.  For refusals
+   written in Ruby. */
+static VALUE
+rb_ca_face_storage_method (VALUE self)
+{
+  const char *name = ca_face_storage_method(self);
+  return name ? rb_str_new_cstr(name) : Qnil;
+}
+
 /* Refuse to order (or, with verb "count", to count by value) a Face whose
    storage does not hold its values in order, pointing at what does: its
    values, or its storage when that is what is meant. */
 void
 ca_face_refuse_order (const char *name, VALUE face, const char *verb)
 {
+  const char *storage = ca_face_storage_method(face);
+  if ( storage ) {
+    rb_raise(rb_eArgError,
+             "%s: %s is not orderable by storage (a cell encodes the value "
+             "rather than being it); %s its values instead -- %s -- or %s "
+             "its storage, which #%s gives",
+             name, rb_obj_classname(face), verb,
+             ca_face_conversion_hint(face), verb, storage);
+  }
   rb_raise(rb_eArgError,
            "%s: %s is not orderable by storage (a cell encodes the value "
-           "rather than being it); %s its values instead -- %s -- or pass "
-           ".parent to %s its storage",
+           "rather than being it); %s its values instead -- %s",
            name, rb_obj_classname(face), verb,
-           ca_face_conversion_hint(face), verb);
+           ca_face_conversion_hint(face));
+}
+
+/* The rule every family that orders, compares, searches or hashes the cells
+   of a Face reference keeps: the storage stands for the values only when the
+   Face declares ORDERABLE_STORAGE.  A fixlen storage is no exception -- its
+   bytes are an order only when the Face says so (CAFixlenString).  Returns
+   when the Face is ORDERABLE; refuses otherwise (ca_face_refuse_order).  A
+   family that can order by a key asks ca_face_orders_by_itself first. */
+void
+ca_face_require_orderable (VALUE face, const char *name, const char *verb)
+{
+  CArray *ca;
+  TypedData_Get_Struct(face, CArray, &carray_data_type, ca);
+  if ( ! ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
+    ca_face_refuse_order(name, face, verb);
+  }
+}
+
+/* Whether a Face is ordered by its own #order rather than by its storage:
+   it is not ORDERABLE and answers #order itself (CAConstString, CARecord),
+   so a family that orders by a key can take that order.  CArray#order is
+   not one: it sorts the storage and comes back to the gate. */
+int
+ca_face_orders_by_itself (VALUE face)
+{
+  ID id_order  = rb_intern("order");
+  ID id_method = rb_intern("method");
+  ID id_owner  = rb_intern("owner");
+  CArray *ca;
+  VALUE m;
+  TypedData_Get_Struct(face, CArray, &carray_data_type, ca);
+  if ( ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
+    return 0;
+  }
+  m = rb_funcall(face, id_method, 1, ID2SYM(id_order));
+  return ( rb_funcall(m, id_owner, 0) != rb_cCArray ) ? 1 : 0;
 }
 
 /* Refuse a numeric operation (arithmetic, math, a reduction) on a Face,
@@ -708,10 +801,20 @@ ca_face_refuse_numeric (VALUE self, const char *name, VALUE eclass)
   if ( ! ca_is_face(ca) ) {
     return;
   }
+  {
+    const char *storage = ca_face_storage_method(self);
+    if ( storage ) {
+      rb_raise(eclass,
+               "%s: %s does not define it (a cell encodes the value rather "
+               "than being a number); compute on its values instead -- %s -- "
+               "or on its storage, which #%s gives",
+               name, rb_obj_classname(self), ca_face_conversion_hint(self),
+               storage);
+    }
+  }
   rb_raise(eclass,
            "%s: %s does not define it (a cell encodes the value rather than "
-           "being a number); compute on its values instead -- %s -- or pass "
-           ".parent to compute on its storage",
+           "being a number); compute on its values instead -- %s",
            name, rb_obj_classname(self), ca_face_conversion_hint(self));
 }
 
@@ -729,12 +832,24 @@ ca_face_operand_descend (VALUE operand, const char *name)
   if ( ca_test_flag(op, CA_FLAG_FACE_COMPARABLE_STORAGE) ) {
     return rb_ca_strip_face_value(operand);
   }
+  {
+    const char *storage = ca_face_storage_method(operand);
+    if ( storage ) {
+      rb_raise(rb_eArgError,
+               "%s: cannot take a %s operand: its storage is not its surface "
+               "(a cell encodes the value rather than being it), so comparing "
+               "the storage would compare the encoding. Convert the operand "
+               "to the receiver's space first -- %s -- or compare the storage "
+               "of both sides, which #%s gives",
+               name, rb_obj_classname(operand),
+               ca_face_conversion_hint(operand), storage);
+    }
+  }
   rb_raise(rb_eArgError,
            "%s: cannot take a %s operand: its storage is not its surface "
            "(a cell encodes the value rather than being it), so comparing "
            "the storage would compare the encoding. Convert the operand to "
-           "the receiver's space first -- %s -- "
-           "or pass .parent on both sides to work in storage space",
+           "the receiver's space first -- %s",
            name, rb_obj_classname(operand), ca_face_conversion_hint(operand));
   return Qnil;   /* not reached */
 }
@@ -823,11 +938,16 @@ ca_face_operand_values (VALUE operand)
    - A reference with to_comparable brings any operand into its own space
      (a unit, an instant), and refuses what it cannot convert.
    - Any other reference has no way to read the operand in its space, and
-     refuses it. */
+     refuses it.
+   UNDEF is undefined in every space, so it passes as it is and the entry
+   answers it as it does for a plain array. */
 VALUE
 ca_face_reconcile_operand (VALUE reference, VALUE operand, const char *name)
 {
   CArray *ca;
+  if ( operand == CA_UNDEF ) {
+    return operand;
+  }
   TypedData_Get_Struct(reference, CArray, &carray_data_type, ca);
   if ( ca->obj_type == CA_OBJ_RECORD ) {
     if ( RTEST(rb_obj_is_carray(operand)) ) {
@@ -854,20 +974,59 @@ ca_face_reconcile_operand (VALUE reference, VALUE operand, const char *name)
   if ( ca_test_flag(ca, CA_FLAG_FACE_COMPARABLE_STORAGE) ) {
     return ca_face_operand_descend(ca_face_operand_values(operand), name);
   }
-  if ( ! ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-    ca_face_refuse_order(name, reference, "compare");
-  }
+  ca_face_require_orderable(reference, name, "compare");
   if ( rb_respond_to(reference, rb_intern("to_comparable")) ) {
     return rb_ca_strip_face_value(rb_funcall(reference,
                                              rb_intern("to_comparable"),
                                              1, operand));
   }
+  {
+    const char *storage = ca_face_storage_method(reference);
+    if ( storage ) {
+      rb_raise(rb_eArgError,
+               "%s: %s is not comparable by storage and has no to_comparable "
+               "to bring the operand into its space; compare the storage of "
+               "both sides, which #%s gives",
+               name, rb_obj_classname(reference), storage);
+    }
+  }
   rb_raise(rb_eArgError,
            "%s: %s is not comparable by storage and has no to_comparable "
-           "to bring the operand into its space; pass .parent on both "
-           "sides to work in storage space",
+           "to bring the operand into its space",
            name, rb_obj_classname(reference));
   return Qnil;   /* not reached */
+}
+
+/* The reference and the operand of a comparison (an operator, count(v), a
+   search, linear_section) brought into one space.  A time reference answers
+   both through comparable_pair: it keeps itself when the operand sits on its
+   grid, and otherwise meets the operand in the finer unit the two share,
+   where to_comparable would refuse a value off its grid.  Every other
+   reference keeps itself and reconciles the operand
+   (ca_face_reconcile_operand).  An assignment, which has to land on the
+   reference's grid, uses ca_face_reconcile_operand. */
+void
+ca_face_reconcile_pair (volatile VALUE *pref, volatile VALUE *poperand,
+                        const char *name)
+{
+  static ID id_comparable_pair = 0;
+  VALUE ref = *pref, operand = *poperand;
+  CArray *ca;
+  if ( id_comparable_pair == 0 ) {
+    id_comparable_pair = rb_intern("comparable_pair");
+  }
+  TypedData_Get_Struct(ref, CArray, &carray_data_type, ca);
+  if ( operand != CA_UNDEF
+       && ca->obj_type != CA_OBJ_RECORD
+       && ! ca_test_flag(ca, CA_FLAG_FACE_COMPARABLE_STORAGE)
+       && ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE)
+       && rb_respond_to(ref, id_comparable_pair) ) {
+    VALUE pair = rb_funcall(ref, id_comparable_pair, 1, operand);
+    *pref     = rb_ary_entry(pair, 0);
+    *poperand = rb_ca_strip_face_value(rb_ary_entry(pair, 1));
+    return;
+  }
+  *poperand = ca_face_reconcile_operand(ref, operand, name);
 }
 
 int
@@ -891,7 +1050,7 @@ ca_face_list_class (VALUE list, const char *who)
 {
   long n = RARRAY_LEN(list), i;
   int any_face = 0, all_face = 1;
-  VALUE face_class = Qnil;
+  VALUE face_class = Qnil, face = Qnil;
   CArray *ref = NULL;
 
   for ( i = 0; i < n; i++ ) {
@@ -903,6 +1062,7 @@ ca_face_list_class (VALUE list, const char *who)
     any_face = 1;
     if ( NIL_P(face_class) ) {
       face_class = rb_obj_class(p);
+      face = p;
       ref = ca;
     }
     else if ( rb_obj_class(p) != face_class ) {
@@ -911,19 +1071,36 @@ ca_face_list_class (VALUE list, const char *who)
   }
   if ( ! any_face ) return Qnil;
   if ( ! all_face ) {
+    const char *storage = ca_face_storage_method(face);
+    if ( ref->obj_type == CA_OBJ_STRING ) {
+      rb_raise(rb_eArgError,
+               "%s: cannot mix Face and non-Face arrays, or arrays of "
+               "different Face classes; convert them first to one Face "
+               "class or to no Face (CArray.string(a) makes a CAString of "
+               "an object array of Strings)",
+               who);
+    }
+    if ( storage ) {
+      rb_raise(rb_eArgError,
+               "%s: cannot mix Face and non-Face arrays, or arrays of "
+               "different Face classes; convert them first to one Face "
+               "class or to no Face, or combine their storage (#%s gives "
+               "the storage of a %s)",
+               who, storage, rb_obj_classname(face));
+    }
     rb_raise(rb_eArgError,
              "%s: cannot mix Face and non-Face arrays, or arrays of "
-             "different Face classes; convert them to one Face class, or "
-             "none, first, or take .parent of each to combine the storage",
+             "different Face classes; convert them first to one Face "
+             "class or to no Face",
              who);
   }
   if ( n > 1 && ! ca_face_state_portable(ref->obj_type, face_class) ) {
     rb_raise(rb_eArgError,
              "%s: %s state is not portable across several arrays (each "
              "keeps its values in storage of its own); convert them first "
-             "(a CAConstString with to_string), or take .parent of each to "
-             "combine the storage",
-             who, rb_class2name(face_class));
+             "(%s)",
+             who, rb_class2name(face_class),
+             ca_face_conversion_hint(face));
   }
   for ( i = 1; i < n; i++ ) {
     VALUE p = rb_ary_entry(list, i);
@@ -956,7 +1133,7 @@ rb_ca_s_face_state_portable_p (VALUE klass)
   return Qtrue;
 }
 
-/* ca.__orderable_storage__ -- whether ca's storage holds its values, in
+/* ca.orderable_storage? -- whether ca's storage holds its values, in
    their order, so that a lookup may compare the storage: true for an array
    that is not a Face and for a Face that declares
    CA_FLAG_FACE_ORDERABLE_STORAGE, false for a Face whose cells encode the
@@ -970,7 +1147,7 @@ rb_ca_orderable_storage_p (VALUE self)
   return ca_test_flag(ca, CA_FLAG_FACE_ORDERABLE_STORAGE) ? Qtrue : Qfalse;
 }
 
-/* ca.__comparable_storage__ -- whether ca's storage holds its values as
+/* ca.comparable_storage? -- whether ca's storage holds its values as
    they are, so that a plain operand may be compared with the storage: true
    for an array that is not a Face and for a Face that declares
    CA_FLAG_FACE_COMPARABLE_STORAGE. */
@@ -983,7 +1160,7 @@ rb_ca_comparable_storage_p (VALUE self)
   return ca_test_flag(ca, CA_FLAG_FACE_COMPARABLE_STORAGE) ? Qtrue : Qfalse;
 }
 
-/* ca.__face_storage__ -- the storage under a Face (ca itself when it is not
+/* ca.face_storage -- the storage under a Face (ca itself when it is not
    a Face). */
 static VALUE
 rb_ca_face_storage (VALUE self)
@@ -991,7 +1168,7 @@ rb_ca_face_storage (VALUE self)
   return rb_ca_strip_face_value(self);
 }
 
-/* ca.__reconcile_operand__(operand, name) -- operand brought into ca's
+/* ca.reconcile_operand(operand, name) -- operand brought into ca's
    storage space by the rule every operand family follows
    (ca_face_reconcile_operand for a Face, ca_face_operand_descend for an
    array that is not one).  For the families written in Ruby. */
@@ -1065,21 +1242,23 @@ ca_face_reconcile_comparison (volatile VALUE *pself, volatile VALUE *pother)
     return;
   }
 
-  if ( ! ca_test_flag(sc, CA_FLAG_FACE_ORDERABLE_STORAGE) ) {
-    ca_face_refuse_order("comparison", self, "compare");
-  }
+  ca_face_require_orderable(self, "comparison", "compare");
 
   {
-    int other_was_scalar = ! RTEST(rb_obj_is_carray(other));
-    other = ca_face_reconcile_operand(self, other, "comparison");
-    /* to_comparable lifts a scalar operand to a length-1 array; unwrap it
+    /* A Ruby Array is a list of values (to_comparable reads it cell by
+       cell), not one value, so it keeps the length it was given. */
+    int other_was_scalar = ! RTEST(rb_obj_is_carray(other))
+                           && ! RB_TYPE_P(other, T_ARRAY);
+    volatile VALUE ref = self, op = other;
+    ca_face_reconcile_pair(&ref, &op, "comparison");
+    /* The reconcile lifts a scalar operand to a length-1 array; unwrap it
        so the comparison stays array-vs-scalar instead of a shape check
        against [1] (which only a 1-D reference would pass). */
-    if ( other_was_scalar && RTEST(rb_obj_is_carray(other)) ) {
-      other = rb_ca_fetch_addr(other, 0);
+    if ( other_was_scalar && RTEST(rb_obj_is_carray(op)) ) {
+      op = rb_ca_fetch_addr(op, 0);
     }
-    *pself  = rb_ca_strip_face_value(self);
-    *pother = other;
+    *pself  = rb_ca_strip_face_value(ref);
+    *pother = op;
   }
 }
 
@@ -1105,12 +1284,14 @@ Init_ca_face (void)
   rb_define_singleton_method(rb_cCArray, "face_state_portable?",
                              rb_ca_s_face_state_portable_p, 0);
   rb_define_method(rb_cCArray, "face_lift", rb_ca_face_lift_method, 1);
-  rb_define_private_method(rb_cCArray, "__orderable_storage__",
+  rb_define_private_method(rb_cCArray, "orderable_storage?",
                            rb_ca_orderable_storage_p, 0);
-  rb_define_private_method(rb_cCArray, "__comparable_storage__",
+  rb_define_private_method(rb_cCArray, "comparable_storage?",
                            rb_ca_comparable_storage_p, 0);
-  rb_define_private_method(rb_cCArray, "__face_storage__",
+  rb_define_private_method(rb_cCArray, "face_storage",
                            rb_ca_face_storage, 0);
-  rb_define_private_method(rb_cCArray, "__reconcile_operand__",
+  rb_define_private_method(rb_cCArray, "reconcile_operand",
                            rb_ca_reconcile_operand, 2);
+  rb_define_private_method(rb_cCArray, "face_storage_method",
+                           rb_ca_face_storage_method, 0);
 }

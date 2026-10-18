@@ -43,13 +43,13 @@ class CArray
     # The original cells are copied as storage, so a read-only Face inserts
     # too; the block's value is written as a value of the array, which a
     # read-only Face refuses.
-    out = __blank_like__(newdim)
+    out = blank_like(newdim)
     if block_given?
       sel = CArray.boolean(*newdim) { true }
       sel[*grids] = false
       out[sel] = block.call
     end
-    out.__send__(:__face_storage__)[*grids] = __face_storage__
+    out.__send__(:face_storage)[*grids] = face_storage
     return out
   end
 

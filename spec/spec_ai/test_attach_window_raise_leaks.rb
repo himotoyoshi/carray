@@ -98,8 +98,9 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     def mask_sync_data (d) ; raise "mask write failed" ; end
   end
 
+  # The arena depth is read only in a development build.
   def setup
-    @arena_depth = CArray.__lazy_arena_depth__
+    @arena_depth = CArray.__lazy_arena_depth__ if CArray.respond_to?(:__lazy_arena_depth__)
   end
 
   # None of these cases may move the lazy arena: a leaked arena level is
@@ -107,6 +108,7 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
   # the run.  Those cases live in test_attach_window_raise_process.rb, one
   # child process each.
   def teardown
+    return unless @arena_depth
     assert_equal @arena_depth, CArray.__lazy_arena_depth__,
                  "this case leaked a lazy arena level into the test process"
   end
@@ -392,11 +394,16 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
   end
 
   # A search with an array query attaches the source and the query together;
-  # a query that does not convert to the source's type raises in the second.
-  releases("search_query_does_not_convert", ArgumentError) do
+  # a query value whose comparison raises does so with both attached.
+  UNEQUAL = Object.new
+  def UNEQUAL.== (other)
+    raise ArgumentError, "can not be compared"
+  end
+
+  releases("search_query_comparison_raises", ArgumentError) do
     t = CArray.int32(4, 6).seq.T
     v = t[1..4, nil]
-    [[v, t], -> { v.search(CA_OBJECT([1, "x"])) }]
+    [[v, t], -> { v.search(CA_OBJECT([1, UNEQUAL])) }]
   end
 
   releases("integer_division_by_zero", ZeroDivisionError) do

@@ -33,7 +33,7 @@ class CAFrame
   # @param names [Array<String>] the columns to summarize; default all.
   # @return [CAFrame] a new frame with one row per column.
   def describe(*names)
-    names = names.empty? ? column_names : names.map(&:to_s)
+    names = names.empty? ? column_names : column_keys(names, "describe")
     rows = names.map { |name| describe_column(self[name]) }
     stats = %w[type count masked unique min max mean stddev]
     cols = stats.to_h do |stat|
@@ -51,6 +51,7 @@ class CAFrame
   end
 
   DESCRIBE_TIME_FACES = %w[CATime CATimedelta].freeze
+  Ractor.make_shareable(DESCRIBE_TIME_FACES)
   private_constant :DESCRIBE_TIME_FACES
 
   private def describe_column(col)
@@ -64,7 +65,7 @@ class CAFrame
       else
         :other
       end
-    type = col.face? ? col.class.name : col.data_type_name
+    type = CArray::Inspector.type_label(col)
     type += col.shape[1..].inspect if col.ndim > 1
     row = { "type" => type,
             "count" => col.count_not_masked, "masked" => col.count_masked,

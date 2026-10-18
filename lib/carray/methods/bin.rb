@@ -18,6 +18,11 @@ class CArray
   #   that side. NaN / masked input cells are always masked in the
   #   output, independently of `lfill` / `ufill`.
   #
+  #   When `vmin == vmax` the range is one point: a value equal to it is
+  #   in bin 0 whatever `bins:` or `step` says, and a value below or above
+  #   it is out of range.  An array whose values are all the same is
+  #   binned this way by `bin(a.min, a.max, ...)`.
+  #
   #   Use `snap(step, offset:)` when the desired output is the snapped
   #   value; use `bin_to(edges)` when the edges are non-uniform.
   #
@@ -46,22 +51,20 @@ class CArray
     end
     raise ArgumentError, "bin: vmin > vmax" if vmin > vmax
 
+    unless bins.nil? || bins.is_a?(Integer)
+      raise TypeError, "bin: bins: must be an Integer (got #{bins.inspect})"
+    end
+    if vmin == vmax
+      # A range of one point: a value equal to it is in bin 0 whatever the
+      # count of bins (or the step), a value below or above it is out of
+      # range.
+      raise ArgumentError, "bin: n must be >= 1" if bins && bins < 1
+      return bin_to(CArray.float64(2) { vmin.to_f },
+                    lfill: lfill, ufill: ufill, include_max: true)
+    end
+
     n = bins || ((vmax - vmin).to_f / step).round
     raise ArgumentError, "bin: n must be >= 1" if n < 1
-
-    if vmin == vmax
-      # Degenerate: zero interval → all cells fall on the single edge;
-      # with include_max: true they land in bin 0.
-      out = CArray.int64(*shape) { 0 }
-      out.mask = self.mask.to_ca if self.has_mask?
-      if self.float?
-        inv = self.is_invalid
-        if inv.count(true) > 0
-          out.mask = out.has_mask? ? (out.mask | inv) : inv
-        end
-      end
-      return out
-    end
 
     # Delegate to `bin_to` with generated uniform edges — same kernel
     # (`histbin_ki`) as `histogram`, so semantics are identical.
@@ -99,8 +102,9 @@ class CArray
   #   @return [CArray] `CA_INT64` array with the same shape as `self`
   #     holding bin indices in `[0, N-1]` (or the fill values / mask
   #     for out-of-range and masked cells).
-  #   @raise [ArgumentError] when `edges` is not 1-D or has fewer
-  #     than 2 values.
+  #   @raise [ArgumentError] when `edges` is not 1-D, has fewer than 2
+  #     values, has a masked value or NaN, or decreases anywhere.  Equal
+  #     edges (a bin of zero width) and infinite ones are accepted.
   #   @example
   #     e = CA_FLOAT64([0, 1, 10, 100])
   #     v = CA_FLOAT64([0.5, 5.0, 50.0, -1.0, 200.0])
@@ -120,8 +124,12 @@ class CArray
     # under -> -1, in-range -> 0..N-1, over -> N.
     out = src.send(:histbin_ki, e, include_max) - 1
 
-    out[:eq, -1] = lfill.nil? ? UNDEF : lfill          # under
-    out[:eq, n]  = ufill.nil? ? UNDEF : ufill          # over
+    # Both sides are found before either is written, so a fill that equals
+    # the other side's index (lfill: n) is not taken for it.
+    under = out.eq(-1)
+    over  = out.eq(n)
+    out[under] = lfill.nil? ? UNDEF : lfill
+    out[over]  = ufill.nil? ? UNDEF : ufill
     out
   end
 

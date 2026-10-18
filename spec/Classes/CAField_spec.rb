@@ -9,7 +9,7 @@ describe "TestCArrayCAField " do
     a = CArray.int16(3,3) { 0x1122 }
     b = a.field(0, CA_INT8)
     is_asserted_by { CA_INT8 == b.data_type }
-    is_asserted_by { [3, 3] == b.dim }
+    is_asserted_by { [3, 3] == b.shape }
   end
 
   example "endian" do

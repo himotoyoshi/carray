@@ -130,7 +130,7 @@ class TestArgMonop < Test::Unit::TestCase
   def test_2d_real_shape_preserved
     a = CArray.float64(3, 4) { |i, j| i * 4 + j - 5 }   # mix of +/- /0
     r = a.arg
-    assert_equal [3, 4], r.dim
+    assert_equal [3, 4], r.shape
     assert_equal CA_FLOAT64, r.data_type
     a.elements.times do |k|
       flat = a[k.divmod(4)[0], k.divmod(4)[1]]
@@ -142,7 +142,7 @@ class TestArgMonop < Test::Unit::TestCase
   def test_2d_complex_input
     a = CArray.cmplx128(2, 2) { |i, j| Complex(i, j) }
     r = a.arg
-    assert_equal [2, 2], r.dim
+    assert_equal [2, 2], r.shape
     assert_equal CA_FLOAT64, r.data_type
     assert_in_delta 0.0,    r[0, 0], 1e-12
     assert_in_delta PI / 2, r[0, 1], 1e-12
@@ -156,16 +156,16 @@ class TestArgMonop < Test::Unit::TestCase
     a = CArray.float64(4, 4) { |i, j| (i * 4 + j) - 8 }
     blk = a[1..2, nil]
     r = blk.arg
-    assert_equal [2, 4], r.dim
+    assert_equal [2, 4], r.shape
     # row 1 (= elements -4..-1) -> all pi; row 2 (= 0..3) -> all 0
-    r.dim[1].times { |j| assert_in_delta PI,  r[0, j], 1e-12 }
-    r.dim[1].times { |j| assert_in_delta 0.0, r[1, j], 1e-12 }
+    r.shape[1].times { |j| assert_in_delta PI,  r[0, j], 1e-12 }
+    r.shape[1].times { |j| assert_in_delta 0.0, r[1, j], 1e-12 }
   end
 
   def test_through_transpose
     a = CArray.cmplx128(2, 2) { |i, j| Complex(i + 1, j + 1) }
     r = a.transpose.arg
-    assert_equal [2, 2], r.dim
+    assert_equal [2, 2], r.shape
     assert_equal CA_FLOAT64, r.data_type
   end
 

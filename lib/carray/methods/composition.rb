@@ -139,6 +139,7 @@ class CArray
   # per-piece dim sizes summed along each tile axis (= block-matrix
   # consistency required across rows / columns).
   def self.__ragged_paste (list, tdim, axis, data_type, name)
+    shared_attrs = attrs_shared_by(list)
     list = CArray.promote_list(list, data_type: data_type)
     # promote_list has already enforced homogeneity (= common data_type, and
     # for Face elements: same Face class + portable + state-compatible).  So,
@@ -150,7 +151,7 @@ class CArray
     # its cell width, and the result is as wide as its widest piece.
     face_parent = list[0].face? ? list.max_by(&:bytes) : nil
     if face_parent
-      list = list.map { |x| x.__send__(:__face_storage__) }
+      list = list.map { |x| x.__send__(:face_storage) }
     end
     data_type = list[0].data_type
     # Fixlen pieces of different widths join at the widest, so no cell is
@@ -223,6 +224,7 @@ class CArray
       obj.paste(idx, item)
     end
     obj = obj.face_lift(face_parent) if face_parent
+    obj.set_attrs(shared_attrs) unless shared_attrs.empty?
     obj
   end
   private_class_method :__ragged_paste

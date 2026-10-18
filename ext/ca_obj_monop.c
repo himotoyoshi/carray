@@ -222,6 +222,7 @@ ca_monop_setup (CAMonOp *ca, CArray *parent, uint16_t op_id)
 CAMonOp *
 ca_monop_new (CArray *parent, uint16_t op_id)
 {
+  /* check: the setup checks nothing */
   CAMonOp *ca = (CAMonOp *) ca_array_alloc(CA_OBJ_MONOP, parent->ndim);
   ca_monop_setup(ca, parent, op_id);
   return ca;
@@ -282,7 +283,7 @@ ca_monop_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
     /* PUT: only writable-view op_ids accept writes (cast, or byte_swap
        involution). */
     if ( ! ca_monop_is_writable_view(ca->op_id) ) {
-      rb_raise(rb_eRuntimeError, "CAMonOp is read-only (xfer_index PUT)");
+      ca_refuse_read_only();
     }
     {
       volatile VALUE holder;
@@ -337,16 +338,14 @@ ca_size_t ca_monop_materialise_call_count = 0;
 #define CA_MAX_LAZY_DEPTH 256
 #endif
 
-/* Whether an op can raise on a cell, so that a masked cell must be
-   skipped rather than computed: any op on an object cell (it calls Ruby),
-   and an integer reciprocal (zero raises). */
+/* Whether a cast from `from` to `to` raises on a NaN cell: a float or
+   complex value has no integer for NaN. */
 static int
-ca_monop_is_trapping (uint16_t op_id, int8_t dt)
+ca_monop_cast_refuses_nan (int8_t from, int8_t to)
 {
-  if ( dt == CA_OBJECT ) {
-    return 1;
-  }
-  return ( op_id == CA_MONOP_RCP && dt >= CA_INT8 && dt <= CA_UINT64 );
+  int from_float = ( from == CA_FLOAT32 || from == CA_FLOAT64 ||
+                     from == CA_CMPLX64 || from == CA_CMPLX128 );
+  return from_float && to >= CA_INT8 && to <= CA_UINT64;
 }
 
 /* Apply a single op in-place on `data` (src == dst, unit element stride).
@@ -476,7 +475,27 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
     v = ALLOCV_N(char, holder, n * parent_bytes);
     if ( dir == CA_XFER_GET ) {
       ca_lazy_req_pull(mo->parent, req, v, CA_XFER_GET);
-      if ( is_cast ) {
+      if ( is_cast && ca_monop_cast_refuses_nan(mo->parent->data_type,
+                                                mo->data_type) ) {
+        /* The cast raises on a NaN cell it is asked to convert; a masked
+           cell (mask_invalid keeps the NaN under the mask) is skipped.
+           The mask is copied off the arena first so a raise leaves no
+           arena slot held. */
+        CArray *parent = mo->parent;
+        boolean8_t *arena_mask = ca_lazy_req_mask(req, 1, &parent);
+        boolean8_t *m = NULL;
+        volatile VALUE mholder = 0;
+        if ( arena_mask ) {
+          m = ALLOCV_N(boolean8_t, mholder, n);
+          memcpy(m, arena_mask, n);
+          ca_lazy_arena_release(arena_mask);
+        }
+        ca_cast_block_with_mask(n, mo->parent, v, (CArray *) mo, data, m);
+        if ( m ) {
+          ALLOCV_END(mholder);
+        }
+      }
+      else if ( is_cast ) {
         ca_cast_block(n, mo->parent, v, (CArray *) mo, data);
       }
       else {
@@ -503,7 +522,7 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
   /* Writable-view op_id PUT/GET is handled above.  Below: non-writable
      monop/monfunc.  PUT is read-only.  */
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CAMonOp is read-only (xfer_stride PUT)");
+    ca_refuse_read_only();
   }
   ca_monop_materialise_call_count++;
 
@@ -573,12 +592,12 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
       ca_lazy_arena_release(scratch);
       cur_dt = target_dt;
     } else {
-      if ( ! mask_taken && ca_monop_is_trapping(op_id, cur_dt) ) {
+      if ( ! mask_taken && ca_op_raises_on_cell(CA_OP_KIND_MONOP, op_id, cur_dt) ) {
         slab_mask  = ca_lazy_req_mask(req, 1, &leaf);
         mask_taken = 1;
       }
       apply_monop_in_place(op_id, cur_dt, slab_n, data,
-                           ca_monop_is_trapping(op_id, cur_dt) ? slab_mask : NULL);
+                           ca_op_raises_on_cell(CA_OP_KIND_MONOP, op_id, cur_dt) ? slab_mask : NULL);
       cur_dt = ca_lazy_promote_monop(op_id, cur_dt);
     }
   }
@@ -638,16 +657,7 @@ ca_monop_func_allocate (void *ap)
   if ( ca_monop_is_writable_view(ca->op_id) ) {
     ca_attach(ca->parent);
   }
-  ca->ptr = xmalloc(ca_length(ca));
-  /* CA_OBJECT initialisation for GC safety.  */
-  if ( ca->data_type == CA_OBJECT ) {
-    VALUE *p = (VALUE *) ca->ptr;
-    VALUE zero = SIZE2NUM(0);
-    ca_size_t i;
-    for ( i = 0; i < ca->elements; i++ ) {
-      *p++ = zero;
-    }
-  }
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -676,22 +686,19 @@ ca_monop_func_attach (void *ap)
      Mirrors CAFake.attach.  */
   if ( ca_monop_is_writable_view(ca->op_id) ) {
     ca_attach(ca->parent);
-    ca->ptr = xmalloc(ca_length(ca));
-    /* CA_OBJECT initialisation for GC safety (mirrors CAFake.allocate):
-       zero-init the VALUE cells before any potential GC can observe
-       them.  */
-    if ( ca->data_type == CA_OBJECT ) {
-      VALUE *p = (VALUE *) ca->ptr;
-      VALUE zero = SIZE2NUM(0);
-      ca_size_t i;
-      for ( i = 0; i < ca->elements; i++ ) {
-        *p++ = zero;
-      }
-    }
+    ca->ptr = ca_alloc_cells((CArray *) ca);
     if ( ca_monop_is_cast(ca->op_id) ) {
-      /* Cast parent.ptr (parent data_type) → ca.ptr (cast target data_type).  */
-      ca_cast_block(ca->elements, ca->parent, ca->parent->ptr,
-                    (CArray *) ca, ca->ptr);
+      /* Cast parent.ptr (parent data_type) → ca.ptr (cast target data_type).
+         A cast that raises on NaN skips the masked cells; the parent's
+         mask is attached with the parent.  A raise here is undone by
+         ca_attach, which calls the detach slot once ca->ptr is set. */
+      boolean8_t *m = NULL;
+      if ( ca_monop_cast_refuses_nan(ca->parent->data_type, ca->data_type)
+           && ca_has_mask(ca->parent) ) {
+        m = (boolean8_t *) ca->parent->mask->ptr;
+      }
+      ca_cast_block_with_mask(ca->elements, ca->parent, ca->parent->ptr,
+                              (CArray *) ca, ca->ptr, m);
     }
     else {
       /* byte_swap: memcpy parent.ptr → ca.ptr (same data_type same bytes),
@@ -702,19 +709,11 @@ ca_monop_func_attach (void *ap)
     return;
   }
 
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 
   s = ca->bytes;
   for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
   for ( k = 0; k < ca->ndim; k++ ) starts[k] = 0;
-  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
-     soon as the view is, so it must not be handed to the GC as raw
-     xmalloc garbage. */
-  if ( ca->data_type == CA_OBJECT ) {
-    VALUE *p = (VALUE *) ca->ptr;
-    ca_size_t i;
-    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
-  }
   ca_monop_func_xfer_stride(ca, starts, ca->dim, native, ca->ptr, CA_XFER_GET);
 }
 
@@ -782,7 +781,7 @@ ca_monop_func_fill_data (void *ap, void *ptr)
      data_type (= same bytes for byte_swap, reverse-cast for cast).
      Non-writable monop/monfunc remains read-only.  */
   if ( ! ca_monop_is_writable_view(ca->op_id) ) {
-    rb_raise(rb_eRuntimeError, "CAMonOp is read-only (fill_data)");
+    ca_refuse_read_only();
   }
   {
     int is_cast = ca_monop_is_cast(ca->op_id);
@@ -915,8 +914,9 @@ rb_ca_monop_build (VALUE cary, uint16_t op_id)
      with no boolean kernel reads the 0/1 storage in int64. */
   if ( parent_dt == CA_BOOLEAN && ! ca_monop_is_writable_view(op_id) ) {
     if ( ca_monop_is_widening(op_id) ) {
-      rb_raise(rb_eCADataTypeError,
-               "invalid data type for monop (not implemented)");
+      /* the eager monop reads a boolean with no kernel as int64 (0/1), and
+         names that type in its refusal */
+      ca_op_refuse_unimplemented(cary, CA_INT64, rb_eCADataTypeError);
     }
     if ( ca_monop_kernel_lookup(op_id, CA_BOOLEAN) == ca_monop_not_implement ) {
       target = rb_ca_monop_new(target, CA_MONOP_CAST_BASE + CA_INT64);
@@ -934,8 +934,13 @@ rb_ca_monop_build (VALUE cary, uint16_t op_id)
        ( ca_monop_kernel_lookup(op_id, kernel_in_dt) == ca_monop_not_implement ||
          ( parent_dt == CA_FIXLEN &&
            ca_monop_kernel_lookup(op_id, CA_FIXLEN) == ca_monop_not_implement ) ) ) {
-    rb_raise(rb_eCADataTypeError,
-             "invalid data type for monop (not implemented)");
+    /* the eager monop takes an integer to float64 before it looks for the
+       kernel, and names the type it looked in */
+    ca_op_refuse_unimplemented(cary,
+                               parent_dt == CA_FIXLEN ? CA_FIXLEN
+                               : RTEST(rb_ca_is_integer_type(cary)) ? CA_FLOAT64
+                               : kernel_in_dt,
+                               rb_eCADataTypeError);
   }
 
   /* Insert cast node if the kernel wants a different input data_type.  */
@@ -952,6 +957,7 @@ rb_ca_monop_build (VALUE cary, uint16_t op_id)
 static VALUE
 rb_ca_monop_s_build (VALUE klass, VALUE cary, VALUE op_id_val)
 {
+  /* fits: an operation number from the library's own table */
   uint16_t op_id = (uint16_t) NUM2UINT(op_id_val);
   (void) klass;
   return rb_ca_monop_build(cary, op_id);
@@ -976,7 +982,7 @@ rb_ca_monop_trapping (VALUE self)
   CAMonOp *mo;
   TypedData_Get_Struct(self, CAMonOp, &camonop_data_type, mo);
   return ( ! ca_monop_is_cast(mo->op_id)
-           && ca_monop_is_trapping(mo->op_id, mo->parent->data_type) )
+           && ca_op_raises_on_cell(CA_OP_KIND_MONOP, mo->op_id, mo->parent->data_type) )
          ? Qtrue : Qfalse;
 }
 
@@ -996,6 +1002,7 @@ rb_ca_monop_op_id (VALUE self)
    because in-place chain eval allocates no scratch; only attach (xfer_all
    → output) and the parent's own xfer_stride alloc, neither of which we
    count here.  */
+#ifdef CARRAY_DEV_BUILD
 static VALUE
 rb_ca_monop_s_reset_scratch_counter (VALUE klass)
 {
@@ -1021,6 +1028,7 @@ rb_ca_monop_s_materialise_count (VALUE klass)
 {
   return SIZE2NUM(ca_monop_materialise_call_count);
 }
+#endif /* CARRAY_DEV_BUILD */
 
 static VALUE
 rb_ca_monop_s_allocate (VALUE klass)
@@ -1119,10 +1127,10 @@ Init_ca_obj_monop (void)
   rb_define_singleton_method(rb_cCAMonOp, "__build__",
                              rb_ca_monop_s_build, 2);
 
-  /* Lazy-view predicate exposed on CArray (covers CAMonOp and
-     CALazyMarker).  */
-  rb_define_method(rb_cCArray, "__lazy_view__?",
-                   rb_ca_is_lazy_view_p, 0);
+  /* Lazy-view predicate on CArray (covers CAMonOp and CALazyMarker).
+     Protected: the lazy dispatch asks it of the other operands. */
+  rb_define_protected_method(rb_cCArray, "lazy_view?",
+                             rb_ca_is_lazy_view_p, 0);
 
   /* op_id accessor for inspect / dump_tree consumers in Ruby.  */
   rb_define_method(rb_cCAMonOp, "__op_id__",
@@ -1130,6 +1138,7 @@ Init_ca_obj_monop (void)
   rb_define_method(rb_cCAMonOp, "__trapping__", rb_ca_monop_trapping, 0);
 
   /* Test instrumentation (not user-facing API).  */
+#ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCAMonOp, "__reset_scratch_counter__",
                              rb_ca_monop_s_reset_scratch_counter, 0);
   rb_define_singleton_method(rb_cCAMonOp, "__scratch_count__",
@@ -1138,4 +1147,5 @@ Init_ca_obj_monop (void)
                              rb_ca_monop_s_reset_materialise_counter, 0);
   rb_define_singleton_method(rb_cCAMonOp, "__materialise_count__",
                              rb_ca_monop_s_materialise_count, 0);
+#endif
 }

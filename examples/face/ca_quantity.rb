@@ -78,7 +78,7 @@ class CAQuantity < CAObject
     end
     CAQuantity.dimension_of(unit)
     @unit = unit
-    super(parent.data_type, parent.dim, parent: parent, face: true,
+    super(parent.data_type, parent.shape, parent: parent, face: true,
           orderable_storage: true)
   end
 

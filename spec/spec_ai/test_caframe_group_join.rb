@@ -52,8 +52,10 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     stat = @df.group_by("station").aggregate(
       "wind_mean" => ["wind", ->(c) { c.mean(axis: 0) }],
     )
-    # tokyo rows: [1,2] and [5,6] -> mean [3,4]
-    assert_equal [3.0, 4.0], stat["wind_mean"][0].to_a
+    # tokyo rows: [1,2] and [5,6] -> mean [3,4]; one vector per group stacks
+    # into an N-D column, as from_records stacks array cells
+    assert_equal [3, 2], stat["wind_mean"].shape
+    assert_equal [3.0, 4.0], stat["wind_mean"][0, nil].to_a
   end
 
   def test_table_escape_cross_column
@@ -62,6 +64,40 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     end
     assert_equal [2, 2, 1], t["n"].to_a
     assert_equal [22.1, 30.0, 15.0], t["tmax"].to_a
+  end
+
+  # A name only a later group gives is a column too; a group without it
+  # is UNDEF there.
+  def test_table_takes_the_names_of_every_group
+    i = -1
+    t = @df.group_by("station").table do |g|
+      i += 1
+      i == 1 ? { "n" => g.nrow, "late" => 9 } : (i == 2 ? { "tmax" => 1.5 } : { "n" => g.nrow })
+    end
+    assert_equal %w[n late tmax], t.column_names
+    assert_equal [2, 2, UNDEF], t["n"].to_a
+    assert_equal [UNDEF, 9, UNDEF], t["late"].to_a
+    assert_equal [UNDEF, UNDEF, 1.5], t["tmax"].to_a
+  end
+
+  # A frame whose row count changed since it was grouped has rows the
+  # grouping does not know: every verb refuses it, to_frame included.
+  def test_a_changed_row_count_is_refused
+    df = CAFrame.new("g" => CA_INT32([1, 1, 2]), "v" => CA_FLOAT64([1, 2, 3]))
+    grp = df.group_by("g")
+    df[3...3] = CAFrame.new("g" => CA_INT32([2, 3]), "v" => CA_FLOAT64([4, 5]))
+    [-> { grp.mean }, -> { grp.to_frame }, -> { grp.lag }, -> { grp["v"] },
+     -> { grp.filter { |x| x.mean("v").gt(0) } }, -> { grp.fill("v", :ffill) },
+     -> { grp.table { |_| { "n" => 1 } } }].each do |call|
+      err = assert_raise(ArgumentError) { call.() }
+      assert_match(/the frame has 5 rows, 3 when it was grouped; group it again/, err.message)
+    end
+  end
+
+  def test_filter_names_the_type_the_block_gave
+    grp = CAFrame.new("g" => CA_INT32([1, 1, 2]), "v" => CA_FLOAT64([1, 2, 3])).group_by("g")
+    err = assert_raise(ArgumentError) { grp.filter { |x| x.mean("v") } }
+    assert_match(/\(got a float64 CArray\)/, err.message)
   end
 
   def test_table_g_is_view_frame
@@ -83,7 +119,7 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     res = df.group_by("key").table { |g| { "members" => g["idx"].to_a } }
     assert_equal (0...ng).to_a, res.index.to_a
     ng.times do |k|
-      assert_equal (k...n).step(ng).to_a, res["members"][k]
+      assert_equal (k...n).step(ng).to_a, res["members"][k, nil].to_a
     end
   end
 
@@ -141,8 +177,8 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
                      "b" => CA_INT32([5, 5, 6]),
                      "v" => CA_FLOAT64([1, 2, 3]))
     m = df.group_by("a", "b").mean
-    assert_equal ["v"], m.column_names
-    assert_equal "group", m.axis_name
+    assert_equal ["a", "b", "v"], m.column_names
+    assert_nil m.index
     assert_equal [1.5, 3.0], m["v"].to_a
   end
 
@@ -163,9 +199,25 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
       "v" => CA_FLOAT64([10, 20, 30]),
     )
     stat = df.group_by("a", "b").aggregate("s" => ["v", :sum])
-    assert_equal "group", stat.axis_name
-    assert_equal [["x", 1], ["x", 2], ["y", 1]], stat.index.to_a
+    assert_nil stat.index
+    assert_equal ["a", "b", "s"], stat.column_names
+    assert_equal ["x", "x", "y"], stat["a"].to_a
+    assert_equal [1, 2, 1], stat["b"].to_a
+    assert_equal :int32, stat["b"].data_type
     assert_equal [10.0, 20.0, 30.0], stat["s"].to_a
+  end
+
+  # A CArray key among several names its column by its position, and a
+  # result column with a key column's name is refused.
+  def test_composite_key_with_an_unnamed_key
+    df = CAFrame.new("a" => CA_OBJECT(["x", "x", "y"]), "v" => CA_FLOAT64([10, 20, 30]))
+    stat = df.group_by("a", CA_INT32([1, 1, 2])).sum
+    assert_equal ["a", "key1", "v"], stat.column_names
+    assert_equal [1, 2], stat["key1"].to_a
+    err = assert_raise(ArgumentError) {
+      df.group_by("a", CA_INT32([1, 1, 2])).aggregate("a" => ["v", :sum])
+    }
+    assert_match(/a result column has the name of a key column: "a"/, err.message)
   end
 
   def test_external_carray_key
@@ -286,6 +338,89 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     df = CAFrame.new("k" => CA_INT32([1, 1, 2]), "f" => fx)
     assert_equal ["ab", "ef"], df.group_by("k").min["f"].to_a
     assert_equal ["ab", "ef"], fx.group_by_category(CA_INT32([1, 1, 2]).categorize).min.to_a
+  end
+
+  # keep_rows: true gives each row its own group's result, in the frame's
+  # rows and index; a row whose key is masked is UNDEF.
+  def test_keep_rows_gives_each_row_its_group
+    @df["station"][4] = UNDEF
+    g = @df.group_by("station")
+    m = g.mean(keep_rows: true)
+    assert_equal 5, m.nrow
+    assert_equal [20.55, 27.65, 20.55, 27.65, UNDEF], m["temp"].to_a.map { |v| UNDEF.equal?(v) ? v : v.round(2) }
+    assert_equal [[3.0, 4.0], [5.0, 6.0], [3.0, 4.0], [5.0, 6.0]], m["wind"][0..3, nil].to_a
+    a = g.aggregate("hi" => ["temp", :max], "rng" => ["temp", ->(c) { c.max - c.min }], keep_rows: true)
+    assert_equal [22.1, 30.0, 22.1, 30.0, UNDEF], a["hi"].to_a
+    assert_in_delta 3.1, a["rng"][0], 1e-12
+    t = g.table(keep_rows: true) { |f| { "n" => f.nrow } }
+    assert_equal [2, 2, 2, 2, UNDEF], t["n"].to_a
+    assert_equal 2, g.mean.nrow
+  end
+
+  # Named columns come back as df[...] gives them: one CArray, or an Array.
+  def test_reductions_take_column_names
+    g = @df.group_by("station")
+    assert_equal [20.55, 27.65, 15.0], g.mean("temp").to_a.map { |v| v.round(2) }
+    assert_equal [22.1, 30.0, 22.1, 30.0, 15.0], g.max("temp", keep_rows: true).to_a
+    hi, wind = g.max("temp", "wind")
+    assert_equal [22.1, 30.0, 15.0], hi.to_a
+    assert_equal [3, 2], wind.shape
+    assert_equal [1.55, -2.35, -1.55, 2.35, 0.0],
+                 (@df["temp"] - g.mean("temp", keep_rows: true)).to_a.map { |v| v.round(2) }
+    assert_raise(KeyError) { g.mean("nope") }
+    assert_raise(TypeError) { g.mean(:temp) }
+    err = assert_raise(CArray::DataTypeError) { g.sum("station") }
+    assert_equal 'sum: column "station" (object) has no sum', err.message
+  end
+
+  def test_is_duplicate_marks_later_repeats
+    df = CAFrame.new("a" => CA_INT32([1, 1, 2, 1, 2, 1]),
+                     "b" => CA_OBJECT(%w[x x y z y x]),
+                     "f" => CA_FLOAT64([Float::NAN, Float::NAN, 0.0, 1, -0.0, 3]))
+    df["a"][5] = UNDEF
+    assert_equal [false, true, false, false, true, false], df.is_duplicate.to_a
+    assert_equal [false, true, false, true, true, false], df.is_duplicate("a").to_a
+    assert_equal [false, true, false, false, true, false], df.is_duplicate("f").to_a
+    assert_equal 4, df[df.is_duplicate("a", "b").not].nrow
+    assert_raise(TypeError) { df.is_duplicate(:a) }
+    assert_raise(KeyError) { df.is_duplicate("zz") }
+    assert_raise(ArgumentError) { CAFrame.new("v" => CArray.float64(3, 2)).is_duplicate }
+  end
+
+  # except: names the occurrence left unmarked; :none marks every row whose
+  # values appear more than once, so its negation is the rows seen once.
+  def test_is_duplicate_except
+    df = CAFrame.new("a" => CA_INT32([1, 2, 1, 1, 3, 2]))
+    assert_equal [false, false, true, true, false, true], df.is_duplicate(except: :first).to_a
+    assert_equal [true, true, true, false, false, false], df.is_duplicate(except: :last).to_a
+    assert_equal [true, true, true, true, false, true], df.is_duplicate(except: :none).to_a
+    df["a"][4] = UNDEF
+    assert_equal [true, true, true, true, false, true], df.is_duplicate(except: :none).to_a
+    err = assert_raise(ArgumentError) { df.is_duplicate(except: false) }
+    assert_equal "is_duplicate: except: must be :first, :last or :none (got false)", err.message
+  end
+
+  # The values the groups give are typed as from_records types a record's:
+  # Integers int64, numbers float64, missing UNDEF, anything else object.
+  def test_table_and_proc_results_are_typed
+    df = CAFrame.new("k" => CA_OBJECT(%w[a b a c]), "v" => CA_FLOAT64([1, 2, 3, 4]))
+    df["v"][3] = UNDEF
+    g = df.group_by("k")
+    t = g.table { |f| { "n" => f.nrow, "hi" => f["v"].max, "big" => f.nrow > 1, "s" => "x" } }
+    assert_equal({ "n" => :int64, "hi" => :float64, "big" => :object, "s" => CAString }, t.data_types)
+    assert_equal [3.0, 2.0, UNDEF], t["hi"].to_a
+    a = g.aggregate("r" => ["v", ->(c) { c.count_not_masked == 0 ? nil : c.max - c.min }])
+    assert_equal :float64, a["r"].data_type
+    assert_equal [2.0, 0.0, UNDEF], a["r"].to_a
+    assert_equal :int64, g.table(keep_rows: true) { |f| { "n" => f.nrow } }["n"].data_type
+  end
+
+  def test_keep_rows_keeps_the_index
+    df = CAFrame.new({ "k" => CA_OBJECT(%w[a b a]), "v" => CA_FLOAT64([1, 2, 5]) }, index: CA_INT32([7, 8, 9]), axis_name: "id")
+    m = df.group_by("k").mean(keep_rows: true)
+    assert_equal [7, 8, 9], m.index.to_a
+    assert_equal "id", m.axis_name
+    assert_equal [3.0, 2.0, 3.0], m["v"].to_a
   end
 end
 
@@ -422,6 +557,76 @@ class TestCAFrameJoin < Test::Unit::TestCase
 
   def test_unknown_how_raises
     assert_raise(ArgumentError) { @df.join(@meta, on: "station", how: :sideways) }
+  end
+end
+
+class TestCAFrameJoinSeveralKeys < Test::Unit::TestCase
+  def setup
+    @obs  = CAFrame.new({"station" => CA_OBJECT(%w[a a b b]),
+                         "day"     => CA_INT32([1, 2, 1, 2]),
+                         "t"       => CA_FLOAT64([10, 11, 12, 13])})
+    @fcst = CAFrame.new({"station" => CA_OBJECT(%w[b a c]),
+                         "day"     => CA_INT32([1, 2, 1]),
+                         "f"       => CA_FLOAT64([20, 21, 22])})
+  end
+
+  def rows(df, names)
+    (0...df.nrow).map { |i| names.map { |n| v = df[n][i]; UNDEF.equal?(v) ? nil : v } }
+  end
+
+  def test_rows_match_when_every_key_matches
+    j = @obs.join(@fcst, on: ["station", "day"])
+    assert_equal %w[station day t f], j.column_names
+    assert_equal [["a", 1, 10.0, nil], ["a", 2, 11.0, 21.0],
+                  ["b", 1, 12.0, 20.0], ["b", 2, 13.0, nil]],
+                 rows(j, %w[station day t f])
+  end
+
+  def test_inner_and_outer
+    assert_equal [["a", 2, 11.0, 21.0], ["b", 1, 12.0, 20.0]],
+                 rows(@obs.join(@fcst, on: ["station", "day"], how: :inner), %w[station day t f])
+    outer = @obs.join(@fcst, on: ["station", "day"], how: :outer)
+    assert_equal ["c", 1, nil, 22.0], rows(outer, %w[station day t f]).last
+    assert_equal 5, outer.nrow
+  end
+
+  def test_right_join
+    j = @obs.join(@fcst, on: ["station", "day"], how: :right)
+    assert_equal [["b", 1, 12.0, 20.0], ["a", 2, 11.0, 21.0], ["c", 1, nil, 22.0]],
+                 rows(j, %w[station day t f])
+  end
+
+  def test_a_masked_key_cell_matches_nothing
+    @obs["day"][2] = UNDEF
+    @fcst["station"][1] = UNDEF
+    j = @obs.join(@fcst, on: ["station", "day"], how: :inner)
+    assert_equal 0, j.nrow
+  end
+
+  def test_a_pair_key_matches_many_rows_as_sql
+    fcst = CAFrame.new({"station" => CA_OBJECT(%w[a a]), "day" => CA_INT32([2, 2]),
+                        "f" => CA_FLOAT64([1, 2])})
+    j = @obs.join(fcst, on: ["station", "day"], how: :inner)
+    assert_equal [["a", 2, 11.0, 1.0], ["a", 2, 11.0, 2.0]], rows(j, %w[station day t f])
+  end
+
+  def test_key_types_are_reconciled_per_column
+    fcst = CAFrame.new({"station" => CA_OBJECT(%w[b]), "day" => CA_FLOAT64([1.0]),
+                        "f" => CA_FLOAT64([5])})
+    j = @obs.join(fcst, on: ["station", "day"], how: :outer)
+    assert_equal :float64, j["day"].data_type
+    assert_equal ["b", 1.0, 12.0, 5.0], rows(j, %w[station day t f])[2]
+  end
+
+  def test_a_one_name_array_is_one_key
+    assert_equal rows(@obs.join(@fcst, on: "day"), %w[day t f]),
+                 rows(@obs.join(@fcst, on: ["day"]), %w[day t f])
+  end
+
+  def test_refuses_no_key_and_a_repeated_key
+    assert_raise(ArgumentError) { @obs.join(@fcst, on: []) }
+    assert_raise(ArgumentError) { @obs.join(@fcst, on: %w[day day]) }
+    assert_raise(TypeError)     { @obs.join(@fcst, on: ["day", :station]) }
   end
 end
 
@@ -929,6 +1134,14 @@ class TestCAFrameSort < Test::Unit::TestCase
     assert_equal %w[a a z m], m["station"].to_a
   end
 
+  def test_sort_by_key_descending_puts_nan_last_and_passes_ties_on
+    nan = Float::NAN
+    df = CAFrame.new("a" => CA_FLOAT64([nan, 1, nan, nan, 1]), "b" => CA_INT32([3, 9, 1, 2, 0]))
+    assert_equal [0, 9, 1, 2, 3], df.sort_by_key(["a", :desc], ["b", :asc])["b"].to_a
+    df = CAFrame.new("a" => CA_FLOAT64([nan, 1, nan]), "b" => CA_INT32([0, 1, 2]))
+    assert_equal [1, 0, 2], df.sort_by_key(["a", :desc])["b"].to_a
+  end
+
   def test_sort_by_block_derived_key
     s = @df.sort_by { |f| (f["temp"] - 24).abs }
     assert_equal [25.0, 22.0, 19.0, 30.0], s["temp"].to_a
@@ -970,6 +1183,23 @@ class TestCAFrameJoinNDKey < Test::Unit::TestCase
     assert_match(/join_asof: the key "wind" has shape \[3, 2\]/, e.message)
   end
 
+  # A raw fixlen key is a cell-width blob: keys of different widths share
+  # no value, and the join says so by the column (it named the set
+  # operation it runs, `union`).  A fixlen string compares as strings.
+  def test_join_refuses_raw_fixlen_keys_of_different_widths
+    l = CAFrame.new("k" => CA_FIXLEN(["ab", "cd"], bytes: 2), "t" => CA_FLOAT64([1, 2]))
+    r = CAFrame.new("k" => CA_FIXLEN(["ab", "zz"], bytes: 4), "t" => CA_FLOAT64([1, 2]))
+    [:left, :inner, :outer, :right].each do |how|
+      e = assert_raise(CArray::DataTypeError) { l.join(r, on: "k", how: how) }
+      assert_match(/\Ajoin: the key "k" is fixlen 2 bytes wide on the left and 4 on the right/, e.message)
+    end
+    e = assert_raise(CArray::DataTypeError) { l.join_asof(r, on: "t", by: "k") }
+    assert_match(/\Ajoin_asof: the key "k" is fixlen 2 bytes wide/, e.message)
+    ls = CAFrame.new("k" => CArray.fixlen_string(["ab", "cd"], bytes: 2))
+    rs = CAFrame.new("k" => CArray.fixlen_string(["ab", "zz"], bytes: 4))
+    assert_equal ["ab", "cd", "zz"], ls.join(rs, on: "k", how: :outer)["k"].to_a
+  end
+
   def test_align_refuses_nd_key_and_nd_reference
     e = assert_raise(ArgumentError) { @left.align("wind", CA_FLOAT64([1.2])) }
     assert_match(/align: the key "wind" has shape \[3, 2\]/, e.message)
@@ -985,6 +1215,47 @@ class TestCAFrameJoinNDKey < Test::Unit::TestCase
 end
 
 # join_asof's tolerance: is a duration for a time key.
+class TestCAFrameJoinAsofBy < Test::Unit::TestCase
+  def setup
+    t = ->(a) { CArray.time(a, unit: :s) }
+    @obs   = CAFrame.new("st"   => CA_OBJECT(%w[a b a b]),
+                         "time" => t.(["2024-01-01 00:10", "2024-01-01 00:10",
+                                       "2024-01-01 00:30", "2024-01-01 00:01"]),
+                         "x"    => CA_INT64([1, 2, 3, 4]))
+    @radar = CAFrame.new("st"   => CA_OBJECT(%w[b a a]),
+                         "time" => t.(["2024-01-01 00:05", "2024-01-01 00:08", "2024-01-01 00:29"]),
+                         "y"    => CA_INT64([10, 20, 30]))
+  end
+
+  def test_the_nearest_row_with_the_same_by_values
+    j = @obs.join_asof(@radar, on: "time", by: "st")
+    assert_equal %w[st time x y], j.column_names
+    assert_equal [20, 10, 30, UNDEF], j["y"].to_a
+  end
+
+  def test_direction_and_tolerance_apply_within_the_group
+    assert_equal [30, UNDEF, UNDEF, 10],
+                 @obs.join_asof(@radar, on: "time", by: "st", direction: :ceil)["y"].to_a
+    assert_equal [20, UNDEF, 30, UNDEF],
+                 @obs.join_asof(@radar, on: "time", by: "st", tolerance: "3 minutes")["y"].to_a
+  end
+
+  def test_several_by_columns_and_a_masked_by_cell
+    @obs["k"]   = CA_INT32([0, 0, 1, 0])
+    @radar["k"] = CA_INT32([0, 1, 1])
+    assert_equal [UNDEF, 10, 30, UNDEF],
+                 @obs.join_asof(@radar, on: "time", by: %w[st k])["y"].to_a
+    @obs["st"][1] = UNDEF
+    assert_equal [UNDEF, UNDEF, 30, UNDEF],
+                 @obs.join_asof(@radar, on: "time", by: %w[st k])["y"].to_a
+  end
+
+  def test_refuses_the_on_key_as_a_by_key
+    assert_raise(ArgumentError) { @obs.join_asof(@radar, on: "time", by: "time") }
+    assert_raise(ArgumentError) { @obs.join_asof(@radar, on: "time", by: []) }
+  end
+end
+
 class TestCAFrameJoinAsofTimeTolerance < Test::Unit::TestCase
   def setup
     t = ->(a, unit = :s) { CArray.time(a, unit: unit) }
@@ -1032,5 +1303,58 @@ class TestCAFrameJoinAsofTimeTolerance < Test::Unit::TestCase
     ref = CArray.time(["2024-01-01 00:00", "2024-01-01 00:20"], unit: :s)
     assert_equal [UNDEF], a.locate_nearest_addr(ref, tolerance: "5 minutes").to_a
     assert_equal [0], a.locate_nearest_addr(ref, direction: :floor, tolerance: "10 minutes").to_a
+  end
+end
+
+# how: :semi / :anti keep this frame's rows by whether +other+ has their key.
+class TestCAFrameJoinSemiAnti < Test::Unit::TestCase
+  def setup
+    @left  = CAFrame.new("k" => CA_INT64([1, 2, UNDEF, 3, 2]),
+                         "v" => CA_OBJECT(%w[a b c d e]))
+    @right = CAFrame.new("k" => CA_FLOAT64([2, UNDEF, 4, 2]),
+                         "v" => CA_INT32([10, 20, 30, 40]))
+  end
+
+  def test_semi_keeps_matched_rows_once_in_left_order
+    s = @left.join(@right, on: "k", how: :semi)
+    assert_equal ["k", "v"], s.column_names
+    assert_equal [2, 2], s["k"].to_a
+    assert_equal ["b", "e"], s["v"].to_a
+  end
+
+  def test_anti_keeps_unmatched_rows_and_masked_keys
+    n = @left.join(@right, on: "k", how: :anti)
+    assert_equal [1, UNDEF, 3], n["k"].to_a
+    assert_equal ["a", "c", "d"], n["v"].to_a
+  end
+
+  def test_several_keys
+    x = CAFrame.new("p" => CA_INT32([1, 1, 2]), "q" => CA_OBJECT(%w[a b a]), "r" => CA_INT32([7, 8, 9]))
+    y = CAFrame.new("p" => CA_INT32([1, 2]), "q" => CA_OBJECT(%w[b a]))
+    assert_equal [8, 9], x.join(y, on: ["p", "q"], how: :semi)["r"].to_a
+    assert_equal [7], x.join(y, on: ["p", "q"], how: :anti)["r"].to_a
+  end
+
+  def test_other_with_no_rows
+    e = CAFrame.new("k" => CA_INT64([]), "v" => CA_INT32([]))
+    assert_equal 0, @left.join(e, on: "k", how: :semi).nrow
+    assert_equal 5, @left.join(e, on: "k", how: :anti).nrow
+    assert_equal 0, e.join(@left, on: "k", how: :anti).nrow
+  end
+
+  def test_shares_columns_and_index_as_filter
+    df = CAFrame.new("k" => CA_INT64([1, 2, 3]), "v" => CA_INT32([4, 5, 6]))
+    df.set_index("k")
+    s = df.join(CAFrame.new("k" => CA_INT64([2, 3])), on: "k", how: :semi)
+    assert_equal [2, 3], s.index.to_a
+    s["v"][0] = 50
+    assert_equal [4, 50, 6], df["v"].to_a
+  end
+
+  def test_refuses_suffixes
+    [["_l", "_r"], false].each do |suffixes|
+      e = assert_raise(ArgumentError) { @left.join(@right, on: "k", how: :semi, suffixes: suffixes) }
+      assert_match(/how: :semi adds no column of the other frame/, e.message)
+    end
   end
 end

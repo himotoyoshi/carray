@@ -1158,15 +1158,10 @@ ca_axis_view_attach_owned (void *ap)
   CArray *ca  = (CArray *) ap;
   char   *buf = xmalloc(ca_length(ca) > 0 ? ca_length(ca) : 1);
   void   *args[2];
-  int     tag = 0;
 
   args[0] = ca;
   args[1] = buf;
-  rb_protect(ca_axis_view_fill_owned, (VALUE) args, &tag);
-  if ( tag ) {
-    xfree(buf);
-    rb_jump_tag(tag);
-  }
+  ca_fill_or_xfree(buf, ca_axis_view_fill_owned, (VALUE) args);
   ca->ptr = buf;
 }
 

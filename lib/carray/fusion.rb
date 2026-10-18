@@ -66,6 +66,7 @@ class CArray
     Plan  = Struct.new(:nodes, :leaves, :data_type, :dim, :masked, :signature)
 
     LAZY_CLASSES = [CAMonOp, CABinOp, CATriOp, CAMonCmp, CABinCmp, CALazyMarker]
+    Ractor.make_shareable(LAZY_CLASSES)
 
     # A lazy node names its operation by an id and the kernels name it by a
     # symbol.  These are the same operations, spelled the way each side
@@ -76,7 +77,7 @@ class CArray
       :&  => :bit_and_i,  :|  => :bit_or_i,   :^  => :bit_xor_i,
       :<< => :bit_lshift, :>> => :bit_rshift,
     }.freeze
-    TRIOP_NAMES = { :__clip_ki__ => :clip }.freeze
+    TRIOP_NAMES = { :clamp_between => :clip }.freeze
 
     MONOP_BY_ID = CArray::LAZY_MONOP_OP_IDS.invert.freeze
     # A Float or Complex array to an Integer power is its own node, ipow,
@@ -118,7 +119,7 @@ class CArray
     # Returns the array, or nil where nothing computed it.
     def self.evaluate (view)
       plan = worth_asking(view) or return nil
-      out = CArray.__alloc_uninit__(view.data_type, view.dim)
+      out = CArray.__alloc_uninit__(view.data_type, view.shape)
       ask(plan, out) ? out : nil
     end
 
@@ -131,30 +132,46 @@ class CArray
     end
 
     # The plan to hand over, or nil.  A marker over an array, or anything
-    # else with nothing to compute, is not worth handing over.
+    # else with nothing to compute, is not worth handing over.  Nothing here
+    # is the evaluator's doing, so nothing here retires it: an array that
+    # raises when it is looked at (a CAObject whose backing is gone) raises
+    # again in the walk, where the caller sees it.
     def self.worth_asking (view)
       return nil unless askable?(view)
       plan = plan(view) or return nil
       plan.nodes.any? { |n| n.is_a?(Op) } ? plan : nil
-    rescue StandardError => error
-      retire(error)
+    rescue StandardError
       nil
     end
 
     def self.ask (plan, out)
       evaluator = CArray.expression_evaluator or return false
       return false if overlaps?(plan, out)
-      # The walk leaves the destination masked where the expression is, so
-      # a destination that arrives masked loses its mask to an expression
-      # that has none.
+      return false unless ready_mask(plan, out)
+      begin
+        evaluator.call(plan, out) ? true : false
+      rescue AddressBasis::Failure
+        # Raised by CArray lending the arrays or taking them back: a refusal,
+        # or an array that cannot be read.  The walk meets the same array.
+        false
+      rescue StandardError => error
+        retire(error)
+        false
+      end
+    end
+
+    # The walk leaves the destination masked where the expression is, so a
+    # destination that arrives masked loses its mask to an expression that
+    # has none.  A destination that cannot hold a mask (a value array) is
+    # left to the walk, which says so.
+    def self.ready_mask (plan, out)
       if plan.masked
         out.mask = 0 unless out.has_mask?
       elsif out.has_mask?
         out.mask = 0
       end
-      evaluator.call(plan, out) ? true : false
-    rescue StandardError => error
-      retire(error)
+      true
+    rescue StandardError
       false
     end
 
@@ -171,13 +188,15 @@ class CArray
         if leaf.equal?(out)
           shifted.include?(index)
         else
-          storages(leaf).any? { |r| mine.any? { |m| m.equal?(r) } }
+          storages(leaf).any? { |r| mine.any? { |m| m.send(:storage_overlaps?, r) } }
         end
       end
     end
 
     # The arrays that hold an array's cells: its root, or each parent's
-    # where a view stands over several.
+    # where a view stands over several.  Two of them share storage when
+    # they are one array, or entities whose memory overlaps (an array and a
+    # wrap_memory_view of it).
     def self.storages (array, found = [])
       root = array.root_array
       if ! root.entity? && root.respond_to?(:parents)
@@ -213,7 +232,7 @@ class CArray
       w.visit(view)
       masked = w.leaves.any? { |a| a.has_mask? } ||
                w.nodes.any? { |n| n.is_a?(Shifted) && n.bounds.include?(:mask) }
-      Plan.new(w.nodes, w.leaves, view.data_type, view.dim, masked, w.signature)
+      Plan.new(w.nodes, w.leaves, view.data_type, view.shape, masked, w.signature)
     end
 
     def self.lazy? (x)
@@ -350,8 +369,8 @@ class CArray
       # expression, say -- has no array to read and is taken as a whole.
       def shifted (n)
         array = n.parent
-        bounds = n.__axis_bounds__
-        if Fusion.lazy?(array) || array.dim != n.dim ||
+        bounds = n.__boundary_rule_of_each_axis__
+        if Fusion.lazy?(array) || array.shape != n.shape ||
            ! bounds.all? { |b| b == :fill || b == :mask }
           return leaf(n)
         end
@@ -366,8 +385,13 @@ class CArray
                          offset, bounds, fill)
       end
 
+      # A leaf the address bases would refuse to lend cannot be read by an
+      # evaluator, so the expression is not described.
       def leaf_index (array)
         @leaf_index.fetch(array.object_id) do
+          if (reason = AddressBasis.classify(array)[:refusal])
+            raise Refused, "a leaf: #{reason}"
+          end
           @leaves << array
           @leaf_index[array.object_id] = @leaves.size - 1
         end

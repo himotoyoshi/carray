@@ -29,6 +29,8 @@ a[0, 0]      #  => 0
 a[2, 3]      #  => 11
 ```
 
+A Float that holds an integer is read as that integer (`a[1.0, 2.0]` is `a[1, 2]`; a count from `sum` is a Float), up to 2**53, where a Float stops telling neighbouring integers apart. A Float with a fraction, NaN, Inf or past 2**53 raises `IndexError`.
+
 Negative integers count from the end.
 
 ```ruby
@@ -100,6 +102,16 @@ Ruby's `(start..stop).step(n)` produces an arithmetic sequence; CArray accepts i
 v = CArray.int32(10).seq!           #  => [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ]
 v[(0..9).step(2)]                  #  => [ 0, 2, 4, 6, 8 ]
 v[(1..8).step(3)]                  #  => [ 1, 4, 7 ]
+```
+
+The step says the direction, as it does in Ruby: a negative step walks
+down, an endless one with a negative step goes down to the first element,
+and a step that points away from the end reads nothing.
+
+```ruby
+v[3.step(by: -1)]                  #  => [ 3, 2, 1, 0 ]
+v[(8..2).step(-3)]                 #  => [ 8, 5, 2 ]
+v[(0..4).step(-1)]                 #  => [ ]
 ```
 
 A `step` of zero is a `ArgumentError`.
@@ -202,7 +214,7 @@ A CArray of integers or booleans in an index position triggers a different form,
 
 ### 3.1 Boolean CArray of the same shape — `SELECT`
 
-A boolean mask of matching `elements` picks out the cells where it is true, in row-major order, as a 1-D array.
+A boolean mask of the array's shape picks out the cells where it is true, in row-major order, as a 1-D array. A 1-D mask with as many elements as the array picks by position among all the cells.
 
 ```ruby
 a[a.gt(5)]
@@ -211,7 +223,7 @@ a[a.gt(5)]
 
 This is the form built on top of comparisons (see [Element-wise operations](03_elementwise.md)) and is the canonical way to filter elements.
 
-A boolean array of mismatched size is a `ArgumentError`.
+A boolean array of another shape, or a 1-D one of another size, is an `ArgumentError` (`.flatten` a mask of the right size but another shape to select by position).
 
 * **Shape back:** 1-D, length = number of true cells.
 * **Class back:** `CASelect`.
@@ -436,6 +448,10 @@ b[:gt, 3]  = UNDEF       #  same idea through the predicate key
 ```
 
 See [Masks and missing values](05_masks.md) for the full story.
+
+### 7.5 An assignment that raises
+
+A store that raises may leave part of the destination written: its values and its mask after the raise are not specified.
 
 ---
 

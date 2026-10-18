@@ -84,7 +84,7 @@ class TestFaceDoubleLift < Test::Unit::TestCase
     # (CA_FIXLEN) -- and receives the int64 storage value.
     tag = Class.new(CAObject) do
       def initialize (parent)
-        super(CA_FIXLEN, parent.dim, bytes: 8, parent: parent, face: true)
+        super(CA_FIXLEN, parent.shape, bytes: 8, parent: parent, face: true)
       end
       def storage_to_element (raw) ; raw ; end
     end.new(td)

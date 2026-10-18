@@ -5,10 +5,11 @@ class CArray
   #   each cell whose value appears in the set `values`.
   #
   #   `values` is treated as a set, not as an operand to broadcast: it
-  #   may be any shape (or an Array / Range) and is flattened to a
+  #   may be any shape (or an Array) and is flattened to a
   #   single seen-set, so its shape need not match `self`. Only one
   #   argument is accepted; to test a few immediate values pass an
-  #   Array (`a.is_in([0, -1])`).
+  #   Array (`a.is_in([0, -1])`). A single value is a set of one, as
+  #   `[value]` is (`a.is_in(2)` is `a.is_in([2])`).
   #
   #   When `self` and `values` have different numeric data types they are
   #   promoted to a common type first (the same promotion binops use,
@@ -46,8 +47,10 @@ class CArray
   #   For a per-fiber "does this fiber contain any of these values"
   #   reduction, compose with {#any}: `a.is_in(values).any(axis: k)`.
   #
-  #   @param values [CArray, Array, Range] the set to test membership
+  #   @param values [CArray, Array] the set to test membership
   #     against. Promoted with `self` to a common data type.
+  #   @raise [ArgumentError] for a Range, which reads as an interval rather
+  #     than the set of its steps.
   #   Between two time arrays the question is about instants, not ticks:
   #   `values` is reconciled into `self`'s unit first, so a `:D` array and an
   #   `:h` array match on the instants they share.  The same holds for the set
@@ -55,6 +58,7 @@ class CArray
   #
   #   @return [CArray] boolean CArray of the same shape as `self`.
   def is_in (values)
+    refuse_range_set(values, "is_in")
     a, b = promote_value_set(values)
     a.__send__(:__is_in__, b)
   end
@@ -69,11 +73,12 @@ class CArray
   #   always flat, like {#unique}, because the distinct values of a
   #   fiber vary in number.
   #
-  #   @param other [CArray, Array, Range] promoted with `self`.
+  #   @param other [CArray, Array] promoted with `self` (a Range is refused, as by {#is_in}).
   #   @param sort [Boolean] when true, return the values sorted
   #     ascending instead of in first-appearance order.
   #   @return [CArray] 1-D CArray of the common distinct values.
   def intersection (other, sort: false)
+    refuse_range_set(other, "intersection")
     a, b = promote_value_set(other)
     r = a.__send__(:__intersection__, b)
     r = r.to_unit(unit) if !a.equal?(self) && respond_to?(:in_common_unit_with)
@@ -85,10 +90,11 @@ class CArray
   #   absent from `other`, in `self`'s first-appearance order.
   #   See {#intersection} for the shared semantics and options.
   #
-  #   @param other [CArray, Array, Range] promoted with `self`.
+  #   @param other [CArray, Array] promoted with `self` (a Range is refused, as by {#is_in}).
   #   @param sort [Boolean] when true, return the values sorted ascending.
   #   @return [CArray] 1-D CArray of the self-only distinct values.
   def difference (other, sort: false)
+    refuse_range_set(other, "difference")
     a, b = promote_value_set(other)
     r = a.__send__(:__difference__, b)
     r = r.to_unit(unit) if !a.equal?(self) && respond_to?(:in_common_unit_with)
@@ -103,17 +109,28 @@ class CArray
   #   holds the values of both ({#intersection} and {#difference} answer in
   #   `self`'s unit, since their values are `self`'s).
   #
-  #   @param other [CArray, Array, Range] promoted with `self`.
+  #   @param other [CArray, Array] promoted with `self` (a Range is refused, as by {#is_in}).
   #   @param sort [Boolean] when true, return the values sorted ascending
   #     (a merged, ordered set — e.g. a common time axis).
   #   @return [CArray] 1-D CArray of the combined distinct values.
   def union (other, sort: false)
+    refuse_range_set(other, "union")
     a, b = promote_value_set(other)
     r = a.__send__(:__union__, b)
     sort ? r.sort : r
   end
 
   private
+
+  # A Range reads as an interval in Ruby, which a set of its steps is not
+  # (2.5 is not in [2, 3, 4]), so the set-valued verbs refuse one rather
+  # than answer for the steps.
+  def refuse_range_set (values, verb)
+    return unless values.is_a?(Range)
+    raise ArgumentError,
+          "#{verb}: a Range is not taken as a set; pass its values as an Array " \
+          "((#{values.inspect}).to_a), or test an interval with is_between(#{values.inspect})"
+  end
 
   # Reconcile a set-valued argument with self to a common data_type via
   # CArray.result_type (the single-source promotion rule the eager binop and
@@ -141,36 +158,38 @@ class CArray
       return fixlen_widened_with(values)
     end
     # A Face that reconciles operands (CATime) reads a bare Array as values
-    # of its own kind -- instants written as Time / String / elements.
-    if values.is_a?(Array) && face? && respond_to?(:to_comparable)
-      return [self, to_comparable(values)]
+    # of its own kind -- instants written as Time / String / elements -- and
+    # meets them as a comparison does (comparable_pair).
+    if values.is_a?(Array) && face? && respond_to?(:comparable_pair)
+      return comparable_pair(values)
     end
     # A single value (a Time, an element, a bare number) is a set of one,
     # read the same way; a bare number is refused like any other operand
     # that is not of its kind.
     if !values.is_a?(CArray) && !values.is_a?(Range) && face? &&
-       respond_to?(:to_comparable)
-      return [self, to_comparable([values])]
+       respond_to?(:comparable_pair)
+      return comparable_pair([values])
     end
     # ...and so does an array of values that are not of its kind (an object
     # column of Time values, a string column).
-    if values.is_a?(CArray) && respond_to?(:to_comparable) &&
-       !values.respond_to?(:to_comparable)
-      return [self, values_in_face(self, values) || to_comparable([])]
+    if values.is_a?(CArray) && respond_to?(:comparable_pair) &&
+       !values.respond_to?(:comparable_pair)
+      return comparable_pair(values)
     end
     # The same from the other side: values of a time array looked for in an
     # array that is not one.
-    if values.is_a?(CArray) && values.respond_to?(:to_comparable) &&
-       !respond_to?(:to_comparable)
-      return [values_in_face(values, self) || values.to_comparable([]), values]
+    if values.is_a?(CArray) && values.respond_to?(:comparable_pair) &&
+       !respond_to?(:comparable_pair)
+      set, own = values.comparable_pair(self)
+      return [own, set]
     end
     # A Face whose storage is not of its surface type.  When its cells are
     # its values, the set meets it as it would meet an array of the storage
     # type, and the Face stays while that type does not change.  Any other
     # Face leaves the set to the lookup, which brings it into the Face's
     # space or refuses it.
-    if face? && (storage = __face_storage__).data_type != data_type
-      unless __comparable_storage__
+    if face? && (storage = face_storage).data_type != data_type
+      unless comparable_storage?
         set = values.is_a?(Range) ? values.to_a : values
         return [self, set.is_a?(CArray) ? set : CArray.wrap_readonly(set)]
       end
@@ -181,9 +200,16 @@ class CArray
     when Array then return promote_elements(values)
     when Range then return promote_elements(values.to_a)
     end
+    # A single value is a set of one, as [value] is.  wrap_readonly would make
+    # it an object array, which takes self into the object lane, where 2.0 is
+    # not eql? 2.
+    if !values.is_a?(CArray) && !values.respond_to?(:to_ca) &&
+       !CArray.memory_view_available?(values)
+      return promote_elements([values])
+    end
     set = values.is_a?(CArray) ? values : CArray.wrap_readonly(values)
     return [self, set] if set.data_type == data_type   # common fast path
-    t = value_match_type(CArray.result_type(self, set), set.data_type)
+    t = query_match_type(set)
     [coerce_self(t), set.to_type(t)]
   end
 
@@ -200,12 +226,17 @@ class CArray
       # set for not matching self.  Same rule the scalar operand of a
       # comparison follows: a String standing in for a cell is padded to the
       # cell's width.
+      # coerce: a fixlen or object set holds values of self's kind (see above)
       [self, elems.to_ca.to_type(data_type, bytes: bytes)]
     elsif data_type == CA_OBJECT
+      # coerce: an object set holds values of self's kind
       [self, elems.to_ca.to_type(data_type)]
+    elsif elems.any? { |v| v.is_a?(String) || v.is_a?(Symbol) }
+      # A String is a value, which result_type would read as the name of a
+      # data type; a numeric self meets it in the object lane.
+      [to_type(CA_OBJECT), elems.to_ca.to_type(CA_OBJECT)]
     else
       t = CArray.result_type(self, *elems)
-      t = value_match_type(t, CA_INT64) if elems.any? { |v| v.is_a?(Integer) && v < 0 }
       [coerce_self(t), elems.to_ca.to_type(t)]
     end
   end
@@ -216,7 +247,7 @@ class CArray
   # their values; anything else, or the same kind of array as self, is
   # taken as it is.  A record is left to be refused.
   def values_for_lookup (other)
-    return other if other.send(:__orderable_storage__)
+    return other if other.send(:orderable_storage?)
     return other if face? && other.class == self.class
     if other.respond_to?(:to_string)
       other.to_string
@@ -242,20 +273,6 @@ class CArray
 
   def widen_fixlen_string (x, w)
     x.bytes == w ? x : x.to_fixlen_string(bytes: w)
-  end
-
-  # The values of +other+, which has no to_comparable, read as values of +face+'s
-  # kind (instants written as Time / Date / String for a time key), in an
-  # array of +other+'s shape; a masked cell stays masked.  nil when every
-  # cell is masked: there is nothing to read.
-  private def values_in_face(face, other)
-    return face.to_comparable(other) if other.is_a?(Array)
-    vals = other.flatten.to_a
-    filler = vals.find { |v| !UNDEF.equal?(v) }
-    return nil if filler.equal?(nil) && vals.all? { |v| UNDEF.equal?(v) }
-    out = face.to_comparable(vals.map { |v| UNDEF.equal?(v) ? filler : v })
-    out[other.is_masked.flatten] = UNDEF if other.has_mask?
-    out.reshape(*other.shape)
   end
 
   def coerce_self (t)

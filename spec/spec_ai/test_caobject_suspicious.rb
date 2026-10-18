@@ -30,7 +30,7 @@ require "carray"
 class SquareView < CAObject
   def initialize(parent)
     @p = parent
-    super(parent.data_type, parent.dim, parent: parent)
+    super(parent.data_type, parent.shape, parent: parent)
   end
   private
   def fetch_addr(addr); @p[addr] ** 2; end

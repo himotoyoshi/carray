@@ -56,6 +56,12 @@ ca_reduce_setup (CAReduce *ca, CArray *parent, ca_size_t count, ca_size_t offset
              "[BUG] CAReduce can't inherit other than boolean array");
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   elements  = parent->elements / count;
 
   ca->obj_type  = CA_OBJ_REDUCE;
@@ -75,9 +81,6 @@ ca_reduce_setup (CAReduce *ca, CArray *parent, ca_size_t count, ca_size_t offset
   ca->count     = count;
   ca->offset    = offset;
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask(ca);
-  }
 
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -89,8 +92,11 @@ ca_reduce_setup (CAReduce *ca, CArray *parent, ca_size_t count, ca_size_t offset
 CAReduce *
 ca_reduce_new (CArray *parent, ca_size_t count, ca_size_t offset)
 {
-  CAReduce *ca = ALLOC(CAReduce);
+  CAReduce *ca;
+  ca_reduce_setup(NULL, parent, count, offset);
+  ca = ALLOC(CAReduce);
   ca_reduce_setup(ca, parent, count, offset);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -193,8 +199,7 @@ ca_reduce_func_allocate (void *ap)
 {
   CAReduce *ca = (CAReduce *) ap;
   ca_attach(ca->parent);
-  /* ca->ptr = ALLOC_N(char, ca->elements); */
-  ca->ptr = xmalloc(ca_length(ca));  
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -204,8 +209,7 @@ ca_reduce_func_attach (void *ap)
   char *p;
   ca_size_t i;
   ca_attach(ca->parent);
-  /* ca->ptr = ALLOC_N(char, ca->elements); */
-  ca->ptr = xmalloc(ca_length(ca));  
+  ca->ptr = ca_alloc_cells((CArray *) ca);
   p = ca->ptr;
   for (i=0; i<ca->elements; i++) {
     ca_reduce_func_xfer_addrs(ca, 1, &i, p, CA_XFER_GET);
@@ -314,6 +318,7 @@ rb_ca_reduce_initialize_copy (VALUE self, VALUE other)
   TypedData_Get_Struct(other, CAReduce, &careduce_data_type, cs);
 
   ca_reduce_setup(ca, cs->parent, cs->count, cs->offset);
+  ca_view_inherit_mask((VALUE) ca);
 
   return self;
 }

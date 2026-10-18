@@ -21,7 +21,8 @@ class CArray
   # parent alias it, so writes through the view reach the parent; cells
   # outside take `fill_value` (default `0`), and `fill_value: UNDEF` masks
   # them instead.  A write that lands outside the parent has no cell to land
-  # in and is discarded.
+  # in and is discarded; under `fill_value: UNDEF` such a cell stays masked
+  # through `unmask` too.
   #
   # A range wider than its axis is how an array is **padded**: `a.window(-1..
   # a.dim0, -1..a.dim1)` puts a one-cell border all round, which is NumPy's
@@ -35,8 +36,9 @@ class CArray
   # @overload window(*ranges, fill_value: 0, bounds: "fill")
   #   @param ranges [Array<Range, Integer>] one range per axis; the count
   #     must equal `self.ndim`.
-  #   @param fill_value [Object] value given to out-of-range cells; `UNDEF`
-  #     masks them instead.
+  #   @param fill_value [Object] value given to out-of-range cells, written
+  #     as a store writes it (a Time for a time array; a CAString's default
+  #     is `""`); `UNDEF` masks them instead.
   #   @param bounds [String, Symbol] what an out-of-range index means; a
   #     Symbol says the same as the String, matching {#windows}: `"fill"`
   #     (default) uses `fill_value`, `"nearest"` clamps to the edge cell,
@@ -50,6 +52,9 @@ class CArray
   #     cyclic shift).
   #   @raise [ArgumentError] when `bounds` conflicts with `fill_value: UNDEF`,
   #     or when `bounds` is not a recognised value.
+  #   @raise [IndexError] when `bounds` is `"strict"` and a range reaches
+  #     outside `self`, or `"ruby"` and a range reaches past the end or
+  #     before the first cell counted from the end.
   def window(*ranges, fill_value: 0, bounds: "fill"); end
 
   # @!endgroup

@@ -100,6 +100,12 @@ ca_record_setup (CARecord *ca, CArray *parent, VALUE data_class)
              parent->data_type);
   }
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type   = CA_OBJ_RECORD;
   ca->data_type  = CA_FIXLEN;
   ca->flags      = CA_FLAG_IS_FACE;
@@ -119,9 +125,6 @@ ca_record_setup (CARecord *ca, CArray *parent, VALUE data_class)
 
   ca->data_class = data_class;
 
-  if ( ca_has_mask(parent) ) {
-    ca_create_mask((CArray *) ca);
-  }
 
   if ( ca_is_scalar(parent) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -137,8 +140,11 @@ ca_record_setup (CARecord *ca, CArray *parent, VALUE data_class)
 CARecord *
 ca_record_new (CArray *parent, VALUE data_class)
 {
-  CARecord *ca = (CARecord *) ca_array_alloc(CA_OBJ_RECORD, parent->ndim);
+  CARecord *ca;
+  ca_record_setup(NULL, parent, data_class);
+  ca = (CARecord *) ca_array_alloc(CA_OBJ_RECORD, parent->ndim);
   ca_record_setup(ca, parent, data_class);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -270,9 +276,7 @@ rb_ca_record_s_new (int argc, VALUE *argv, VALUE klass)
     shape_offset = 1;
   }
   ndim = argc - shape_offset;
-  if ( ndim < 0 || ndim > CA_RANK_MAX ) {
-    rb_raise(rb_eArgError, "invalid number of shape arguments (%d)", ndim);
-  }
+  ca_check_rank_fits(ndim, NULL);
   for ( i = 0; i < ndim; i++ ) {
     dim[i] = NUM2SIZE(argv[shape_offset + i]);
   }
@@ -362,6 +366,7 @@ rb_ca_record_initialize_copy (VALUE self, VALUE other)
     ca_array_pool_alloc(ca, CA_OBJ_RECORD, cs->parent->ndim);
   }
   ca_record_setup(ca, cs->parent, cs->data_class);
+  ca_view_inherit_mask((VALUE) ca);
   /* Marshal loads into an empty instance through here without copying
      ivars, so the parent pin is set from `other`, not inherited. */
   rb_ca_set_parent(self, rb_ca_parent(other));

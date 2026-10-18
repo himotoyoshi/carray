@@ -33,6 +33,7 @@ variance  stddev  all  any
 variancep  stddevp  minmax                                # tier 2
 wsum  wmean                                               # weighted
 median  percentile  quantile                             # tier 3 (order statistics)
+first  last  nunique                                     # position / distinct
 count  count_not_masked  count_masked  elements          # count family
 each  reduce                                             # generic iteration
 ```
@@ -44,6 +45,17 @@ contract are the core's, unchanged — the iterator adds no new semantics. `all`
 `any` require a boolean payload, as `CArray#all` / `#any` do. `accumulate` is
 `sum` kept in the source's own data type, wrapping at its width, where `sum`
 answers in the type the core promotes to (float64 for an integer source).
+`first` / `last` are the first and last present values of a piece, in the
+piece's own order (`UNDEF` for a piece with none), and `nunique` counts its
+distinct present values (0 for none); like the core ones they take no
+`min_count:` or `fill_value:`.
+
+A member whose pieces do not overlap also fills masked cells within each
+piece: `strip_mask(method: :forward)` (`:ffill`) carries a piece's last present
+value forward and `:backward` (`:bfill`) its next one back, as
+`CArray#strip_mask(method:)` does, never across into another piece. A cell with
+nothing to carry in its piece stays masked. `:linear`, which needs a coordinate
+a piece does not have, is the core's alone.
 
 `each` / `reduce` are the escape hatch for a statistic not in the named list:
 `each { |piece| … }` yields each piece (an `Enumerator` with no block);
@@ -59,15 +71,20 @@ a piece *is*.
 |---|:--:|:--:|:--:|:--:|:--:|:--:|
 | tier 1 / 2, `minmax`, `wsum` / `wmean` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `median` / `percentile` / `quantile` | ✓ | ✓ ¹ | ✓ | ✓ | ✓ | ✓ |
+| `first` / `last` / `nunique` | ✓ | ✓ ¹ | ✓ | ✓ | ✓ | ✓ |
 | count family, `elements`, `each` / `reduce` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `min_index` / `max_index` (position **within** a piece) | ✓ | ✓ | ✓ | ✓ | — ² | ✓ |
 | `min_addr` / `max_addr` (flat **source** address of the winner) | ✓ | ✓ ³ | ✓ | ✓ | ✓ | ✓ |
 | `map` (per-piece transform, scattered back to the source) | ✓ | — ⁴ | ✓ | ✓ | ✓ | ✓ |
 | `sort_addr` (per-piece sort → source addresses) | ✓ | — ⁴ | ✓ | ✓ | ✓ | ✓ |
 | `cumsum` / `cumprod` / `cummax` / `cummin` / `cumcount` (per-cell running scan) | ✓ | — ⁴ | ✓ | ✓ | ✓ ⁵ | ✓ |
+| `lag(n)` (the value `n` steps earlier in the same piece) | ✓ ⁶ | — ⁴ | ✓ | ✓ | ✓ ⁵ | ✓ |
+| `order` (each cell's rank within its piece) | ✓ ⁶ | — ⁴ | ✓ | ✓ | ✓ ⁵ | ✓ |
+| `strip_mask(method: :forward / :backward)` (fill within the piece) | ✓ ⁶ | — ⁴ | ✓ | ✓ | ✓ ⁵ | ✓ |
 
-1. Window order statistics leave the UNDEF margin of the default `:skip` out
-   of each window, as they leave out any masked cell.
+1. Window order statistics, `first` / `last` and `nunique` leave the UNDEF
+   margin of the default `:skip` out of each window, as they leave out any
+   masked cell.
 2. A group preserves source order, so a *within-group* index is weak; the group
    offers the flat **source address** (`min_addr` / `max_addr`) instead — the
    `_addr` vs `_index` split (a group indexes back into the original array).
@@ -77,11 +94,16 @@ a piece *is*.
    value with no source cell) yields a masked result.
 4. A window's pieces overlap and its margin cells are padding with no source
    address, so a scatter-back (`map`), a per-cell running scan (`cumsum` etc.,
-   a cell would land in many windows with no single running value), and a
-   per-cell source `sort_addr` are all ill-defined; use `reduce` for a custom
-   per-window fold.
-5. A group's scans take `axis: :group`; its `cumcount` is the running member
+   a cell would land in many windows with no single running value), a
+   per-cell source `sort_addr`, a `lag` (a cell has no single position to
+   step back from), an `order` (no single rank) and a fill (no single value
+   to be filled with) are all ill-defined; use `reduce` for a custom per-window
+   fold, and `CArray#lag(n, axis:)` / `CArray#order(axis:)` along an axis.
+5. A group's scans, `lag`, `order` and `strip_mask` take `axis: :group`; its `cumcount` is the running member
    ordinal within each group.
+6. A slab's `lag`, `order` and `strip_mask` run along its one slab axis (a multi-axis slab
+   raises, as its scans do); its `lag` is a view of the source, as
+   `CArray#lag` is, where the other members return a new array.
 
 **Reductions vs per-cell surface.** The reductions collapse a piece to one value
 (output = the piece grid). `map` and the scans (`cumsum` …) instead write **one

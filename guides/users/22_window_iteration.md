@@ -56,6 +56,7 @@ A window fold is applied to every cell's window. The named reductions are the sa
 | position | `min_index` · `max_index` (position *within the window*) |
 | weighted | `wsum(weights)` · `wmean(weights)` |
 | order statistics | `median` · `percentile(*p)` · `quantile` (see [below](#order-statistics)) |
+| first / distinct | `first` · `last` (first / last present value, row-major within the window) · `nunique` (distinct present values) |
 | counting | `count` · `count_not_masked` · `count_masked` · `count(v)` · `elements` |
 | generic | `each` · `reduce` (escape hatch) |
 

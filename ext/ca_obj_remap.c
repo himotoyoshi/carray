@@ -129,6 +129,12 @@ ca_remap_setup (CARemap *ca, CArray *ref, CArray *idx)
 {
   ca_remap_check_constraints(ref, idx);
 
+  /* ca == NULL asks for the checks above only, so that a constructor can
+     run them before it allocates. */
+  if ( ca == NULL ) {
+    return 0;
+  }
+
   ca->obj_type  = CA_OBJ_REMAP;
   ca->data_type = ref->data_type;
   ca->flags     = 0;
@@ -147,9 +153,6 @@ ca_remap_setup (CARemap *ca, CArray *ref, CArray *idx)
   ca->nosync    = 0;
   ca->idx       = idx;
 
-  if ( ca_has_mask(ref) ) {
-    ca_create_mask(ca);
-  }
 
   if ( ca_is_scalar(ref) ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
@@ -161,8 +164,11 @@ ca_remap_setup (CARemap *ca, CArray *ref, CArray *idx)
 CARemap *
 ca_remap_new (CArray *ref, CArray *idx)
 {
-  CARemap *ca = (CARemap *) ca_array_alloc(CA_OBJ_REMAP, ref->ndim);
+  CARemap *ca;
+  ca_remap_setup(NULL, ref, idx);
+  ca = (CARemap *) ca_array_alloc(CA_OBJ_REMAP, ref->ndim);
   ca_remap_setup(ca, ref, idx);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -211,7 +217,7 @@ static void
 ca_remap_func_allocate (void *ap)
 {
   CARemap *ca = (CARemap *) ap;
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -435,8 +441,9 @@ rb_ca_remap_new (VALUE cary, VALUE rmapper)
 }
 
 /* Read-only accessor for the per-cell index CArray that defines this
-   CARemap's mapping.  Returns the same CArray VALUE the caller passed
-   to ca[mapper] (= shared reference, not a copy).  Companion to
+   CARemap's mapping: the array the view reads.  For ca[mapper] it is a
+   copy of mapper taken at the call, so a later change to mapper does
+   not reach the view.  Companion to
    CABlock#start / CAStride#strides / CAWindow#count etc. — the view
    hierarchy is preserved so each named view class exposes its own
    defining semantic state. */
@@ -453,8 +460,22 @@ rb_ca_remap_mapper (VALUE self)
 static VALUE
 rb_ca_remap_dup (VALUE self)
 {
-  return rb_ca_remap_new(rb_ca_parent(self),
-                         rb_ivar_get(self, rb_intern("remap_idx")));
+  volatile VALUE rmapper = rb_ivar_get(self, rb_intern("remap_idx"));
+  if ( NIL_P(rmapper) ) {
+    /* The mask of a CARemap (it holds no index array of its own): another
+       remap over the same parent mask and index.  The array it is the mask
+       of keeps both alive, so the copy holds that array too. */
+    volatile VALUE obj;
+    CArray *ca, *cp;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+    cp = (CArray *) ca_remap_func_clone(ca);
+    ca_keep_chain_flags(cp, ca);
+    obj = TypedData_Wrap_Struct(rb_obj_class(self), &caremap_data_type, cp);
+    rb_ivar_set(obj, rb_intern("masked_array"),
+                rb_ivar_get(self, rb_intern("masked_array")));
+    return obj;
+  }
+  return rb_ca_remap_new(rb_ca_parent(self), rmapper);
 }
 
 static VALUE

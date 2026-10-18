@@ -39,14 +39,14 @@ to the view's meld-axis length:
 ```
 result.ndim              == parent.ndim
 result.shape[a]          == parent.shape[a]           for a != meld_axis
-result.shape[meld_axis]  == Σ_k parents[k].dim[meld_axis]
+result.shape[meld_axis]  == Σ_k parents[k].shape[meld_axis]
 ```
 
 The prefix-sum table `seg_offsets` records where each segment starts:
 
 ```
 seg_offsets[0]           == 0
-seg_offsets[k+1]         == seg_offsets[k] + parents[k].dim[meld_axis]
+seg_offsets[k+1]         == seg_offsets[k] + parents[k].shape[meld_axis]
 seg_offsets[n_parents]   == shape[meld_axis]
 ```
 
@@ -271,7 +271,7 @@ staying within eager-entity noise.
 External-axis `xfer_all` writes each parent contiguously into the
 result buffer at `seg_offsets[k] × tail_bytes`.  Internal-axis
 `xfer_all` copies each parent into a slab buf then scatters a
-trailing contig chunk (`Π_{a≥meld_axis} p.dim[a]` bytes) per outer
+trailing contig chunk (`Π_{a≥meld_axis} p.shape[a]` bytes) per outer
 combo — one memcpy call per outer iteration, not per cell.
 
 Non-structural (transpose, strided step) falls back to per-cell

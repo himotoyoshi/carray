@@ -26,7 +26,7 @@ class TestFixlenSortFamily < Test::Unit::TestCase
   end
 
   def rows(g)
-    (0...g.dim[0]).map { |i| g[i, nil].copy }
+    (0...g.shape[0]).map { |i| g[i, nil].copy }
   end
 
   def test_sort_axis_per_row_view

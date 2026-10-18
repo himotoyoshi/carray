@@ -39,6 +39,85 @@ ca_csv_at (const char *s, long n, long p, const char *t, long tlen)
   return p + tlen <= n && memcmp(s + p, t, tlen) == 0;
 }
 
+/* The coderange of UTF-8 text, as rb_enc_str_coderange answers it: 7BIT,
+   VALID, or BROKEN for an invalid sequence (a stray continuation byte, an
+   overlong form, a surrogate, past U+10FFFF, or a sequence cut short).
+   Runs of ASCII are passed over 8 bytes at a time, which Ruby's scan does
+   not do once it has met a multibyte character. */
+static int
+ca_csv_utf8_coderange (const unsigned char *s, long n)
+{
+  long i = 0;
+  int ascii = 1;
+  while ( i < n ) {
+    unsigned c, c1;
+    while ( i + 8 <= n ) {
+      uint64_t w;
+      memcpy(&w, s + i, 8);
+      if ( w & 0x8080808080808080ULL ) {
+        break;
+      }
+      i += 8;
+    }
+    if ( i >= n ) {
+      break;
+    }
+    c = s[i];
+    if ( c < 0x80 ) {
+      i += 1;
+      continue;
+    }
+    ascii = 0;
+    if ( c < 0xC2 || c > 0xF4 ) {
+      return ENC_CODERANGE_BROKEN;
+    }
+    if ( c < 0xE0 ) {
+      if ( i + 1 >= n || ( s[i + 1] & 0xC0 ) != 0x80 ) {
+        return ENC_CODERANGE_BROKEN;
+      }
+      i += 2;
+      continue;
+    }
+    if ( i + 1 >= n ) {
+      return ENC_CODERANGE_BROKEN;
+    }
+    c1 = s[i + 1];
+    if ( ( c1 & 0xC0 ) != 0x80
+         || ( c == 0xE0 && c1 < 0xA0 ) || ( c == 0xED && c1 > 0x9F )
+         || ( c == 0xF0 && c1 < 0x90 ) || ( c == 0xF4 && c1 > 0x8F ) ) {
+      return ENC_CODERANGE_BROKEN;
+    }
+    if ( c < 0xF0 ) {
+      if ( i + 2 >= n || ( s[i + 2] & 0xC0 ) != 0x80 ) {
+        return ENC_CODERANGE_BROKEN;
+      }
+      i += 3;
+      continue;
+    }
+    if ( i + 3 >= n || ( s[i + 2] & 0xC0 ) != 0x80 || ( s[i + 3] & 0xC0 ) != 0x80 ) {
+      return ENC_CODERANGE_BROKEN;
+    }
+    i += 4;
+  }
+  return ascii ? ENC_CODERANGE_7BIT : ENC_CODERANGE_VALID;
+}
+
+/* The coderange of the text, computed here for UTF-8 and cached on the
+   String as Ruby would cache it, so the Ruby reader's later String#count on
+   the same chunk does not scan it again. */
+static int
+ca_csv_text_coderange (VALUE text, rb_encoding *enc)
+{
+  int cr = ENC_CODERANGE(text);
+  if ( cr != ENC_CODERANGE_UNKNOWN || enc != rb_utf8_encoding() ) {
+    return rb_enc_str_coderange(text);
+  }
+  cr = ca_csv_utf8_coderange((const unsigned char *) RSTRING_PTR(text),
+                             RSTRING_LEN(text));
+  ENC_CODERANGE_SET(text, cr);
+  return cr;
+}
+
 /* The end of the line content that starts at p: the position of its "\n",
    or n; *next is where the following line starts.  A "\r" before the "\n",
    or at the end of the text, is not content. */
@@ -311,7 +390,7 @@ ca_csv_check_reader_args (VALUE text, VALUE vsep, VALUE vquote, VALUE vncol,
   *ncol = NUM2LONG(vncol);
   enc = rb_enc_get(text);
   if ( ( enc != rb_utf8_encoding() && enc != rb_usascii_encoding() )
-       || rb_enc_str_coderange(text) == ENC_CODERANGE_BROKEN || *ncol < 0 ) {
+       || ca_csv_text_coderange(text, enc) == ENC_CODERANGE_BROKEN || *ncol < 0 ) {
     return 0;
   }
   return RSTRING_LEN(vsep) >= 1 && RSTRING_LEN(vquote) >= 1;

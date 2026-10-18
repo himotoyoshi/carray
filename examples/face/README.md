@@ -146,7 +146,7 @@ gated — and that is the reason to make this one NonNumeric.
 
 The full account is in [CAFace.md](../../docs/topics/CAFace.md) §3–§5.
 
-Construct with `super(parent.data_type, parent.dim, parent: parent,
+Construct with `super(parent.data_type, parent.shape, parent: parent,
 face: true)`. Over a numeric storage that gives a NonNumeric Face; pass
 `numeric: true` for a Numeric one.
 

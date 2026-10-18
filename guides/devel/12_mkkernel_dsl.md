@@ -367,6 +367,10 @@ MkKernel.sort :sort_index,
 Sort kind selection (radix vs comparison) is not exposed on the Ruby
 surface in 3.0.
 
+#### Where NaN goes
+
+Sort and every order statistic put a NaN after every number, NaN ties NaN, and a descending order keeps NaN after the numbers. The rule lives in parts, and an order kernel, generated or hand-written, uses them and nothing of its own: `CA_FLOAT_ORDER_CMP(a, b)` (a three-way float comparison) and `ca_obj_order_cmp(a, b)` (the same for object cells) in `carray_internal.h`, and `ca_partition_nan_*` in `ca_sort_kernels.h` (moves the NaN of a float buffer to its tail before a sort or a selection). Ruby code that orders values goes through `sort_index`; two Ruby values are compared with the private `CArray.object_order_cmp`. `rake nan_order_check` refuses a NaN order written by hand.
+
 ### `MkKernel.search`
 
 Per-`(base, query)` scalar return: one slab axis on `self`, query

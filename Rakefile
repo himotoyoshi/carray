@@ -60,6 +60,71 @@ task :face_parts_check do
   ruby "utils/check_face_parts.rb" or exit($?.exitstatus)
 end
 
+desc "Check that an axis taken from Ruby is read by ca_normalize_axis_arg"
+task :axis_normalize_check do
+  ruby "utils/check_axis_normalize.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a rank is held to CA_RANK_MAX by ca_check_rank_fits"
+task :rank_limit_check do
+  ruby "utils/check_rank_limit.rb" or exit($?.exitstatus)
+end
+
+desc "Check that an error's method name comes from ca_calling_method_name"
+task :method_naming_check do
+  ruby "utils/check_method_naming.rb" or exit($?.exitstatus)
+end
+
+desc "Check that no file of lib gains a define_method, whose frame names nothing"
+task :define_method_check do
+  ruby "utils/check_define_method.rb" or exit($?.exitstatus)
+end
+
+desc "Check that no file of ext gains a raise that does not name the method"
+task :unnamed_raise_check do
+  ruby "utils/check_unnamed_raises.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a write into a read-only array is refused by ca_refuse_read_only"
+task :read_only_refusal_check do
+  ruby "utils/check_read_only_refusal.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a frame verb over the columns runs through CAFrame::ColumnVerbs"
+task :frame_column_verbs_check do
+  ruby "utils/check_frame_column_verbs.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a repeated column name is refused by CAFrame.refuse_repeated_names"
+task :frame_repeated_names_check do
+  ruby "utils/check_frame_repeated_names.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a frame key is read through CAFrame#key_column"
+task :frame_keys_check do
+  ruby "utils/check_frame_keys.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a column name is refused by CAFrame.column_key"
+task :frame_column_names_check do
+  ruby "utils/check_frame_column_names.rb" or exit($?.exitstatus)
+end
+
+desc "Check that an index made from a key is given the key's attributes by CAFrame.key_labels"
+task :frame_key_labels_check do
+  ruby "utils/check_frame_key_labels.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a distance limit is read by CArray::DistanceLimit"
+task :distance_limit_check do
+  ruby "utils/check_distance_limit.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a type is named through CArray::Inspector.type_label"
+task :type_label_check do
+  ruby "utils/check_type_label.rb" or exit($?.exitstatus)
+end
+
 desc "Check that no file gains a hand-written IndexError"
 task :index_error_check do
   ruby "utils/check_index_errors.rb" or exit($?.exitstatus)
@@ -70,9 +135,79 @@ task :runtime_error_check do
   ruby "utils/check_runtime_errors.rb" or exit($?.exitstatus)
 end
 
+desc "Check that every odometer walk says how it skips an empty extent"
+task :empty_walk_check do
+  ruby "utils/check_empty_walks.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a cast to another array's data type says why that side is the authority"
+task :one_sided_cast_check do
+  ruby "utils/check_one_sided_cast.rb" or exit($?.exitstatus)
+end
+
+desc "Check that no Ruby value is narrowed into an integer cell by a C cast"
+task :integer_store_check do
+  ruby "utils/check_integer_store_narrowing.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a constructor checks its arguments before it allocates"
+task :setup_before_alloc_check do
+  ruby "utils/check_setup_before_alloc.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a step that can raise is undone through a part"
+task :protect_parts_check do
+  ruby "utils/check_protect_parts.rb" or exit($?.exitstatus)
+end
+
+desc "Check that no view setup asks its parent for a mask"
+task :view_setup_mask_check do
+  ruby "utils/check_view_setup_mask.rb" or exit($?.exitstatus)
+end
+
+desc "Report memory a raise leaves behind across every public method (macOS, slow)"
+task :leak_matrix do
+  ruby "-Iext", "-Ilib", "utils/leak_matrix.rb" or exit($?.exitstatus)
+end
+
+desc "Check that whether a kernel can raise on a cell is decided by one part"
+task :cell_raise_check do
+  ruby "utils/check_cell_raise.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a row's code for several key columns is made by one part"
+task :key_codes_check do
+  ruby "utils/check_key_codes.rb" or exit($?.exitstatus)
+end
+
+desc "Check that the type a value query meets its reference in is decided by one part"
+task :query_match_check do
+  ruby "utils/check_query_match.rb" or exit($?.exitstatus)
+end
+
+desc "Check that the order of NaN is decided by the parts, not written by hand"
+task :nan_order_check do
+  ruby "utils/check_nan_order.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a mask stand-in is made, read and settled only through the parts"
+task :mask_standin_check do
+  ruby "utils/check_mask_standins.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a buffer for an array's cells is valid before it is published"
+task :cell_buffer_check do
+  ruby "utils/check_cell_buffers.rb" or exit($?.exitstatus)
+end
+
 desc "Check that every attach window opened by hand says why it is safe"
 task :attach_window_check do
   ruby "utils/check_attach_windows.rb" or exit($?.exitstatus)
+end
+
+desc "Check that every method named like __x__ is on utils/dunder_methods.txt"
+task :dunder_method_check => :build_ext do
+  ruby "-Iext", "-Ilib", "utils/check_dunder_methods.rb" or exit($?.exitstatus)
 end
 
 task :install do
@@ -232,7 +367,7 @@ def build_spec_ai_smoke (dirname, basename)
   end
 end
 
-desc "Build spec_ai author-surface smoke fixtures (cfunc_r / with_buffer / source / iter_source_kind)"
+desc "Build spec_ai author-surface smoke fixtures (cfunc_r / with_buffer / source / iter_source_kind / header_contract / address_basis_c)"
 task :build_author_surface_smoke do
   build_spec_ai_smoke("ext_cfunc_r_smoke",     "cfunc_r")
   build_spec_ai_smoke("ext_cslab_smoke",       "cslab")
@@ -240,6 +375,8 @@ task :build_author_surface_smoke do
   build_spec_ai_smoke("ext_with_buffer_smoke",   "with_buffer")
   build_spec_ai_smoke("ext_source_smoke",      "source_smoke")
   build_spec_ai_smoke("ext_iter_source_kind",  "iter_source_kind")
+  build_spec_ai_smoke("ext_header_contract",   "header_contract")
+  build_spec_ai_smoke("ext_address_basis",     "address_basis_c")
 end
 
 # NOTE: the tasks below build the user-facing examples under examples/.  They
@@ -275,10 +412,73 @@ task :build_c_extension_examples => [
   :build_with_buffer_example,
 ]
 
-desc "Run spec_ai tests (ruby -I ext -I lib)"
+# spec_ai runs its files in several processes at once (SPEC_JOBS, default
+# up to 8; SPEC_JOBS=1 runs them all in one process as before).  The files
+# are dealt out largest first into four bundles per process, so each bundle
+# mixes heavy and light files, and the processes take bundles off a queue.
+# A file that measures the process's memory (resident size, or the malloc
+# zone in use) sees the load of the other processes, so it runs alone after
+# the rest.
+SPEC_AI_ALONE = ["spec/spec_ai/test_iter_raise_cleanup.rb",
+                 "spec/spec_ai/test_copy_raise_cleanup.rb",
+                 "spec/spec_ai/test_iter_delivery_detectors.rb"]
+
+SPEC_AI_COMMAND = ["ruby", "-I", "ext", "-I", "lib", "-r", "test/unit",
+                   "-r", "./spec/spec_ai/attach_balance.rb", "-e",
+                   "files = ARGV.dup; ARGV.clear; files.each { |f| require File.expand_path(f) }"]
+
+SPEC_AI_SUMMARY = /(\d+) tests, (\d+) assertions, (\d+) failures, (\d+) errors, (\d+) pendings, (\d+) omissions, (\d+) notifications/
+
+def run_spec_ai_bundle (files)
+  require "open3"
+  out, status = Open3.capture2e(*SPEC_AI_COMMAND, *files)
+  counts = (m = out.scan(SPEC_AI_SUMMARY).last) ? m.map(&:to_i) : nil
+  ok = status.success? && counts && counts[2] == 0 && counts[3] == 0
+  { files: files, out: out, counts: counts, ok: ok, status: status }
+end
+
+def run_spec_ai_parallel (files, jobs)
+  started = Time.now
+  alone, rest = files.partition { |f| SPEC_AI_ALONE.include?(f) }
+  bundles = Array.new([jobs * 4, rest.size].min) { [] }
+  rest.sort_by { |f| -File.size(f) }.each_with_index { |f, i| bundles[i % bundles.size] << f }
+  queue = Queue.new
+  bundles.sort_by { |b| -b.sum { |f| File.size(f) } }.each { |b| queue << b }
+  results = Queue.new
+  workers = Array.new(jobs) do
+    Thread.new do
+      while (b = (queue.pop(true) rescue nil))
+        r = run_spec_ai_bundle(b)
+        results << r
+        print(r[:ok] ? "." : "F")
+      end
+    end
+  end
+  workers.each(&:join)
+  results << run_spec_ai_bundle(alone).tap { |r| print(r[:ok] ? "." : "F") } unless alone.empty?
+  puts
+  all = Array.new(results.size) { results.pop }
+  all.reject { |r| r[:ok] }.each do |r|
+    puts "=" * 72
+    puts "Failed bundle (exit #{r[:status].exitstatus.inspect}#{r[:counts] ? "" : ", no summary: crashed"}):"
+    puts r[:files].map { |f| "  #{f}" }
+    puts r[:out]
+  end
+  sums = all.map { |r| r[:counts] || [0] * 7 }.transpose.map(&:sum)
+  printf "%d tests, %d assertions, %d failures, %d errors, %d pendings, %d omissions, %d notifications\n", *sums
+  printf "%d files in %d bundles, %d processes at a time, %.1f s\n", files.size, all.size, jobs, Time.now - started
+  failed = all.reject { |r| r[:ok] }
+  fail "spec_ai: #{failed.size} bundle(s) failed" unless failed.empty?
+end
+
+desc "Run spec_ai tests (ruby -I ext -I lib, SPEC_JOBS processes at once)"
 task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_parts_check,
-                  :runtime_error_check, :index_error_check,
-                  :build_ext, :build_mv_borrower, :build_mock_unattachable,
+                  :runtime_error_check, :index_error_check, :axis_normalize_check, :rank_limit_check, :method_naming_check, :define_method_check, :unnamed_raise_check, :read_only_refusal_check, :frame_column_verbs_check, :frame_repeated_names_check, :frame_keys_check, :frame_column_names_check, :frame_key_labels_check, :distance_limit_check, :type_label_check, :cell_buffer_check,
+                  :view_setup_mask_check, :protect_parts_check,
+                  :setup_before_alloc_check, :integer_store_check, :one_sided_cast_check,
+                  :empty_walk_check, :mask_standin_check, :nan_order_check, :query_match_check, :key_codes_check, :cell_raise_check,
+                  :build_ext, :dunder_method_check,
+                  :build_mv_borrower, :build_mock_unattachable,
                   :build_xfer_smoke, :build_author_surface_smoke] do
   # macOS 13+ ships MallocZeroOnFree which zeros freed blocks -- masks any
   # ALLOC() user that relies on returned memory being zeroed.  Disable it so
@@ -294,7 +494,14 @@ task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_parts_check
   # it, so it does not want collecting either.
   # attach_balance.rb checks around every test that no view was left
   # attached (development builds only).
-  sh "ruby -I ext -I lib -r test/unit -r ./spec/spec_ai/attach_balance.rb -e 'Dir[\"spec/spec_ai/**/test_*.rb\"].sort.each{|f| require_relative f}'"
+  require "etc"
+  files = Dir["spec/spec_ai/**/test_*.rb"].sort
+  jobs = Integer(ENV["SPEC_JOBS"] || [Etc.nprocessors, 8].min)
+  if jobs <= 1
+    sh(*SPEC_AI_COMMAND, *files)
+  else
+    run_spec_ai_parallel(files, jobs)
+  end
 end
 
 desc "Run spec_ai with every fast path switched off (development builds only)"
@@ -303,6 +510,16 @@ task :spec_ai_general do
   # answers.  CARRAY_GENERAL_PATH=1 makes a development build take the
   # general path everywhere, so this run and spec_ai compare the two.
   ENV["CARRAY_GENERAL_PATH"] = "1"
+  Rake::Task[:spec_ai].invoke
+end
+
+desc "Run spec_ai with the kernel iterator delivering every source by transfer"
+task :spec_ai_transfer do
+  # CARRAY_GENERAL_PATH=2 also switches the fast paths off, and makes the
+  # kernel iterator gather every source through the view's own transfer
+  # (ca_xfer_all) -- the walk that keeps no promise of its own.  This run,
+  # spec_ai_general and spec_ai compare the iterator's routes with it.
+  ENV["CARRAY_GENERAL_PATH"] = "2"
   Rake::Task[:spec_ai].invoke
 end
 
@@ -407,8 +624,18 @@ namespace :pdf do
     )
   end
 
-  desc "Bundle both developer and user guides."
-  task :all => [:devel, :users]
+  desc "Bundle guides/dataframe into a single PDF (CAFrame User's Guide). md-to-pdf required."
+  task :dataframe do
+    build_md_bundle_pdf(
+      src_dir:  "guides/dataframe",
+      out:      "guides/pdf/CAFrame-Users-Guide.pdf",
+      title:    "CAFrame User's Guide",
+      subtitle: "guides/dataframe — bundled edition",
+    )
+  end
+
+  desc "Bundle the developer, user and CAFrame guides."
+  task :all => [:devel, :users, :dataframe]
 end
 
 # ---------------------------------------------------------------------------

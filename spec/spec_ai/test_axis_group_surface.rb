@@ -3,7 +3,7 @@
 #   + CAGroupIterator, :group reduce dispatch, and GroupLabels.
 #
 # The apply path is C-level (ext/ca_group_iter.c type gate + CAGroupIterator
-# + reduce driving over __axis_group_reduce__); AxisGroup / GroupLabels
+# + reduce driving over __reduce_by_axis_groups__); AxisGroup / GroupLabels
 # metadata is Ruby (lib/carray/axis_group.rb).  The classifier is CACategorical
 # (lib/carray/categorical.rb), built via `categorize` / CACategorical.from_codes.
 # Exercises autoload wiring too (plain require "carray").

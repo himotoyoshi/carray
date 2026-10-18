@@ -437,6 +437,7 @@ rb_ca_is_object_type (VALUE self)
 /* ------------------------------------------------------------------- */
 
 static ID id_parent;
+static ID id_lifted_from;
 static ID id_attr;
 static ID id_attrs;
 
@@ -444,6 +445,47 @@ VALUE
 rb_ca_parent (VALUE self)
 {
   return rb_ivar_get(self, id_parent);
+}
+
+/* A view of a Face is built on the Face's storage and wrapped in a new Face
+   (ca_face_lift), so the Face it was taken from is not on its parent chain.
+   The lift records that Face here, and the attribute walk goes to it in
+   place of the parent: the attributes set on a Face show on its views. */
+void
+rb_ca_set_lifted_from (VALUE lifted, VALUE face)
+{
+  rb_ivar_set(lifted, id_lifted_from, face);
+}
+
+/* The next array of the attribute walk: the Face a lifted view was taken
+   from, or else the parent. */
+static VALUE
+ca_attr_parent (VALUE obj)
+{
+  if ( rb_ivar_defined(obj, id_lifted_from) ) {
+    return rb_ivar_get(obj, id_lifted_from);
+  }
+  return rb_ivar_get(obj, id_parent);
+}
+
+static VALUE
+rb_ca_attribute_parent (VALUE self)
+{
+  return ca_attr_parent(self);
+}
+
+/* dup and clone copy the instance variables before initialize_copy, so the
+   copy would share the receiver's attribute Hash and a set_attr on it would
+   write into the receiver.  Give the copy a Hash of its own. */
+void
+rb_ca_own_attr (VALUE self)
+{
+  if ( rb_ivar_defined(self, id_attr) ) {
+    VALUE h = rb_ivar_get(self, id_attr);
+    if ( RB_TYPE_P(h, T_HASH) ) {
+      rb_ivar_set(self, id_attr, rb_hash_dup(h));
+    }
+  }
 }
 
 /* Give dst the attributes (lib/carray/attribute.rb) that src shows, as its
@@ -458,13 +500,14 @@ rb_ca_inherit_attr (VALUE dst, VALUE src)
   VALUE obj = src, attrs;
   int depth;
 
+  /* A chain longer than this is left to #attrs, which walks it all. */
   for (depth = 0; depth < 64 && ! NIL_P(obj); depth++) {
     if ( rb_ivar_defined(obj, id_attr) ) {
       break;
     }
-    obj = rb_ivar_get(obj, id_parent);
+    obj = ca_attr_parent(obj);
   }
-  if ( depth == 64 || NIL_P(obj) ) {
+  if ( NIL_P(obj) ) {
     return;
   }
   attrs = rb_funcall(src, id_attrs, 0);
@@ -553,12 +596,50 @@ ca_root_array (void *ap)
 }
 
 /* Whether two arrays may share memory: their cells live in the same
-   root.  An operation that writes one while reading the other must read
-   from a copy taken before it writes. */
+   root, or in two entities whose memory overlaps (one wraps the other's
+   memory, as wrap_memory_view does).  A view with several parents (a
+   stack, a meld, a lazy expression) is the end of its own chain, so its
+   parents are asked in turn.  An operation that writes one while reading
+   the other must read from a copy taken before it writes. */
 int
 ca_shares_root (void *ap, void *aq)
 {
-  return ca_root_array(ap) == ca_root_array(aq);
+  CArray *ra = ca_root_array(ap);
+  CArray *rb = ca_root_array(aq);
+  if ( ra == rb ) {
+    return 1;
+  }
+  if ( ca_test_flag(ra, CA_FLAG_MULTI_PARENTS) ) {
+    CAMultiParent *mp = (CAMultiParent *) ra;
+    int32_t k;
+    for ( k = 0; k < mp->n_parents; k++ ) {
+      if ( mp->parents[k] && ca_shares_root(mp->parents[k], rb) ) {
+        return 1;
+      }
+    }
+    return 0;
+  }
+  if ( ca_test_flag(rb, CA_FLAG_MULTI_PARENTS) ) {
+    return ca_shares_root(rb, ra);
+  }
+  if ( ca_is_entity(ra) && ca_is_entity(rb) && ra->ptr && rb->ptr ) {
+    char *a0 = ra->ptr, *a1 = ra->ptr + ca_length(ra);
+    char *b0 = rb->ptr, *b1 = rb->ptr + ca_length(rb);
+    return a0 < b1 && b0 < a1;
+  }
+  return 0;
+}
+
+/* Whether self and other may share memory (ca_shares_root), for the plan
+   reader that keeps an evaluator off a store reading what it writes. */
+static VALUE
+rb_ca_storage_overlaps (VALUE self, VALUE other)
+{
+  CArray *ca, *cb;
+  rb_check_carray_object(other);
+  TypedData_Get_Struct(self,  CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(other, CArray, &carray_data_type, cb);
+  return ca_shares_root(ca, cb) ? Qtrue : Qfalse;
 }
 
 static VALUE
@@ -624,6 +705,7 @@ void
 Init_carray_attribute (void)
 {
   id_parent     = rb_intern("parent");
+  id_lifted_from = rb_intern("lifted_from");
   id_attr       = rb_intern("@attr");
   id_attrs      = rb_intern("attrs");
 
@@ -632,7 +714,6 @@ Init_carray_attribute (void)
   rb_define_method(rb_cCArray, "bytes", rb_ca_bytes, 0);
   rb_define_method(rb_cCArray, "flags", rb_ca_flags, 0);
   rb_define_method(rb_cCArray, "ndim", rb_ca_ndim, 0);
-  rb_define_method(rb_cCArray, "rank", rb_ca_ndim, 0);
   rb_define_method(rb_cCArray, "shape", rb_ca_dim, 0);
   rb_define_method(rb_cCArray, "dim", rb_ca_dim, 0);
   rb_define_method(rb_cCArray, "dim0", rb_ca_dim0, 0);
@@ -646,6 +727,7 @@ Init_carray_attribute (void)
   rb_define_method(rb_cCArray, "data_type_name", rb_ca_data_type_name, 0);
 
   rb_define_method(rb_cCArray, "parent", rb_ca_parent, 0);
+  rb_define_private_method(rb_cCArray, "attribute_parent", rb_ca_attribute_parent, 0);
 
   rb_define_method(rb_cCArray, "data_class", rb_ca_data_class, 0);
   rb_define_method(rb_cCArray, "data_class=", rb_ca_set_data_class, 1);
@@ -673,6 +755,7 @@ Init_carray_attribute (void)
   rb_define_method(rb_cCArray, "object?",   rb_ca_is_object_type, 0);
 
   rb_define_method(rb_cCArray, "root_array", rb_ca_root_array, 0);
+  rb_define_private_method(rb_cCArray, "storage_overlaps?", rb_ca_storage_overlaps, 1);
   rb_define_method(rb_cCArray, "ancestors", rb_ca_ancestors, 0);
 }
 

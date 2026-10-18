@@ -163,6 +163,7 @@ ca_triop_setup (CATriOp *ca, CArray *op1, CArray *op2, CArray *op3,
 CATriOp *
 ca_triop_new (CArray *op1, CArray *op2, CArray *op3, uint16_t op_id)
 {
+  /* check: the setup checks nothing */
   CATriOp *ca = (CATriOp *) ca_array_alloc(CA_OBJ_TRIOP, op1->ndim);
   ca_triop_setup(ca, op1, op2, op3, op_id);
   return ca;
@@ -210,7 +211,7 @@ ca_triop_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   ca_size_t s;
 
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CATriOp is read-only (xfer_index PUT)");
+    ca_refuse_read_only();
   }
 
   s = ca->bytes;
@@ -296,7 +297,7 @@ ca_triop_eval (CATriOp *to, const ca_lazy_req_t *req, void *data)
                "CATriOp: kernel not implemented (op_id=%u data_type=%d)",
                (unsigned) to->op_id, (int) to->data_type);
     }
-    if ( to->data_type == CA_OBJECT ) {
+    if ( ca_op_raises_on_cell(CA_OP_KIND_TRIOP, to->op_id, to->data_type) ) {
       CArray *ops[3];
       ops[0] = to->parent;
       ops[1] = to->op2;
@@ -322,7 +323,7 @@ ca_triop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   ca_lazy_req_t req;
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CATriOp is read-only (xfer_stride PUT)");
+    ca_refuse_read_only();
   }
   ca_lazy_req_region(&req, ap, starts, counts, strides);
   ca_triop_eval((CATriOp *) ap, &req, data);
@@ -335,7 +336,7 @@ ca_triop_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
 {
   ca_lazy_req_t req;
   if ( dir != CA_XFER_GET ) {
-    rb_raise(rb_eRuntimeError, "CATriOp is read-only (xfer_addrs PUT)");
+    ca_refuse_read_only();
   }
   ca_lazy_req_addrs(&req, n, addrs);
   ca_triop_eval((CATriOp *) ap, &req, data);
@@ -358,15 +359,7 @@ static void
 ca_triop_func_allocate (void *ap)
 {
   CATriOp *ca = (CATriOp *) ap;
-  ca->ptr = xmalloc(ca_length(ca));
-  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
-     soon as the view is, so it must not be handed to the GC as raw
-     xmalloc garbage. */
-  if ( ca->data_type == CA_OBJECT ) {
-    VALUE *p = (VALUE *) ca->ptr;
-    ca_size_t i;
-    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
-  }
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -381,19 +374,11 @@ ca_triop_func_attach (void *ap)
   int8_t    k;
   ca_size_t s;
 
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 
   s = ca->bytes;
   for ( k = ca->ndim - 1; k >= 0; k-- ) { native[k] = s; s *= ca->dim[k]; }
   for ( k = 0; k < ca->ndim; k++ ) starts[k] = 0;
-  /* CA_OBJECT cells are VALUEs and this buffer is about to be marked as
-     soon as the view is, so it must not be handed to the GC as raw
-     xmalloc garbage. */
-  if ( ca->data_type == CA_OBJECT ) {
-    VALUE *p = (VALUE *) ca->ptr;
-    ca_size_t i;
-    for ( i = 0; i < ca->elements; i++ ) *p++ = Qnil;
-  }
   ca_triop_func_xfer_stride(ca, starts, ca->dim, native, ca->ptr, CA_XFER_GET);
 }
 
@@ -416,7 +401,7 @@ static void
 ca_triop_func_fill_data (void *ap, void *ptr)
 {
   (void) ap; (void) ptr;
-  rb_raise(rb_eRuntimeError, "CATriOp is read-only (fill_data)");
+  ca_refuse_read_only();
 }
 
 /* Build out.mask on each read (CAMaskOfOperands): the three operands'
@@ -575,8 +560,7 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
 
   /* No kernel for that data_type: raise as the eager triop does. */
   if ( ca_triop_kernel_lookup_vvv(op_id, dt1) == ca_triop_not_implement ) {
-    rb_raise(rb_eCADataTypeError,
-             "invalid data_type for triop (not implemented)");
+    ca_op_refuse_unimplemented(cary1, dt1, rb_eCADataTypeError);
   }
   r1 = insert_cast(r1, dt1, &op1);
   r2 = insert_cast(r2, dt2, &op2);
@@ -589,10 +573,11 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
     CArray *anchor = NULL;
     volatile VALUE r_anchor = Qnil;
     int8_t anchor_ndim;
-    /* Pick the largest-ndim non-scalar operand as anchor. */
-    if ( op1->elements > 1 ) { anchor = op1; r_anchor = r1; }
-    else if ( op2->elements > 1 ) { anchor = op2; r_anchor = r2; }
-    else if ( op3->elements > 1 ) { anchor = op3; r_anchor = r3; }
+    /* The first operand that is not a scalar is the anchor.  An array of
+       no cells is one (its shape is the walk's), not a scalar. */
+    if ( ! ca_is_scalar(op1) ) { anchor = op1; r_anchor = r1; }
+    else if ( ! ca_is_scalar(op2) ) { anchor = op2; r_anchor = r2; }
+    else if ( ! ca_is_scalar(op3) ) { anchor = op3; r_anchor = r3; }
     if ( anchor && anchor != op1 ) {
       /* op1 is a CScalar but the walk shape is determined by another
          operand.  Lift op1 up to anchor's shape via
@@ -642,6 +627,7 @@ static VALUE
 rb_ca_triop_s_build (VALUE klass, VALUE cary1, VALUE cary2, VALUE cary3,
                      VALUE op_id_val)
 {
+  /* fits: an operation number from the library's own table */
   uint16_t op_id = (uint16_t) NUM2UINT(op_id_val);
   (void) klass;
   return rb_ca_triop_build(cary1, cary2, cary3, op_id);
@@ -653,9 +639,10 @@ rb_ca_triop_s_build (VALUE klass, VALUE cary1, VALUE cary2, VALUE cary3,
 static VALUE
 rb_ca_triop_trapping (VALUE self)
 {
-  CArray *ca;
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  return ( ca->data_type == CA_OBJECT ) ? Qtrue : Qfalse;
+  CATriOp *to;
+  TypedData_Get_Struct(self, CATriOp, &catriop_data_type, to);
+  return ca_op_raises_on_cell(CA_OP_KIND_TRIOP, to->op_id, to->data_type)
+         ? Qtrue : Qfalse;
 }
 
 static VALUE
@@ -679,6 +666,7 @@ rb_ca_triop_op3 (VALUE self)
 }
 
 /* Test instrumentation. */
+#ifdef CARRAY_DEV_BUILD
 static VALUE
 rb_ca_triop_s_reset_scratch_counter (VALUE klass)
 {
@@ -708,6 +696,7 @@ rb_ca_triop_s_materialise_count (VALUE klass)
   (void) klass;
   return SIZE2NUM(ca_triop_materialise_call_count);
 }
+#endif /* CARRAY_DEV_BUILD */
 
 static VALUE
 rb_ca_triop_s_allocate (VALUE klass)
@@ -767,6 +756,7 @@ Init_ca_obj_triop (void)
                                 rb_ca_triop_op3, 0);
 
   /* Test instrumentation. */
+#ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCATriOp, "__reset_scratch_counter__",
                              rb_ca_triop_s_reset_scratch_counter, 0);
   rb_define_singleton_method(rb_cCATriOp, "__scratch_count__",
@@ -775,4 +765,5 @@ Init_ca_obj_triop (void)
                              rb_ca_triop_s_reset_materialise_counter, 0);
   rb_define_singleton_method(rb_cCATriOp, "__materialise_count__",
                              rb_ca_triop_s_materialise_count, 0);
+#endif
 }

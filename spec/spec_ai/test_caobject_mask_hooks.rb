@@ -86,6 +86,27 @@ class TestCAObjectMaskHooks < Test::Unit::TestCase
     end
   end
 
+  # Reading the values with the mask held open (a stack's or a meld's
+  # to_a, an address basis) leaves the cells the hooks mask masked.
+  KINDS.each do |kind, klass|
+    define_method("test_#{kind}_mask_survives_a_stack_or_meld") do
+      o = klass.new([1, 0, 0, 1])
+      assert_equal [[:U, 1, 2, :U]], CArray.stack([o]).to_a.map { |r| VALUES.(r) }
+      assert_equal [:U, 1, 2, :U, :U, 1, 2, :U], VALUES.(CArray.meld(o, o))
+      assert_equal [1, 0, 0, 1], bits_of(o.bits)
+    end
+
+    define_method("test_#{kind}_mask_written_inside_an_address_basis_reaches_the_hooks") do
+      o = klass.new([1, 0, 0, 1])
+      CArray::AddressBasis.open([o], [false]) { o.mask[2] = 1; o[1] = UNDEF }
+      assert_equal [1, 1, 1, 1], bits_of(o.bits)
+      o = klass.new([1, 0, 0, 1])
+      CArray::AddressBasis.open([o, o], [false, false]) do
+        assert_equal [1, 0, 0, 1], bits_of(o.mask)
+      end
+    end
+  end
+
   # A fetcher that answers UNDEF masks the cell, as it always did.
   class UndefFetch < CAObject
     def initialize

@@ -31,7 +31,7 @@ require "carray"
 #   Example:
 #
 #     a = CANestedArray.new([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-#     a.dim            #=> [2, 3]
+#     a.shape            #=> [2, 3]
 #     a[1, 2]          #=> 6.0
 #     a.copy           #=> CArray.float64(2, 3) snapshot
 #     a[0, 0] = 9.0    # store_index
@@ -86,7 +86,7 @@ class CANestedArray < CAObject
 
   # ---- bulk ------------------------------------------------------------
 
-  # data is the internal CArray snapshot (shape == self.dim).  Filling it with
+  # data is the internal CArray snapshot (shape == self.shape).  Filling it with
   # the row-major flattened nested array delivers the whole view in one pass.
   def copy_data (data)
     data[] = @nested.flatten

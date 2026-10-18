@@ -110,6 +110,7 @@ array:
 | position | `min_index` `max_index` (flat index within the tile) |
 | weighted | `wsum(weights)` `wmean(weights)` (weights shaped like one full tile) |
 | order statistics | `median` `percentile(*p)` `quantile` |
+| first / distinct | `first` `last` (first / last present value, row-major within the tile) · `nunique` (distinct present values) |
 | counting | `count` / `count_not_masked` / `count_masked` / `count(v)` · `elements` |
 
 - `elements` is the (constant) tile size `Π bᵢ`; `count_not_masked` is the number
@@ -150,6 +151,25 @@ a.blocks(2, 2).reduce { |tile| tile.max - tile.min }   # a tile-grid result
 `reduce { |tile| ... }` folds each tile to one value; `reduce(init) { |acc, x| ... }`
 is the element-wise fold. Each yielded tile is a uniform `b0×b1×…` CArray with
 out-of-bounds cells masked.
+
+### `lag`
+
+`lag(n)` gives each cell the value `n` steps earlier in its own tile, counting
+the tile's cells row-major; a cell with no such value in its tile is `UNDEF`,
+so a lag never reaches into another tile. A partial edge tile counts only the
+cells it has:
+
+```ruby
+a = CArray.int32(3, 5).seq
+a.blocks(2, 2).lag[nil, 4]   # => [UNDEF, 4, UNDEF]   (the edge tiles 2x1 and 1x1)
+```
+
+`strip_mask(method: :ffill)` / `:bfill` fill the masked cells from the tile's
+cells, counted row-major; a cell with nothing to carry in its tile stays
+masked.
+
+`order` ranks each cell among its tile's cells (int64, `0` the smallest), with
+the keywords of `CArray#order`; a partial edge tile ranks only the cells it has.
 
 ## Winner address and sorting
 

@@ -69,7 +69,7 @@ class CArray
       raise ArgumentError,
         "pack_bits: expected CA_BOOLEAN / CA_UINT8 / CA_INT8 (got #{data_type_name})"
     end
-    raise ArgumentError, "pack_bits: 1-D CArray expected (got rank #{rank})" unless rank == 1
+    raise ArgumentError, "pack_bits: 1-D CArray expected (got ndim #{ndim})" unless ndim == 1
     n = elements
     n_bytes = (n + 7) / 8
     packed = CArray.uint8(n_bytes) { 0 }

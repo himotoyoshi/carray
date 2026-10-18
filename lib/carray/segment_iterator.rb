@@ -41,7 +41,7 @@ class CASegmentIterator < CAIterator
     kw = {}
     kw[:offsets] = offsets unless offsets.nil?
     kw[:lengths] = lengths unless lengths.nil?
-    bounds = CArray.__segment_bounds__("segments", **kw)
+    bounds = CArray.__segment_boundaries_from_lengths_or_offsets__("segments", **kw)
     origin, finish = bounds[0], bounds[-1]
     if origin < 0 || finish > value.elements
       raise ArgumentError,
@@ -58,8 +58,8 @@ class CASegmentIterator < CAIterator
     @offsets   = @bounds[0...-1].copy                # the starts, for the kernels
     @elements  = @k > 0 ? (@bounds[1..-1] - @bounds[0...-1]) : CArray.int64(0)
     @grouped   = finish > origin ? value.reshape(value.elements)[origin...finish].copy
-                                 : CArray.new(value.data_type, [0], bytes: value.bytes)
-    @empty     = CArray.new(@grouped.data_type, [0], bytes: @grouped.bytes)
+                                 : value.reshape(value.elements)[0...0].copy
+    @empty     = @grouped[0...0]          # an empty segment is the values' own kind
   end
 
   # @overload inspect
@@ -153,7 +153,7 @@ class CASegmentIterator < CAIterator
   def sum(axis: nil)
     return axis_sum(axis) if axis
     m = moments
-    return per_segment(core_reduce_type(:sum)) { |s| s.sum } unless m
+    return per_segment(core_reduce_kind(:sum)) { |s| s.sum } unless m
     m[:sum].copy                    # the moments sum IS the core fold (empty -> 0.0)
   end
 
@@ -167,7 +167,7 @@ class CASegmentIterator < CAIterator
   #   @return [CArray]
   def accumulate(axis: nil)
     return axis_by_masked_copy(axis, :accumulate, core_reduce_type(:accumulate)) if axis
-    per_segment(core_reduce_type(:accumulate)) { |s| s.accumulate }
+    per_segment(core_reduce_kind(:accumulate)) { |s| s.accumulate }
   end
 
   # @overload max
@@ -177,7 +177,7 @@ class CASegmentIterator < CAIterator
   def max(axis: nil)
     return axis_moments(axis, :max)[:max] if axis
     m = moments
-    m ? m[:max].copy : per_segment(core_reduce_type(:max)) { |s| s.max }
+    m ? m[:max].copy : per_segment(core_reduce_kind(:max)) { |s| s.max }
   end
 
   # @overload min
@@ -187,7 +187,7 @@ class CASegmentIterator < CAIterator
   def min(axis: nil)
     return axis_moments(axis, :min)[:min] if axis
     m = moments
-    m ? m[:min].copy : per_segment(core_reduce_type(:min)) { |s| s.min }
+    m ? m[:min].copy : per_segment(core_reduce_kind(:min)) { |s| s.min }
   end
 
   # @overload mean
@@ -196,7 +196,7 @@ class CASegmentIterator < CAIterator
   def mean(axis: nil)
     return axis_mean(axis) if axis
     m = moments
-    return per_segment(core_reduce_type(:mean)) { |s| s.mean } unless m
+    return per_segment(core_reduce_kind(:mean)) { |s| s.mean } unless m
     cnt = m[:count]
     out = m[:sum] / cnt.float64      # count 0 -> NaN, masked next
     out[cnt.eq(0)] = UNDEF           # empty / all-masked category -> MASKED
@@ -220,8 +220,8 @@ class CASegmentIterator < CAIterator
   #   @return [CArray]
   def percentile (p, axis: nil)
     return axis_order_stat(axis, :percentile, p) if axis
-    unless MONOID_TYPES.include?(grouped.data_type)
-      return per_segment(core_reduce_type(:percentile, p)) { |s| s.percentile(p) }
+    unless kernel_reads?
+      return per_segment(core_reduce_kind(:percentile, p)) { |s| s.percentile(p) }
     end
     out = CArray.float64(@k)
     grouped.send(:__reduceat_percentile__, @offsets, p.to_f, out)
@@ -235,8 +235,8 @@ class CASegmentIterator < CAIterator
   #   MASKED. For a single fraction q in 0..1 use `percentile(q * 100)`.
   #   @return [Array<CArray>]
   def quantile
-    unless MONOID_TYPES.include?(grouped.data_type)
-      return CArray.__answer_as__(:quantile) { [0, 25, 50, 75, 100].map { |p| percentile(p) } }
+    unless kernel_reads?
+      return CArray.__name_errors_after_method__(:quantile) { [0, 25, 50, 75, 100].map { |p| percentile(p) } }
     end
     outs = Array.new(5) { CArray.float64(@k) }
     grouped.send(:__reduceat_quantile__, @offsets, *outs)
@@ -251,7 +251,7 @@ class CASegmentIterator < CAIterator
   def variance(axis: nil)
     return axis_by_masked_copy(axis, :variance) if axis
     m = moments
-    return per_segment(core_reduce_type(:variance)) { |s| s.variance } unless m
+    return per_segment(core_reduce_kind(:variance)) { |s| s.variance } unless m
     cnt   = m[:count]
     means = m[:sum] / cnt.float64    # per-segment mean (garbage where count 0/1,
     out   = CArray.float64(@k)       #   ignored by the kernel's n<2 guards)
@@ -267,7 +267,7 @@ class CASegmentIterator < CAIterator
   def stddev(axis: nil)
     return axis_by_masked_copy(axis, :stddev) if axis
     m = moments
-    return per_segment(core_reduce_type(:stddev)) { |s| s.stddev } unless m
+    return per_segment(core_reduce_kind(:stddev)) { |s| s.stddev } unless m
     variance.sqrt                    # sqrt propagates the n<2 mask
   end
 
@@ -278,7 +278,7 @@ class CASegmentIterator < CAIterator
   #   @return [CArray]
   def prod(axis: nil)
     return axis_prod(axis) if axis
-    return per_segment(core_reduce_type(:prod)) { |s| s.prod } unless MONOID_TYPES.include?(grouped.data_type)
+    return per_segment(core_reduce_kind(:prod)) { |s| s.prod } unless kernel_reads?
     out = CArray.float64(@k)
     grouped.send(:__reduceat_prod__, @offsets, out)
     out
@@ -304,6 +304,48 @@ class CASegmentIterator < CAIterator
     aa ? aa[:any] : per_segment(CA_BOOLEAN) { |s| s.any }
   end
 
+  # @overload first
+  #   Returns the first present value of each segment, in the value's data
+  #   type (matching `CArray#first`).  A segment with no present value is
+  #   UNDEF.
+  #   @return [CArray]
+  def first (axis: nil)
+    return axis_by_core(axis, :first) if axis
+    edge_values(:first)
+  end
+
+  # @overload last
+  #   Returns the last present value of each segment, in the value's data
+  #   type (matching `CArray#last`).  A segment with no present value is
+  #   UNDEF.
+  #   @return [CArray]
+  def last (axis: nil)
+    return axis_by_core(axis, :last) if axis
+    edge_values(:last)
+  end
+
+  # @overload nunique
+  #   Returns the number of distinct present values in each segment as int64,
+  #   with the distinctness of `CArray#nunique` (every NaN is one value,
+  #   -0.0 is 0.0).  A segment with no present value counts 0.
+  #   @return [CArray]
+  def nunique (axis: nil)
+    return axis_by_core(axis, :nunique) if axis
+    return per_segment(CA_INT64) { |s| s.nunique } unless CArray.__fast_paths_enabled__
+    out = CArray.int64(@k)
+    return out if grouped.elements.zero?
+    # Each cell's value becomes a code, so a distinct (segment, value) pair is
+    # a distinct int64 key; the keys' segments, counted, are the answer.
+    values = grouped.categorize
+    width  = [values.labels.size, 1].max
+    keys   = CArray.segment_index(offsets: @bounds) * width + values.codes.int64
+    owners = keys.unique / width
+    return out if owners.elements.zero?
+    counts = owners.bincount
+    out[0...counts.elements] = counts
+    out
+  end
+
   # ---- tier 2 (fused / population / position) ------------------------------
 
   # @overload minmax
@@ -324,17 +366,19 @@ class CASegmentIterator < CAIterator
 
   # @overload variancep
   #   Per-segment POPULATION variance (ddof=0) as float64, matching
-  #   `CArray#variancep`: empty / all-masked -> MASKED, single value -> 0.0.
+  #   `CArray#variancep`: empty / all-masked -> MASKED, single value -> 0.0
+  #   (NaN when that value is a NaN or an infinity).
   #   Derived from the sample variance (variancep = variance * (n-1) / n), so it
   #   reuses the centred two-pass kernel with no extra walk.
   #   @return [CArray]
   def variancep(axis: nil)
     return axis_by_masked_copy(axis, :variancep) if axis
     m = moments
-    return per_segment(core_reduce_type(:variancep)) { |s| s.variancep } unless m
+    return per_segment(core_reduce_kind(:variancep)) { |s| s.variancep } unless m
     cnt = m[:count]
     vp  = variance * (cnt - 1).float64 / cnt.float64
-    vp[cnt.eq(1)] = 0.0                   # one value: defined, unlike variance
+    one = cnt.eq(1)                       # one value: defined, unlike variance --
+    vp[one] = (m[:sum] - m[:sum])[one]    # 0.0, or NaN for a NaN or an infinity
     vp
   end
 
@@ -344,7 +388,7 @@ class CASegmentIterator < CAIterator
   def stddevp(axis: nil)
     return axis_by_masked_copy(axis, :stddevp) if axis
     m = moments
-    return per_segment(core_reduce_type(:stddevp)) { |s| s.stddevp } unless m
+    return per_segment(core_reduce_kind(:stddevp)) { |s| s.stddevp } unless m
     variancep.sqrt
   end
 
@@ -421,7 +465,7 @@ class CASegmentIterator < CAIterator
   #   @return [CArray]
   def wsum (weights, axis: nil)
     return axis_wsum_wmean(weights, axis, :wsum)[0] if axis
-    kernel = MONOID_TYPES.include?(grouped.data_type)
+    kernel = kernel_reads?
     wg = scatter_weights(weights, kernel)
     return kernel_weighted(wg)[0] if kernel
     fold_weighted(:wsum, wg, 0.0) { |v, ws| v.wsum(ws) }
@@ -435,7 +479,7 @@ class CASegmentIterator < CAIterator
   #   @return [CArray]
   def wmean (weights, axis: nil)
     return axis_wsum_wmean(weights, axis, :wmean)[1] if axis
-    kernel = MONOID_TYPES.include?(grouped.data_type)
+    kernel = kernel_reads?
     wg = scatter_weights(weights, kernel)
     return kernel_weighted(wg)[1] if kernel
     fold_weighted(:wmean, wg, UNDEF) { |v, ws| v.wmean(ws) }
@@ -507,7 +551,7 @@ class CASegmentIterator < CAIterator
   # data type is the core's (`cumsum` of a boolean is uint64, of an integer
   # float64), a Face keeps its Face (`cummin` of a time column is a time), and
   # a scan the core refuses (`cumsum` of a time column) raises in the core's
-  # words.  When the fused C kernel __axis_group_scan__ answers in that data
+  # words.  When the fused C kernel __scan_by_axis_groups__ answers in that data
   # type, it runs with the whole source as a single grouped axis and the
   # segment of each cell (#codes) as the single bundle, emitting in source
   # order; otherwise each segment is scanned by the core and scattered back.
@@ -527,8 +571,122 @@ class CASegmentIterator < CAIterator
   # @!method cumcount
   #   Per-segment 1-based within-segment ordinal (int64), source-shaped.
   #   @return [CArray]
-  [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
-    define_method(op) { |axis: nil| axis ? axis_scan(op, axis) : scan(op) }
+  CArray.send(:define_named_methods, self,
+              [:cumsum, :cumprod, :cummax, :cummin, :cumcount], :segment_scan)
+
+  private def segment_scan (op, axis: nil)
+    axis ? axis_scan(op, axis) : scan(op)
+  end
+
+  # @overload lag(n = 1)
+  #   Returns the value `n` steps earlier within each segment, source-shaped,
+  #   as `CArray#lag` does along an axis. A cell whose segment has no value
+  #   `n` steps back is UNDEF, so a lag never reaches into the segment before;
+  #   a cell in no segment is UNDEF. A negative `n` looks ahead.
+  #   @param n [Integer]
+  #   @return [CArray]
+  def lag (n = 1, axis: nil)
+    unless n.is_a?(Integer)
+      raise TypeError, "lag: n must be an Integer (got #{n.class})"
+    end
+    return axis_lag(n, axis) if axis
+    out = blank_like(@value, @src_shape)
+    out[] = UNDEF
+    m = grouped.elements
+    return out if m.zero?
+    # The copy is in segment order, so one shift moves every segment; the
+    # cells it brought across a segment boundary are then cut.
+    lagged = grouped.lag(n)
+    lagged = out.data_type == CA_OBJECT && lagged.face? ?
+               CArray.object(m) { lagged.to_a } : lagged.copy
+    unless n.zero?
+      seg   = CArray.segment_index(offsets: @bounds)
+      start = @bounds[seg]
+      pos   = CArray.int64(m).seq! - start
+      lagged[n > 0 ? pos.lt(n) : pos.ge(@bounds[seg + 1] - start + n)] = UNDEF
+    end
+    out.reshape(@value.elements)[perm] = lagged
+    out
+  end
+
+  # @overload strip_mask(method:)
+  #   Returns the values with each masked cell filled from its segment, as
+  #   `CArray#strip_mask(method:)` fills a 1-D array: `:forward` (`:ffill`)
+  #   carries the segment's last present value forward, `:backward`
+  #   (`:bfill`) its next one back. A fill never reaches across into another
+  #   segment, so a masked cell with nothing to carry in its segment stays
+  #   masked; a cell in no segment is UNDEF. The value is not modified.
+  #   @param method [Symbol] `:forward`, `:ffill`, `:backward` or `:bfill`.
+  #   @return [CArray] source-shaped
+  def strip_mask (method:, axis: nil)
+    backward = CAIterator.hold_backward?(method)
+    return axis_hold(method, axis) if axis
+    if @value.face? && ! face_output?
+      return scatter_segments(->(shape) { blank_like(@value, shape) }) { |s| s.strip_mask(method: method) }
+    end
+    out = blank_like(@value, @src_shape)
+    out[] = UNDEF
+    m = grouped.elements
+    return out if m.zero?
+    # For each cell, the present cell its value comes from: the nearest one at
+    # or before it (forward) or at or after it (backward), kept when it lies
+    # in the cell's own segment.
+    slot = CArray.int64(m).seq!
+    slot[grouped.is_masked] = backward ? m : -1 if grouped.has_mask?
+    seg = CArray.segment_index(offsets: @bounds)
+    if backward
+      source = slot.reverse.cummin.reverse
+      found  = source.lt(@bounds[seg + 1])
+    else
+      source = slot.cummax
+      found  = source.ge(@bounds[seg])
+    end
+    filled = grouped[source.pmin(m - 1).pmax(0)].copy
+    filled[found.not] = UNDEF
+    out.reshape(@value.elements)[perm] = filled
+    out
+  end
+
+  # @overload order(descending: false, method: :ordinal, kind: :quick)
+  #   Returns each cell's rank among the members of its segment, source-shaped
+  #   int64, as `CArray#order` ranks a 1-D array: `0` is the smallest, ties
+  #   are broken by position (`:ordinal`) or share a rank (`:dense`), and
+  #   `descending:` reverses the order. A masked cell, and a cell in no
+  #   segment, is UNDEF.
+  #   @return [CArray]
+  def order (axis: nil, descending: false, method: :ordinal, kind: :quick)
+    return axis_order(axis, descending: descending, method: method, kind: kind) if axis
+    out = CArray.int64(*@src_shape)
+    out[] = UNDEF
+    # The keywords are checked by the core, on no cells, so a segment
+    # iterator refuses what CArray#order refuses.
+    CArray.int64(0).order(descending: descending, method: method, kind: kind)
+    # The core ranks every value once, so the order and the ties are its own.
+    # Ranked in the asked direction, so tied cells keep their order either way.
+    ranks = grouped.order(method: :dense, kind: kind, descending: descending)
+    m = grouped.elements
+    return out if m.zero?
+    seg     = CArray.segment_index(offsets: @bounds)
+    present = ranks.is_not_masked
+    # One key per cell, segment first and a masked cell last in its segment;
+    # a stable sort keeps tied cells in their order.
+    key     = seg * (m + 1) + ranks.strip_mask(m)
+    sorted  = key.sort_index(kind: :stable)
+    first   = @bounds[seg[sorted]]           # where each sorted cell's segment starts
+    local   = CArray.int64(m)
+    if method == :dense
+      skey = key[sorted]
+      step = CArray.int64(m)
+      step[] = 1
+      step[1..-1] = skey[1..-1].ne(skey[0...-1]).int64 if m > 1
+      run = step.cumsum.int64
+      local[sorted] = run - run[first]
+    else
+      local[sorted] = CArray.int64(m).seq! - first
+    end
+    local[present.not] = UNDEF
+    out.reshape(@value.elements)[perm] = local
+    out
   end
 
   private
@@ -557,7 +715,7 @@ class CASegmentIterator < CAIterator
   # one that no cell belongs to: every cell comes back UNDEF, as it does when
   # there are segments and a cell is in none of them.
   def scan (op)
-    CArray.__answer_as__(op) { scan_answered(op) }
+    CArray.__name_errors_after_method__(op) { scan_answered(op) }
   end
 
   def scan_answered (op)
@@ -570,14 +728,14 @@ class CASegmentIterator < CAIterator
     bundle = @k > 0 ? [codes, @k, [0]]
                     : [CArray.int64(@value.elements).fill(-1), 1, [0]]
     scan_source.reshape(@value.elements)
-               .__axis_group_scan__([0], [bundle], op)
+               .__scan_by_axis_groups__([0], [bundle], op)
                .reshape(*@src_shape)
   end
 
   # The core's scan of one cell of the value: the scan answers in its data
   # type and Face. A scan the core refuses raises here, in the core's words.
   def core_scan_answer (op)
-    (@core_scan_answer ||= {})[op] ||= core_probe.public_send(op)
+    (@core_scan_answer ||= {})[op] ||= CAIterator.core_probe(@value).public_send(op)
   end
 
   # Whether the axis-group scan kernel gives the core's answer. It reads
@@ -587,6 +745,7 @@ class CASegmentIterator < CAIterator
   # cumcount in int64 -- which is not the core's answer for every data type
   # (the core counts a boolean's running sum in uint64).
   def kernel_scans? (op, answer)
+    return false unless CArray.__fast_paths_enabled__
     return false if @value.face? || answer.face? || @value.complex?
     kernel_type =
       case op
@@ -634,7 +793,7 @@ class CASegmentIterator < CAIterator
     if model.face? && model.read_only?
       CArray.new(CA_OBJECT, shape)
     else
-      model.__send__(:__blank_like__, shape)
+      model.__send__(:blank_like, shape)
     end
   end
 
@@ -683,8 +842,9 @@ class CASegmentIterator < CAIterator
 
   # Lay a per-cell weight array out in segment-contiguous order (same layout as
   # @grouped), so wsum / wmean can pair each segment's values with its weights.
-  # Weights are coerced to float64; the same counting-sort scatter propagates
-  # the weight mask and skips excluded cells, so wg lines up with @grouped.
+  # Weights are coerced to float64 and gathered through the same permutation
+  # as the values, which carries the weight mask and leaves out the excluded
+  # cells, so wg lines up with @grouped.
   # The weighted kernel reads float64 weights; the per-segment fallback hands
   # them to the core as they are, so an object weight stays exact.
   def scatter_weights (weights, as_float64 = true)
@@ -694,10 +854,10 @@ class CASegmentIterator < CAIterator
             "value.elements (#{codes.elements})"
     end
     wf = as_float64 ? weights.float64 : weights
-    wg = CArray.new(wf.data_type, [grouped.elements], bytes: wf.bytes)
-    codes.send(:__categorical_scatter__, wf.reshape(wf.elements),
-                @offsets.copy, wg, @k)
-    wg
+    wf = wf.reshape(wf.elements)
+    # An empty index into an empty source is out of range, so take the empty
+    # layout directly.
+    grouped.elements > 0 ? wf[perm].copy : wf[0...0].copy
   end
 
   # Map a per-segment index to the flat source address via the
@@ -735,6 +895,37 @@ class CASegmentIterator < CAIterator
     out
   end
 
+  # The value at the first or last present cell of each segment, UNDEF for a
+  # segment with none.  Every segment's position is found at once: for each
+  # grouped slot, the nearest present slot at or after it (a running minimum
+  # taken from the end) or at or before it (a running maximum), read at the
+  # segment's first or last slot and kept when it falls inside the segment.
+  # A read-only Face cannot take UNDEF cell by cell, so its answers are
+  # collected segment by segment, as its other reductions are.
+  def edge_values (op)
+    n = grouped.elements
+    if n.zero? || (@value.face? && ! face_output?) || ! CArray.__fast_paths_enabled__
+      return per_segment(core_reduce_kind(op)) { |s| s.public_send(op) }
+    end
+    slot = CArray.int64(n).seq!
+    if grouped.has_mask?
+      slot[grouped.is_masked] = (op == :first) ? n : -1
+    end
+    lo, hi = @bounds[0...-1], @bounds[1..-1]
+    if op == :first
+      nearest = slot.reverse.cummin.reverse
+      at = nearest[lo.pmin(n - 1)]
+    else
+      nearest = slot.cummax
+      at = nearest[(hi - 1).pmax(0)]
+    end
+    found = at.ge(lo) & at.lt(hi)
+    out = grouped[at.pmin(n - 1).pmax(0)].copy
+    out[found.not] = UNDEF
+    # A reduction carries no attributes, a picked value included.
+    grouped.__send__(:drop_carried_attrs, out)
+  end
+
   # The members of segment `c` as a CArray slice of the grouped copy.  An empty
   # segment (zero-width segment) yields the shared empty array — a zero-length
   # slice cannot be taken directly, and an empty array carries the same reduction
@@ -754,10 +945,19 @@ class CASegmentIterator < CAIterator
   MONOID_TYPES = %i[int8 uint8 int16 uint16 int32 uint32
                     int64 uint64 float32 float64].freeze
 
+  # Whether the C reduceat and scatter kernels read a value of +data_type+:
+  # a numeric one, with the fast paths on.  They are a faster way to the
+  # core's answer for each group; a development build run with
+  # CARRAY_GENERAL_PATH set reduces every group by the core instead, which
+  # is how the two are compared.
+  def kernel_reads? (data_type = grouped.data_type)
+    MONOID_TYPES.include?(data_type) && CArray.__fast_paths_enabled__
+  end
+
   def moments
     return @moments if defined?(@moments)
     @moments =
-      if MONOID_TYPES.include?(grouped.data_type)
+      if kernel_reads?
         dt     = grouped.data_type
         counts = CArray.int64(@k)
         sums   = CArray.float64(@k)
@@ -773,7 +973,7 @@ class CASegmentIterator < CAIterator
   def arg_minmax
     return @arg_minmax if defined?(@arg_minmax)
     @arg_minmax =
-      if MONOID_TYPES.include?(grouped.data_type)
+      if kernel_reads?
         mn = CArray.int64(@k)
         mx = CArray.int64(@k)
         grouped.send(:__reduceat_argminmax__, @offsets, mn, mx)
@@ -787,7 +987,7 @@ class CASegmentIterator < CAIterator
   def all_any
     return @all_any if defined?(@all_any)
     @all_any =
-      if grouped.data_type == CA_BOOLEAN
+      if grouped.data_type == CA_BOOLEAN && CArray.__fast_paths_enabled__
         a = CArray.boolean(@k)
         o = CArray.boolean(@k)
         grouped.send(:__reduceat_all_any__, @offsets, a, o)
@@ -807,20 +1007,18 @@ class CASegmentIterator < CAIterator
   # per-fiber form -- and `accumulate(axis:)`, the one axis: member that needs
   # this, is exactly the case that would have found it missing.
   def core_reduce_type (op, *args)
-    (@core_reduce_type ||= {})[[op, args]] ||=
-      @value.face? && @value.elements.zero? ?
-        CA_OBJECT : core_probe.public_send(op, *args, axis: 1).data_type
+    kind = core_reduce_kind(op, *args)
+    kind ? kind.data_type : CA_OBJECT
   end
 
-  # A one-cell array of the same kind as the values, so the core answers about
-  # the same thing the segment slices will hand back. For a Face that is a view
-  # of the values themselves rather than a blank: a Face cannot be allocated
-  # from its surface data type alone, and a blank storage array is not a valid
-  # Face for every one of them -- a const string's record indexes a shared
-  # pool, so a zeroed record points nowhere.
-  def core_probe
-    return CArray.new(@value.data_type, [1, 1], bytes: @value.bytes) unless @value.face?
-    @value.reshape(@value.elements)[[0]].reshape(1, 1)
+  # The core's answer itself for the one-cell probe, or nil for a Face with no
+  # cell to probe.  Its class is the one the per-segment answers come in, which
+  # for a Face need not be the values' own (a CATime's spread is a CATimedelta).
+  def core_reduce_kind (op, *args)
+    memo = (@core_reduce_kind ||= {})
+    return memo[[op, args]] if memo.key?([op, args])
+    probe = CAIterator.core_probe(@value)
+    memo[[op, args]] = probe && probe.public_send(op, *args, axis: 1)
   end
 
   # Whether an output can be built by lifting one. A Face is filled by writing
@@ -838,15 +1036,22 @@ class CASegmentIterator < CAIterator
   # segment's members — the mask carries the "insufficient present data" contract
   # for free (an all-masked segment reduces like an empty one; identity-bearing
   # reductions return their identity, ratios return UNDEF).
-  def per_segment (data_type)
-    out = if ! @value.face? || data_type != @value.data_type
-            bytes = (data_type == @value.data_type) ? @value.bytes : 0
+  def per_segment (kind)
+    # a data type the values' own Face answers in names that Face
+    kind = @value if ! kind.is_a?(CArray) && @value.face? && kind == @value.data_type
+    data_type = kind.is_a?(CArray) ? kind.data_type : kind
+    out = if kind.nil?
+            CArray.new(CA_OBJECT, [@k])
+          elsif ! (kind.is_a?(CArray) && kind.face?)
+            bytes = if kind.is_a?(CArray) then kind.bytes
+                    elsif data_type == @value.data_type then @value.bytes
+                    else 0 end
             CArray.new(data_type, [@k], bytes: bytes)
-          elsif face_output?
-            # the core answered in the values' own Face, so the output is one
-            # too: CATime#min hands back a CATime::Element, which only a
-            # CATime has anywhere to put
-            @value.__send__(:__blank_like__, [@k])
+          elsif ! kind.read_only?
+            # the core answered in a Face, so the output is one too:
+            # CATime#min hands back a CATime::Element, which only a CATime
+            # has anywhere to put
+            kind.__send__(:blank_like, [@k])
           else
             # a read-only Face cannot be filled, so its answers are collected
             # as the surface objects they already are
@@ -859,6 +1064,10 @@ class CASegmentIterator < CAIterator
   end
 
   # ---- no axis: form -------------------------------------------------------
+
+  def axis_by_core (*)
+    raise NotImplementedError, "#{self.class} has no axis: form"
+  end
 
   def axis_by_masked_copy (*)
     raise NotImplementedError, "#{self.class} has no axis: form"
@@ -881,6 +1090,18 @@ class CASegmentIterator < CAIterator
   end
 
   def axis_scan (*)
+    raise NotImplementedError, "#{self.class} has no axis: form"
+  end
+
+  def axis_lag (*)
+    raise NotImplementedError, "#{self.class} has no axis: form"
+  end
+
+  def axis_order (*)
+    raise NotImplementedError, "#{self.class} has no axis: form"
+  end
+
+  def axis_hold (*)
     raise NotImplementedError, "#{self.class} has no axis: form"
   end
 
@@ -931,37 +1152,47 @@ class CASegmentIterator < CAIterator
         (op == :count && (args.empty? || args[0].equal?(UNDEF)))
     end
 
-    REDUCTIONS.each do |op|
-      define_method(op) do |*args, min_count: nil, fill_value: nil, **kw|
-        # The segment reduction already leaves an empty segment as the core
-        # does, so only a min_count asking for more is applied here.
-        need = CArray.__min_count_need__(op, min_count, 0)
-        # an error from the core reductions a member is made of names the member
-        result = CArray.__answer_as__(op) { super(*args, **kw) }
-        return result if need == 0 && fill_value.nil?
-        if need > 0
-          present = if op == :wsum || op == :wmean
-                      present_pair_count(args[0], kw[:axis])
-                    elsif ReductionCountAndFill.mask_count?(op, args)
-                      if kw[:axis]
-                        raise NotImplementedError,
-                              "#{self.class}##{op}(axis:, min_count:) is not implemented"
-                      end
-                      elements
-                    else
-                      count_not_masked(**kw)
+    CArray.send(:define_named_methods, self, REDUCTIONS, :reduce_counted, super_block: true)
+
+    # The segment reduction already leaves an empty segment as the core does,
+    # so only a min_count asking for more is applied here.  The reduction the
+    # member is made of is the block (super).
+    private def reduce_counted (op, args, kw)
+      min_count  = kw.delete(:min_count)
+      fill_value = kw.delete(:fill_value)
+      need = CArray.__present_cells_needed_per_result_cell__(op, min_count, 0)
+      result = yield(*args, **kw)
+      return result if need == 0 && fill_value.nil?
+      if need > 0
+        present = if op == :wsum || op == :wmean
+                    present_pair_count(args[0], kw[:axis])
+                  elsif ReductionCountAndFill.mask_count?(op, args)
+                    if kw[:axis]
+                      raise NotImplementedError,
+                            "#{self.class}##{op}(axis:, min_count:) is not implemented"
                     end
-          short = present.lt(need)
-        end
-        if short
-          (result.is_a?(Array) ? result : [result]).each { |r| r[short] = UNDEF }
-        end
-        CArray.__reduce_fill__(result, fill_value)
+                    elements
+                  else
+                    count_not_masked(**kw)
+                  end
+        short = present.lt(need)
       end
+      if short
+        (result.is_a?(Array) ? result : [result]).each { |r| r[short] = UNDEF }
+      end
+      CArray.__fill_undefined_result_cells__(result, fill_value)
     end
   end
   prepend ReductionCountAndFill
 
+
+  # lag and strip_mask(method:) give the source's values moved or held in
+  # place, so the result shows the source's attributes, as CArray#lag and
+  # CArray#strip_mask(method:) do.
+  prepend(Module.new do
+    def lag (*args, **keywords) = @value.__send__(:carry_attrs, super)
+    def strip_mask (**keywords) = @value.__send__(:carry_attrs, super)
+  end)
 end
 
 

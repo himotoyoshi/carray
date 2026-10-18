@@ -111,6 +111,27 @@ r = (ref.data_type == t) ? ref  : ref.to_type(t)
 It is legitimate when the target is "a fixed type the kernel structurally
 requires" (write that with `wrap_readonly`).
 
+**Matching values.** A method that compares the values of a query with a
+reference (`count(v)`, the search family, `is_in`, the set operations,
+`locate_addr`) cannot always meet at the `result_type`: a mixed-sign integer
+pair such as `int8` with `uint8` has the common type `uint8`, where `-1` reads
+as `255`.  One part decides the type they are compared in,
+`ca_query_match_type(ref_type, query)` in C (`query_match_type(query)`, a
+private method, in Ruby).  A CArray query meets the reference at the common
+type widened by `ca_value_match_type` (a signed type that holds both, `object`
+for 64 bits, double precision for a wide integer beside `float32`); a Float
+query takes the type the operators give it; an Integer the reference's type
+cannot hold takes the type its value needs, where it matches nothing, as `eq`
+answers.  The reference is then read through a view of that type.  Joining
+arrays value for value (`promote_list`, and so `CArray.stack`) widens the same
+way.
+
+**Checked by a lint.** `rake one_sided_cast_check`
+(`utils/check_one_sided_cast.rb`, run before `rake spec_ai`) finds every cast
+whose target is some array's data type and asks for a note saying why that
+side is the authority — `# coerce: a store into the receiver` in Ruby,
+`/* coerce: ... */` in C.
+
 ## Decision flow
 
 1. Does the operand accept a non-CArray (Numeric/Array/String/MV)?

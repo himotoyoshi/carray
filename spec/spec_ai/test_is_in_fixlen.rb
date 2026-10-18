@@ -55,7 +55,8 @@ class TestIsInFixlen < Test::Unit::TestCase
   def test_a_range_set
     a = CArray.new(CA_FIXLEN, [3], bytes: 1)
     %w[a b c].each_with_index { |w, i| a[i] = w }
-    assert_equal [true, true, false], a.is_in("a".."b").to_a
+    assert_raise(ArgumentError) { a.is_in("a".."b") }
+    assert_equal [true, true, false], a.is_in(("a".."b").to_a).to_a
   end
 
   def test_a_carray_set_of_the_right_width_still_works

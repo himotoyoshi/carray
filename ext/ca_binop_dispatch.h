@@ -147,7 +147,6 @@ void ca_binop_kernel_input_data_types (uint16_t op_id, int8_t l_dt, int8_t r_dt,
    When trapping AND either operand has a mask, xfer_stride must pass
    a slab mask to the kernel so masked cells are skipped (otherwise
    masked-zero divisors crash with SIGFPE).  See §3.4 rev3.            */
-int ca_binop_is_trapping (uint16_t op_id, int8_t common_dt);
 int ca_binop_op_id_of_table (ca_binop_func_t table[]);
 
 #endif /* CA_BINOP_DISPATCH_H */

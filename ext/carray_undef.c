@@ -18,6 +18,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "ruby.h"
+#include "ruby/ractor.h"
 
 static VALUE rb_cUNDEF;
 
@@ -63,6 +64,9 @@ Init_carray_undef (void)
      can be created.  The identity invariant relies on this. */
   CA_UNDEF = rb_funcall(rb_cUNDEF, rb_intern("new"), 0);
   rb_undef_method(CLASS_OF(rb_cUNDEF), "new");
+  /* Frozen and shareable: masked reads hand the same object to every
+     Ractor. */
+  rb_ractor_make_shareable(CA_UNDEF);
   rb_const_set(rb_cObject, rb_intern("UNDEF"), CA_UNDEF);
 
   /* CAREFUL: CA_UNDEF is dereferenced via raw pointer compare

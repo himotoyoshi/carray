@@ -268,10 +268,19 @@ ca_window_compose_fold (void *win_ap,
    for the window-over-parent mapping (ca_window_compose_fold) and composes
    f through it (ca_stride_compose_through).  Declines (returns 0) when the
    window is not interior-only, making the window the fold boundary. */
+static void ca_window_mask_current (CAWindow *ca);
+static int  ca_window_mask_reads_standin (CAWindow *ca);
+
 static int
 ca_window_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
 {
   CAWindow *w = (CAWindow *) ap;
+  ca_window_mask_current(w);
+  /* A write folded through to a stand-in would bypass the settle in this
+     window's write slots. */
+  if ( ca_window_mask_reads_standin(w) ) {
+    return 0;
+  }
   ca_size_t synth_strides[CA_RANK_MAX];
   ca_size_t synth_base;
   ca_size_t *synth_dim;
@@ -329,6 +338,7 @@ ca_window_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 {
   if ( ca_region_is_empty(((CArray *) ap)->ndim, counts) ) return;
   CAWindow *w = (CAWindow *) ap;
+  ca_window_mask_current(w);
   CArray   *parent = w->parent;
   int8_t    ndim = w->ndim;
   int8_t    inner = ndim - 1;
@@ -369,6 +379,7 @@ ca_window_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     ca_size_t idx[CA_RANK_MAX], doff = 0, base = 0;
     for (k = 0; k < ndim; k++) base += starts[k] * wnative[k];
     for (k = 0; k < ndim; k++) idx[k] = 0;
+    /* empty: the slot returns on an empty region at its entry */
     while (1) {
       ca_size_t woff = base, widx[CA_RANK_MAX];
       for (k = 0; k < ndim; k++) woff += idx[k] * strides[k];
@@ -672,7 +683,6 @@ ca_window_setup (CAWindow *ca, CArray *parent,
   ca_size_t *dim;
   ca_size_t bytes, elements;
   int i;
-  int any_mask;
 
   data_type = parent->data_type;
   ndim      = parent->ndim;
@@ -687,6 +697,27 @@ ca_window_setup (CAWindow *ca, CArray *parent,
     }
   }
   elements = ca_shape_elements(ndim, count, bytes);
+
+  /* Under "ruby" or "strict" an index outside the parent raises.  The
+     parent's shape is fixed, so a window that reaches outside it would raise
+     on every whole read or write, and a write would have changed the cells
+     before the one that raised.  It is refused here instead. */
+  for (i=0; i<ndim; i++) {
+    ca_size_t lo, hi, size = dim[i];
+    if ( count[i] == 0 ) {
+      continue;
+    }
+    lo = start[i];
+    hi = start[i] + count[i] - 1;
+    if ( bounds[i] == CA_BOUNDS_STRICT ) {
+      if ( lo < 0 ) ca_index_out_of_range(lo, size, "index");
+      if ( hi >= size ) ca_index_out_of_range(hi, size, "index");
+    }
+    else if ( bounds[i] == CA_BOUNDS_RUBY ) {
+      if ( lo < -size ) ca_index_out_of_range(lo, size, "index");
+      if ( hi >= size ) ca_index_out_of_range(hi, size, "index");
+    }
+  }
 
   /* ca == NULL asks for the checks above only, so that a constructor can
      run them before it allocates. */
@@ -707,6 +738,8 @@ ca_window_setup (CAWindow *ca, CArray *parent,
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
+  ca->mask_standin = NULL;
+  ca->mask_owner   = NULL;
   /* Pool path: bounds/start/count/size0/embed_* are already wired into
      ca->_pool by ca_window_pool_init.  Legacy path: ALLOC_N each.  `fill`
      is bytes-sized (not ndim) so it stays on its own ALLOC_N in both
@@ -747,19 +780,25 @@ ca_window_setup (CAWindow *ca, CArray *parent,
     }
   }
 
-  /* Mask is needed if ANY axis uses MASK policy (per-axis). */
-  any_mask = 0;
-  for (i=0; i<ndim; i++) {
+  return 0;
+}
+
+/* A window with an axis of MASK bounds has a mask of its own.  Making it
+   asks the parent for its mask, which can raise (a CAObject answers in
+   Ruby), so the constructor makes it after the setup under
+   ca_fill_or_free; see ca_view_inherit_mask. */
+VALUE
+ca_window_create_bounds_mask (VALUE view)
+{
+  CAWindow *ca = (CAWindow *) view;
+  int8_t i;
+  for (i = 0; i < ca->ndim; i++) {
     if ( ca->bounds[i] == CA_BOUNDS_MASK ) {
-      any_mask = 1;
+      ca_create_mask((CArray *) ca);
       break;
     }
   }
-  if ( any_mask ) {
-    ca_create_mask(ca);
-  }
-
-  return 0;
+  return Qnil;
 }
 
 CAWindow *
@@ -770,6 +809,7 @@ ca_window_new (CArray *parent,
   ca_window_setup(NULL, parent, start, count, bounds, fill);
   ca = (CAWindow *) ca_array_alloc(CA_OBJ_WINDOW, parent->ndim);
   ca_window_setup(ca, parent, start, count, bounds, fill);
+  ca_fill_or_free((CArray *) ca, ca_window_create_bounds_mask, (VALUE) ca);
   return ca;
 }
 
@@ -779,6 +819,7 @@ free_ca_window (void *ap)
   CAWindow *ca = (CAWindow *) ap;
   if ( ca != NULL ) {
     ca_free(ca->mask);
+    ca_free(ca->mask_standin);
     xfree(ca->fill);              /* always separate (bytes-sized) */
     if ( ca->_pool ) {
       /* bounds/start/count/size0/embed_* all live in ca->_pool. */
@@ -818,7 +859,39 @@ static void *
 ca_window_func_clone (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
-  return ca_window_new(ca->parent, ca->start, ca->count, ca->bounds, ca->fill);
+  CAWindow *cp = ca_window_new(ca->parent, ca->start, ca->count, ca->bounds,
+                               ca->fill);
+  cp->mask_owner = ca->mask_owner;
+  return cp;
+}
+
+/* A mask window over its owner's stand-in (ca_mask_standin_current): what
+   it reads from now on. */
+static void
+ca_window_mask_current (CAWindow *ca)
+{
+  CAWindow *o = (CAWindow *) ca->mask_owner;
+  if ( o != NULL ) {
+    ca->parent = ca_mask_standin_current((CArray *) ca, ca->parent, o->parent,
+                                         o->mask_standin);
+  }
+}
+
+static int
+ca_window_mask_reads_standin (CAWindow *ca)
+{
+  CAWindow *o = (CAWindow *) ca->mask_owner;
+  return o != NULL && o->mask_standin != NULL && ca->parent == o->mask_standin;
+}
+
+/* After a write that may have put a true into the stand-in: it goes on to
+   the parent's mask. */
+static void
+ca_window_mask_settle (CAWindow *ca)
+{
+  if ( ca_window_mask_reads_standin(ca) ) {
+    ca_mask_standin_settle(((CAWindow *) ca->mask_owner)->parent, ca->parent);
+  }
 }
 
 /* Per-cell access.  GET and PUT share the bound-normalised index walk; an OOB
@@ -828,6 +901,7 @@ static void
 ca_window_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
   CAWindow *ca = (CAWindow *) ap;
+  ca_window_mask_current(ca);
   ca_size_t *start = ca->start;
   ca_size_t *size0 = ca->size0;
   ca_size_t idx0[CA_RANK_MAX];
@@ -856,6 +930,7 @@ ca_window_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
                            void *data, int dir)
 {
   CAWindow *ca = (CAWindow *) ap;
+  ca_window_mask_current(ca);
   ca_size_t *start = ca->start;
   ca_size_t *size0 = ca->size0;
   char      *d = (char *) data;
@@ -1010,8 +1085,9 @@ static void
 ca_window_func_allocate (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
+  ca_window_mask_current(ca);
   if ( ca_window_owns_buffer(ca) ) {
-    ca->ptr = xmalloc(ca_length(ca));
+    ca->ptr = ca_alloc_cells((CArray *) ca);
     return;
   }
   ca_attach(ca->parent);
@@ -1019,7 +1095,7 @@ ca_window_func_allocate (void *ap)
     ca->ptr = ca_window_alias_ptr(ca);
     return;
   }
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 /* The engine paths below emit a per-axis descriptor (ca_window_describe_axes)
@@ -1034,6 +1110,7 @@ static void
 ca_window_func_attach (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
+  ca_window_mask_current(ca);
   if ( ca_window_owns_buffer(ca) ) {
     ca_axis_view_attach_owned(ca);
     return;
@@ -1049,8 +1126,7 @@ ca_window_func_attach (void *ap)
     ca->ptr = ca_window_alias_ptr(ca);
   } else if ( ca->embed_eligible ) {
     /* Embed path: allocate, then 1 fill + 1 strided memcpy. */
-    ca_size_t out_len = ca->elements * ca->bytes;
-    ca->ptr = xmalloc(out_len > 0 ? out_len : 1);
+    ca->ptr = ca_alloc_cells((CArray *) ca);
     ca_window_attach_embed(ca, ca->ptr);
   } else {
     /* Fallback: PERIODIC / REFLECT / NEAREST / RUBY / STRICT go through
@@ -1085,6 +1161,7 @@ ca_window_func_sync (void *ap)
                              ca->elements, ca->ptr);
   }
   ca_sync(ca->parent);
+  ca_window_mask_settle(ca);
 }
 
 static void
@@ -1149,6 +1226,7 @@ static void
 ca_window_func_xfer_all (void *ap, void *data, int dir)
 {
   CAWindow *ca = (CAWindow *) ap;
+  ca_window_mask_current(ca);
   if ( ca->parent->ptr ) {
     ca_window_func_run_fast_path(ca, (char *) data, dir);
     return;
@@ -1250,6 +1328,7 @@ static void
 ca_window_func_fill_data (void *ap, void *ptr)
 {
   CAWindow *ca = (CAWindow *) ap;
+  ca_window_mask_current(ca);
 
   /* embed_eligible (= no PERIODIC/REFLECT) covers both interior-only
      windows (embed_covers_all == 1) and OOB-bearing ones such as a CAShift
@@ -1334,12 +1413,26 @@ static void
 ca_window_func_create_mask (void *ap)
 {
   CAWindow *ca = (CAWindow *) ap;
+  CArray *pmask;
   boolean8_t fill;
   uint8_t mbounds[CA_RANK_MAX];
   int8_t i;
   int any_mask;
 
-  ca_create_mask(ca->parent);
+  /* The mask lies over the parent's mask, or, while the parent has none,
+     over an all-false stand-in this window holds: masking the
+     out-of-bounds cells gives the parent no mask
+     (ca_mask_standin_new). */
+  if ( ca_has_mask(ca->parent) ) {
+    ca_create_mask(ca->parent);
+    pmask = ca->parent->mask;
+  }
+  else {
+    if ( ca->mask_standin == NULL ) {
+      ca->mask_standin = ca_mask_standin_new(ca->parent);
+    }
+    pmask = ca->mask_standin;
+  }
 
   /* Any MASK axis of the view becomes FILL in the mask sub-view, with the
      mask cell forced to 1 (= "masked").  Other axes keep their policy.  When
@@ -1358,11 +1451,73 @@ ca_window_func_create_mask (void *ap)
   /* The mask has the view's own type, so CAShift (which shares this table)
      gets a CAShiftMask. */
   {
+    /* check: the mask window copies its own window's checked ranges */
     CAWindow *m = (CAWindow *) ca_array_alloc(ca->obj_type, ca->ndim);
-    ca_window_setup(m, ca->parent->mask,
-                    ca->start, ca->count, mbounds, (char*)&fill);
-    m->obj_type = ca->obj_type;
+    ca_window_setup(m, pmask, ca->start, ca->count, mbounds, (char*)&fill);
+    m->obj_type   = ca->obj_type;
+    m->mask_owner = (CArray *) ca;
+    if ( pmask == ca->mask_standin ) {
+      /* writes inside an attach window reach the stand-in through the
+         sync, where they can give way to the parent's mask */
+      m->embed_alias_eligible = 0;
+    }
     ca->mask = (CArray *) m;
+  }
+}
+
+/* The table's write slots: on the mask of a window still reading a
+   stand-in, a write that may have put a true into it ends with the settle
+   (ca_mask_standin_settle). */
+static void
+ca_window_put_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
+{
+  ca_window_func_xfer_index(ap, idx, data, dir);
+  if ( dir == CA_XFER_PUT && ca_window_mask_reads_standin((CAWindow *) ap)
+       && ca_mask_any_true(data, 1) ) {
+    ca_window_mask_settle((CAWindow *) ap);
+  }
+}
+
+static void
+ca_window_put_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data,
+                          int dir)
+{
+  ca_window_func_xfer_addrs(ap, n, addrs, data, dir);
+  if ( dir == CA_XFER_PUT && ca_window_mask_reads_standin((CAWindow *) ap)
+       && ca_mask_any_true(data, n) ) {
+    ca_window_mask_settle((CAWindow *) ap);
+  }
+}
+
+static void
+ca_window_put_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
+                           ca_size_t *strides, void *data, int dir)
+{
+  ca_window_func_xfer_stride(ap, starts, counts, strides, data, dir);
+  if ( dir == CA_XFER_PUT && ca_window_mask_reads_standin((CAWindow *) ap)
+       && ca_mask_any_true(data,
+                           ca_shape_elements(((CArray *) ap)->ndim, counts, 1)) ) {
+    ca_window_mask_settle((CAWindow *) ap);
+  }
+}
+
+static void
+ca_window_put_xfer_all (void *ap, void *data, int dir)
+{
+  ca_window_func_xfer_all(ap, data, dir);
+  if ( dir == CA_XFER_PUT && ca_window_mask_reads_standin((CAWindow *) ap)
+       && ca_mask_any_true(data, ((CArray *) ap)->elements) ) {
+    ca_window_mask_settle((CAWindow *) ap);
+  }
+}
+
+static void
+ca_window_put_fill_data (void *ap, void *ptr)
+{
+  ca_window_func_fill_data(ap, ptr);
+  if ( ca_window_mask_reads_standin((CAWindow *) ap)
+       && ca_mask_any_true(ptr, 1) ) {
+    ca_window_mask_settle((CAWindow *) ap);
   }
 }
 
@@ -1375,13 +1530,13 @@ ca_operation_function_t ca_window_func = {
   ca_window_func_attach,
   ca_window_func_sync,
   ca_window_func_detach,
-  ca_window_func_fill_data,
+  ca_window_put_fill_data,
   ca_window_func_create_mask,
-  ca_window_func_xfer_index,
-  ca_window_func_xfer_addrs,
+  ca_window_put_xfer_index,
+  ca_window_put_xfer_addrs,
   ca_window_func_fold_stride,
-  ca_window_func_xfer_stride,
-  ca_window_func_xfer_all,
+  ca_window_put_xfer_stride,
+  ca_window_put_xfer_all,
 };
 
 /* ------------------------------------------------------------------- */
@@ -1401,6 +1556,7 @@ ca_window_describe_axes (void *ap, ca_axis_desc_t *out,
                          ca_size_t *out_parent_dims)
 {
   CAWindow *ca = (CAWindow *) ap;
+  ca_window_mask_current(ca);
   int8_t k;
   for ( k = 0; k < ca->ndim; k++ ) {
     out_parent_dims[k] = ca->parent->dim[k];
@@ -1502,9 +1658,13 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
     bounds = CA_BOUNDS_MASK;
   }
   else {
-    rcs = rb_cscalar_new_with_value(ca->data_type, ca->bytes, rfval);
+    /* The fill is a value of the array (a String for a CAString, an
+       instant for a time array): rb_ca_obj2ptr writes it as one cell of
+       the storage, through the Face. */
+    rcs = rb_cscalar_new(ca_strip_face(ca)->data_type, ca->bytes, NULL);
     TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cs);
     fill = cs->ptr;
+    rb_ca_obj2ptr(self, rfval, fill);
   }
 
   if ( ! NIL_P(rbounds) ) {
@@ -1593,6 +1753,10 @@ rb_ca_window_initialize_copy (VALUE self, VALUE other)
     ca_array_pool_alloc(ca, CA_OBJ_WINDOW, cs->ndim);
   }
   ca_window_setup(ca, cs->parent, cs->start, cs->count, cs->bounds, cs->fill);
+  ca_window_create_bounds_mask((VALUE) ca);
+  /* a copy of a mask over a stand-in gives way to the parent's mask as
+     the original does */
+  ca->mask_owner = cs->mask_owner;
 
   return self;
 }
@@ -1809,7 +1973,7 @@ Init_ca_obj_window (void)
   /* No `count` accessor: the per-axis window widths are what `shape`
      already answers, and the name belongs to CArray#count. */
   rb_define_method(rb_cCAWindow, "start",  rb_cw_start, 0);
-  rb_define_method(rb_cCAWindow, "__axis_bounds__", rb_ca_window_axis_bounds, 0);
+  rb_define_method(rb_cCAWindow, "__boundary_rule_of_each_axis__", rb_ca_window_axis_bounds, 0);
   rb_define_method(rb_cCAWindow, "size0",  rb_cw_size0, 0);
 
 #ifdef CARRAY_DEV_BUILD

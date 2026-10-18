@@ -38,8 +38,8 @@ describe "TestCABlock " do
     b = a[1..2, 1..2]
 
     is_asserted_by { b.class == CABlock }
-    is_asserted_by { b.rank == a.rank }
-    is_asserted_by { b.dim == [2, 2] }
+    is_asserted_by { b.ndim == a.ndim }
+    is_asserted_by { b.shape == [2, 2] }
     is_asserted_by { b.elements == 4 }
 
     c = CArray.int32(2, 2).tap { |x| x[] = [[5,6],[9,10]] }
@@ -59,10 +59,10 @@ describe "TestCABlock " do
     a = CArray.int32(4, 4) { 1 }
     b = a[0..2, 0..2]
     is_asserted_by { b.data_type == CA_INT32 }
-    is_asserted_by { b.rank == 2 }
+    is_asserted_by { b.ndim == 2 }
     is_asserted_by { b.bytes == CArray.sizeof(CA_INT32) }
     is_asserted_by { b.size0 == [4, 4] }
-    is_asserted_by { b.dim == [3, 3] }
+    is_asserted_by { b.shape == [3, 3] }
     is_asserted_by { b.start == [0, 0] }
     is_asserted_by { b.step == [1, 1] }
     is_asserted_by { b.elements == 9 }

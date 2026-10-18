@@ -172,31 +172,10 @@ rb_ca_s_sort_addr_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
     if ( elements != NUM2SIZE(rb_ca_elements(argv[j])) ) {
       rb_raise(rb_eArgError, "elements mismatch");
     }
-    /* Face gate: an ORDERABLE Face sorts by its storage, so it descends to
-       it (attach / comparator / template output then run on plain storage,
-       which also avoids a face-lifted NULL-ptr index output).  A fixlen
-       storage that is not ORDERABLE (CAConstString's offsets, a record's
-       bytes) has no order in its bytes; the Face's own order stands in for
-       it, as a dense rank, so ties stay ties for the next key.  A Face that
-       has no order (CARecord without order_by:) raises there.  Any other
-       storage raises here. */
     TypedData_Get_Struct(argv[j], CArray, &carray_data_type, ca_j);
     if ( ca_is_face(ca_j) ) {
-      int orderable = ca_test_flag(ca_j, CA_FLAG_FACE_ORDERABLE_STORAGE);
-      VALUE stripped = rb_ca_strip_face_value(argv[j]);
-      CArray *sc;
-      TypedData_Get_Struct(stripped, CArray, &carray_data_type, sc);
-      if ( sc->data_type == CA_FIXLEN && ! orderable ) {
-        VALUE opts = rb_hash_new();
-        rb_hash_aset(opts, ID2SYM(rb_intern("method")), ID2SYM(rb_intern("dense")));
-        argv[j] = rb_funcallv_kw(argv[j], rb_intern("order"), 1, &opts,
-                                 RB_PASS_KEYWORDS);
-        continue;
-      }
-      if ( ! orderable ) {
-        ca_face_refuse_order("sort_addr", argv[j], "order");
-      }
-      argv[j] = stripped;
+      argv[j] = ca_order_key(argv[j], "sort_addr");
+      continue;
     }
     {
       CArray *k;
@@ -442,14 +421,9 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
   TypedData_Get_Struct(self,     CArray, &carray_data_type, ca);
   TypedData_Get_Struct(vindices, CArray, &carray_data_type, idx_ca);
 
-  /* axis normalization + range check. */
-  int axis_raw = NIL_P(vaxis) ? 0 : (int) ca_axis_integer(vaxis, NULL);
-  int axis = (axis_raw < 0) ? ((int) ca->ndim + axis_raw) : axis_raw;
-  if ( axis < 0 || axis >= ca->ndim ) {
-    rb_raise(rb_eArgError,
-             "%s: axis %d out of range for ndim %d",
-             ca_calling_method_name(), axis_raw, (int) ca->ndim);
-  }
+  long axis_l = ca_normalize_axis_arg(NIL_P(vaxis) ? INT2FIX(0) : vaxis,
+                                      (int) ca->ndim, NULL);
+  int axis = (int) axis_l;
 
   /* Shape rule: indices.ndim == self.ndim, dims match except at axis. */
   if ( idx_ca->ndim != ca->ndim ) {
@@ -470,10 +444,11 @@ rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
 
   /* indices data_type: integer kind accepted; cast to CA_SIZE if needed
      (zero-copy when already CA_SIZE via to_type identity). */
+  ca_check_index_array(vindices);
   if ( ! ca_is_integer_type(idx_ca) ) {
     rb_raise(rb_eArgError,
-             "%s: indices data_type must be integer kind (got %d)",
-             ca_calling_method_name(), (int) idx_ca->data_type);
+             "%s: indices data_type must be integer kind (got %s)",
+             ca_calling_method_name(), ca_type_name[idx_ca->data_type]);
   }
   volatile VALUE vidx_cast = vindices;
   CArray         *idx_cast = idx_ca;
@@ -534,6 +509,31 @@ rb_ca_axis2addr (int argc, VALUE *argv, VALUE self)
   return rb_ca_axis2addr_c(self, vindices, vaxis);
 }
 
+
+/* The array the order of v is read from, for a method that orders v's
+   cells (a sort, a selection, a ranking, an extremum by key).  A plain
+   array is its own key.  An ORDERABLE Face orders by its storage, so the
+   key is the storage.  A Face that is not ORDERABLE but defines its own
+   #order (CAConstString, whose cells are offsets; CARecord, whose bytes
+   are no order) is keyed by that order, as a dense rank, so ties stay ties
+   and a masked cell stays masked.  A Face that has no order (a CARecord
+   without order_by:) raises in that order; any other Face raises here. */
+VALUE
+ca_order_key (VALUE v, const char *name)
+{
+  CArray *ca;
+  TypedData_Get_Struct(v, CArray, &carray_data_type, ca);
+  if ( ! ca_is_face(ca) ) {
+    return v;
+  }
+  if ( ca_face_orders_by_itself(v) ) {
+    VALUE opts = rb_hash_new();
+    rb_hash_aset(opts, ID2SYM(rb_intern("method")), ID2SYM(rb_intern("dense")));
+    return rb_funcallv_kw(v, rb_intern("order"), 1, &opts, RB_PASS_KEYWORDS);
+  }
+  ca_face_require_orderable(v, name, "order");
+  return rb_ca_strip_face_value(v);
+}
 
 /* ===== sort / sort_copy (value & view surface, sibling of the
    sort_addr / axis2addr block above). =============== */
@@ -717,8 +717,7 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(target, CArray, &carray_data_type, cat);
 
   /* Normalize axis (negative -> +ndim, range check). */
-  int axis = rb_ca_normalize_axis_for_ndim(ca_axis_integer(vaxis_use, NULL),
-                                           cat->ndim, NULL);
+  int axis = ca_normalize_axis_arg(vaxis_use, cat->ndim, NULL);
 
   /* Allocate output: same shape and data_type as target
      (bytes=0 = preserve native bytes). */
@@ -805,6 +804,7 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
   ALLOCV_END(aux_holder);
 
   RB_GC_GUARD(target);
+  rb_ca_inherit_attr(vout, self);
   return vout;
 }
 

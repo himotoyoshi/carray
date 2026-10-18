@@ -283,7 +283,7 @@ group_op_code (VALUE vop)
 #define GACC_XOR \
   ( ((boolean8_t *) co->ptr)[o] ^= (*(boolean8_t *)(p + gw_doff[e]) ? 1 : 0) )
 
-/* __axis_group_reduce__(group_axes, bundles, op) — group-reduces self along
+/* __reduce_by_axis_groups__(group_axes, bundles, op) — group-reduces self along
  * the union of `group_axes` (ascending source-axis indices = the slab) into
  * composite groups described by `bundles`, preserving the band (= non-grouped)
  * axes.  Internal: the Ruby surface is CAGroupIterator.
@@ -352,7 +352,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   /* --- bundles: small per-group code tables (metadata, kept alive) --- */
   Check_Type(vbundles, T_ARRAY);
   int  n_bundles = (int) RARRAY_LEN(vbundles);
-  if ( n_bundles <= 0 || n_bundles > CA_RANK_MAX ) {
+  if ( n_bundles <= 0 || n_bundles > CA_RANK_MAX ) {   /* rank-check: a count of key bundles */
     rb_raise(rb_eArgError, "axis_group_reduce: bad bundle count %d", n_bundles);
   }
   int32_t  *bundle_codes[CA_RANK_MAX];
@@ -362,7 +362,8 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   int       bundle_slot[CA_RANK_MAX][CA_RANK_MAX];
   ca_size_t bundle_cstride[CA_RANK_MAX][CA_RANK_MAX];
   CArray   *bundle_ca[CA_RANK_MAX];
-  volatile VALUE keep = rb_ary_new();   /* GC-pin int32 code views */
+  volatile VALUE keep = rb_ary_new();   /* keeps the int32 code views alive */
+  volatile VALUE h_codes[CA_RANK_MAX];  /* holders of the copied code tables */
 
   ca_size_t K_total = 1;
   long consumed_total = 0;
@@ -385,18 +386,16 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
        and the end of the walk can raise -- a validation just below, a gather
        that cannot convert a cell, an object-lane callback into Ruby -- and a
        raise jumps over every detach, leaving the source materialised with
-       nothing left to release it. The copy rides a temporary buffer that the
-       unwind collects. */
+       nothing left to release it. The copy rides ALLOCV, a temporary buffer
+       that the unwind collects. Not a String: a String held only by `keep`
+       can be moved by compaction, taking the bytes under bundle_codes with
+       it. */
     VALUE v32 = rb_ca_wrap_readonly(vcodes, INT2NUM(CA_INT32));
     rb_ary_push((VALUE) keep, v32);
     GetCArray(v32, bundle_ca[bi]);
-    {
-      size_t nbytes = (size_t) bundle_ca[bi]->elements * sizeof(int32_t);
-      VALUE  vbuf   = rb_str_tmp_new((long) nbytes);
-      rb_ary_push((VALUE) keep, vbuf);
-      ca_copy_data(bundle_ca[bi], RSTRING_PTR(vbuf));
-      bundle_codes[bi] = (int32_t *) RSTRING_PTR(vbuf);
-    }
+    h_codes[bi] = 0;
+    bundle_codes[bi] = ALLOCV_N(int32_t, h_codes[bi], bundle_ca[bi]->elements);
+    ca_copy_data(bundle_ca[bi], (char *) bundle_codes[bi]);
 
     int nb = (int) RARRAY_LEN(vbaxes);
     if ( nb <= 0 || nb > src->ndim ) {
@@ -682,6 +681,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   ALLOCV_END(h_prod);   ALLOCV_END(h_seen);   ALLOCV_END(h_xbuf);
   ALLOCV_END(h_nz);     ALLOCV_END(h_mnaddr); ALLOCV_END(h_mxaddr);
   ALLOCV_END(h_band);
+  for ( int bi = 0; bi < n_bundles; bi++ ) ALLOCV_END(h_codes[bi]);
 
   RB_GC_GUARD(keep);
   return vout;
@@ -983,7 +983,7 @@ group_scan_build_plan (ca_iter_state *st, boolean8_t *m,
     omask[o] = 1;                                \
   } while (0)
 
-/* The CA_OBJECT lane of __axis_group_scan__.  Every cell calls into Ruby,
+/* The CA_OBJECT lane of __scan_by_axis_groups__.  Every cell calls into Ruby,
    so the walk can raise part way; its state lives in the caller's frame, in
    c->st, and ca_iter_ensure finishes it however this body leaves.  The
    buffers are ALLOCV-backed, so the unwind collects them. */
@@ -1115,9 +1115,9 @@ group_scan_op_code (VALUE vop)
   rb_raise(rb_eArgError, "axis_group_scan: unsupported op :%"PRIsVALUE, rb_id2str(id));
 }
 
-/* __axis_group_scan__(group_axes, bundles, op) — group-keyed segment scan of
+/* __scan_by_axis_groups__(group_axes, bundles, op) — group-keyed segment scan of
  * self over the union of `group_axes` into composite groups described by
- * `bundles` (same argument shape as __axis_group_reduce__).  Internal.
+ * `bundles` (same argument shape as __reduce_by_axis_groups__).  Internal.
  *
  * Unlike the reduce the grouped axes are not collapsed: the result is a new
  * CArray of the same shape as self, each cell holding the running statistic of
@@ -1187,7 +1187,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   /* --- bundles: small per-group code tables (same as reduce) --- */
   Check_Type(vbundles, T_ARRAY);
   int  n_bundles = (int) RARRAY_LEN(vbundles);
-  if ( n_bundles <= 0 || n_bundles > CA_RANK_MAX ) {
+  if ( n_bundles <= 0 || n_bundles > CA_RANK_MAX ) {   /* rank-check: a count of key bundles */
     rb_raise(rb_eArgError, "axis_group_scan: bad bundle count %d", n_bundles);
   }
   int32_t  *bundle_codes[CA_RANK_MAX];
@@ -1198,6 +1198,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   ca_size_t bundle_cstride[CA_RANK_MAX][CA_RANK_MAX];
   CArray   *bundle_ca[CA_RANK_MAX];
   volatile VALUE keep = rb_ary_new();
+  volatile VALUE h_codes[CA_RANK_MAX];
 
   ca_size_t K_total = 1;
   long consumed_total = 0;
@@ -1220,18 +1221,16 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
        and the end of the walk can raise -- a validation just below, a gather
        that cannot convert a cell, an object-lane callback into Ruby -- and a
        raise jumps over every detach, leaving the source materialised with
-       nothing left to release it. The copy rides a temporary buffer that the
-       unwind collects. */
+       nothing left to release it. The copy rides ALLOCV, a temporary buffer
+       that the unwind collects. Not a String: a String held only by `keep`
+       can be moved by compaction, taking the bytes under bundle_codes with
+       it. */
     VALUE v32 = rb_ca_wrap_readonly(vcodes, INT2NUM(CA_INT32));
     rb_ary_push((VALUE) keep, v32);
     GetCArray(v32, bundle_ca[bi]);
-    {
-      size_t nbytes = (size_t) bundle_ca[bi]->elements * sizeof(int32_t);
-      VALUE  vbuf   = rb_str_tmp_new((long) nbytes);
-      rb_ary_push((VALUE) keep, vbuf);
-      ca_copy_data(bundle_ca[bi], RSTRING_PTR(vbuf));
-      bundle_codes[bi] = (int32_t *) RSTRING_PTR(vbuf);
-    }
+    h_codes[bi] = 0;
+    bundle_codes[bi] = ALLOCV_N(int32_t, h_codes[bi], bundle_ca[bi]->elements);
+    ca_copy_data(bundle_ca[bi], (char *) bundle_codes[bi]);
 
     int nb = (int) RARRAY_LEN(vbaxes);
     if ( nb <= 0 || nb > src->ndim ) {
@@ -1413,6 +1412,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
   ALLOCV_END(h_band2); ALLOCV_END(h_code);  ALLOCV_END(h_doff);
   ALLOCV_END(h_moff);  ALLOCV_END(h_addr);  ALLOCV_END(h_accd);
   ALLOCV_END(h_accn);  ALLOCV_END(h_seen);  ALLOCV_END(h_acco);
+  for ( int bi = 0; bi < n_bundles; bi++ ) ALLOCV_END(h_codes[bi]);
 
   RB_GC_GUARD(keep);
   return vout;
@@ -1421,8 +1421,8 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
 void
 Init_ca_axis_group (void)
 {
-  rb_define_method(rb_cCArray, "__axis_group_reduce__",
+  rb_define_method(rb_cCArray, "__reduce_by_axis_groups__",
                    rb_ca_axis_group_reduce, 3);
-  rb_define_method(rb_cCArray, "__axis_group_scan__",
+  rb_define_method(rb_cCArray, "__scan_by_axis_groups__",
                    rb_ca_axis_group_scan, 3);
 }

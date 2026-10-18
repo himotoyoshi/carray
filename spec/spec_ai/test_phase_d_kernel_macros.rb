@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 #
-# Phase D POC — CA_SLAB_REDUCE_F64 macro suite tests.
+# Phase D POC — CA_SLAB_REDUCE_T macro suite tests.
 #
 # Pins:
 #   - sum_ki / mean_ki / min_ki / max_ki parity against CArray#sum etc.
@@ -357,8 +357,8 @@ class TestPhaseDKernelMacros < Test::Unit::TestCase
   def test_stddevp_ki_2d_parity
     a = CArray.float64(5, 7).seq + 0.5
     # Compare against manual computation via mean
-    a.dim[1].times do |j|
-      col = (0...a.dim[0]).map { |i| a[i, j] }
+    a.shape[1].times do |j|
+      col = (0...a.shape[0]).map { |i| a[i, j] }
       m = col.sum / col.size.to_f
       var_pop = col.map { |x| (x - m)**2 }.sum / col.size.to_f
       expected = Math.sqrt(var_pop)

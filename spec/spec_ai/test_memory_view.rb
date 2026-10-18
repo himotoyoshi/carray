@@ -134,10 +134,6 @@ class TestMemoryView < Test::Unit::TestCase
                  "CASelect is position-based; cannot be wrapped zero-copy")
   end
 
-  # CAMapping was removed in R.3 (PROPOSAL_CAMAPPING_REMOVAL); the 1-D
-  # fancy-index path now routes to CAGrid, which is covered by
-  # test_grid_rejected_no_alias_path (or equivalent).
-
   def test_shift_rejected_no_alias_path
     ca = CArray.int32(5).seq
     sh = ca.shift(2)

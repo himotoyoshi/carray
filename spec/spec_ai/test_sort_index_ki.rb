@@ -59,12 +59,12 @@ class TestSortIndexKi < Test::Unit::TestCase
     # Each (i, *, k) fiber along axis 1 has consecutive values; sorting
     # ascending preserves [0,1,2].
     σ = a.sort_index_ki(1)
-    assert_equal([2, 3, 2], σ.dim.to_a)
-    a.dim[0].times do |i|
-      a.dim[2].times do |k|
-        fiber = (0...a.dim[1]).map { |j| a[i, j, k] }
+    assert_equal([2, 3, 2], σ.shape.to_a)
+    a.shape[0].times do |i|
+      a.shape[2].times do |k|
+        fiber = (0...a.shape[1]).map { |j| a[i, j, k] }
         expected = (0...fiber.size).sort_by { |idx| fiber[idx] }
-        actual = (0...a.dim[1]).map { |j| σ[i, j, k] }
+        actual = (0...a.shape[1]).map { |j| σ[i, j, k] }
         assert_equal(expected, actual,
                      "fiber (i=#{i}, k=#{k}): values=#{fiber}")
       end
@@ -172,11 +172,11 @@ class TestSortIndexKi < Test::Unit::TestCase
     a = CArray.int32(3, 4).seq
     tv = a.transpose                  # shape (4, 3)
     σ = tv.sort_index_ki(0)           # sort each column of transposed view
-    assert_equal([4, 3], σ.dim.to_a)
-    σ.dim[1].times do |j|
-      fiber = (0...σ.dim[0]).map { |i| tv[i, j] }
+    assert_equal([4, 3], σ.shape.to_a)
+    σ.shape[1].times do |j|
+      fiber = (0...σ.shape[0]).map { |i| tv[i, j] }
       expected = (0...fiber.size).sort_by { |idx| fiber[idx] }
-      actual = (0...σ.dim[0]).map { |i| σ[i, j] }
+      actual = (0...σ.shape[0]).map { |i| σ[i, j] }
       assert_equal(expected, actual,
                    "column j=#{j} fiber=#{fiber}")
     end
@@ -186,11 +186,11 @@ class TestSortIndexKi < Test::Unit::TestCase
     a = CArray.int32(10, 10).seq
     bv = a[2..6, 3..7]                # shape (5, 5)
     σ = bv.sort_index_ki(1)
-    assert_equal([5, 5], σ.dim.to_a)
-    bv.dim[0].times do |i|
-      fiber = (0...bv.dim[1]).map { |j| bv[i, j] }
+    assert_equal([5, 5], σ.shape.to_a)
+    bv.shape[0].times do |i|
+      fiber = (0...bv.shape[1]).map { |j| bv[i, j] }
       expected = (0...fiber.size).sort_by { |idx| fiber[idx] }
-      actual = (0...bv.dim[1]).map { |j| σ[i, j] }
+      actual = (0...bv.shape[1]).map { |j| σ[i, j] }
       assert_equal(expected, actual, "row i=#{i}")
     end
   end

@@ -29,6 +29,7 @@ class CArray
       :xoshiro256pp => File.expand_path("../../ext/ca_rng_xoshiro256pp.h",
                                         __dir__),
     }.freeze
+    Ractor.make_shareable(SOURCE_FILES)
 
     # The C each generator is, as text.
     #
@@ -50,6 +51,7 @@ class CArray
     SOURCE = SOURCE_FILES.transform_values { |path|
       File.read(path, :encoding => "UTF-8")
     }.freeze
+    Ractor.make_shareable(SOURCE)
 
     # What every generator's text needs beside it, and what none of them
     # owns: turning uniforms into a normal is the same arithmetic whichever
@@ -80,6 +82,7 @@ class CArray
         :bits    => "ca_xoshiro256pp_next",
       }.freeze,
     }.freeze
+    Ractor.make_shareable(DRAW_FUNCTIONS)
 
   end
 

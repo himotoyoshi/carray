@@ -17,6 +17,8 @@
 
 #include "ruby/st.h"
 #include "ruby/thread_native.h"
+#include "ruby/ractor.h"
+#include "ruby/debug.h"     /* rb_profile_frames: the method the user called */
 
 static ID id_begin, id_end, id_excl_end;
 #define RANGE_BEG(r)  (rb_funcall(r, id_begin, 0))
@@ -56,7 +58,8 @@ ca_set_iterator (int n, ...)
         max = ca->elements;
       }
       else if ( max != ca->elements ) {
-        rb_raise(rb_eArgError, "data size mismatch in operation");
+        rb_raise(rb_eArgError, "%s: data size mismatch in operation",
+                 ca_calling_method_name());
       }
     }
   }
@@ -158,7 +161,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
     }
     *poffset = start;
     *pcount  = llabs(last - start) + 1;
-    *pstep   = 1;
+    *pstep   = ( last >= start ) ? 1 : -1;
   }
 #ifdef HAVE_RB_ARITHMETIC_SEQUENCE_EXTRACT
   else if ( rb_obj_is_kind_of(arg, rb_cArithSeq) ) { /* ca[--,ArithSeq,--]*/
@@ -172,6 +175,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
     if ( step == 0 ) {
       rb_raise(rb_eArgError, "step should not be 0");
     }
+    CA_CHECK_INDEX(start, size);
     if ( last < 0 ) {
       last += size;
     }
@@ -181,7 +185,6 @@ ca_parse_range (VALUE arg, ca_size_t size,
     if ( last < 0 || last >= size ) {
       ca_index_out_of_range(last, size, "index");
     }
-    CA_CHECK_INDEX(start, size);
     if ( (last - start) * step < 0 ) {
       count = 1;
     }
@@ -189,7 +192,9 @@ ca_parse_range (VALUE arg, ca_size_t size,
       count = llabs(last - start)/llabs(step) + 1;
     }
     bound = start + (count - 1)*step;
-    CA_CHECK_INDEX(bound, size);
+    if ( count > 0 && ( bound < 0 || bound >= size ) ) {
+      ca_index_out_of_range(bound, size, "index");
+    }
     *poffset = start;
     *pcount  = count;
     *pstep   = step;
@@ -211,8 +216,9 @@ ca_parse_range (VALUE arg, ca_size_t size,
         start = 0;
         count = (size-1)/llabs(step) + 1;
         bound = start + (count - 1)*step;
-        CA_CHECK_INDEX(start, size);
-        CA_CHECK_INDEX(bound, size);
+        if ( count > 0 && ( bound < 0 || bound >= size ) ) {
+          ca_index_out_of_range(bound, size, "index");
+        }
         *poffset = start;
         *pcount  = count;
         *pstep   = step;
@@ -225,6 +231,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "step should not be 0");
         }
+        CA_CHECK_INDEX(start, size);
         if ( last < 0 ) {
           last += size;
         }
@@ -234,7 +241,6 @@ ca_parse_range (VALUE arg, ca_size_t size,
         if ( last < 0 || last >= size ) {
           ca_index_out_of_range(last, size, "index");
         }
-        CA_CHECK_INDEX(start, size);
         if ( (last - start) * step < 0 ) {
           count = 1;
         }
@@ -242,7 +248,9 @@ ca_parse_range (VALUE arg, ca_size_t size,
           count = llabs(last - start)/llabs(step) + 1;
         }
         bound = start + (count - 1)*step;
-        CA_CHECK_INDEX(bound, size);
+        if ( count > 0 && ( bound < 0 || bound >= size ) ) {
+          ca_index_out_of_range(bound, size, "index");
+        }
         *poffset = start;
         *pcount  = count;
         *pstep   = step;
@@ -259,6 +267,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "step should not be 0");
         }
+        CA_CHECK_INDEX(start, size);
         if ( last < 0 ) {
           last += size;
         }
@@ -268,7 +277,6 @@ ca_parse_range (VALUE arg, ca_size_t size,
         if ( last < 0 || last >= size ) {
           ca_index_out_of_range(last, size, "index");
         }
-        CA_CHECK_INDEX(start, size);
         if ( (last - start) * step < 0 ) {
           count = 1;
         }
@@ -276,7 +284,9 @@ ca_parse_range (VALUE arg, ca_size_t size,
           count = llabs(last - start)/llabs(step) + 1;
         }
         bound = start + (count - 1)*step;
-        CA_CHECK_INDEX(bound, size);
+        if ( count > 0 && ( bound < 0 || bound >= size ) ) {
+          ca_index_out_of_range(bound, size, "index");
+        }
         *poffset = start;
         *pcount  = count;
         *pstep   = step;
@@ -285,9 +295,11 @@ ca_parse_range (VALUE arg, ca_size_t size,
       else {                            /* [i,n] */
         start = NUM2SIZE(arg0);
         count = NUM2SIZE(arg1);
-        bound = start + (count - 1);
         CA_CHECK_INDEX(start, size);
-        CA_CHECK_INDEX(bound, size);
+        bound = start + (count - 1);
+        if ( count > 0 && ( bound < 0 || bound >= size ) ) {
+          ca_index_out_of_range(bound, size, "index");
+        }
         *poffset = start;
         *pcount  = count;
         *pstep    = 1;
@@ -300,9 +312,11 @@ ca_parse_range (VALUE arg, ca_size_t size,
       if ( step == 0 ) {
         rb_raise(rb_eArgError, "step should not be 0");
       }
-      bound = start + (count - 1)*step;
       CA_CHECK_INDEX(start, size);
-      CA_CHECK_INDEX(bound, size);
+      bound = start + (count - 1)*step;
+      if ( count > 0 && ( bound < 0 || bound >= size ) ) {
+        ca_index_out_of_range(bound, size, "index");
+      }
       *poffset = start;
       *pcount  = count;
       *pstep   = step;
@@ -535,27 +549,44 @@ ca_stable_id_name (ID id)
 /* The method a delegating method answers for.  A method that does its work
    by calling others (median calls partition_index, mode calls sort) runs
    them under ca_answer_as_caller, so an error they raise names the method
-   the user called.  The outermost one wins. */
-static _Thread_local const char *ca_answering_name = NULL;
+   the user called.  The outermost one wins.  The name is kept with the
+   Ruby thread (Thread#[], so per fiber): Ractors share native threads under
+   the M:N scheduler, and a native-thread-local variable leaks one Ractor's
+   name into another's message. */
+static ID id_answering;
+
+static const char *
+ca_answering_name (void)
+{
+  VALUE name = rb_thread_local_aref(rb_thread_current(), id_answering);
+  return NIL_P(name) ? NULL : ca_stable_id_name(SYM2ID(name));
+}
+
+static void
+ca_set_answering_name (const char *name)
+{
+  rb_thread_local_aset(rb_thread_current(), id_answering,
+                       name ? ID2SYM(rb_intern(name)) : Qnil);
+}
 
 static VALUE
 ca_answer_restore (VALUE unused)
 {
-  ca_answering_name = NULL;
+  ca_set_answering_name(NULL);
   return Qnil;
 }
 
+/* A C method that does its work by calling others runs them through here.
+   It used to fix the name at entry; the name is now found from the frames
+   when an error is raised (ca_user_called_method_id), which also reaches
+   the outer method, so nothing is fixed and nothing is paid on the way in. */
 VALUE
 ca_answer_as_caller (VALUE (*body)(VALUE), VALUE arg)
 {
-  if ( ca_answering_name ) {
-    return body(arg);
-  }
-  ca_answering_name = ca_calling_method_name();
-  return rb_ensure(body, arg, ca_answer_restore, Qnil);
+  return body(arg);
 }
 
-/* CArray.__answer_as__(name) { ... }: the same for a method written in Ruby. */
+/* CArray.__name_errors_after_method__(name) { ... }: the same for a method written in Ruby. */
 static VALUE
 rb_ca_s_answer_as_body (VALUE unused)
 {
@@ -565,11 +596,122 @@ rb_ca_s_answer_as_body (VALUE unused)
 static VALUE
 rb_ca_s_answer_as (VALUE klass, VALUE name)
 {
-  if ( ca_answering_name ) {
+  if ( ca_answering_name() ) {
     return rb_yield(Qnil);
   }
-  ca_answering_name = ca_stable_id_name(rb_to_id(name));
+  ca_set_answering_name(ca_stable_id_name(rb_to_id(name)));
   return rb_ensure(rb_ca_s_answer_as_body, Qnil, ca_answer_restore, Qnil);
+}
+
+/* The directory the library's Ruby files are loaded from (lib/), set once
+   by lib/carray.rb as it loads, read only afterwards. */
+static char *ca_library_root = NULL;
+static long  ca_library_root_len = 0;
+
+/* CArray.library_root = dir (private): where the frames of the library's
+   own Ruby methods are.  The first call wins. */
+static VALUE
+rb_ca_s_set_library_root (VALUE klass, VALUE dir)
+{
+  if ( ca_library_root == NULL ) {
+    long  len = RSTRING_LEN(StringValue(dir));
+    char *copy = ALLOC_N(char, len + 1);
+    memcpy(copy, RSTRING_PTR(dir), len);
+    copy[len] = '\0';
+    ca_library_root_len = len;
+    ca_library_root = copy;
+  }
+  return Qnil;
+}
+
+/* Whether a frame without a source file -- a C method -- is one of the
+   library's: a method of a CA* or CScalar class, or a CA_* conversion
+   function.  A method of a core class (Array#map, Integer#times) is not. */
+static int
+ca_frame_is_library_cfunc (VALUE frame, VALUE name)
+{
+  VALUE path = rb_profile_frame_classpath(frame);
+  if ( ! NIL_P(path) ) {
+    const char *p = RSTRING_PTR(path);
+    long        n = RSTRING_LEN(path);
+    if ( ( n >= 2 && strncmp(p, "CA", 2) == 0 )
+         || ( n >= 7 && strncmp(p, "CScalar", 7) == 0 ) ) {
+      return 1;
+    }
+  }
+  return RSTRING_LEN(name) > 3 && strncmp(RSTRING_PTR(name), "CA_", 3) == 0;
+}
+
+/* The method the user called: going out from the innermost frame, the last
+   frame of the library -- a Ruby method under ca_library_root, or one of
+   its C methods -- before the user's own code (a block included) is
+   reached.  A core C method the library calls on the way (Array#map) is
+   passed through.  0 when no frame of the library is found. */
+#define CA_NAMING_FRAMES 64
+
+static ID
+ca_user_called_method_id (void)
+{
+  ID id_initialize = rb_intern("initialize");
+  ID id_new        = rb_intern("new");
+  VALUE frames[CA_NAMING_FRAMES];
+  int   lines[CA_NAMING_FRAMES];
+  int   n, i;
+  ID    found = 0;
+  if ( ca_library_root == NULL ) {
+    return 0;
+  }
+  n = rb_profile_frames(0, CA_NAMING_FRAMES, frames, lines);
+  for (i = 0; i < n; i++) {
+    VALUE file = rb_profile_frame_absolute_path(frames[i]);
+    VALUE name, label;
+    if ( NIL_P(file) ) {
+      /* code evaluated with a file name (class_eval in the library) and the
+         core written in Ruby ("<internal:numeric>") have a path but no
+         absolute path; -e has a path outside the library */
+      file = rb_profile_frame_path(frames[i]);
+    }
+    if ( ! NIL_P(file) && strcmp(StringValueCStr(file), "<cfunc>") == 0 ) {
+      name = rb_profile_frame_method_name(frames[i]);
+      if ( NIL_P(name) ) {
+        continue;
+      }
+      if ( ca_frame_is_library_cfunc(frames[i], name) ) {
+        found = rb_to_id(name);
+      }
+      else if ( found == id_initialize && rb_to_id(name) == id_new ) {
+        found = id_new;                       /* Class#new around our initialize */
+      }
+      continue;                               /* a core C method passes */
+    }
+    if ( ! NIL_P(file) && strncmp(StringValueCStr(file), "<internal:", 10) == 0 ) {
+      continue;                               /* core written in Ruby (Integer#times) */
+    }
+    if ( NIL_P(file)                          /* eval without a file: the user's */
+         || RSTRING_LEN(file) <= ca_library_root_len
+         || strncmp(RSTRING_PTR(file), ca_library_root, ca_library_root_len) != 0
+         || RSTRING_PTR(file)[ca_library_root_len] != '/' ) {
+      break;
+    }
+    /* A block of the library (an each inside a method, the autoload stub)
+       names nothing: the method around it is further out.  A block whose
+       method is a class body is a method made by define_method, and its
+       frame does not carry the method's name, so the walk gives up and the
+       innermost C method is named, as before the walk. */
+    label = rb_profile_frame_label(frames[i]);
+    if ( ! NIL_P(label) && strncmp(StringValueCStr(label), "block ", 6) == 0 ) {
+      VALUE base = rb_profile_frame_base_label(frames[i]);
+      if ( ! NIL_P(base) && RSTRING_LEN(base) > 0 && RSTRING_PTR(base)[0] == '<' ) {
+        return 0;
+      }
+      continue;
+    }
+    name = rb_profile_frame_method_name(frames[i]);
+    if ( ! NIL_P(name) ) {
+      found = rb_to_id(name);
+    }
+  }
+  return found;
 }
 
 const char *
@@ -578,10 +720,13 @@ ca_calling_method_name (void)
   ID id;
   const char *s;
   size_t n;
-  if ( ca_answering_name ) {
-    return ca_answering_name;
+  if ( (s = ca_answering_name()) ) {
+    return s;
   }
-  id = rb_frame_this_func();
+  id = ca_user_called_method_id();
+  if ( ! id ) {
+    id = rb_frame_this_func();
+  }
   if ( ! id ) {
     return "axis";
   }
@@ -624,15 +769,22 @@ ca_shape_elements (int8_t ndim, const ca_size_t *dim, ca_size_t bytes)
   return elements;
 }
 
-/* An index array is read as ca_size_t.  A uint64 one holding 2**63 or more
-   would turn negative on the way and count from the end of the axis, so it
-   is refused here as the out-of-range index it is. */
+/* An index array is read as ca_size_t.  A float or complex one would be
+   cut to an integer on the way, so it is refused, as the indexer refuses
+   it.  A uint64 one holding 2**63 or more would turn negative and count
+   from the end of the axis, so it is refused as the out-of-range index it
+   is. */
 void
 ca_check_index_array (VALUE v)
 {
   CArray *ca;
   if ( ! rb_obj_is_carray(v) ) return;
   GetCArray(v, ca);
+  if ( ca_is_float_type(ca) || ca_is_complex_type(ca) ) {
+    rb_raise(rb_eIndexError,
+             "data_type %s is invalid for an index (should be integer)",
+             ca_type_name[ca->data_type]);
+  }
   if ( ca->data_type != CA_UINT64 || ca->elements == 0 ) return;
   {
     VALUE max = rb_funcall(v, rb_intern("max"), 0);
@@ -698,7 +850,7 @@ ca_min_count_arg (VALUE v, const char *name)
   return n;
 }
 
-/* CArray.__min_count_need__(op, min_count, least): how many present cells a
+/* CArray.__present_cells_needed_per_result_cell__(op, min_count, least): how many present cells a
    result cell of `op` needs (ca_too_few_present), for a reduction written
    in Ruby; it masks the cells whose count is below it. */
 static VALUE
@@ -719,11 +871,10 @@ int
 ca_symbol_choice (VALUE v, const char *arg, const char *c0, const char *c1,
                   const char *name)
 {
-  const char *nm = name ? name : ca_calling_method_name();
   ID id;
   if ( ! SYMBOL_P(v) ) {
     rb_raise(rb_eTypeError, "%s: %s must be a Symbol (got %"PRIsVALUE")",
-             nm, arg, rb_obj_class(v));
+             name ? name : ca_calling_method_name(), arg, rb_obj_class(v));
   }
   id = SYM2ID(v);
   if ( id == rb_intern(c0) ) {
@@ -733,7 +884,7 @@ ca_symbol_choice (VALUE v, const char *arg, const char *c0, const char *c1,
     return 1;
   }
   rb_raise(rb_eArgError, "%s: unknown %s :%"PRIsVALUE" (expected :%s or :%s)",
-           nm, arg, rb_id2str(id), c0, c1);
+           name ? name : ca_calling_method_name(), arg, rb_id2str(id), c0, c1);
   return 0;
 }
 
@@ -776,7 +927,7 @@ ca_reduce_fill (VALUE result, VALUE fill, int whole)
   return ( result == CA_UNDEF ) ? fill : result;
 }
 
-/* CArray.__reduce_fill__(result, fill_value): ca_reduce_fill for a
+/* CArray.__fill_undefined_result_cells__(result, fill_value): ca_reduce_fill for a
    reduction written in Ruby.  A fill_value of nil or UNDEF leaves the
    undefined cells as they are. */
 static VALUE
@@ -817,6 +968,38 @@ rb_ca_normalize_axis_for_ndim (long raw, int ndim, const char *name)
   return (int) axis;
 }
 
+/* An array has at most CA_RANK_MAX axes, and every dim[] and strides[]
+   array in the library is that long.  A constructor or view whose result
+   would have more -- a shape given, a rank computed -- calls this before it
+   writes a single dim, and is refused with ArgumentError naming the method,
+   the rank and the limit.  `name` NULL names the method the user called. */
+void
+ca_check_rank_fits (long ndim, const char *name)
+{
+  if ( ndim > CA_RANK_MAX ) {
+    rb_raise(rb_eArgError, "%s: ndim %ld exceeds CA_RANK_MAX %d",
+             name ? name : ca_calling_method_name(), ndim, CA_RANK_MAX);
+  }
+}
+
+/* The axis an `axis` argument names among `ndim` axes: the one rule every
+   entry that takes an axis from Ruby keeps.  An Integer, negative counting
+   from the end; anything else raises TypeError, and an Integer outside
+   [-ndim, ndim) raises ArgumentError naming the value given -- a Bignum
+   too, since no ndim reaches it.  `name` and the insertion-position use of
+   `ndim` are as for rb_ca_normalize_axis_for_ndim. */
+int
+ca_normalize_axis_arg (VALUE raxis, int ndim, const char *name)
+{
+  ca_check_rank_fits(ndim, name);   /* no array has the axes to name */
+  if ( RB_INTEGER_TYPE_P(raxis) && ! RB_FIXNUM_P(raxis) ) {
+    rb_raise(rb_eArgError,
+             "%s: axis %"PRIsVALUE" out of range for ndim %d",
+             name ? name : ca_calling_method_name(), raxis, ndim);
+  }
+  return rb_ca_normalize_axis_for_ndim(ca_axis_integer(raxis, name), ndim, name);
+}
+
 /* Self-bound wrapper: delegate to the kernel using self.ndim.  Kept
    for backward compatibility with the existing instance method
    `CArray#normalize_axis`. */
@@ -825,7 +1008,7 @@ rb_ca_normalize_axis_value (VALUE self, VALUE raxis, const char *name)
 {
   CArray *ca;
   GetCArray(self, ca);
-  return rb_ca_normalize_axis_for_ndim(ca_axis_integer(raxis, name), (int) ca->ndim, name);
+  return ca_normalize_axis_arg(raxis, (int) ca->ndim, name);
 }
 
 /* Ruby-facing `CArray#normalize_axis(axis, name=nil)` — returns the
@@ -860,7 +1043,7 @@ rb_ca_s_normalize_axis (int argc, VALUE *argv, VALUE klass)
   int k;
   rb_scan_args(argc, argv, "21", &raxis, &rndim, &rname);
   name = NIL_P(rname) ? NULL : StringValueCStr(rname);
-  k = rb_ca_normalize_axis_for_ndim(ca_axis_integer(raxis, name), NUM2INT(rndim), name);
+  k = ca_normalize_axis_arg(raxis, NUM2INT(rndim), name);
   return INT2NUM(k);
 }
 
@@ -880,7 +1063,7 @@ rb_ca_normalize_axes (int argc, VALUE *argv, VALUE self)
   const char *name;
 
   rb_scan_args(argc, argv, "11", &raxes, &rname);
-  name = NIL_P(rname) ? ca_calling_method_name() : StringValueCStr(rname);
+  name = NIL_P(rname) ? NULL : StringValueCStr(rname);   /* NULL: looked up on error */
   GetCArray(self, ca);
 
   if ( NIL_P(raxes) ) {
@@ -941,7 +1124,8 @@ rb_ca_guess_type (VALUE obj)
     /* Check before narrowing to int8_t, so the message names the id given. */
     long id = FIX2LONG(obj);
     if ( id <= CA_NONE || id >= CA_NTYPE ) {
-      rb_raise(rb_eArgError, "invalid data_type id %ld", id);
+      rb_raise(rb_eArgError, "%s: invalid data_type id %ld",
+               ca_calling_method_name(), id);
     }
     return (int8_t) id;
   }
@@ -968,7 +1152,8 @@ rb_ca_guess_type (VALUE obj)
 
   inspect = rb_inspect(obj);
   rb_raise(rb_eArgError,
-           "<%s> is unknown data_type representation", StringValuePtr(inspect));
+           "%s: <%s> is unknown data_type representation",
+           ca_calling_method_name(), StringValuePtr(inspect));
 }
 
 void
@@ -991,7 +1176,7 @@ rb_ca_guess_type_and_bytes (VALUE rtype, VALUE rbytes,
     }
   }
   else {
-    CA_CHECK_DATA_TYPE(*data_type);
+    CA_CHECK_DATA_TYPE_GIVEN(*data_type);
     *bytes = ca_sizeof[*data_type];
   }
 }
@@ -1187,11 +1372,25 @@ rb_set_options (VALUE ropt, const char *spec_in, ...)
 }
 
 
+/* Whether this runs in the main Ractor: Init does, and leaves a value in
+   its Ractor-local storage that no other Ractor has. */
+static rb_ractor_local_key_t ca_main_ractor_key;
+
+int
+ca_in_main_ractor (void)
+{
+  VALUE mark;
+  return rb_ractor_local_storage_value_lookup(ca_main_ractor_key, &mark);
+}
+
 void
 Init_carray_utils (void)
 {
+  ca_main_ractor_key = rb_ractor_local_storage_value_newkey();
+  rb_ractor_local_storage_value_set(ca_main_ractor_key, Qtrue);
   ca_id_names = st_init_numtable();
   rb_nativethread_lock_initialize(&ca_id_names_lock);
+  id_answering = rb_intern("__carray_answering_method__");
   id_begin    = rb_intern("begin");
   id_end      = rb_intern("end");
   id_excl_end = rb_intern("exclude_end?");
@@ -1203,11 +1402,13 @@ Init_carray_utils (void)
   rb_define_method(rb_cCArray, "normalize_axes", rb_ca_normalize_axes, -1);
   rb_define_singleton_method(rb_cCArray, "normalize_axis",
                              rb_ca_s_normalize_axis, -1);
-  rb_define_singleton_method(rb_cCArray, "__min_count_need__",
+  rb_define_singleton_method(rb_cCArray, "__present_cells_needed_per_result_cell__",
                              rb_ca_s_min_count_need, 3);
-  rb_define_singleton_method(rb_cCArray, "__reduce_fill__",
+  rb_define_singleton_method(rb_cCArray, "__fill_undefined_result_cells__",
                              rb_ca_s_reduce_fill, 2);
-  rb_define_singleton_method(rb_cCArray, "__answer_as__",
+  rb_define_private_method(rb_singleton_class(rb_cCArray), "library_root=",
+                           rb_ca_s_set_library_root, 1);
+  rb_define_singleton_method(rb_cCArray, "__name_errors_after_method__",
                              rb_ca_s_answer_as, 1);
 
 }

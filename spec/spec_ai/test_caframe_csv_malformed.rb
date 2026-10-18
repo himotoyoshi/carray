@@ -57,11 +57,15 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
   # A repeated header name used to keep only the last of its columns.
   def test_a_repeated_header_name_raises
     err = assert_raise(ArgumentError) { read("a,b,a\n1,2,3\n") }
-    assert_match(/"a" more than once/, err.message)
+    assert_match(/\Afrom_csv: the header row names "a" more than once; pass header: false/, err.message)
   end
 
-  def test_two_empty_header_names_raise
-    assert_raise(ArgumentError) { read("a,,\n1,2,3\n") }
+  # An empty header field names no column: the column takes the name a
+  # file without a header gives it, c<position>.
+  def test_empty_header_names_take_their_position
+    assert_equal %w[a c1 c2], read("a,,\n1,2,3\n").column_names
+    err = assert_raise(ArgumentError) { read(",c0\n1,2\n") }
+    assert_match(/the header row names "c0" more than once/, err.message)
   end
 
   def test_column_names_rename_a_repeated_header

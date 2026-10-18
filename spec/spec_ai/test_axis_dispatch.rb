@@ -52,7 +52,7 @@ class TestAxisDispatchCSA < Test::Unit::TestCase
   def test_2d_mask_with_scalar
     a = CArray.int(4, 3).seq
     m = CArray.boolean(4).tap { |__a| __a[] = [1, 0, 1, 1] }
-    assert_d3_matches a[m, 1]
+    assert_d3_matches a[m, 1..1]
   end
 
   def test_2d_negative_range
@@ -93,7 +93,7 @@ class TestAxisDispatchCSA < Test::Unit::TestCase
     # (non-slab) path here.
     a = CArray.int(3, 4, 2).seq
     m = CArray.boolean(3).tap { |__a| __a[] = [1, 0, 1] }
-    assert_d3_matches a[m, 1..2, 0]
+    assert_d3_matches a[m, 1..2, 0..0]
   end
 
   def test_3d_mask_with_range_and_nil

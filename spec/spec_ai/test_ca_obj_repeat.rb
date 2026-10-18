@@ -22,7 +22,7 @@ class TestCARepeat < Test::Unit::TestCase
   end
 
   def test_shape
-    assert_equal [3, 4], @r.dim.to_a
+    assert_equal [3, 4], @r.shape.to_a
   end
 
   def test_read

@@ -45,73 +45,96 @@
 /* op_id -> kernel table lookup                                         */
 /* ------------------------------------------------------------------- */
 
-/* Returns the kernel for the given input data_type.  Returns NULL for
-   cast ops (op_id >= CA_MONOP_CAST_BASE) and unknown op_ids; cast is
-   handled specially in xfer_stride via ca_cast_block. */
-ca_monop_func_t
-ca_monop_kernel_lookup (uint16_t op_id, int8_t in_data_type)
+/* The kernel table of an op, or NULL for cast ops (op_id >=
+   CA_MONOP_CAST_BASE) and unknown op_ids; cast is handled specially in
+   xfer_stride via ca_cast_block. */
+static ca_monop_func_t *
+ca_monop_table_of (uint16_t op_id)
 {
   switch (op_id) {
-    case CA_MONOP_ZERO:    return ca_monop_zero[in_data_type];
-    case CA_MONOP_ONE:     return ca_monop_one[in_data_type];
-    case CA_MONOP_FRAC:    return ca_monop_frac[in_data_type];
-    case CA_MONOP_NEG:     return ca_monop_neg[in_data_type];
-    case CA_MONOP_BIT_NEG: return ca_monop_bit_neg[in_data_type];
-    case CA_MONOP_ABS_I:   return ca_monop_abs_i[in_data_type];
-    case CA_MONOP_CONJ:    return ca_monop_conj[in_data_type];
-    case CA_MONOP_NOT:     return ca_monop_not[in_data_type];
+    case CA_MONOP_ZERO:    return ca_monop_zero;
+    case CA_MONOP_ONE:     return ca_monop_one;
+    case CA_MONOP_FRAC:    return ca_monop_frac;
+    case CA_MONOP_NEG:     return ca_monop_neg;
+    case CA_MONOP_BIT_NEG: return ca_monop_bit_neg;
+    case CA_MONOP_ABS_I:   return ca_monop_abs_i;
+    case CA_MONOP_CONJ:    return ca_monop_conj;
+    case CA_MONOP_NOT:     return ca_monop_not;
 
-    case CA_MONOP_CEIL:    return ca_monop_ceil[in_data_type];
-    case CA_MONOP_FLOOR:   return ca_monop_floor[in_data_type];
-    case CA_MONOP_ROUND:   return ca_monop_round[in_data_type];
-    case CA_MONOP_RCP:     return ca_monop_rcp[in_data_type];
+    case CA_MONOP_CEIL:    return ca_monop_ceil;
+    case CA_MONOP_FLOOR:   return ca_monop_floor;
+    case CA_MONOP_ROUND:   return ca_monop_round;
+    case CA_MONOP_RCP:     return ca_monop_rcp;
 
-    case CA_MONOP_RAD:     return ca_monop_rad[in_data_type];
-    case CA_MONOP_DEG:     return ca_monop_deg[in_data_type];
-    case CA_MONOP_SQRT:    return ca_monop_sqrt[in_data_type];
-    case CA_MONOP_EXP:     return ca_monop_exp[in_data_type];
-    case CA_MONOP_EXP2:    return ca_monop_exp2[in_data_type];
-    case CA_MONOP_EXP10:   return ca_monop_exp10[in_data_type];
-    case CA_MONOP_LOG:     return ca_monop_log[in_data_type];
-    case CA_MONOP_LOG10:   return ca_monop_log10[in_data_type];
-    case CA_MONOP_LOG2:    return ca_monop_log2[in_data_type];
-    case CA_MONOP_LOGB:    return ca_monop_logb[in_data_type];
-    case CA_MONOP_SIN:     return ca_monop_sin[in_data_type];
-    case CA_MONOP_COS:     return ca_monop_cos[in_data_type];
-    case CA_MONOP_TAN:     return ca_monop_tan[in_data_type];
-    case CA_MONOP_ASIN:    return ca_monop_asin[in_data_type];
-    case CA_MONOP_ACOS:    return ca_monop_acos[in_data_type];
-    case CA_MONOP_ATAN:    return ca_monop_atan[in_data_type];
-    case CA_MONOP_SINH:    return ca_monop_sinh[in_data_type];
-    case CA_MONOP_COSH:    return ca_monop_cosh[in_data_type];
-    case CA_MONOP_TANH:    return ca_monop_tanh[in_data_type];
-    case CA_MONOP_ASINH:   return ca_monop_asinh[in_data_type];
-    case CA_MONOP_ACOSH:   return ca_monop_acosh[in_data_type];
-    case CA_MONOP_ATANH:   return ca_monop_atanh[in_data_type];
+    case CA_MONOP_RAD:     return ca_monop_rad;
+    case CA_MONOP_DEG:     return ca_monop_deg;
+    case CA_MONOP_SQRT:    return ca_monop_sqrt;
+    case CA_MONOP_EXP:     return ca_monop_exp;
+    case CA_MONOP_EXP2:    return ca_monop_exp2;
+    case CA_MONOP_EXP10:   return ca_monop_exp10;
+    case CA_MONOP_LOG:     return ca_monop_log;
+    case CA_MONOP_LOG10:   return ca_monop_log10;
+    case CA_MONOP_LOG2:    return ca_monop_log2;
+    case CA_MONOP_LOGB:    return ca_monop_logb;
+    case CA_MONOP_SIN:     return ca_monop_sin;
+    case CA_MONOP_COS:     return ca_monop_cos;
+    case CA_MONOP_TAN:     return ca_monop_tan;
+    case CA_MONOP_ASIN:    return ca_monop_asin;
+    case CA_MONOP_ACOS:    return ca_monop_acos;
+    case CA_MONOP_ATAN:    return ca_monop_atan;
+    case CA_MONOP_SINH:    return ca_monop_sinh;
+    case CA_MONOP_COSH:    return ca_monop_cosh;
+    case CA_MONOP_TANH:    return ca_monop_tanh;
+    case CA_MONOP_ASINH:   return ca_monop_asinh;
+    case CA_MONOP_ACOSH:   return ca_monop_acosh;
+    case CA_MONOP_ATANH:   return ca_monop_atanh;
 
-    case CA_MONOP_BYTE_SWAP: return ca_monop_byte_swap[in_data_type];
+    case CA_MONOP_BYTE_SWAP: return ca_monop_byte_swap;
 
-    case CA_MONOP_IMAG_I:  return ca_monop_imag_i[in_data_type];
+    case CA_MONOP_IMAG_I:  return ca_monop_imag_i;
 
-    case CA_MONOP_EXPM1:   return ca_monop_expm1 [in_data_type];
-    case CA_MONOP_LOG1P:   return ca_monop_log1p [in_data_type];
-    case CA_MONOP_RSQRT:   return ca_monop_rsqrt [in_data_type];
-    case CA_MONOP_TRUNC:   return ca_monop_trunc [in_data_type];
-    case CA_MONOP_SQUARE:  return ca_monop_square[in_data_type];
+    case CA_MONOP_EXPM1:   return ca_monop_expm1;
+    case CA_MONOP_LOG1P:   return ca_monop_log1p;
+    case CA_MONOP_RSQRT:   return ca_monop_rsqrt;
+    case CA_MONOP_TRUNC:   return ca_monop_trunc;
+    case CA_MONOP_SQUARE:  return ca_monop_square;
 
-    case CA_MONOP_DEG_360: return ca_monop_deg_360[in_data_type];
-    case CA_MONOP_DEG_180: return ca_monop_deg_180[in_data_type];
-    case CA_MONOP_RAD_2PI: return ca_monop_rad_2pi[in_data_type];
-    case CA_MONOP_RAD_PI:  return ca_monop_rad_pi [in_data_type];
+    case CA_MONOP_DEG_360: return ca_monop_deg_360;
+    case CA_MONOP_DEG_180: return ca_monop_deg_180;
+    case CA_MONOP_RAD_2PI: return ca_monop_rad_2pi;
+    case CA_MONOP_RAD_PI:  return ca_monop_rad_pi;
 
-    case CA_MONOP_SIGN:    return ca_monop_sign   [in_data_type];
-    case CA_MONOP_ARG_I:   return ca_monop_arg_i  [in_data_type];
+    case CA_MONOP_SIGN:    return ca_monop_sign;
+    case CA_MONOP_ARG_I:   return ca_monop_arg_i;
 
     default:
       /* Cast ops or unknown — caller handles cast specially.  */
       return NULL;
   }
 }
+
+/* Returns the kernel for the given input data_type.  Returns NULL for
+   cast ops and unknown op_ids. */
+ca_monop_func_t
+ca_monop_kernel_lookup (uint16_t op_id, int8_t in_data_type)
+{
+  ca_monop_func_t *table = ca_monop_table_of(op_id);
+  return table ? table[in_data_type] : NULL;
+}
+
+/* The op id whose kernel table is `table`, or -1 for a table no op id
+   names. */
+int
+ca_monop_op_id_of_table (ca_monop_func_t table[])
+{
+  int op_id;
+  for ( op_id = 0; op_id < CA_MONOP_CAST_BASE; op_id++ ) {
+    if ( ca_monop_table_of((uint16_t) op_id) == table ) return op_id;
+  }
+  return -1;
+}
+
+
 
 /* ------------------------------------------------------------------- */
 /* op category predicates                                               */

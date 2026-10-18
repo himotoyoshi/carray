@@ -28,7 +28,7 @@ class TestLazyMonopP11 < Test::Unit::TestCase
     m = a.lazy
     assert_equal CALazyMarker, m.class
     # marker is a transparent pass-through over a
-    assert_equal [5], m.dim
+    assert_equal [5], m.shape
     assert_equal CA_FLOAT64, m.data_type
     assert_equal a.to_a, m.to_ca.to_a
   end
@@ -55,6 +55,7 @@ class TestLazyMonopP11 < Test::Unit::TestCase
   end
 
   def test_chain_scratch_count_0_depth_3
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(10).seq + 1.0
     CAMonOp.__reset_scratch_counter__
     result = a.lazy.sqrt.sqrt.sqrt.to_ca
@@ -66,6 +67,7 @@ class TestLazyMonopP11 < Test::Unit::TestCase
   end
 
   def test_chain_scratch_count_0_depth_20
+    omit "requires CARRAY_DEV_BUILD" unless CArray.respond_to?(:__lazy_arena_depth__)
     a = CArray.float64(10).seq + 2.0
     CAMonOp.__reset_scratch_counter__
     chain = a.lazy
@@ -85,7 +87,7 @@ class TestLazyMonopP11 < Test::Unit::TestCase
     result = nil
     assert_nothing_raised { result = chain.to_ca }
     refute_nil result
-    assert_equal [3], result.dim
+    assert_equal [3], result.shape
   end
 
   def test_eager_fallback_non_lazy

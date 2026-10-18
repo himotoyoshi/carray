@@ -53,7 +53,7 @@ class TestPartitionAxis < Test::Unit::TestCase
     end
     result = a.partition(1, axis: 1)
     assert_equal(CARemap, result.class)
-    assert_equal([2, 3], result.dim.to_a)
+    assert_equal([2, 3], result.shape.to_a)
   end
 
   def test_partition_kth_at_position_is_correctly_placed
@@ -65,8 +65,8 @@ class TestPartitionAxis < Test::Unit::TestCase
     end
     p2 = a.partition(2, axis: 1)
     # Each row sorted; position 2 = 3rd smallest
-    p2.dim[0].times do |i|
-      row = (0...p2.dim[1]).map { |j| p2[i, j] }
+    p2.shape[0].times do |i|
+      row = (0...p2.shape[1]).map { |j| p2[i, j] }
       assert_equal(row.sort[2], p2[i, 2], "row #{i}: #{row}")
     end
   end
@@ -105,11 +105,11 @@ class TestPartitionAxis < Test::Unit::TestCase
     end
     pi = a.partition_index(1, axis: 1)
     assert_kind_of(CArray, pi)
-    assert_equal([2, 4], pi.dim.to_a)
+    assert_equal([2, 4], pi.shape.to_a)
     # For full sort (= rev7), output matches argsort.
     # Row 0: [4,2,3,1] sorted = [1,2,3,4] -> indices [3,1,2,0]
-    assert_equal([3, 1, 2, 0], (0...pi.dim[1]).map { |j| pi[0, j] })
-    assert_equal([3, 1, 2, 0], (0...pi.dim[1]).map { |j| pi[1, j] })
+    assert_equal([3, 1, 2, 0], (0...pi.shape[1]).map { |j| pi[0, j] })
+    assert_equal([3, 1, 2, 0], (0...pi.shape[1]).map { |j| pi[1, j] })
   end
 
   def test_partition_index_default_axis_is_0

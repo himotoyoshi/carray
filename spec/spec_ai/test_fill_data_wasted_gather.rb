@@ -50,7 +50,7 @@ class TestFillDataWastedGather < Test::Unit::TestCase
     idx = CArray.int64(2).seq * 2          # [0, 2] = rows 0 and 2
     a.grid(idx, nil).refer(CA_FLOAT64, [10])[] = -3.0
     # rows 0, 2 を全部 -3.0、rows 1, 3 unchanged (seq)
-    expect = a.dim[0].times.map do |i|
+    expect = a.shape[0].times.map do |i|
       [0, 2].include?(i) ? [-3.0] * 5 : (i * 5 + 0...i * 5 + 5).map(&:to_f)
     end.flatten
     assert_equal expect, a.to_a.flatten
@@ -154,8 +154,8 @@ class TestFillDataWastedGather < Test::Unit::TestCase
     a = CArray.float64(10, 10).seq
     a.window(1..8, 1..8).refer(CA_FLOAT64, [64])[] = -5.0
     # interior 8x8 -> -5.0, edge -> seq
-    a.dim[0].times do |i|
-      a.dim[1].times do |j|
+    a.shape[0].times do |i|
+      a.shape[1].times do |j|
         if i.between?(1, 8) && j.between?(1, 8)
           assert_equal(-5.0, a[i, j].to_f)
         else
@@ -175,8 +175,8 @@ class TestFillDataWastedGather < Test::Unit::TestCase
     # window(1..8, 1..8) is interior-only (embed_covers_all=1) -> all
     # 64 cells in parent are written.
     a.window(1..8, 1..8)[] = -7.0
-    a.dim[0].times do |i|
-      a.dim[1].times do |j|
+    a.shape[0].times do |i|
+      a.shape[1].times do |j|
         expected = i.between?(1, 8) && j.between?(1, 8) ? -7.0 : (i * 10 + j).to_f
         assert_equal expected, a[i, j].to_f
       end
@@ -202,8 +202,8 @@ class TestFillDataWastedGather < Test::Unit::TestCase
     # = 4x4 = 16 cells
     a.shift(1, -1, fill_value: 0.0)[] = -2.0
     # check interior cells were written, others unchanged
-    a.dim[0].times do |i|
-      a.dim[1].times do |j|
+    a.shape[0].times do |i|
+      a.shape[1].times do |j|
         # parent cell (i, j) gets written if (i-1, j+1) maps validly
         # via shift(1, -1): view(i,j) = a(i-1, j+1) when valid
         # write v[i,j]=-2 -> a(i-1, j+1) = -2 when in bounds

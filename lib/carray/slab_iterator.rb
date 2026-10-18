@@ -174,6 +174,27 @@ class CASlabIterator < CAIterator
     RUBY
   end
 
+  # @!method first
+  #   Per-slab first present value, in row-major order over the slab axes;
+  #   UNDEF for a slab with none.
+  #   @return [CArray] one value per slab
+  # @!method last
+  #   Per-slab last present value; UNDEF for a slab with none.
+  #   @return [CArray] one value per slab
+  # @!method nunique
+  #   Per-slab number of distinct present values (int64); 0 for a slab with
+  #   none.
+  #   @return [CArray] one count per slab
+  #
+  # These take no `min_count:` or `fill_value:`, as the core ones do not.
+  [:first, :last, :nunique].each do |op|
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def #{op} (**kw)
+        @reference.#{op}(axis: @slab_axes, **CAIterator.reduce_keywords(:#{op}, kw))
+      end
+    RUBY
+  end
+
   # @overload count(v = <none>)
   #   Per-slab count, delegating to `reference.count(..., axis: slab_axes)`.
   #   No argument counts present (non-masked) cells; `count(UNDEF)` counts
@@ -342,6 +363,35 @@ class CASlabIterator < CAIterator
         @reference.#{op}(axis: single_scan_axis(:#{op}))
       end
     RUBY
+  end
+
+  # @overload lag(n = 1)
+  #   Per-slab value `n` steps earlier along the slab axis (UNDEF where the
+  #   slab has none), as `reference.lag(n, axis: slab_axis)`: a view of the
+  #   reference. A multi-axis slab has no single direction to step in, so it
+  #   raises, as the scans do.
+  #   @return [CArray] reference-shaped
+  def lag (n = 1)
+    @reference.lag(n, axis: single_scan_axis(:lag))
+  end
+
+  # @overload strip_mask(method:)
+  #   Per-slab fill of the masked cells along the slab axis, as
+  #   `reference.strip_mask(method:, axis: slab_axis)`: `:forward` / `:ffill`
+  #   or `:backward` / `:bfill`. A multi-axis slab raises, as the scans do.
+  #   @return [CArray] reference-shaped
+  def strip_mask (method:)
+    CAIterator.hold_backward?(method)
+    @reference.strip_mask(method: method, axis: single_scan_axis(:strip_mask))
+  end
+
+  # @overload order(descending: false, method: :ordinal, kind: :quick)
+  #   Per-slab rank of each cell along the slab axis (int64), as
+  #   `reference.order(axis: slab_axis, ...)`. A multi-axis slab has no
+  #   single sort axis, so it raises, as sort_addr does.
+  #   @return [CArray] reference-shaped
+  def order (**kw)
+    @reference.order(axis: single_sort_axis(:order), **CAIterator.reduce_keywords(:order, kw))
   end
 
   private

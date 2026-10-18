@@ -27,6 +27,9 @@ class CArray
   #   mask (`value_array? == true`).
   #
   #   Use this to read or write the data slot of masked elements.
+  #   Nothing in a value array is masked, so `unmask` on it does nothing,
+  #   while a write that would mask a cell (`UNDEF`, `mask=`,
+  #   `invert_mask`) raises TypeError.
   #   @return [CArray]
   def value; end
 
@@ -34,6 +37,11 @@ class CArray
   #   Returns a new boolean view of the mask state of `self`. Each
   #   element is `1` where `self` is masked and `0` where it is not.
   #   The returned view itself cannot carry a mask.
+  #
+  #   The mask of a view is a view over its parent's mask: it follows
+  #   later changes to the parent's mask, and so does its `dup` or
+  #   `clone`, which is another view onto the same parent mask (a write
+  #   to it lands in the parent's mask). Use `copy` for a mask of its own.
   #
   #   Returns `0` (Integer) if `self` has no mask array attached.
   #   @return [CArray, Integer]
@@ -43,6 +51,12 @@ class CArray
   #   Sets the mask array of `self` to `new_mask`. Allocates the mask
   #   array first if `self` does not yet have one. Cannot be called on
   #   a value array or a mask array.
+  #
+  #   `mask=` replaces the whole mask with `new_mask`. A masked cell of
+  #   `new_mask` makes the cell masked, as a masked value does in any
+  #   store. To mask the cells where a condition holds, prefer
+  #   `self[cond] = UNDEF`. There a masked cell of `cond` selects nothing,
+  #   as it does in any index.
   #   @param new_mask [CArray, Boolean, Integer] mask values. A
   #     non-CArray value is broadcast and stored elementwise; a CArray
   #     of any type is coerced to boolean.
@@ -91,7 +105,11 @@ class CArray
   #     linearly by index from the two bracketing valid cells (numeric
   #     data_type, or a time Face — `CATime` / `CATimedelta` interpolate
   #     through their own `linear_fetch`, so the filled values stay on the
-  #     array's unit and are rounded to it).
+  #     array's unit and are rounded to it). An integer array takes the
+  #     nearest integer, half away from zero (`[190, _, _, 341]` fills
+  #     `240, 291`). The interpolation runs in float64, so in an int64
+  #     array with values beyond 2**53 the filled cells may be off by the
+  #     float64 spacing there; the valid cells are not touched.
   #   @param axis [Integer, nil] scan axis (single axis). `nil` flattens.
   #   @return [self]
   def unmask(*, method: nil, axis: nil); end
@@ -164,6 +182,8 @@ class CArray
   #   @param others [Array<CArray>] arrays whose mask states are
   #     OR-ed into `self`. Non-CArray arguments are ignored.
   #   @return [self]
+  #   @raise [ArgumentError] if an array in `others` other than a scalar
+  #     has fewer elements than `self`.
   def inherit_mask(*others); end
 
   # @overload inherit_mask_replace(*others)
@@ -173,6 +193,8 @@ class CArray
   #   @param others [Array<CArray>] arrays whose mask states form the
   #     new mask of `self`.
   #   @return [self]
+  #   @raise [ArgumentError] if an array in `others` other than a scalar
+  #     has fewer elements than `self`.
   def inherit_mask_replace(*others); end
 
   # @overload count_masked
@@ -226,7 +248,9 @@ class CArray
   #   In-place equivalent: `ca[:eq, v] = UNDEF`.
   #
   #   Replaces the removed `maskout(v)` from 2.x.
-  #   @param v [Object] value to mask. Cast to `self.data_type`.
+  #   `v` is compared as {#eq} compares it, by value: `1.5` masks nothing
+  #   in an integer array, and `-1` does not mask `255` in a `uint8` one.
+  #   @param v [Object] value to mask.
   #   @return [CArray]
   def mask_eq(v); end
 

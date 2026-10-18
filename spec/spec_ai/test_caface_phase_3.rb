@@ -10,7 +10,7 @@ require 'carray'
 class TestFaceObj < CAObject
   def initialize(parent, tag: :default)
     @tag = tag
-    super(CA_INT64, parent.dim, parent: parent, face: true)
+    super(CA_INT64, parent.shape, parent: parent, face: true)
   end
   attr_reader :tag
 
@@ -23,7 +23,7 @@ end
 class TestCACircular < CAObject
   def initialize(parent, range: :rad)
     @range = range
-    super(CA_FLOAT64, parent.dim, parent: parent, face: true)
+    super(CA_FLOAT64, parent.shape, parent: parent, face: true)
   end
   attr_reader :range
 

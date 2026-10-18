@@ -76,7 +76,7 @@ rb_ca_fetch_index (VALUE self, ca_size_t *idx)
     volatile VALUE holder;
     char *v = ALLOCV_N(char, holder, ca->bytes);
     ca_fetch_index(ca, idx, v);
-    out = rb_ca_ptr2obj(self, v);
+    out = rb_ca_ptr2obj_storage(self, v);
     ALLOCV_END(holder);
   }
 
@@ -94,7 +94,7 @@ rb_ca_fetch_index (VALUE self, ca_size_t *idx)
   CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(out, self, ca);
 
   /* Boolean scalar access yields true/false, not Integer 0/1.  Bulk paths
-     (to_a / cast / serialize via rb_ca_ptr2obj) keep 0/1.  Gate on the raw
+     (cast / serialize) keep 0/1.  Gate on the raw
      INT2FIX(0/1) so a boolean-storage Face that decoded to its own object is
      left untouched; note INT2FIX(0) is truthy in Ruby, so map by value, not
      by RTEST. */
@@ -158,7 +158,7 @@ rb_ca_fetch_addr (VALUE self, ca_size_t addr)
     volatile VALUE holder;
     char *v = ALLOCV_N(char, holder, ca->bytes);
     ca_fetch_addr(ca, addr, v);
-    out = rb_ca_ptr2obj(self, v);
+    out = rb_ca_ptr2obj_storage(self, v);
     ALLOCV_END(holder);
   }
 
@@ -229,9 +229,7 @@ static void
 ary_guess_shape (VALUE ary, int level, int *max_level, ca_size_t *dim)
 {
   volatile VALUE ary0;
-  if ( level > CA_RANK_MAX ) {
-    rb_raise(rb_eArgError, "too deep level array for conversion to carray");
-  }
+  ca_check_rank_fits(level + 1, NULL);
 
   if ( TYPE(ary) == T_ARRAY ) {
     if ( RARRAY_LEN(ary) == 0 && level == 0 ) {
@@ -476,26 +474,6 @@ ca_id_expression_evaluator (void)
   return id;
 }
 
-/* `a[:sym, args] = v` computes the index by calling Ruby with self held
-   attached for the reads, then stores through it. */
-
-typedef struct {
-  VALUE  self;
-  VALUE  dest;   /* what is stored into: self, or a Face's storage */
-  ID     mid;
-  int    argc;
-  VALUE *argv;
-  VALUE  rval;
-} ca_store_method_call_ctx_t;
-
-static VALUE
-ca_store_method_call_body (VALUE arg)
-{
-  ca_store_method_call_ctx_t *c = (ca_store_method_call_ctx_t *) arg;
-  volatile VALUE idx = rb_funcallv_public(c->self, c->mid, c->argc, c->argv);
-  return rb_ca_store(c->dest, idx, c->rval);
-}
-
 /* The casting stores below convert into the destination inside a window,
    and a conversion from Ruby objects can raise part way.  Such a window
    attaches rather than allocates: the cells converted before the raise
@@ -586,6 +564,10 @@ ca_store_all_list_body (VALUE arg)
                             (boolean8_t*)ca->mask->ptr);
   }
   else {
+    /* Every cell gets a value, so none stays masked. */
+    if ( ca->mask ) {
+      memset(ca->mask->ptr, 0, ca->elements);
+    }
     ca_cast_block(ca->elements, c->ico, (VALUE *)RARRAY_CONST_PTR(list), cast_target, ca->ptr);
   }
   return Qnil;
@@ -654,6 +636,38 @@ ca_face_source_for_store (VALUE self, CArray *ca, VALUE rval)
   return rb_funcall(rval, rb_intern("to_type"), 1, INT2NUM(CA_OBJECT));
 }
 
+/* A store into no cells writes nothing, but the value is checked as it
+   would be for any cells: the same statement does not raise or pass
+   depending on how many cells the index picks. */
+static void
+ca_store_all_check_empty (VALUE self, VALUE rval)
+{
+  CArray *ca;
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  if ( rb_obj_is_cscalar(rval) ) {
+    rval = rb_ca_fetch_addr(rval, 0);
+  }
+  rval = ca_face_source_for_store(self, ca, rval);
+  if ( ! rb_obj_is_carray(rval) && TYPE(rval) != T_ARRAY &&
+       rb_respond_to(rval, id_to_ca) ) {
+    rval = rb_funcall(rval, id_to_ca, 0);
+  }
+  if ( rb_obj_is_carray(rval) ) {
+    ca_broadcast_to_destination(self, (volatile VALUE *) &rval);
+  }
+  else if ( TYPE(rval) == T_ARRAY ) {
+    if ( NIL_P(rb_ary_flatten_for_elements(rval, ca->elements, ca)) ) {
+      rb_raise(rb_eArgError, "failed to guess data size of given array");
+    }
+  }
+  else if ( rval != CA_UNDEF ) {
+    volatile VALUE holder;
+    char *fval = ALLOCV_N(char, holder, ca->bytes);
+    rb_ca_obj2ptr(self, rval, fval);
+    ALLOCV_END(holder);
+  }
+}
+
 VALUE
 rb_ca_store_all (VALUE self, VALUE rval)
 {
@@ -661,10 +675,14 @@ rb_ca_store_all (VALUE self, VALUE rval)
 
   rb_ca_modify(self);
 
-  if ( self == rval || rb_ca_is_empty(self) ) {
+  if ( self == rval ) {
     return rval;
   }
-  
+  if ( rb_ca_is_empty(self) ) {
+    ca_store_all_check_empty(self, rval);
+    return rval;
+  }
+
   if ( rb_obj_is_cscalar(rval) ) {
     rval = rb_ca_fetch_addr(rval, 0);
   }
@@ -689,6 +707,7 @@ rb_ca_store_all (VALUE self, VALUE rval)
          && ca->data_type == cv->data_type
          && ca->ndim == cv->ndim
          && ca->elements == cv->elements
+         && ca_in_main_ractor()
          && RTEST(rb_attr_get(rb_cCArray, ca_id_expression_evaluator())) ) {
       int8_t k;
       int    same = 1;
@@ -1022,7 +1041,9 @@ extern VALUE rb_ca_remap_new (VALUE cary, VALUE rmapper);
      (b) Otherwise -> normalize chain (a.flatten[mapper.flatten]
          .reshape).  A 1-D mapper is already routed to CAGrid upstream.
 
-   Both routes raise on a masked mapper. */
+   A masked mapper cell selects nothing: the cell keeps its position and
+   reads as masked (a CAGrid hole); the same-shape fast path is left to a
+   mapper with no masked cell. */
 static VALUE
 rb_ca_fancy_index_chain (VALUE self, VALUE rmapper)
 {
@@ -1034,15 +1055,24 @@ rb_ca_fancy_index_chain (VALUE self, VALUE rmapper)
   TypedData_Get_Struct(self,    CArray, &carray_data_type, ca);
   TypedData_Get_Struct(rmapper, CArray, &carray_data_type, cm);
 
-  if ( ca_is_any_masked(cm) ) {
-    rb_raise(rb_eArgError, "mapper in ca[mapper] should not be masked");
-  }
-
-  /* (a) same-shape fast path: ndim + per-axis dim + CA_SIZE data_type. */
+  /* (a) same-shape fast path: ndim + per-axis dim + CA_SIZE data_type.
+     The view reads the index array it is given, so it is given a copy: the
+     indices are the ones the caller passed at this call, as every other
+     route reads them, and each is checked against self now, so an index out
+     of range raises here and not at the first read. */
   if ( cm->data_type == CA_SIZE
+    && ! ca_is_any_masked(cm)
     && cm->ndim == ca->ndim
     && memcmp(cm->dim, ca->dim, ca->ndim * sizeof(ca_size_t)) == 0 ) {
-    return rb_ca_remap_new(self, rmapper);
+    volatile VALUE snapshot = rb_ca_copy(rmapper);
+    CArray *cs;
+    ca_size_t k, *p;
+    TypedData_Get_Struct(snapshot, CArray, &carray_data_type, cs);
+    p = (ca_size_t *) cs->ptr;
+    for (k = 0; k < cs->elements; k++) {
+      CA_CHECK_INDEX(p[k], ca->elements);
+    }
+    return rb_ca_remap_new(self, snapshot);
   }
 
   /* (b) Normalize chain fallback.  A Face is flattened through its storage
@@ -1070,10 +1100,9 @@ rb_ca_fancy_index_chain (VALUE self, VALUE rmapper)
   return result;
 }
 
-/* The CAMapping class is gone; rb_ca_mapping_new and rb_ca_mapping build
-   the normalize chain via rb_ca_fancy_index_chain.  The public C API
-   signatures are preserved so external ext gems keep linking; the runtime
-   class of the returned VALUE is CARefer (chain outermost), not CAMapping. */
+/* rb_ca_mapping_new and rb_ca_mapping index cary by a mapper array through
+   rb_ca_fancy_index_chain: the result is a CAGrid over the flattened array,
+   reshaped (CARefer, the outermost layer) to the mapper's shape. */
 
 VALUE
 rb_ca_mapping_new (VALUE cary, CArray *mapper)
@@ -1098,6 +1127,18 @@ rb_ca_mapping (int argc, VALUE *argv, VALUE self)
    view, then reshape the base inserting size-1 axes.  reshape inherits
    the optimal view class (CAStride for stride bases, CARefer for fancy
    bases). */
+
+/* a[:name, args] calls a method of the array, and its arguments are the
+   method's, whatever they are: the scans for :_, :> and group indices
+   below look at index keys only. */
+static int
+ca_argv_is_method_call (int argc, VALUE *argv)
+{
+  const char *name;
+  if ( argc < 1 || ! SYMBOL_P(argv[0]) ) return 0;
+  name = rb_id2name(SYM2ID(argv[0]));
+  return ( name != NULL && strlen(name) > 1 );
+}
 
 static int
 ca_argv_has_newaxis (int argc, VALUE *argv)
@@ -1140,6 +1181,10 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
+  if ( ca_argv_is_method_call(argc, argv) ) {
+    goto classify;
+  }
+
   /* newaxis (:_) interception (cheap pointer scan; zero overhead beyond
      the loop when no :_ is present). */
   if ( ca_argv_has_newaxis(argc, argv) ) {
@@ -1163,6 +1208,7 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
     return rb_ca_fetch_group(argc, argv, self);
   }
 
+ classify:
   info.range_check = 1;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);
 
@@ -1244,11 +1290,6 @@ rb_ca_fetch_method (int argc, VALUE *argv, VALUE self)
     }
     break;
   }
-  case CA_REG_ATTRIBUTE: {
-    obj = rb_funcall(self, rb_intern("attribute"), 0);
-    obj = rb_hash_aref(obj, info.symbol);
-    break;
-  }
   default:
     rb_raise(rb_eIndexError, "invalid index specified");
   }
@@ -1292,7 +1333,7 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
       nunder++;
       continue;
     }
-    if ( FIXNUM_P(a) || RB_TYPE_P(a, T_BIGNUM) ) {
+    if ( ca_index_key_is_scalar(a) ) {
       nscalar++;
     }
     if ( a == sym_gt || a == sym_perc
@@ -1301,7 +1342,7 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
                "newaxis (:_) cannot be combined with :>, :%%, "
                "or rubber dim (false / :~)");
     }
-    if ( nclean >= CA_RANK_MAX ) {
+    if ( nclean >= CA_RANK_MAX ) {   /* rank-check: a count of indices */
       rb_raise(rb_eIndexError, "too many indices");
     }
     clean[nclean++] = a;
@@ -1339,21 +1380,40 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
   TypedData_Get_Struct(base, CArray, &carray_data_type, cb);
 
   /* Reconstruct final shape: walk original argv.  :_ -> size-1, scalar
-     (Integer) -> dropped (skip), else -> base.dim[cursor]. */
-  base_cursor = 0;
-  for (i = 0; i < argc; i++) {
-    VALUE a = argv[i];
-    if ( a == sym_under ) {
-      final_dims[nfinal++] = 1;
-    }
-    else if ( FIXNUM_P(a) || RB_TYPE_P(a, T_BIGNUM) ) {
-      /* scalar index -> axis dropped in base; contributes no output axis */
-    }
-    else {
-      if ( base_cursor >= cb->ndim ) {
-        rb_raise(rb_eIndexError, "newaxis: base axis count mismatch");
+     (Integer) -> dropped (skip), else -> base.dim[cursor].  A key gives one
+     axis, except an integer CArray read alone (a mapping), which gives as
+     many as it has: the axes the base has beyond one per key are its. */
+  {
+    int nkeys = 0, extra, ncarray = 0;
+    for (i = 0; i < nclean; i++) {
+      if ( ! ca_index_key_is_scalar(clean[i]) ) {
+        nkeys++;
+        if ( rb_obj_is_carray(clean[i]) ) ncarray++;
       }
-      final_dims[nfinal++] = cb->dim[base_cursor++];
+    }
+    extra = cb->ndim - nkeys;
+    base_cursor = ( extra != 0 && ncarray != 1 ) ? -1 : 0;
+    for (i = 0; i < argc && base_cursor >= 0; i++) {
+      VALUE a = argv[i];
+      int take = 1, t;
+      if ( a == sym_under ) {
+        final_dims[nfinal++] = 1;
+        continue;
+      }
+      if ( ca_index_key_is_scalar(a) ) {
+        /* scalar index -> axis dropped in base; contributes no output axis */
+        continue;
+      }
+      if ( rb_obj_is_carray(a) ) {
+        take += extra;
+      }
+      for (t = 0; t < take; t++) {
+        if ( base_cursor >= cb->ndim || nfinal >= CA_RANK_MAX ) {   /* rank-check: a count of indices */
+          base_cursor = -1;
+          break;
+        }
+        final_dims[nfinal++] = cb->dim[base_cursor++];
+      }
     }
   }
   if ( base_cursor != cb->ndim ) {
@@ -1397,7 +1457,7 @@ rb_ca_slab_iter_new (VALUE self, CAIndexInfo *info)
    align with the post-expansion ndim, replace :> with nil (full axis),
    promote Integer to length-1 Range so the base view preserves ndim,
    recurse through the regular indexer dispatch to build the base
-   reference (CABlock / CASelectAxis / CAGrid / CAMapping / ...), then
+   reference (CABlock / CASelectAxis / CAGrid / ...), then
    wrap in CASlabIterator with the recorded slab_axes positions. */
 static VALUE
 rb_ca_fetch_slab_sigil (int argc, VALUE *argv, VALUE self)
@@ -1451,7 +1511,7 @@ rb_ca_fetch_slab_sigil (int argc, VALUE *argv, VALUE self)
     eargv = expanded;
   }
 
-  if ( eargc > CA_RANK_MAX ) {
+  if ( eargc > CA_RANK_MAX ) {   /* rank-check: a count of indices */
     rb_raise(rb_eIndexError, "too many indices");
   }
 
@@ -1461,7 +1521,7 @@ rb_ca_fetch_slab_sigil (int argc, VALUE *argv, VALUE self)
       rb_ary_push(slab_axes, INT2NUM(i));
       clean[i] = Qnil;
     }
-    else if ( FIXNUM_P(a) || RB_TYPE_P(a, T_BIGNUM) ) {
+    else if ( ca_index_key_is_scalar(a) ) {
       /* Promote Integer to length-1 Range so the recursed view keeps
          the axis (matches the existing :> dispatcher semantics where
          scalars become length-1 BLOCKs via finalize_reg). */
@@ -1545,11 +1605,6 @@ rb_cs_fetch_method (int argc, VALUE *argv, VALUE self)
     }
     break;
   }
-  case CA_REG_ATTRIBUTE: {
-    obj = rb_funcall(self, rb_intern("attribute"), 0);
-    obj = rb_hash_aref(obj, info.symbol);
-    break;
-  }
   default:
     rb_raise(rb_eIndexError, "invalid index specified");
   }
@@ -1592,6 +1647,23 @@ ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
       return ca_face_convert_store_rval(self, ca,
                                         rb_funcall(val, rb_intern("to_a"), 0));
     }
+    /* A CAString takes Strings.  A text Face goes in as the CAString its
+       to_string gives, and an object array as itself wrapped in a CAString,
+       which checks every cell that is not masked; either keeps its shape,
+       so it meets the shape rule of a store as an object array would.  Any
+       other array goes in as its values, each through the write hook. */
+    if ( ca->obj_type == CA_OBJ_STRING && cval->obj_type != CA_OBJ_STRING ) {
+      if ( ca_is_face(cval) && rb_respond_to(val, rb_intern("to_string")) ) {
+        return ca_face_convert_store_rval(self, ca,
+                                          rb_funcall(val, rb_intern("to_string"), 0));
+      }
+      if ( ! ca_is_face(cval) && cval->data_type == CA_OBJECT ) {
+        return ca_face_convert_store_rval(self, ca,
+                 rb_funcall(rb_obj_class(self), rb_intern("wrap"), 1, val));
+      }
+      return ca_face_convert_store_rval(self, ca,
+                                        rb_funcall(val, rb_intern("to_a"), 0));
+    }
     /* Face RHS: reconcile to self's unit and descend to storage.  Mirror of
        the scalar path (ca_face_element_to_storage) for a bulk CArray source.
        Guarded on self having to_comparable so a Face without a reconcile
@@ -1610,11 +1682,17 @@ ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
     {
       CArray *storage = ca_strip_face(ca);
       if ( storage && ca_is_integer_type(storage) && ! ca_is_integer_type(cval) ) {
+        const char *method = ca_face_storage_method(self);
+        if ( method ) {
+          rb_raise(rb_eTypeError,
+                   "%s cannot store a bare %s array as raw storage "
+                   "(write the %s storage, which #%s gives, directly)",
+                   rb_obj_classname(self), ca_type_name[cval->data_type],
+                   ca_type_name[storage->data_type], method);
+        }
         rb_raise(rb_eTypeError,
-                 "%s cannot store a bare %s array as raw storage "
-                 "(use ca.parent to write the %s storage directly)",
-                 rb_obj_classname(self), ca_type_name[cval->data_type],
-                 ca_type_name[storage->data_type]);
+                 "%s cannot store a bare %s array as raw storage",
+                 rb_obj_classname(self), ca_type_name[cval->data_type]);
       }
     }
     return val;
@@ -1676,7 +1754,7 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
   /* newaxis (:_) interception on store.  Build the newaxis view (a
      writable reshape aliasing self), then assign rval into the whole view
      (writes propagate to self). */
-  if ( ca_argv_has_newaxis(argc, argv) ) {
+  if ( ! ca_argv_is_method_call(argc, argv) && ca_argv_has_newaxis(argc, argv) ) {
     volatile VALUE view = rb_ca_fetch_newaxis(argc, argv, self, ca);
     rb_ca_store_all(view, rval);
     return rval;
@@ -1685,7 +1763,7 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
   /* slab sigil on store is rejected regardless of outer-slot type.  Catch
      :> before scan_index so mask/fancy outer slots get the same "not
      supported" message instead of a misleading TypeError. */
-  if ( ca_argv_has_slab_sigil(argc, argv) ) {
+  if ( ! ca_argv_is_method_call(argc, argv) && ca_argv_has_slab_sigil(argc, argv) ) {
     rb_raise(rb_eIndexError,
              "assignment through a slab iterator (:>) is not supported "
              "(use a block index, e.g. ca[range, nil] = val, or each_slab)");
@@ -1702,6 +1780,16 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
   dest = self;
   if ( converted && ca_is_face(ca) && ! rb_obj_is_carray(rval) ) {
     dest = rb_ca_strip_face_value(self);
+  }
+
+  /* One cell of a CAString holds a String.  Stored into the object storage,
+     a Ruby Array would become the cell's value, which a plain object array
+     allows. */
+  if ( ca->obj_type == CA_OBJ_STRING && TYPE(rval) == T_ARRAY &&
+       ( info.type == CA_REG_ADDRESS || info.type == CA_REG_POINT ) ) {
+    rb_raise(rb_eTypeError,
+             "%s: an Array is not a String (one cell of a CAString holds "
+             "a String; UNDEF masks a cell)", ca_calling_method_name());
   }
 
   switch ( info.type ) {
@@ -1755,15 +1843,12 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
     break;
   }
   case CA_REG_METHOD_CALL: {
-    ca_store_method_call_ctx_t c;
-    TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-    c.self = self;
-    c.dest = dest;
-    c.mid  = SYM2ID(info.symbol);
-    c.argc = (int)(argc-1);
-    c.argv = argv+1;
-    c.rval = rval;
-    obj = ca_attach_window(1, &ca, "r", ca_store_method_call_body, (VALUE) &c);
+    /* a[:eq, 0] = v is a[a.eq(0)] = v: the index is computed first and the
+       store then goes through it, as the read does -- only the cells it
+       picks are written. */
+    volatile VALUE idx;
+    idx = rb_funcallv_public(self, SYM2ID(info.symbol), argc-1, argv+1);
+    obj = rb_ca_store(dest, idx, rval);
     break;
   }
   case CA_REG_MEMBER: {
@@ -1776,11 +1861,6 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
       rb_raise(rb_eIndexError, 
                "can't store member of carray doesn't have data_class");
     }
-    break;
-  }
-  case CA_REG_ATTRIBUTE: {
-    obj = rb_funcall(self, rb_intern("attribute"), 0);
-    obj = rb_hash_aset(obj, info.symbol, rval);
     break;
   }
   }
@@ -1812,7 +1892,9 @@ rb_ca_store (VALUE self, VALUE index, VALUE rval)
   case T_ARRAY:
     index = rb_obj_clone(index);
     rb_ary_push(index, rval);
-    return rb_ca_store_method((int)RARRAY_LEN(index), (VALUE *)RARRAY_CONST_PTR(index), self);
+    rval = rb_ca_store_method((int)RARRAY_LEN(index), (VALUE *)RARRAY_CONST_PTR(index), self);
+    RB_GC_GUARD(index);   /* the store reads its arguments out of index */
+    return rval;
   default: {
     VALUE rindex[2] = { index, rval };
     return rb_ca_store_method(2, rindex, self);
@@ -1825,7 +1907,9 @@ rb_ca_store2 (VALUE self, int n, VALUE *rindex, VALUE rval)
 {
   volatile VALUE index = rb_ary_new4(n, rindex);
   rb_ary_push(index, rval);
-  return rb_ca_store_method((int)RARRAY_LEN(index), (VALUE *)RARRAY_CONST_PTR(index), self);
+  rval = rb_ca_store_method((int)RARRAY_LEN(index), (VALUE *)RARRAY_CONST_PTR(index), self);
+  RB_GC_GUARD(index);   /* the store reads its arguments out of index */
+  return rval;
 }
 
 static VALUE
@@ -1842,11 +1926,11 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   Check_Type(ridx, T_ARRAY);
 
   ndim = (int) RARRAY_LEN(rdim);
-  CA_CHECK_RANK(ndim);
+  CA_CHECK_RANK_GIVEN(ndim);
   for (i=0; i<ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
   }
-  CA_CHECK_DIM(ndim, dim);
+  CA_CHECK_DIM_GIVEN(ndim, dim);
   elements = ca_shape_elements(ndim, dim, 1);
 
   info.range_check = 1;
@@ -1919,8 +2003,7 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   case CA_REG_GRID:
   case CA_REG_MAPPING:
   case CA_REG_METHOD_CALL:
-  case CA_REG_MEMBER:  
-  case CA_REG_ATTRIBUTE:  
+  case CA_REG_MEMBER:
     break;
   default:
     rb_raise(rb_eArgError, "unknown index specification");
@@ -2016,10 +2099,11 @@ parse_shape_kwarg (VALUE rshape, int *out_ndim, ca_size_t *dim,
 
   Check_Type(rshape, T_ARRAY);
   ndim = (int) RARRAY_LEN(rshape);
-  if ( ndim < 1 || ndim > CA_RANK_MAX ) {
+  if ( ndim < 1 ) {
     rb_raise(rb_eArgError, "invalid shape ndim %d (must be 1..%d)",
              ndim, CA_RANK_MAX);
   }
+  ca_check_rank_fits(ndim, NULL);
   for (i = 0; i < ndim; i++) {
     dim[i] = NUM2SIZE(rb_ary_entry(rshape, i));
     if ( dim[i] < 0 ) {
@@ -2103,6 +2187,7 @@ addr2index_do (int ndim, ca_size_t *dim, ca_size_t elements, VALUE raddr)
     }
 
     ca_detach(cin);
+    RB_GC_GUARD(raddr);   /* the CA_SIZE view is reached only through cin */
     return out;
   }
 }
@@ -2306,7 +2391,7 @@ rb_ca_s_addr2index (int argc, VALUE *argv, VALUE klass)
 static VALUE
 rb_ca_s_index2addr (int argc, VALUE *argv, VALUE klass)
 {
-  VALUE rest, opts;
+  VALUE rest, opts, out;
   ID kw_ids[1];
   VALUE kw_vals[1];
   int ndim;
@@ -2320,7 +2405,10 @@ rb_ca_s_index2addr (int argc, VALUE *argv, VALUE klass)
   }
   rb_get_kwargs(opts, kw_ids, 1, 0, kw_vals);
   parse_shape_kwarg(kw_vals[0], &ndim, dim, &elements);
-  return index2addr_do(ndim, dim, (int) RARRAY_LEN(rest), RARRAY_PTR(rest));
+  /* index2addr_do reads, and replaces, its arguments in rest */
+  out = index2addr_do(ndim, dim, (int) RARRAY_LEN(rest), RARRAY_PTR(rest));
+  RB_GC_GUARD(rest);
+  return out;
 }
 
 

@@ -63,11 +63,13 @@ require "carray"
 require "carray/segment_iterator"
 
 # A CAIterator over the categories of a CACategorical.  It is a
-# CASegmentIterator over a category-sorted copy of the value: construction
-# gathers the value through the categorical's cached grouping plan, so each
-# category is one contiguous segment, and every reduction without `axis:` is
-# the segment reduction over that copy (one value per category, in {#labels}
-# order).  This class adds the construction, the labels, and the per-fiber
+# CASegmentIterator over a category-sorted copy of the value: the value is
+# gathered through the categorical's cached grouping plan, so each category
+# is one contiguous segment, and every reduction without `axis:` is the
+# segment reduction over that copy (one value per category, in {#labels}
+# order). With few categories and a numeric value, the count / sum / min /
+# max are read from the values by code instead, and the copy is gathered
+# only for the reductions that need it.  This class adds the construction, the labels, and the per-fiber
 # form (`axis:`), which classifies each fiber along an axis and keeps the
 # other axes.
 class CACategoricalIterator < CASegmentIterator
@@ -106,10 +108,9 @@ class CACategoricalIterator < CASegmentIterator
       nvalid    = counts.sum
       @offsets  = cat.reduceat_index                # cached segment STARTS (int64[k])
       @bounds   = CArray.segment_offsets(lengths: @elements)  # every boundary (int64[k+1])
-      # Group-major source indices = the valid prefix of the cached sort_addr.
-      # With no classified cell the prefix is empty (and slicing a length-0
-      # sort_addr would be out of range), so take the empty permutation directly.
-      @perm     = nvalid > 0 ? cat.sort_addr[0...nvalid] : CArray.int64(0)
+      # The group-major source indices (#perm) are taken from the cached
+      # sort_addr when first asked for.
+      @nvalid   = nvalid
       @codes    = cat.codes.reshape(cat.elements)   # flat codes view (map re-walk / weights)
       # Gather value into category-contiguous order via the cached permutation
       # and materialise (the reduceat kernels read the grouped buffer's raw ptr,
@@ -118,9 +119,21 @@ class CACategoricalIterator < CASegmentIterator
       # rebuilt per column. With no classified cell (empty / all-excluded) there
       # is nothing to gather — an empty index into an empty source is out of
       # range — so build the empty grouped buffer directly.
-      @grouped  = nvalid > 0 ? value.reshape(value.elements)[@perm].copy
-                             : CArray.new(value.data_type, [0], bytes: value.bytes)
-      @empty    = CArray.new(grouped.data_type, [0], bytes: grouped.bytes)
+      #
+      # With few categories, a numeric value is instead copied as it lies:
+      # the count / sum / min / max read it in one pass by code (scattering
+      # into one slot per category beats gathering every cell first while
+      # the slots stay in cache), and the grouped copy is gathered from it
+      # only when a reduction needs the categories contiguous. Either way
+      # the iterator holds the values as they were when it was built.
+      flat = value.reshape(value.elements)
+      if @k <= SCATTER_CATEGORIES_MAX && kernel_reads?(value.data_type)
+        @as_built = flat.copy
+        @empty    = @as_built[0...0]
+      else
+        @grouped  = nvalid > 0 ? flat[perm].copy : flat[0...0].copy
+        @empty    = @grouped[0...0]       # an empty category is the values' own kind
+      end
     else
       # Shape mismatch: only per-fiber axis: dispatch could still work.  With a
       # 1-D value there is no fiber structure to broadcast into, so a mismatch
@@ -147,6 +160,10 @@ class CACategoricalIterator < CASegmentIterator
     end
     self
   end
+
+  # The most categories for which the count / sum / min / max are read by
+  # scattering the values by code rather than through the grouped copy.
+  SCATTER_CATEGORIES_MAX = 4096
 
   # @overload labels
   #   Returns the category vocabulary the results are aligned to.
@@ -299,12 +316,46 @@ class CACategoricalIterator < CASegmentIterator
 
   # Both are built with the grouping plan, and only on the flat path; the
   # per-fiber form has neither and must not build a segment's.
+  # Group-major source indices = the valid prefix of the cached sort_addr.
+  # With no classified cell the prefix is empty (and slicing a length-0
+  # sort_addr would be out of range), so take the empty permutation directly.
   def perm
+    if @nvalid && ! @perm
+      @perm = @nvalid > 0 ? @cat.sort_addr[0...@nvalid] : CArray.int64(0)
+    end
     @perm
   end
 
   def codes
     @codes
+  end
+
+  # With few categories the grouped copy is gathered from the values as
+  # built, the first time a reduction asks for it.
+  def grouped
+    if @as_built && ! @grouped
+      @grouped = @nvalid > 0 ? @as_built[perm].copy : @as_built[0...0].copy
+    end
+    super
+  end
+
+  def kernel_reads? (data_type = (@as_built || grouped).data_type)
+    super(data_type)
+  end
+
+  # With few categories the count / sum / min / max come from one pass over
+  # the values as built, each cell added to the slot of its code; a cell
+  # whose value or code is masked, or whose code names no category, is in
+  # no slot, as it is in no segment of the grouped copy.
+  def moments
+    return @moments if defined?(@moments)
+    return super unless @as_built && kernel_reads?
+    counts = CArray.int64(@k)
+    sums   = CArray.float64(@k)
+    mins   = CArray.new(@as_built.data_type, [@k])
+    maxs   = CArray.new(@as_built.data_type, [@k])
+    @as_built.__send__(:__fiber_scatter_moments__, @codes, 0, @k, counts, sums, mins, maxs)
+    @moments = { count: counts, sum: sums, min: mins, max: maxs }
   end
 
   # Axis-aware count of present cells. Counting how many cells fall in a
@@ -315,7 +366,7 @@ class CACategoricalIterator < CASegmentIterator
   # counted from the codes and the value's mask, one group at a time.
   def axis_counts (axis, op)
     h = @value
-    return axis_moments(axis, op)[:count] if h.integer? || h.float?
+    return axis_moments(axis, op)[:count] if kernel_reads?(h.data_type)
     axis = checked_axis(axis, op)
     full_c  = resolve_axis_codes(@cat.codes, h.shape, axis)
     band    = h.shape.dup; band.delete_at(axis)
@@ -349,7 +400,7 @@ class CACategoricalIterator < CASegmentIterator
   # this one thing was the odd choice; a caller who wants a fused kernel's
   # four answers shares them by keeping the result.
   def axis_moments (axis, op)
-    return axis_moments_by_core(axis, op) unless MONOID_TYPES.include?(@value.data_type)
+    return axis_moments_by_core(axis, op) unless kernel_reads?(@value.data_type)
     h = @value
     axis = checked_axis(axis, op)
     band = h.shape.dup; band.delete_at(axis)
@@ -382,6 +433,7 @@ class CACategoricalIterator < CASegmentIterator
   # kernel had all four from one.
   BAND_ONLY_KEYS = { sum: [:sum], mean: [:sum, :count], min: [:min],
                      max: [:max], minmax: [:min, :max] }.freeze
+  Ractor.make_shareable(BAND_ONLY_KEYS)
   private_constant :BAND_ONLY_KEYS
 
   def band_only_moments (h, axis, band, op)
@@ -419,7 +471,7 @@ class CACategoricalIterator < CASegmentIterator
   # Axis-aware mean: sums / counts (float64); empty group cells (count=0) MASKED.
   # Matches flat #mean per fiber.
   def axis_mean (axis)
-    return axis_by_core(axis, :mean) unless MONOID_TYPES.include?(@value.data_type)
+    return axis_by_core(axis, :mean) unless kernel_reads?(@value.data_type)
     m   = axis_moments(axis, :mean)
     cnt = m[:count]
     out = m[:sum] / cnt.float64      # count 0 -> NaN
@@ -448,14 +500,13 @@ class CACategoricalIterator < CASegmentIterator
     slot_idx  = [nil] + [nil] * band.size    # placeholder; c fills slot 0
     codes_bad = full_c.has_mask? ? full_c.is_masked : nil
     @k.times do |c|
-      h_local = h.copy
       # Boolean of cells that DO belong to group c (with codes present).  On
       # any masked codes cell the codes.eq(c) result carries UNDEF, which
       # naturally reads as "not in group c" for our exclusion purpose.
       in_c = full_c.eq(c)
       exclude = in_c.not
       exclude = exclude | codes_bad if codes_bad
-      h_local[exclude] = UNDEF
+      h_local = h.mask_where(exclude)
       slice = h_local.__send__(op, axis: axis)   # band shape, mask carries n<contract
       slot_idx[0] = c
       out[*slot_idx] = slice
@@ -472,16 +523,21 @@ class CACategoricalIterator < CASegmentIterator
   # taken by index; otherwise its cells are kept by masking the rest of a copy.
   # A read-only Face's answers (a const string's records index a pool of
   # their own) cannot be put together, so they are collected as the surface
-  # values they are, as the flat form does.
+  # values they are, as the flat form does.  Over a 1-D value each group
+  # reduces to one cell, kept as a 1-element array so the answers stack.
   def axis_by_core (axis, op, *args)
     h    = @value
     axis = checked_axis(axis, op)
+    flat = (h.ndim == 1)
     groups  = (0...[@k, 1].max).map { |c| group_cells(h, axis, c, @k.zero?) }
-    answers = groups.map { |g| g.__send__(op, *args, axis: axis) }
+    answers = groups.map do |g|
+      flat ? g.__send__(op, *args, axis: axis, keep_axis: true)
+           : g.__send__(op, *args, axis: axis)
+    end
     if answers.first.face? && answers.first.read_only?
       answers = answers.map { |a| CArray.object(*a.shape) { a.to_a } }
     end
-    out = CArray.stack(answers, axis: 0).copy
+    out = flat ? CArray.concatenate(answers) : CArray.stack(answers, axis: 0).copy
     @k.zero? ? out[0...0, *([nil] * (out.ndim - 1))].copy : out
   end
 
@@ -493,7 +549,9 @@ class CACategoricalIterator < CASegmentIterator
 
   def group_cells (h, axis, c, none)
     codes = @cat.codes
-    if codes.shape == [h.shape[axis]]
+    # Classified along the axis, a group is taken by index; the general way,
+    # masking the rest of a copy, gives the same cells.
+    if codes.shape == [h.shape[axis]] && CArray.__fast_paths_enabled__
       sel = none ? CArray.boolean(codes.elements) { false } : codes.eq(c)
       sel = sel.strip_mask(false) if sel.has_mask?
       idx = [nil] * h.ndim
@@ -503,9 +561,8 @@ class CACategoricalIterator < CASegmentIterator
       full_c  = resolve_axis_codes(codes, h.shape, axis)
       exclude = none ? CArray.boolean(*h.shape) { true } : full_c.eq(c).not
       exclude = exclude | full_c.is_masked if full_c.has_mask?
-      local = h.copy
-      local[exclude] = UNDEF
-      local
+      # a copy with the rest masked, which a read-only Face also gives
+      h.mask_where(exclude)
     end
   end
   private :axis_by_core, :axis_moments_by_core, :group_cells
@@ -524,10 +581,40 @@ class CACategoricalIterator < CASegmentIterator
     if kernel_scans?(op, answer)
       bundle = @k > 0 ? [@cat.codes, @k, [axis]]
                       : [CArray.int64(h.shape[axis]).fill(-1), 1, [axis]]
-      return h.__axis_group_scan__([axis], [bundle], op)
+      return h.__scan_by_axis_groups__([axis], [bundle], op)
     end
     each_group_along(axis, ->(shape) { blank_like(answer, shape) }) do |g|
       g.public_send(op, axis: axis)
+    end
+  end
+
+  # #lag along an axis (case A): each group's positions along the axis, every
+  # other axis kept, lagged along it, so a lag never reaches another group.
+  def axis_lag (n, axis)
+    axis = checked_axis(axis, :lag)
+    classified_along!(:lag, axis)
+    each_group_along(axis, ->(shape) { blank_like(@value, shape) }) do |g|
+      g.lag(n, axis: axis)
+    end
+  end
+
+  # #strip_mask(method:) along an axis (case A): each group's positions along
+  # the axis filled along it, fiber by fiber.
+  def axis_hold (method, axis)
+    axis = checked_axis(axis, :strip_mask)
+    classified_along!(:strip_mask, axis)
+    each_group_along(axis, ->(shape) { blank_like(@value, shape) }) do |g|
+      g.strip_mask(method: method, axis: axis)
+    end
+  end
+
+  # #order along an axis (case A): each group's positions along the axis
+  # ranked along it, fiber by fiber.
+  def axis_order (axis, **kw)
+    axis = checked_axis(axis, :order)
+    classified_along!(:order, axis)
+    each_group_along(axis, ->(shape) { CArray.int64(*shape) }) do |g|
+      g.order(axis: axis, **kw)
     end
   end
 
@@ -566,7 +653,7 @@ class CACategoricalIterator < CASegmentIterator
           "positions along axis #{axis} (shape [#{n}]); got shape " \
           "#{@cat.codes.shape.inspect}"
   end
-  private :axis_scan, :axis_map, :each_group_along, :classified_along!
+  private :axis_scan, :axis_lag, :axis_order, :axis_hold, :axis_map, :each_group_along, :classified_along!
 
   # Axis-aware wsum + wmean fused (single kernel call, both outputs).  Returns
   # [wsum_ca, wmean_ca].  Weights must match source shape exactly (explicit
@@ -582,6 +669,7 @@ class CACategoricalIterator < CASegmentIterator
             "must equal source.shape #{h.shape.inspect}. Wrap 1-D / band-shape " \
             "weights via `.broadcast_to(*source.shape)` before passing."
     end
+    return weighted_by_core(weights, axis) unless kernel_reads?(h.data_type)
     codes_h_shape = resolve_axis_codes(@cat.codes, h.shape, axis)
     weights_f64   = weights.data_type == CA_FLOAT64 ? weights : weights.float64
     band          = h.shape.dup; band.delete_at(axis)
@@ -592,10 +680,25 @@ class CACategoricalIterator < CASegmentIterator
     [ws_out, wm_out]
   end
 
+  # wsum and wmean of each group by the core: the group's cells of the value
+  # and of the weights, each other cell masked, reduced along the axis.
+  def weighted_by_core (weights, axis)
+    h = @value
+    %i[wsum wmean].map do |op|
+      answers = (0...[@k, 1].max).map do |c|
+        group_cells(h, axis, c, @k.zero?)
+          .public_send(op, group_cells(weights, axis, c, @k.zero?), axis: axis)
+      end
+      out = CArray.stack(answers, axis: 0).copy
+      @k.zero? ? out[0...0, *([nil] * (out.ndim - 1))].copy : out
+    end
+  end
+  private :weighted_by_core
+
   # Axis-aware prod: dedicated kernel (identity 1.0, separate from moments to
   # avoid conflating with sum's zero-identity memset).
   def axis_prod (axis)
-    return axis_by_core(axis, :prod) unless MONOID_TYPES.include?(@value.data_type)
+    return axis_by_core(axis, :prod) unless kernel_reads?(@value.data_type)
     h = @value
     axis = checked_axis(axis, :prod)
     codes_h_shape = resolve_axis_codes(@cat.codes, h.shape, axis)

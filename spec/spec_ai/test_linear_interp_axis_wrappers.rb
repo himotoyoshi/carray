@@ -39,7 +39,7 @@ class TestLinearInterpAxisWrappers < Test::Unit::TestCase
   def test_linear_section_2d_axis
     m = CArray.float64(3, 4) { |i, j| (i * 100 + j).to_f }
     out = m.linear_section(1.5, axis: 1)
-    assert_equal [3], out.dim
+    assert_equal [3], out.shape
     # Row 0 [0,1,2,3] -> 1.5; rows 1,2 ([100..],[200..]) query 1.5 out of
     # range -> NaN (Option C: no extrapolation).
     assert_in_delta 1.5, out[0], 1e-12
@@ -74,7 +74,7 @@ class TestLinearInterpAxisWrappers < Test::Unit::TestCase
   def test_linear_fetch_2d_axis
     m = CArray.float64(3, 4) { |i, j| (i * 10 + j).to_f }
     out = m.linear_fetch(1.5, axis: 1)
-    assert_equal [3], out.dim
+    assert_equal [3], out.shape
     assert_in_delta 1.5,  out[0], 1e-12
     assert_in_delta 11.5, out[1], 1e-12
     assert_in_delta 21.5, out[2], 1e-12

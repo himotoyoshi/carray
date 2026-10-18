@@ -461,6 +461,16 @@ class TestCACategoricalFace < Test::Unit::TestCase
     assert_equal([0, 0, 0, 1, 1, 2, 2, 2], sorted)          # non-decreasing
   end
 
+  # Within a category the cells keep their source order, and the cells in no
+  # category -- a masked key, a label not in the vocabulary -- follow every
+  # category, also in source order.
+  def test_sort_addr_is_stable_and_puts_the_excluded_cells_last
+    keys = CA_INT([2, 9, 0, 1, 2, 0, 9, 0, 1, 2])
+    keys[3] = UNDEF
+    cat = keys.categorize(labels: [0, 1, 2])
+    assert_equal([2, 5, 7, 8, 0, 4, 9, 1, 3, 6], cat.sort_addr.to_a)
+  end
+
   def test_reduceat_roundtrip_per_block_sum
     keys = CA_INT([2, 0, 1, 2, 0, 0, 1, 2])
     cat  = keys.categorize(labels: [0, 1, 2])

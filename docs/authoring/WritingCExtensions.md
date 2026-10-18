@@ -380,7 +380,7 @@ CArray            (entity)
 │   │                CARepeat, CAField
 │   ├── CAWindow  ── CAShift
 │   ├── CASelectAxis, CAGrid                 (per-axis scatter family)
-│   ├── CASelect, CAMapping                  (flat-index family)
+│   ├── CASelect, CARemap                    (flat-index family)
 │   ├── CAFake, CAByteSwap, CABitarray, CABitfield  (overlays)
 │   └── CAReduce                             (reduction view)
 └── CAObject     (Ruby-callback bridge; may be entity or view)
@@ -989,7 +989,7 @@ output buffers sized to the non-masked count (e.g. `compress`-style
 operations).
 
 If you would rather not branch at all, `ca_unmask(ca, &fill)` and
-`ca_unmasked_copy(ca, &fill)` substitute a caller-provided fill value
+`ca_unmask_copy(ca, &fill)` substitute a caller-provided fill value
 into masked cells. The first mutates `ca` in place (clearing its
 mask); the second returns a fresh entity. Both expect `fill` to point
 at a value of the correct data_type.
@@ -2125,7 +2125,7 @@ span of `n` elements of a known data_type, do the work — and the iterator
 handles everything else:
 
 - accepts any of CArray's view kinds as input (CAStride family,
-  CASelect, CAMapping, CAWindow, CAShift, CAGrid, CAFake, CAByteSwap,
+  CASelect, CAWindow, CAShift, CAGrid, CAFake, CAByteSwap,
   CABitfield, CABitarray, CAReduce, CAObject, …), without your kernel
   having to know which it got;
 - folds view chains down to the root entity where possible, yielding
@@ -2142,8 +2142,8 @@ related kernels are built on.
 
 ### 12.2 A glimpse of the code
 
-A reduction-style kernel looks roughly like this (Float64, sum over a
-chosen set of axes):
+A reduction-style kernel looks roughly like this (Float64, sum along one
+chosen axis):
 
 ```c
 static VALUE
@@ -2161,23 +2161,25 @@ rb_ca_sum_ki (int argc, VALUE *argv, VALUE self)
   VALUE   vout = rb_ca_new_reduced(self, axes, naxes, CA_FLOAT64);
   CArray *out; GetCArray(vout, out);
 
-  ca_iter_state_t st;
-  ca_iter_init_l2(&st, ca, CA_SLAB_AXES, axes, naxes, 0);
+  ca_iter_state st;
+  ca_iter_state_init_l2(&st, ca, CA_SLAB_AXES, axes, naxes, 0);
 
   ca_attach(out);
   double *op = (double *)out->ptr;
   ca_size_t outer = 0;
 
-  const char *p; ca_size_t n, stride;
-  while (ca_iter_next_slab_strided(&st, &p, &n, &stride)) {
+  char *p;
+  while (ca_iter_state_next_slab_axes(&st, &p, NULL)) {
+    /* one slab axis: slab_dims[0] cells, slab_strides[0] bytes apart */
+    ca_size_t n = st.slab_dims[0], stride = st.slab_strides[0];
     double acc = 0.0;
     for (ca_size_t i = 0; i < n; i++) {
       acc += *(const double *)(p + i * stride);
     }
     op[outer++] = acc;
   }
-  ca_iter_finish(&st);
-  ca_sync(out); ca_detach(out);
+  ca_iter_state_finish(&st);
+  ca_sync_detach(out);
   return vout;
 }
 ```
@@ -2387,17 +2389,18 @@ bad argument fails cleanly with nothing to unwind:
 static VALUE
 rb_ca_scale (VALUE self, VALUE vfactor, VALUE vaxis)
 {
-  /* 1. Convert scalars first — NUM2DBL/NUM2INT raise TypeError on
+  /* 1. Convert scalars first — NUM2DBL raises TypeError on
    *    non-numeric input, before any CArray work.                 */
   double factor = NUM2DBL(vfactor);
-  int    axis   = NUM2INT(vaxis);
 
-  /* 2. Extract and check the array.                               */
+  /* 2. Extract the array and read the axis against it.  The axis
+   *    goes to rb_ca_normalize_axis_value as Ruby gave it: it counts
+   *    a negative axis from the end and raises for the rest (TypeError
+   *    for a non-Integer, ArgumentError naming the method otherwise).
+   *    Reading it with NUM2INT first would narrow it before the check,
+   *    and 2**32 + 1 would pass as 1.                               */
   CArray *ca; GetCArray(self, ca);
-  if (axis < 0 || axis >= ca->ndim) {
-    rb_raise(rb_eArgError, "axis %d out of range for %d-D array",
-             axis, ca->ndim);
-  }
+  int axis = rb_ca_normalize_axis_value(self, vaxis, NULL);
 
   /* 3. Only now coerce / allocate / attach.                       */
   volatile VALUE vin = rb_ca_wrap_readonly(self, INT2FIX(CA_FLOAT64));
@@ -2417,10 +2420,10 @@ Conventions worth keeping consistent with the rest of CArray:
 - **Coerce before you reject.** As in §7.2, prefer `ca_wrap_readonly`
   over a hard data_type check when the input can reasonably be seen as
   your compute type; raise only for the genuinely unusable.
-- **Negative-axis normalisation.** If you accept Python-style negative
-  axes, normalise (`if (axis < 0) axis += ca->ndim;`) and then
-  range-check; `rb_ca_parse_reduce_axes` does this for the multi-axis
-  reduction case.
+- **Axis arguments.** Read an axis with `rb_ca_normalize_axis_value`
+  (or `rb_ca_normalize_axis_for_ndim` for a `long` you already hold)
+  rather than normalising it yourself; `rb_ca_parse_reduce_axes_kw`
+  does the same for the multi-axis reduction case.
 
 Front-loading validation keeps the interior of the method
 raise-light, which in turn keeps the §17.2 cleanup burden small: the

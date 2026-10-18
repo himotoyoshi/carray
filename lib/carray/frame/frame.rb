@@ -37,10 +37,12 @@ class CAFrame
   # Integer data_types that select rows positionally when used as a df[] key.
   INTEGER_TYPES = [:int8, :int16, :int32, :int64,
                    :uint8, :uint16, :uint32, :uint64].freeze
+  Ractor.make_shareable(INTEGER_TYPES)
   private_constant :INTEGER_TYPES
 
   # @!visibility private
   DEFAULT_AXIS_NAME = "row"
+  Ractor.make_shareable(DEFAULT_AXIS_NAME)
 
   # Build a frame from a Hash of +name => column+. Columns may be CArrays or
   # anything that answers +to_ca+ (Ruby Array, lazy view). All columns must
@@ -51,22 +53,34 @@ class CAFrame
   # y)+). +:axis_name+ / +:index+ are control options; any remaining
   # (string-keyed) options are treated as columns.
   #
-  # Column names are normalized to Strings, so a Symbol key in an explicit
-  # column hash is stringified. The Symbol rejection below applies only to the
-  # keyword channel, which doubles as the +:axis_name+ / +:index+ control-option
-  # channel: a stray Symbol there is a mistyped control option, not a column.
+  # Column names are Strings, in an explicit column hash as in inline pairs.
+  # A stray Symbol among the keywords is a mistyped control option
+  # (+:axis_name+ / +:index+), not a column, and is named as such.
+  #
+  # +types:+ casts the built frame as +from_records+ does: it takes anything
+  # +cast+ takes as a map (a name => type map, :infer, or a map with
+  # +default:+), with +on_error:+ as for +cast+. A cast column is a new array,
+  # so a CArray given for it is no longer shared with the frame.
   def initialize(columns = {}, **opts)
     axis_name = opts.delete(:axis_name)
     index     = opts.delete(:index)
-    stray = opts.keys.reject { |k| k.is_a?(String) }
-    unless stray.empty?
-      raise ArgumentError,
-            "column keys must be Strings (Symbols are reserved); got #{stray.inspect}"
+    attrs     = opts.delete(:attrs)
+    types     = opts.delete(:types)
+    on_error  = opts.key?(:on_error) ? opts.delete(:on_error) : :mask
+    opts.each_key do |k|
+      CAFrame.__send__(:column_key, k, "CAFrame.new",
+                       hint: "axis_name:, index:, attrs:, types: and on_error: are the options")
+    end
+    @attrs = nil
+    unless attrs.nil?
+      raise TypeError, "CAFrame.new: attrs: takes a Hash (got #{attrs.class})" unless attrs.is_a?(Hash)
+      set_attrs(attrs)
     end
     columns = columns.merge(opts) unless opts.empty?
 
     @columns   = {}
-    @axis_name = axis_name || DEFAULT_AXIS_NAME
+    @axis_name = axis_name.nil? ? DEFAULT_AXIS_NAME :
+                   CAFrame.__send__(:column_key, axis_name, "CAFrame.new", "axis_name:")
     @index     = nil
     # The row axis name this frame had before set_index promoted a column over
     # it, so reset_index can put it back.  A frame built with an index never
@@ -77,7 +91,8 @@ class CAFrame
     n = nil
     n_from = nil
     columns.each do |name, col|
-      key = name.to_s
+      key = column_key(name, "CAFrame.new")
+      raise ArgumentError, "CAFrame.new: a column name can not be empty" if key.empty?
       ca  = coerce_column(col)
       len = ca.shape[0]
       if n.nil?
@@ -115,6 +130,8 @@ class CAFrame
       raise ArgumentError,
             "axis_name #{@axis_name.inspect} collides with a column of the same name"
     end
+
+    cast(types, on_error: on_error, option_name: :types) unless types.nil?
   end
 
   # --- df[...] : key type decides the axis (memo §13.2) ------------------
@@ -251,7 +268,11 @@ class CAFrame
   # first so a refused edit leaves the frame as it was: the edits change the
   # column table before any instance variable.
   private def refuse_if_frozen
-    raise FrozenError.new("can't modify frozen CAFrame: #{inspect}", receiver: self) if frozen?
+    return unless frozen?
+    # The size, not the table: inspect prints every row.
+    size = "#{@nrow} row#{@nrow == 1 ? "" : "s"}, #{ncol} column#{ncol == 1 ? "" : "s"}"
+    raise FrozenError.new("can't modify frozen CAFrame (#{size})",
+                          receiver: self)
   end
 
   # Make this frame read-only and return it.  It is +freeze+ extended to the
@@ -325,6 +346,7 @@ class CAFrame
   # leaves the old one alone (the same rule +cast+ follows, for the physical
   # reason that a type change cannot reuse the buffer).
   private def rebind_column(key, column)
+    raise ArgumentError, "df[name] =: a column name can not be empty" if key.empty?
     if @index && key == @axis_name
       raise ArgumentError,
             "#{key.inspect} names the index, not a column; " \
@@ -369,8 +391,7 @@ class CAFrame
   def select(*names)
     raise ArgumentError, "select requires at least one column name" if names.empty?
     cols = {}
-    names.each do |name|
-      key = name.to_s
+    column_keys(names, "select").each do |key|
       raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
       cols[key] = @columns[key]
     end
@@ -399,7 +420,7 @@ class CAFrame
     mask = yield(self)
     unless mask.is_a?(CArray) && mask.data_type == :boolean
       raise ArgumentError,
-            "filter block must return a boolean CArray (got #{mask.class})"
+            "filter block must return a boolean CArray (got #{mask.is_a?(CArray) ? "a #{CArray::Inspector.type_label(mask)} CArray" : mask.class})"
     end
     unless mask.shape == [@nrow]
       raise ArgumentError,
@@ -408,12 +429,69 @@ class CAFrame
     select_rows(mask, keep_masked: keep_masked)
   end
 
+  # Judge every row against named rules, and return the verdicts as a frame:
+  #
+  #   report = df.verify(
+  #     "age is not negative" => ->(f) { f["age"] >= 0 },
+  #     "end after start"     => ->(f) { f["end"] > f["start"] },
+  #   )
+  #   df.filter { |f| report["end after start"].not }   # the rows that break it
+  #
+  # A rule is called with the frame, as a +filter+ block is, and returns a
+  # boolean CArray with one entry per row on its first axis; true means the
+  # rule holds.  A rule over an N-D column may answer per cell, in the
+  # column's own shape, so the cells that break it can be masked directly.
+  # A cell the rule could not judge -- it read a masked value -- stays
+  # UNDEF rather than becoming false.
+  #
+  # The result has one column per rule, named after it, and this frame's
+  # index and row axis name.
+  #
+  # @param rules [Hash{String => #call}] the rules by name.
+  # @return [CAFrame]
+  # @raise [ArgumentError] when there are no rules, a name is empty, or a
+  #   rule does not return a boolean CArray of this frame's length.
+  # @raise [TypeError] when a name is not a String.
+  def verify(rules)
+    unless rules.is_a?(Hash)
+      raise ArgumentError, "verify: the rules are a Hash of name => rule (got #{rules.class})"
+    end
+    raise ArgumentError, "verify: there are no rules" if rules.empty?
+    verdicts = {}
+    rules.each do |name, rule|
+      key = column_name_arg(name, "verify")
+      if @index && key == @axis_name
+        raise ArgumentError,
+              "verify: rule #{key.inspect} has the name of the row axis, " \
+              "which the index has in the result; name the rule otherwise"
+      end
+      unless rule.respond_to?(:call)
+        raise ArgumentError, "verify: rule #{key.inspect} is not callable (got #{rule.class})"
+      end
+      verdict = rule.call(self)
+      unless verdict.is_a?(CArray) && verdict.data_type == :boolean
+        raise ArgumentError,
+              "verify: rule #{key.inspect} must return a boolean CArray (got " \
+              "#{verdict.is_a?(CArray) ? "a #{verdict.data_type} CArray" : verdict.class})"
+      end
+      unless verdict.shape[0] == @nrow
+        raise ArgumentError,
+              "verify: rule #{key.inspect} returned shape #{verdict.shape.inspect}, " \
+              "expected #{@nrow} rows on the first axis"
+      end
+      verdicts[key] = verdict
+    end
+    # The verdicts are a table about the rows, not a part of this one, so the
+    # frame's attributes are not carried.
+    CAFrame.new(verdicts, axis_name: @axis_name, index: @index)
+  end
+
   # Move a column to the index and name the row axis after it (memo §3).
   # An index-role change: the data is unchanged, so this mutates self and
   # returns it (memo §3.8). Any existing index is replaced.
   def set_index(name)
     refuse_if_frozen
-    key = name.to_s
+    key = column_key(name, "set_index")
     raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
     idx = @columns[key]
     unless idx.ndim == 1
@@ -517,7 +595,8 @@ class CAFrame
   def copy
     cols = {}
     @columns.each { |k, v| cols[k] = v.copy }
-    CAFrame.new(cols, axis_name: @axis_name, index: @index && @index.copy)
+    CAFrame.new(cols, axis_name: @axis_name, index: @index && @index.copy,
+                attrs: @attrs)
   end
 
   # +dup+ / +clone+ share the column data -- that is the CArray dup contract
@@ -528,6 +607,84 @@ class CAFrame
   private def initialize_copy(other)
     super
     @columns = @columns.dup
+    @attrs   = @attrs.dup if @attrs
+  end
+
+  # Marshal writes the instance variables as they are.  Loading stores the
+  # attribute values again as set_attr does, as frozen copies: Marshal
+  # brings back a value thawed.
+  private def marshal_dump
+    instance_variables.to_h { |name| [name, instance_variable_get(name)] }
+  end
+
+  private def marshal_load(ivars)
+    ivars.each { |name, value| instance_variable_set(name, value) }
+    if @attrs
+      @attrs = @attrs.transform_values { |v| CArray.__send__(:attr_coerce_value, v) }
+    end
+  end
+
+  # --- attributes of the frame ------------------------------------------
+  #
+  # Key/value metadata about the table as a whole (a title, a source), apart
+  # from each column's own attributes.  Keys and values follow the rules of
+  # CArray#set_attr: a Symbol or String key, stored as a String, and a
+  # JSON-compatible value, stored as a frozen copy.
+  #
+  # A frame made from this one takes its attributes when it holds the same
+  # table: a selection of rows (df[rows], filter, head, tail, sort_by,
+  # join(how: :semi / :anti)), a change of columns (select, append, drop,
+  # rename, ...), copy and dup.  A frame computed from it -- a summary, a
+  # join, a reshape -- does not; ask the frame it came from.  Each frame has
+  # its own Hash: setting an attribute on a frame made from this one leaves
+  # this one unchanged.
+
+  # The value of the attribute +key+, or nil when the frame has none.
+  def attr(key)
+    @attrs ? @attrs[CArray.__send__(:attr_normalize_key, key)] : nil
+  end
+
+  # Set the attribute +key+ to +value+ and return the stored value.
+  def set_attr(key, value)
+    refuse_if_frozen
+    CArray.__send__(:attr_validate_value, value)
+    (@attrs ||= {})[CArray.__send__(:attr_normalize_key, key)] =
+      CArray.__send__(:attr_coerce_value, value)
+  end
+
+  # Set every key of +hash+, as set_attr sets one, and return self.  Every
+  # value is checked before any is written.
+  def set_attrs(hash)
+    refuse_if_frozen
+    raise TypeError, "set_attrs takes a Hash (got #{hash.class})" unless hash.is_a?(Hash)
+    entries = hash.map do |key, value|
+      CArray.__send__(:attr_validate_value, value)
+      [CArray.__send__(:attr_normalize_key, key), CArray.__send__(:attr_coerce_value, value)]
+    end
+    unless entries.empty?
+      h = (@attrs ||= {})
+      entries.each { |k, v| h[k] = v }
+    end
+    self
+  end
+
+  # Remove the attribute +key+ and return its value, or nil.
+  def delete_attr(key)
+    k = CArray.__send__(:attr_normalize_key, key)
+    return nil unless @attrs&.key?(k)
+    refuse_if_frozen
+    @attrs.delete(k)
+  end
+
+  # A frozen Hash of the frame's attributes.
+  def attrs
+    (@attrs ? @attrs.dup : {}).freeze
+  end
+
+  # Whether the frame has any attribute, or the attribute +key+.
+  def has_attr?(key = nil)
+    return !(@attrs.nil? || @attrs.empty?) if key.nil?
+    !!@attrs&.key?(CArray.__send__(:attr_normalize_key, key))
   end
 
   # --- metadata readers (memo §13.2) ------------------------------------
@@ -559,18 +716,28 @@ class CAFrame
   # Index column (CArray) or nil.
   attr_reader :index
 
-  # name => data_type, freshly derived.
+  # name => data_type, freshly derived; a Face column gives its class
+  # (CATime, CAString, ...), since a Face's data_type is the surface its
+  # kernels dispatch on, not what the column holds.
   def data_types
     h = {}
-    @columns.each { |k, v| h[k] = v.data_type }
+    @columns.each { |k, v| h[k] = v.face? ? v.class : v.data_type }   # type-label: data_types returns the class itself, a value
     h
   end
 
+  # A frame of the same table with a different set of columns: it takes this
+  # frame's attributes.
   private def rebuild(cols)
-    CAFrame.new(cols, axis_name: @axis_name, index: @index)
+    CAFrame.new(cols, axis_name: @axis_name, index: @index, attrs: @attrs)
   end
 
+  # A column given to the frame: a CArray as it is; a Ruby Array typed by its
+  # values as from_records types a record's (build_record_column); anything
+  # else through its to_ca.
   private def coerce_column(col)
+    if col.is_a?(Array)
+      return CAFrame.__send__(:build_record_column, col, col.size)
+    end
     if col.is_a?(CAFrame)
       raise ArgumentError,
             "a CAFrame cannot be a column (it answers to_ca as a 2-D matrix); " \
@@ -680,8 +847,10 @@ class CAFrame
                                                    # column beforehand — silent
                                                    # promotion in a splice would
                                                    # hide schema drift.
+      splice_keep_attrs(new_cols[name], col)
     end
     new_index = splice_index(other, lo, hi)
+    splice_keep_attrs(new_index, @index) if new_index
     @columns  = new_cols
     @index    = new_index
     # Read the new count off something the frame now holds, rather than
@@ -695,6 +864,13 @@ class CAFrame
               0
             end
     self
+  end
+
+  # A splice edits this frame's table, so a spliced column keeps the
+  # attributes this frame's column had, whatever the rows put in carry.
+  private def splice_keep_attrs(result, own)
+    (result.attrs.keys - own.attrs.keys).each { |k| result.delete_attr(k) }
+    result.set_attrs(own.attrs)
   end
 
   # The index for a splice: head + other's index + tail. When this frame has
@@ -774,7 +950,7 @@ class CAFrame
       cols[name] = col[selector, *([nil] * (col.ndim - 1))]
     end
     new_index = @index ? @index[selector] : nil
-    CAFrame.new(cols, axis_name: @axis_name, index: new_index)
+    CAFrame.new(cols, axis_name: @axis_name, index: new_index, attrs: @attrs)
   end
 
   private def select_rows_keep_masked(selector)
@@ -802,8 +978,57 @@ class CAFrame
     # aliased index would write through to the parent from a frame whose columns
     # do not.
     new_index = @index ? @index[keep].copy : nil
-    CAFrame.new(cols, axis_name: @axis_name, index: new_index)
+    CAFrame.new(cols, axis_name: @axis_name, index: new_index, attrs: @attrs)
   end
+
+  # A column name given as an argument: a String, as the frame's column
+  # keys are. Symbols are the frame's options and types, never names.
+  private def column_key(name, verb)
+    CAFrame.__send__(:column_key, name, verb)
+  end
+
+  # A name a verb is given for a column -- or, with +what+, for the row
+  # axis -- is a String: a Symbol is a frame's option or type, never a
+  # name.  Anything else is refused with TypeError "<verb>: <what> is a
+  # String (got :x)", +hint+ appended.  A +verb+ that is an option, as
+  # "types:", already ends in its colon.
+  def self.column_key(name, verb, what = "a column name", hint: nil)
+    return name if name.is_a?(String)
+    message = "#{verb.end_with?(":") ? verb : "#{verb}:"} #{what} is a String (got #{name.inspect})"
+    message += "; #{hint}" if hint
+    raise TypeError, message
+  end
+  private_class_method :column_key
+
+  # A list of column names as a verb takes them: each a String, and none
+  # twice.
+  private def column_keys(names, verb)
+    CAFrame.__send__(:refuse_repeated_names, names.map { |n| column_key(n, verb) }, verb)
+  end
+
+  # Column names a verb makes or takes, none of them twice.  A frame holds
+  # one column per name, so a repeated name among new columns would keep
+  # only the last of them, and among the columns a verb takes would be
+  # taken once or twice depending on the verb.  Refused with ArgumentError
+  # "<verb>: <what> <name> more than once", +hint+ appended.  df[...] alone
+  # takes a name twice, as Hash#values_at does.
+  def self.refuse_repeated_names(names, verb, what = "names", hint: nil)
+    dup = names.tally.find { |_, count| count > 1 }
+    return names unless dup
+    message = "#{verb}: #{what} #{dup.first.inspect} more than once"
+    message += "; #{hint}" if hint
+    raise ArgumentError, message
+  end
+  private_class_method :refuse_repeated_names
+
+  # The labels an index is made of from a key -- a group's first values,
+  # the resample bins, the sorted pivot keys -- as the key column shows
+  # them: +labels+, already of the key's data type, Face and unit, given
+  # the key's attributes.  Returns +labels+.
+  def self.key_labels(key, labels)
+    key.__send__(:carry_attrs, labels)
+  end
+  private_class_method :key_labels
 
   private def positional_range?(range)
     (range.begin.nil? || range.begin.is_a?(Integer)) &&

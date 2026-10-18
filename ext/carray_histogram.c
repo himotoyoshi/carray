@@ -26,11 +26,38 @@
 #include "carray_internal.h"   /* ca_attach_window */
 #include <math.h>
 
-/* Resolve `redges` to a 1-D float64 CArray of at least two edges.  The
-   caller copies the edges out (ca_xfer_all into its own buffer) rather
-   than attaching them: the walk that follows reads the caller's array,
-   and a raise there must not leave the edges attached. */
-static CArray *
+/* Edges are the bin boundaries and must read as such: no masked edge (its
+   stored value is no boundary), no NaN, and no edge below the one before
+   it.  Equal edges (a bin of zero width) and infinite ones are kept. */
+static void
+histbin_check_edge_mask (CArray *ce, const char *name)
+{
+  if ( ca_has_mask(ce) && ca_is_any_masked(ce) ) {
+    rb_raise(rb_eArgError, "%s: edges has a masked value", name);
+  }
+}
+
+static void
+histbin_check_edge_order (const double *ep, ca_size_t n, const char *name)
+{
+  ca_size_t i;
+  for (i = 0; i < n; i++) {
+    if ( isnan(ep[i]) ) {
+      rb_raise(rb_eArgError, "%s: edges has NaN at %lld", name, (long long) i);
+    }
+    if ( i > 0 && ep[i] < ep[i-1] ) {
+      rb_raise(rb_eArgError, "%s: edges must not decrease "
+               "(%g at %lld after %g)", name, ep[i], (long long) i, ep[i-1]);
+    }
+  }
+}
+
+/* Resolve `redges` to a 1-D float64 CArray of at least two edges, and
+   return it: it may be a view made here, which only the caller can keep
+   alive.  The caller copies the edges out (ca_xfer_all into its own
+   buffer) rather than attaching them: the walk that follows reads the
+   caller's array, and a raise there must not leave the edges attached. */
+static VALUE
 histbin_resolve_edges (VALUE self, VALUE redges)
 {
   CArray *ce;
@@ -50,8 +77,9 @@ histbin_resolve_edges (VALUE self, VALUE redges)
   if ( ce->elements < 2 ) {
     rb_raise(rb_eArgError, "histbin_ki: edges needs at least 2 values");
   }
+  histbin_check_edge_mask(ce, "bin_to");
 
-  return ce;
+  return redges;
 }
 
 /* ---- shared binning helpers (used by histbin_ki + the fused kernel) ---- */
@@ -144,10 +172,13 @@ rb_ca_histbin_ki (VALUE self, VALUE redges, VALUE rinclude_max)
              ca_type_name[ca->data_type]);
   }
 
-  ce = histbin_resolve_edges(self, redges);
+  redges = histbin_resolve_edges(self, redges);
+  GetCArray(redges, ce);
   ep = ALLOCV_N(double, hedges, ce->elements);
   ca_xfer_all(ce, ep, CA_XFER_GET);
+  histbin_check_edge_order(ep, ce->elements, "bin_to");
   histbin_axis_setup(&ax, ep, ce->elements, RTEST(rinclude_max));
+  RB_GC_GUARD(redges);   /* a view made by histbin_resolve_edges is read through ce */
 
   /* output: fresh contiguous int64, same shape as self. */
   vout = rb_carray_new(CA_INT64, ca->ndim, ca->dim, 0, NULL);
@@ -315,6 +346,10 @@ histogram_scatter_edges (VALUE arg)
   histogram_scatter_t *c = (histogram_scatter_t *) arg;
   long k;
   for ( k = 0; k < c->M; k++ ) {
+    histbin_check_edge_order((const double *) c->edge_ca[k]->ptr,
+                             c->edge_ca[k]->elements, "histogram");
+  }
+  for ( k = 0; k < c->M; k++ ) {
     histbin_axis_setup(&c->axes[k], (const double *) c->edge_ca[k]->ptr,
                        c->edge_ca[k]->elements,
                        RTEST(RARRAY_AREF(c->rincmax, k)));
@@ -382,6 +417,7 @@ rb_ca_histogram_scatter_ki (VALUE self, VALUE rcounts, VALUE redges,
   for ( k = 0; k < M; k++ ) {
     VALUE e = RARRAY_AREF(redges, k);
     GetCArray(e, edge_ca[k]);
+    histbin_check_edge_mask(edge_ca[k], "histogram");
   }
 
   /* ext strides (row-major within the trailing M bin axes of counts). */
@@ -428,7 +464,16 @@ rb_ca_histogram_scatter_ki (VALUE self, VALUE rcounts, VALUE redges,
      weights = nil OR float64 [fiber..., A] (second iterator in lockstep).
    =========================================================================== */
 
-#define BINCOUNT_ND_BODY(LABEL_T)                                              \
+/* A label at or above the last bin lands in the overflow cell.  An unsigned
+   64-bit label above INT64_MAX must be clamped before it becomes an int64,
+   or it turns negative and indexes before the counts. */
+static inline int64_t
+bincount_nd_label_u64 (uint64_t x)
+{
+  return ( x > (uint64_t) INT64_MAX ) ? INT64_MAX : (int64_t) x;
+}
+
+#define BINCOUNT_ND_BODY(LABEL_T, TO_INT64)                                    \
   do {                                                                         \
     while ( ca_iter_state_next_slab_axes(&st, &p, &m) ) {                      \
       ca_size_t fiber_base = 0, A, a, kk, ss, cs, sms, cms, ws = 0, wms = 0;   \
@@ -441,7 +486,7 @@ rb_ca_histogram_scatter_ki (VALUE self, VALUE rcounts, VALUE redges,
       for ( a = 0; a < A; a++ ) {                                             \
         ca_size_t off = fiber_base; int masked = 0;                           \
         for ( kk = 0; kk < (ca_size_t) M; kk++ ) {                            \
-          int64_t v = (int64_t) *(const LABEL_T *)(p + a * ss + kk * cs);     \
+          int64_t v = TO_INT64(*(const LABEL_T *)(p + a * ss + kk * cs));     \
           if ( m && m[a * sms + kk * cms] ) { masked = 1; break; }            \
           if ( v >= ext_dim[kk] - 1 ) v = ext_dim[kk] - 1;                    \
           off += (ca_size_t) v * ext_stride[kk];                             \
@@ -515,14 +560,14 @@ rb_ca_bincount_nd_count_ki (VALUE self, VALUE rcounts, VALUE rweights)
     for ( mm = 0; mm < st.outer_ndim; mm++ ) cur_outer_idx[mm] = 0;
 
     switch ( ca->data_type ) {
-    case CA_INT8:   BINCOUNT_ND_BODY(int8_t);   break;
-    case CA_UINT8:  BINCOUNT_ND_BODY(uint8_t);  break;
-    case CA_INT16:  BINCOUNT_ND_BODY(int16_t);  break;
-    case CA_UINT16: BINCOUNT_ND_BODY(uint16_t); break;
-    case CA_INT32:  BINCOUNT_ND_BODY(int32_t);  break;
-    case CA_UINT32: BINCOUNT_ND_BODY(uint32_t); break;
-    case CA_INT64:  BINCOUNT_ND_BODY(int64_t);  break;
-    case CA_UINT64: BINCOUNT_ND_BODY(uint64_t); break;
+    case CA_INT8:   BINCOUNT_ND_BODY(int8_t, (int64_t));   break;
+    case CA_UINT8:  BINCOUNT_ND_BODY(uint8_t, (int64_t));  break;
+    case CA_INT16:  BINCOUNT_ND_BODY(int16_t, (int64_t));  break;
+    case CA_UINT16: BINCOUNT_ND_BODY(uint16_t, (int64_t)); break;
+    case CA_INT32:  BINCOUNT_ND_BODY(int32_t, (int64_t));  break;
+    case CA_UINT32: BINCOUNT_ND_BODY(uint32_t, (int64_t)); break;
+    case CA_INT64:  BINCOUNT_ND_BODY(int64_t, (int64_t));  break;
+    case CA_UINT64: BINCOUNT_ND_BODY(uint64_t, bincount_nd_label_u64); break;
     default:
       ca_iter_state_finish(&st);
       if ( weighted ) ca_iter_state_finish(&stw);

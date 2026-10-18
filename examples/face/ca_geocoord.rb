@@ -110,7 +110,7 @@ if __FILE__ == $0
   puts "=== CAGeoCoord sample ==="
   puts "pts.class      : #{pts.class}"
   puts "pts.data_class : #{pts.data_class}"
-  puts "pts.dim        : #{pts.dim.inspect}"
+  puts "pts.shape      : #{pts.shape.inspect}"
   puts "pts.parent     : #{pts.parent.class} (FIXLEN, #{pts.parent.bytes}B/elem)"
   puts
 

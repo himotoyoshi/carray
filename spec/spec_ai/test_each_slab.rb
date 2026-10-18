@@ -48,7 +48,7 @@ class TestEachSlabBeta4 < Test::Unit::TestCase
   def test_yields_each_fiber_3d
     a = CArray.int32(2, 3, 4).seq!
     seen_lens = []
-    a.each_slab(axis: -1) { |fiber| seen_lens << fiber.dim[0] }
+    a.each_slab(axis: -1) { |fiber| seen_lens << fiber.shape[0] }
     assert_equal [4] * 6, seen_lens   # 2 * 3 outer iters, each fiber length 4
   end
 
@@ -134,7 +134,11 @@ class TestEachSlabBeta4 < Test::Unit::TestCase
                  rows_as_arrays
   end
 
+  # An entity walked in place: its slab is a window onto it, so dup reads
+  # the cells of that iteration.  Not a contract (copy is the snapshot);
+  # the transfer walk of CARRAY_GENERAL_PATH=2 does not walk in place.
   def test_dup_snapshot_in_block_works
+    omit "relies on the in-place walk of an entity" if CArray.__iter_by_transfer_only__
     a = CArray.int32(3, 4).seq!
     rows_dup = []
     a.each_slab(axis: 1) { |row| rows_dup << row.dup }

@@ -179,8 +179,8 @@ class CArray
   #   is a one-liner on top of `flatten[axis2addr(...)]`.
   #
   #   Shape rule: `indices.ndim == self.ndim`, and
-  #   `indices.dim[j] == self.dim[j]` for all `j != axis`;
-  #   `indices.dim[axis]` is free.
+  #   `indices.shape[j] == self.shape[j]` for all `j != axis`;
+  #   `indices.shape[axis]` is free.
   #
   #   `indices` data_type: any integer kind (zero-copy when
   #   already `:int64`). Negative indices: Python-style
@@ -196,9 +196,10 @@ class CArray
   #   @return [CArray] `:int64` view-flat addresses, same shape as
   #     `indices`.
   #   @raise [IndexError] when an index is out of range after
-  #     negative normalization.
-  #   @raise [ArgumentError] for shape / ndim / data_type
-  #     violations.
+  #     negative normalization, or `indices` is a float or complex
+  #     array.
+  #   @raise [ArgumentError] for shape / ndim violations, or a
+  #     boolean / object `indices`.
   def axis2addr(indices, axis: 0); end
 
   # @!endgroup

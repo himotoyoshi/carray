@@ -302,28 +302,47 @@ class CABlockIterator < CAIterator
   #   @param fill_value [Object, nil] value to put in place of a masked
   #     result instead of leaving it masked.
   #   @return [CArray] tile-grid shaped
-  [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev,
-   :variancep, :stddevp].each do |op|
-    define_method(op) do |min_count: nil, fill_value: nil|
-      if FACE_WINNER_INDEX.key?(op) && @source.face?
-        return face_winner(FACE_WINNER_INDEX[op], min_count, fill_value)
-      end
-      kw = {}
-      kw[:min_count]  = min_count  unless min_count.nil?
-      kw[:fill_value] = fill_value unless fill_value.nil?
-      fold(op, **kw)
+  CArray.send(:define_named_methods, self,
+              [:sum, :accumulate, :prod, :mean, :min, :max, :variance, :stddev,
+               :variancep, :stddevp], :fold_reduction)
+
+  private def fold_reduction (op, min_count: nil, fill_value: nil)
+    if FACE_WINNER_INDEX.key?(op) && @source.face?
+      return face_winner(FACE_WINNER_INDEX[op], min_count, fill_value)
     end
+    kw = {}
+    kw[:min_count]  = min_count  unless min_count.nil?
+    kw[:fill_value] = fill_value unless fill_value.nil?
+    fold(op, **kw)
   end
 
-  [:all, :any].each do |op|
-    define_method(op) { |**kw| fold(op, **CAIterator.reduce_keywords(op, kw)) }
+  CArray.send(:define_named_methods, self, [:all, :any], :fold_with_keywords)
+
+  private def fold_with_keywords (op, **kw)
+    fold(op, **CAIterator.reduce_keywords(op, kw))
   end
+
+  # @!method first
+  #   Per-tile first present value, in row-major order within the tile;
+  #   UNDEF for a tile with none.
+  #   @return [CArray] tile-grid shaped
+  # @!method last
+  #   Per-tile last present value; UNDEF for a tile with none.
+  #   @return [CArray] tile-grid shaped
+  # @!method nunique
+  #   Per-tile number of distinct present values (int64); 0 for a tile with
+  #   none.
+  #   @return [CArray] tile-grid shaped
+  #
+  # These take no `min_count:` or `fill_value:`, as the core ones do not.
+  CArray.send(:define_named_methods, self, [:first, :last, :nunique], :fold_with_keywords)
 
   # A Face's minimum and maximum are cells of the Face, so they are gathered
   # from the source by the winner's address.  Assembling the per-region results
   # instead copies the Face's storage into an array that no longer knows it is
   # one: a CATime came back as 8-byte strings.
   FACE_WINNER_INDEX = { min: :min_index, max: :max_index }.freeze
+  Ractor.make_shareable(FACE_WINNER_INDEX)
   private_constant :FACE_WINNER_INDEX
 
   # ---- count family and elements ----------------------------------------
@@ -362,11 +381,11 @@ class CABlockIterator < CAIterator
   #   @return [CArray]
   def count_masked (**kw)
     kw   = CAIterator.reduce_keywords(:count_masked, kw)
-    need = CArray.__min_count_need__(:count_masked, kw[:min_count], 0)
+    need = CArray.__present_cells_needed_per_result_cell__(:count_masked, kw[:min_count], 0)
     out  = elements - count_not_masked
     # A count of the mask reads every cell of the tile.
     out[elements.lt(need)] = UNDEF if need > 0
-    CArray.__reduce_fill__(out, kw[:fill_value])
+    CArray.__fill_undefined_result_cells__(out, kw[:fill_value])
   end
 
   # @overload elements
@@ -434,13 +453,14 @@ class CABlockIterator < CAIterator
   # and with `min_count` a tile with too few present cells, is a masked cell.
   def face_winner (idx_op, min_count, fill_value)
     addr = winner_addr(idx_op)
-    need = CArray.__min_count_need__(idx_op == :min_index ? :min : :max, min_count, 0)
+    need = CArray.__present_cells_needed_per_result_cell__(idx_op == :min_index ? :min : :max, min_count, 0)
     addr[count_not_masked.lt(need)] = UNDEF if need > 0
     src   = @source.reshape(@source.elements)
     empty = addr.is_masked
     return src[addr].copy unless empty.any
-    # A masked index drops the cell rather than masking it, so an empty tile
-    # needs a placeholder address.  Pointing it at a masked cell of the source
+    # A masked index would read as masked, but gathering by one gives the
+    # source a mask, so an empty tile takes a placeholder address instead.
+    # Pointing it at a masked cell of the source
     # carries the mask through the gather, which a read-only Face (whose copy
     # cannot be written) needs.  Otherwise mask the placeholder afterwards.
     if fill_value.nil? && src.has_mask? && (hole = src.is_masked.where).elements > 0
@@ -474,7 +494,7 @@ class CABlockIterator < CAIterator
       out ||= CArray.int64(*@shape)
       out[*out_ranges] = picked
     end
-    CArray.__reduce_fill__(out || CArray.int64(*@shape), kw[:fill_value])
+    CArray.__fill_undefined_result_cells__(out || CArray.int64(*@shape), kw[:fill_value])
   end
 
   public
@@ -691,24 +711,81 @@ class CABlockIterator < CAIterator
   # @!method cumcount
   #   Per-tile running count of present cells (int64), source-shaped.
   #   @return [CArray]
-  [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
-    define_method(op) { block_scan(op) }
+  CArray.send(:define_named_methods, self,
+              [:cumsum, :cumprod, :cummax, :cummin, :cumcount], :scan_tiles)
+
+  # A scan takes no arguments here.
+  private def scan_tiles (op, *args)
+    unless args.empty?
+      raise ArgumentError, "wrong number of arguments (given #{args.size}, expected 0)"
+    end
+    block_scan(op)
+  end
+
+  # @overload lag(n = 1)
+  #   Per-tile value `n` steps earlier, counting the tile's cells row-major;
+  #   UNDEF where the tile has none, so a lag never reaches into another
+  #   tile. A partial edge tile counts only the cells it has.
+  #   @return [CArray] source-shaped
+  def lag (n = 1)
+    unless n.is_a?(Integer)
+      raise TypeError, "lag: n must be an Integer (got #{n.class})"
+    end
+    tile_wise { |rows, axis| rows.lag(n, axis: axis) }
+  end
+
+  # @overload strip_mask(method:)
+  #   Per-tile fill of the masked cells, counting the tile's cells row-major:
+  #   `:forward` / `:ffill` or `:backward` / `:bfill`. A fill never reaches
+  #   into another tile, so a masked cell with nothing to carry in its tile
+  #   stays masked.
+  #   @return [CArray] source-shaped
+  def strip_mask (method:)
+    CAIterator.hold_backward?(method)
+    tile_wise { |rows, axis| rows.strip_mask(method: method, axis: axis) }
+  end
+
+  # @overload order(descending: false, method: :ordinal, kind: :quick)
+  #   Per-tile rank of each cell among the tile's cells (int64, `0` the
+  #   smallest), as `CArray#order` ranks them; a partial edge tile ranks only
+  #   the cells it has. The keywords are those of `CArray#order`.
+  #   @return [CArray] source-shaped
+  def order (**kw)
+    tile_wise { |rows, axis| rows.order(axis: axis, **kw) }
   end
 
   private
+
+  # A source-shaped result built tile by tile: the block gets a region's
+  # tiles as rows (one tile's cells, row-major, along +axis+) and gives back
+  # rows of the same shape. Each region has whole tiles of one size, so a
+  # partial edge tile is its own cells rather than cells and padding.
+  def tile_wise
+    out = nil
+    each_region do |strip_ranges, tiles, _out_ranges|
+      view  = @source[*strip_ranges].block_view(*tiles)
+      grid  = view.shape[0, @sndim]
+      found = yield(view.copy.reshape(*grid, tiles.inject(1, :*)), @sndim)
+                .reshape(*grid, *tiles)
+      out ||= tile_output(found)
+      out[*strip_ranges].block_view(*tiles)[] = tile_values(out, found)
+    end
+    # a source with no cells has no region; its one-cell rows give the type
+    out || yield(@source.copy.reshape(*@source.shape, 1), @sndim).reshape(*@source.shape)
+  end
 
   # Drive a within-tile segment scan: scan each tile flattened row-major and
   # scatter back to a source-shaped result.  The output data type is taken from the
   # first tile's scan (all tiles share it); the padded margin is UNDEF and the
   # OOB cells of a partial edge tile are cropped from the result.
-  def block_scan (op)
+  def block_scan (op, *args)
     tgv  = tile_grid_view
     nils = Array.new(@sndim, nil)
     pout = nil
     pgv  = nil
     CArray.each_index(*@shape) do |*g|
       tile    = tgv[*g, *nils]
-      scanned = tile.copy.reshape(tile.elements).public_send(op).reshape(*@sizes)
+      scanned = tile.copy.reshape(tile.elements).public_send(op, *args).reshape(*@sizes)
       unless pout
         pout = CArray.new(scanned.data_type, padded_source.shape, bytes: scanned.bytes)
         pout[] = UNDEF
@@ -717,6 +794,24 @@ class CABlockIterator < CAIterator
       pgv[*g, *nils] = scanned
     end
     pout[*@sndim.times.map { |i| 0...@source.shape[i] }].copy
+  end
+
+  # A source-shaped array that can hold what #tile_wise gives: of its kind,
+  # or an object array for a read-only Face, which cannot be written cell by
+  # cell.
+  def tile_output (lagged)
+    if lagged.face? && lagged.read_only?
+      CArray.object(*@source.shape)
+    else
+      lagged.__send__(:blank_like, @source.shape)
+    end
+  end
+
+  # The values as +out+ can hold them: a Face going into an object array
+  # goes as its surface values, not its storage.
+  def tile_values (out, lagged)
+    return lagged unless out.data_type == CA_OBJECT && lagged.face?
+    CArray.object(*lagged.shape) { lagged.to_a }
   end
 
   # A padded entity whose interior holds the source and whose partial-edge
@@ -729,7 +824,7 @@ class CABlockIterator < CAIterator
       if pshape == @source.shape.to_a
         @source
       else
-        pad = CArray.new(@source.data_type, pshape, bytes: @source.bytes)
+        pad = @source.__send__(:blank_like, pshape)   # a Face stays one
         pad[] = UNDEF
         pad[*@sndim.times.map { |i| 0...@source.shape[i] }] = @source
         pad
@@ -742,6 +837,14 @@ class CABlockIterator < CAIterator
   def tile_grid_view
     @tile_grid_view ||= padded_source.block_view(*@sizes)
   end
+
+  # lag and strip_mask(method:) give the source's values moved or held in
+  # place, so the result shows the source's attributes, as CArray#lag and
+  # CArray#strip_mask(method:) do.
+  prepend(Module.new do
+    def lag (*args, **keywords) = @source.__send__(:carry_attrs, super)
+    def strip_mask (**keywords) = @source.__send__(:carry_attrs, super)
+  end)
 end
 
 

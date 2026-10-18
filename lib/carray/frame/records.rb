@@ -16,7 +16,8 @@
 
 class CAFrame
   # Build a frame from an Array of row Hashes. Column set is the union of keys
-  # in first-appearance order; keys are stringified. +types:+ takes
+  # in first-appearance order; keys are stringified, and two keys that
+  # stringify to one name (+:temp+ and +"temp"+) raise. +types:+ takes
   # anything +cast+ takes as a map (a name => type map, :infer, or a map with
   # +default:+) and casts the built frame with it, with +on_error:+ as for
   # +cast+.
@@ -27,6 +28,11 @@ class CAFrame
     return new if records.empty?
 
     keys = record_key_union(records)
+    if keys.any? { |k| k.to_s.empty? }
+      raise ArgumentError, "from_records: a key names a column, and a column name can not be empty"
+    end
+    refuse_repeated_names(keys.map(&:to_s), "from_records", "the keys name the column",
+                          hint: "a String key and a Symbol key spell it both ways; use one spelling")
     n = records.size
     cols = {}
     keys.each do |key|
@@ -56,15 +62,27 @@ class CAFrame
   end
   private_class_method :record_key_union
 
-  # Arrange one column's values (Ruby objects, nil for missing) into a CArray.
-  # All-Array cells of equal length -> N-D native column; numeric scalars ->
-  # native scalar column (nil -> UNDEF); anything else -> object column.
+  # Arrange one column's values (Ruby objects, nil or UNDEF for missing) into
+  # a CArray: the one rule a frame types Ruby values by, wherever it takes
+  # them (CAFrame.new and df[name]= given an Array, from_records, the values
+  # a group's block or Proc gives).  All-Array cells of equal length -> N-D
+  # native column; numeric scalars -> native scalar column (missing ->
+  # UNDEF); Strings -> a text column (CAString), as from_csv reads text;
+  # time and duration elements -> a CATime / CATimedelta column in the finest
+  # resolution among them; anything else -> object column.
   def self.build_record_column(values, n)
+    values = values.map { |v| UNDEF.equal?(v) ? nil : v }
     present = values.reject(&:nil?)
     return mask_missing(CArray.object(n) { values }) if present.empty?
 
     if present.all? { |v| v.is_a?(Array) || v.is_a?(CArray) }
       build_nd_column(values, present, n)
+    elsif present.all? { |v| v.is_a?(String) }
+      CArray.string(values)
+    elsif present.all? { |v| v.is_a?(CATime::Element) }
+      CArray.time(values)
+    elsif present.all? { |v| v.is_a?(CATimedelta::Element) }
+      build_duration_column(values, present, n)
     else
       type = numeric_leaf_type(present)
       col = CArray.object(n) { values }
@@ -72,6 +90,27 @@ class CAFrame
     end
   end
   private_class_method :build_record_column
+
+  # A CATimedelta column of duration elements, in the finest of their
+  # resolutions. Durations that have no common resolution (a month beside a
+  # second) stay an object column of the elements.
+  def self.build_duration_column(values, present, n)
+    unit = begin
+      present.map(&:unit).reduce { |a, b| CATimeUnitAlgebra.finer(a, b) }
+    rescue ArgumentError
+      return mask_missing(CArray.object(n) { values })
+    end
+    ticks = CArray.int64(n)
+    values.each_with_index do |v, i|
+      ticks[i] =
+        if v.nil? then UNDEF
+        elsif v.unit == unit then v.value
+        else CA_INT64([v.value]).timedelta(unit: v.unit).to_unit(unit).ticks[0]
+        end
+    end
+    ticks.timedelta(unit: unit)
+  end
+  private_class_method :build_duration_column
 
   # A missing cell is UNDEF, not a Ruby nil sitting in a cell.  to_records
   # writes a masked cell as nil, so nil on the way back in is the only
@@ -98,13 +137,34 @@ class CAFrame
     end
 
     blank = shape.reverse.inject(nil) { |cell, d| Array.new(d) { cell } }
-    nested = values.map { |v| v.nil? ? blank : (v.is_a?(CArray) ? v.to_a : v) }
+    # A missing leaf is nil or UNDEF (a masked cell of a CArray cell reads
+    # as UNDEF), the same two spellings a scalar cell has.
+    nested = values.map { |v| v.nil? ? blank : undef_to_nil(v.is_a?(CArray) ? v.to_a : v) }
     leaves = nested.flatten.compact
-    type = leaves.empty? ? nil : numeric_leaf_type(leaves)
+    # Cells given as numeric CArrays keep their data type, the one the
+    # cells have in common, when that type holds every cell's values;
+    # otherwise (int64 beside uint64, a large int64 beside float32), and
+    # for Ruby values, the column is typed by its leaves.
+    common = if present.all? { |v| v.is_a?(CArray) && !v.face? && v.numeric? }
+               CArray.result_type(*present)
+             end
+    type = if common && present.all? { |v| holds_values?(v, common) }
+             common
+           elsif leaves.empty?
+             nil
+           else
+             numeric_leaf_type(leaves)
+           end
     table = CArray.object(n, *shape) { nested }
     type ? table.to_type(type) : mask_missing(table)
   end
   private_class_method :build_nd_column
+
+  def self.undef_to_nil(v)
+    return v.map { |e| undef_to_nil(e) } if v.is_a?(Array)
+    UNDEF.equal?(v) ? nil : v
+  end
+  private_class_method :undef_to_nil
 
   # The shape of a rectangular nested Array, or nil when it is not
   # rectangular.  A leaf (anything but an Array) has shape [].
@@ -120,8 +180,24 @@ class CAFrame
   # :int64 if every value is an Integer, :float64 for Integers and Floats,
   # :cmplx128 when Complex values join them, otherwise nil (keep object).
   # Other Numerics (Rational, BigDecimal) stay object: a float column would
-  # round them, and a Complex one has room for them only as floats too.
+  # round them, and a Complex one has room for them only as floats too.  So
+  # does an Integer an int64 cannot hold: it is kept as it is, not refused.
+  INT64_RANGE = (-2**63..2**63 - 1)
+  private_constant :INT64_RANGE
+
+  # Whether converting the numeric CArray +cell+ to +data_type+ keeps every
+  # value (a NaN stays a NaN).
+  def self.holds_values?(cell, data_type)
+    return true if cell.data_type == data_type
+    # coerce: the type CArray.result_type chose for the cells, tried on each
+    cell.to_type(data_type).to_a.flatten.zip(cell.to_a.flatten).all? do |a, b|
+      a == b || (a.respond_to?(:nan?) && b.respond_to?(:nan?) && a.nan? && b.nan?)
+    end
+  end
+  private_class_method :holds_values?
+
   def self.numeric_leaf_type(values)
+    return nil if values.any? { |v| v.is_a?(Integer) && !INT64_RANGE.cover?(v) }
     if values.all? { |v| v.is_a?(Integer) }
       :int64
     elsif values.all? { |v| v.is_a?(Integer) || v.is_a?(Float) }

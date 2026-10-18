@@ -71,9 +71,11 @@ class CAWindowIterator < CAIterator
   #   `:nearest` / `:truncate`).  `fill_value:` is a constant margin value
   #   (an escape for `:constant` padding); when given it overrides `:skip`.
   #
-  #   For backward compatibility `initialize(window_view)` accepts a CAWindow
-  #   view (the old `CAWindowIterator.new(a.window(...))` form): the geometry
-  #   (offset ranges, bounds, fill value) is read back from the view.
+  #   For backward compatibility `initialize(window_view)` with no ranges
+  #   accepts a CAWindow view (the old `CAWindowIterator.new(a.window(...))`
+  #   form): the geometry (offset ranges, bounds, fill value) is read back
+  #   from the view.  Given ranges, a CAWindow view is rolled over like any
+  #   other array.
   #
   #   @param source [CArray, CAWindow] the array to roll over, or a CAWindow
   #     view to read the geometry from.
@@ -81,7 +83,7 @@ class CAWindowIterator < CAIterator
   #   @param bounds [Symbol] `:skip` / `:nearest` / `:truncate`.
   #   @param fill_value [Object, nil] constant margin value, overriding :skip.
   def initialize (source, *ranges, bounds: :skip, fill_value: nil)
-    if source.is_a?(CArray) && source.obj_type == CA_OBJ_WINDOW
+    if ranges.empty? && source.is_a?(CArray) && source.obj_type == CA_OBJ_WINDOW
       # Backward-compat: read geometry from a CAWindow view built by #window.
       # start[i] = lo, shape[i] (window width) = w, so hi = lo + w - 1.
       win     = source
@@ -198,7 +200,7 @@ class CAWindowIterator < CAIterator
     buffer = padded_entity
     wanted = @ndim.times.map { |k| @origins[k]...(@origins[k] + @shape[k] + @widths[k] - 1) }
     return buffer if wanted.each_with_index.all? { |range, k|
-      range.begin.zero? && range.end == buffer.dim[k]
+      range.begin.zero? && range.end == buffer.shape[k]
     }
     buffer[*wanted]
   end
@@ -269,9 +271,9 @@ class CAWindowIterator < CAIterator
   # the Face's own.  A buffer of the Face's surface type could not take the
   # margin values at all.
   def pad_face (src, lefts, rights, mode, value)
-    storage = src.__send__(:__face_storage__)
+    storage = src.__send__(:face_storage)
     if mode == :constant && !value.nil?
-      cell = src.__send__(:__blank_like__, [1])
+      cell = src.__send__(:blank_like, [1])
       cell[0] = value
       padded = pad_source(storage, lefts, rights, :constant, cell.parent[0])
     else
@@ -472,6 +474,28 @@ class CAWindowIterator < CAIterator
     RUBY
   end
 
+  # @!method first
+  #   Rolling first present value, in row-major order within the window;
+  #   UNDEF for a window with none (the UNDEF margin of `:skip` is not
+  #   present, so a window over the edge starts at its first source cell).
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @!method last
+  #   Rolling last present value; UNDEF for a window with none.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  # @!method nunique
+  #   Rolling number of distinct present values (int64); 0 for a window with
+  #   none.
+  #   @return [CArray] reference-shaped (or shrunk, for :truncate)
+  #
+  # These take no `min_count:` or `fill_value:`, as the core ones do not.
+  [:first, :last, :nunique].each do |op|
+    class_eval <<~RUBY, __FILE__, __LINE__ + 1
+      def #{op} (**kw)
+        sliding_view.#{op}(axis: @window_axes, **CAIterator.reduce_keywords(:#{op}, kw))
+      end
+    RUBY
+  end
+
   # @overload min_addr
   #   Rolling flat SOURCE address of the window minimum — which source cell holds
   #   it, so `source.reshape(source.elements)[sw.min_addr]` are the window minima.
@@ -517,6 +541,12 @@ class CAWindowIterator < CAIterator
                   :min  => :pmin!, :max  => :pmax!,
                   :all  => :and!,  :any  => :or! }.freeze
 
+  # A boolean accumulates as the core's does, by parity, so its kernel is xor.
+  def offset_fold_kernel (op)
+    return :xor! if op == :accumulate && @source.data_type == CA_BOOLEAN
+    OFFSET_FOLD.fetch(op)
+  end
+
   # Widest window this path takes on any one axis.
   OFFSET_FOLD_MAX_WIDTH = 5
 
@@ -524,7 +554,7 @@ class CAWindowIterator < CAIterator
   # answer for -- in which case the caller delegates as before.
   def fold_by_offset (op, min_count, fill_value = nil)
     return nil unless CArray.__fast_paths_enabled__
-    need = CArray.__min_count_need__(op, min_count, 0)
+    need = CArray.__present_cells_needed_per_result_cell__(op, min_count, 0)
     return nil unless op == :mean || OFFSET_FOLD.key?(op)
     # The elementwise kernels act on a Face's storage; its reductions are its own.
     return nil if @source.face?
@@ -538,7 +568,7 @@ class CAWindowIterator < CAIterator
     folded = mask_empty_windows(folded) if EMPTY_WINDOW_IS_UNDEFINED.include?(op)
     folded = apply_min_count(folded, need)
     # A `fill_value:` on the call replaces a result that came out undefined.
-    CArray.__reduce_fill__(folded, fill_value)
+    CArray.__fill_undefined_result_cells__(folded, fill_value)
   end
 
   # The mean is the sum over the same offsets, divided by the number of cells
@@ -551,13 +581,14 @@ class CAWindowIterator < CAIterator
       divisor = counts.copy
       divisor[counts.eq(0)] = 1
     end
+    # coerce: the mean's fixed compute type
     accumulate_offsets(:sum).to_type(offset_fold_data_type(:mean)) / divisor
   end
 
   # Walks the window offsets, accumulating each shifted plane into the result.
   def accumulate_offsets (op, base = nil, kernel = nil, data_type = nil)
     base      ||= offset_fold_base(op)
-    kernel    ||= OFFSET_FOLD.fetch(op)
+    kernel    ||= offset_fold_kernel(op)
     data_type ||= offset_fold_data_type(op)
     accumulator = nil
     offset_grid.each do |offset|
@@ -604,7 +635,7 @@ class CAWindowIterator < CAIterator
     @source.is_nan.any
   end
 
-  # A result only where the window held `need` cells (CArray.__min_count_need__).
+  # A result only where the window held `need` cells (CArray.__present_cells_needed_per_result_cell__).
   def apply_min_count (folded, need)
     return folded if need == 0
     counts = window_cell_counts
@@ -708,7 +739,7 @@ class CAWindowIterator < CAIterator
   def offset_fold_data_type (op)
     @offset_fold_data_type ||= {}
     @offset_fold_data_type[op] ||=
-      CArray.new(@source.data_type, [1, 1], bytes: @source.bytes).send(op, axis: [1]).data_type
+      CAIterator.core_probe(@source).public_send(op, axis: [1]).data_type
   end
 
   # Every offset within the window, as a list of per-axis positions into the
@@ -752,7 +783,7 @@ class CAWindowIterator < CAIterator
     end
     addr[oob] = UNDEF unless @bounds == :nearest
     addr[mi.is_masked.eq(1)] = UNDEF if mi.has_mask?
-    CArray.__reduce_fill__(addr, kw[:fill_value])
+    CArray.__fill_undefined_result_cells__(addr, kw[:fill_value])
   end
 
   public
@@ -1063,13 +1094,51 @@ class CAWindowIterator < CAIterator
   #   winner is well-defined).
   #   @raise [NotImplementedError]
   [:cumsum, :cumprod, :cummax, :cummin, :cumcount].each do |op|
-    define_method(op) do |*, **|
+    # define_method: a refusal that names itself in its own message
+    define_method(op, &Ractor.make_shareable(proc do |*, **|
       raise NotImplementedError,
             "#{self.class} has no #{op}: a segment scan needs each cell to " \
             "belong to exactly one piece, but overlapping windows share cells, " \
             "so a per-cell running value is ill-defined; use reduce for a " \
             "custom per-window fold."
-    end
+    end))
+  end
+
+  # @!method lag(n = 1)
+  #   Not supported for a window iterator. A lag writes each cell the value
+  #   some steps earlier in its piece, which needs each cell to have one
+  #   position in one piece; overlapping windows put a cell in many windows.
+  #   Use `source.lag(n, axis:)` for the lag along an axis.
+  #   @raise [NotImplementedError]
+  def lag (*)
+    raise NotImplementedError,
+          "#{self.class} has no lag: a cell belongs to many overlapping windows, " \
+          "so it has no single position to step back from; use " \
+          "source.lag(n, axis:) for the lag along an axis."
+  end
+
+  # @!method strip_mask
+  #   Not supported for a window iterator: a cell belongs to many overlapping
+  #   windows, so it has no single value to be filled with. Use
+  #   `source.strip_mask(method:, axis:)` for a fill along an axis.
+  #   @raise [NotImplementedError]
+  def strip_mask (*, **)
+    raise NotImplementedError,
+          "#{self.class} has no strip_mask: a cell belongs to many overlapping " \
+          "windows, so it has no single fill; use source.strip_mask(method:, axis:) " \
+          "for a fill along an axis."
+  end
+
+  # @!method order
+  #   Not supported for a window iterator: a cell belongs to many overlapping
+  #   windows, so it has no single rank. Use `source.order(axis:)` for the
+  #   rank along an axis.
+  #   @raise [NotImplementedError]
+  def order (*, **)
+    raise NotImplementedError,
+          "#{self.class} has no order: a cell belongs to many overlapping windows, " \
+          "so it has no single rank; use source.order(axis:) for the rank along " \
+          "an axis."
   end
 
   private
@@ -1095,7 +1164,44 @@ class CArray
   #   @param bounds [Symbol] `:skip` / `:nearest` / `:truncate`.
   #   @param fill_value [Object, nil] constant margin value.
   #   @return [CAWindowIterator]
-  def windows (*ranges, bounds: :skip, fill_value: nil)
+  # @overload windows(on:, before: nil, after: nil, exclude: :lower, by: nil, interval: nil, at: nil)
+  #   Returns a {CAKeyWindowIterator}: a window per value bounded by a width
+  #   of the key `on` (a time, a duration or a number) instead of a count of
+  #   cells.  The window of a value whose key is t holds the values whose
+  #   key lies between t - before and t + after; `exclude:` leaves out the
+  #   lower end (default), the upper end, both or neither.  `by:` keeps
+  #   each window within the values with the same by keys, and `interval:`
+  #   gives the key's grid step for {CAKeyWindowIterator#is_complete}.  A
+  #   value whose key is masked, NaN or infinite is in no window and has no
+  #   window.  `at:` places the windows at those points of the key instead
+  #   of at the values, one answer per point (a grid of points gives
+  #   windows on a grid); it cannot be given with `by:`.
+  #
+  #     temp.windows(on: time, before: "1 hour").mean
+  #     temp.windows(on: time, at: hours, after: "3 hours", exclude: :upper).mean
+  #   @return [CAKeyWindowIterator]
+  def windows (*ranges, on: nil, **key_window)
+    unless on.nil?
+      unless ranges.empty?
+        raise ArgumentError, "windows: give offset ranges or on:, not both"
+      end
+      given = [:bounds, :fill_value] & key_window.keys
+      unless given.empty?
+        raise ArgumentError,
+              "windows: #{given.map { |k| "#{k}:" }.join(', ')} " \
+              "belong to offset windows; a window on a key has no padding " \
+              "(a row with no window answers UNDEF)"
+      end
+      require "carray/key_windows"
+      return CAKeyWindowIterator.new(self, on: on, **key_window)
+    end
+    bounds     = key_window.delete(:bounds) { :skip }
+    fill_value = key_window.delete(:fill_value)
+    unless key_window.empty?
+      raise ArgumentError,
+            "windows: #{key_window.keys.map { |k| "#{k}:" }.join(', ')} " \
+            "need on:, the key the widths are measured on"
+    end
     if ranges.size == 1 && ranges[0].is_a?(CArray) && ranges[0].obj_type == CA_OBJ_WINDOW
       return CAWindowIterator.new(ranges[0])
     end

@@ -20,7 +20,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
-#include "carray_internal.h"   /* ca_axis_integer */
+#include "carray_internal.h"   /* ca_normalize_axis_arg */
 #include "ca_iter_substrate.h"
 #include "ca_obj_face.h"  /* ca_is_face, used by the compose-fold walk */
 
@@ -94,17 +94,15 @@ int8_t CA_OBJ_STRIDE;       /* assigned at Init time via ca_install_obj_type */
    override pattern and makes the C-level dispatch wire up correctly
    on the first try. */
 int
-ca_stride_setup (CAStride *ca, int8_t obj_type, CArray *parent,
-                 int8_t data_type, ca_size_t bytes,
-                 int8_t ndim, ca_size_t *dim,
-                 ca_size_t *strides, ca_size_t base_offset)
+ca_stride_setup_view (CAStride *ca, int8_t obj_type, CArray *parent,
+                      int8_t data_type, ca_size_t bytes,
+                      int8_t ndim, ca_size_t *dim,
+                      ca_size_t *strides, ca_size_t base_offset)
 {
   ca_size_t elements;
   int  i;
 
-  if (ndim < 0 || ndim > CA_RANK_MAX) {
-    rb_raise(rb_eArgError, "invalid ndim %d", (int) ndim);
-  }
+  ca_check_rank_fits(ndim, NULL);
   for (i = 0; i < ndim; i++) {
     if (dim[i] < 0) {
       rb_raise(rb_eIndexError,
@@ -144,10 +142,23 @@ ca_stride_setup (CAStride *ca, int8_t obj_type, CArray *parent,
     ca->strides[i] = strides[i];
   }
 
-  if (parent && ca_has_mask(parent)) {
-    ca_create_mask(ca);
-  }
+  return 0;
+}
 
+/* The public form also takes the parent's mask.  A struct that no Ruby
+   object owns yet is lost if the parent's answer raises; the in-tree
+   constructors use ca_stride_setup_view and ca_view_inherit_mask. */
+int
+ca_stride_setup (CAStride *ca, int8_t obj_type, CArray *parent,
+                 int8_t data_type, ca_size_t bytes,
+                 int8_t ndim, ca_size_t *dim,
+                 ca_size_t *strides, ca_size_t base_offset)
+{
+  ca_stride_setup_view(ca, obj_type, parent, data_type, bytes,
+                       ndim, dim, strides, base_offset);
+  if ( ca != NULL ) {
+    ca_view_inherit_mask((VALUE) ca);
+  }
   return 0;
 }
 
@@ -158,11 +169,12 @@ ca_stride_new (int8_t obj_type, CArray *parent,
                ca_size_t *strides, ca_size_t base_offset)
 {
   CAStride *ca;
-  ca_stride_setup(NULL, obj_type, parent,
-                  data_type, bytes, ndim, dim, strides, base_offset);
+  ca_stride_setup_view(NULL, obj_type, parent,
+                       data_type, bytes, ndim, dim, strides, base_offset);
   ca = (CAStride *) ca_array_alloc(obj_type, ndim);
-  ca_stride_setup(ca, obj_type, parent,
-                  data_type, bytes, ndim, dim, strides, base_offset);
+  ca_stride_setup_view(ca, obj_type, parent,
+                       data_type, bytes, ndim, dim, strides, base_offset);
+  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
 
@@ -443,6 +455,8 @@ ca_stride_compose_to_root (CAStride *leaf,
 
    "Identity compose-fold" semantics:
      - cand->bytes == root->bytes      (no byte reinterpret)
+     - cand->data_type == root->data_type (no type reinterpret: a caller
+       may read the root's cells as typed values)
      - composed_base == 0
      - composed_strides[k] match row-major over cand->dim with cand->bytes
 
@@ -471,6 +485,7 @@ ca_resolve_attached_root_via_identity (CArray *cand)
   ca_stride_compose_to_root(cs, &root, composed_strides, &composed_base);
   if ( !root->ptr ) return cand;
   if ( cs->bytes != root->bytes ) return cand;
+  if ( cs->data_type != root->data_type ) return cand;
   if ( composed_base != 0 ) return cand;
 
   s = root->bytes;
@@ -610,7 +625,7 @@ ca_stride_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
   ca_size_t composed_base;
   ca_size_t rbytes;
   ca_size_t *paddrs;
-  ca_size_t  i, base;
+  ca_size_t  i;
   int8_t     k;
   int        all_aligned = 1;
   volatile VALUE holder;
@@ -619,18 +634,12 @@ ca_stride_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
   ca_stride_compose_to_root(ca, &root, composed_strides, &composed_base);
   rbytes = root->bytes;
 
-  /* Fast path: identity transform detection -- when the addr remap composed_base +
-     Σ idx[k]*composed_strides[k] reduces to an identity mapping over the
-     root's flat byte space (= simple reshape, same bytes, row-major
-     composed_strides), forward addrs as-is to root without the ALLOCV +
-     per-cell remap loop.  Cascades through chain a[idx_2d] (= outer
-     reshape -> CAGrid -> inner reshape -> entity): outer CARefer is a
-     simple reshape so addrs pass through, then CAGrid Y.1.b fast path
-     triggers on the recursive call, then inner CARefer simple reshape
-     pass-through to entity.  Detection is O(ndim) + O(n).  */
-  if ( n == ca->elements
-       && ca->bytes == rbytes && composed_base == 0
-       && ca_xfer_addrs_is_sequential_run(n, addrs, &base) && base == 0 ) {
+  /* Identity: same cell size, no offset, row-major composed strides (a
+     simple reshape / flatten of the root).  A view address is then the
+     root address, whatever the addresses are, so the list goes through
+     as-is.  Cascades through chains such as a[idx_2d] (outer reshape ->
+     CAGrid -> inner reshape -> entity). */
+  if ( ca->bytes == rbytes && composed_base == 0 ) {
     ca_size_t s = rbytes;
     int is_identity = 1;
     for ( k = ca->ndim - 1; k >= 0; k-- ) {
@@ -643,36 +652,51 @@ ca_stride_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
     }
   }
 
-  paddrs = ALLOCV_N(ca_size_t, holder, n);
-  for ( i = 0; i < n; i++ ) {
-    ca_size_t idx[CA_RANK_MAX];
-    ca_size_t off = composed_base;
-    ca_addr2index((CArray *) ca, addrs[i], idx);
+  /* Whole-cell strides: translate in cell units, with no per-cell division. */
+  if ( ca->bytes == rbytes && composed_base % rbytes == 0 ) {
     for ( k = 0; k < ca->ndim; k++ ) {
-      off += idx[k] * composed_strides[k];
+      if ( composed_strides[k] % rbytes != 0 ) { all_aligned = 0; break; }
     }
-    if ( ca->bytes == rbytes && off % rbytes == 0 ) {
-      paddrs[i] = off / rbytes;
-    }
-    else {
-      all_aligned = 0;
-      break;
-    }
+  }
+  else {
+    all_aligned = 0;
   }
 
   if ( all_aligned ) {
-    ca_xfer_addrs(root, n, paddrs, data, dir);
-  }
-  else {
-    /* byte-mismatched reinterpret: deliver cell by cell via xfer_index
-       (still no whole-view attach -- delegates one cell at a time). */
-    for ( i = 0; i < n; i++ ) {
-      ca_size_t idx[CA_RANK_MAX];
-      ca_addr2index((CArray *) ca, addrs[i], idx);
-      ca_stride_func_xfer_index(ca, idx, d + i * ca->bytes, dir);
+    ca_size_t esteps[CA_RANK_MAX];
+    ca_size_t ebase = composed_base / rbytes;
+    for ( k = 0; k < ca->ndim; k++ ) {
+      esteps[k] = composed_strides[k] / rbytes;
     }
+    paddrs = ALLOCV_N(ca_size_t, holder, n);
+    if ( ca->ndim == 1 ) {
+      for ( i = 0; i < n; i++ ) {
+        paddrs[i] = ebase + addrs[i] * esteps[0];
+      }
+    }
+    else {
+      for ( i = 0; i < n; i++ ) {
+        ca_size_t idx[CA_RANK_MAX];
+        ca_size_t off = ebase;
+        ca_addr2index((CArray *) ca, addrs[i], idx);
+        for ( k = 0; k < ca->ndim; k++ ) {
+          off += idx[k] * esteps[k];
+        }
+        paddrs[i] = off;
+      }
+    }
+    ca_xfer_addrs(root, n, paddrs, data, dir);
+    ALLOCV_END(holder);
+    return;
   }
-  ALLOCV_END(holder);
+
+  /* Byte-mismatched reinterpret: deliver cell by cell via xfer_index
+     (still no whole-view attach -- delegates one cell at a time). */
+  for ( i = 0; i < n; i++ ) {
+    ca_size_t idx[CA_RANK_MAX];
+    ca_addr2index((CArray *) ca, addrs[i], idx);
+    ca_stride_func_xfer_index(ca, idx, d + i * ca->bytes, dir);
+  }
 }
 
 /* Optimised region delivery.  Reached when ca->ptr == NULL (the central dispatcher handles the alias / attached case).
@@ -833,6 +857,7 @@ ca_stride_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   if (!aligned || !root->ptr) {
     ca_size_t idx[CA_RANK_MAX], doff = 0;
     for (k = 0; k < ndim; k++) idx[k] = 0;
+    /* empty: the slot returns on an empty region at its entry */
     while (1) {
       ca_size_t off = base_addr, vmidx[CA_RANK_MAX];
       for (k = 0; k < ndim; k++) off += idx[k] * strides[k];
@@ -1085,8 +1110,9 @@ static int ca_layout_is_contiguous (int8_t ndim, const ca_size_t *dim,
    composes a source down to its root.
 
    Entities hold their own buffer.  A CAStride-family root is one the fold
-   declined to walk through (a byte reinterpret, say); its own attach folds
-   onward as it always has, so leave that chain alone.  What is left is the
+   declined to walk through (a reshape over a transpose); its own attach
+   folds onward from itself, so the answer is the one for the root it folds
+   to.  What is left is the
    boundary views that compute or fetch their contents -- CAObject, the lazy
    per-element transforms, whatever a companion gem installed -- and of those,
    only the ones with an xfer_stride slot can answer a region request at all.
@@ -1098,7 +1124,17 @@ ca_root_lends_no_memory (void *ap)
   CArray *root = (CArray *) ap;
 
   if ( ca_is_entity(root) ) return 0;
-  if ( ca_func[root->obj_type].attach == ca_stride_func.attach ) return 0;
+  if ( ca_func[root->obj_type].attach == ca_stride_func.attach ) {
+    /* The fold stopped at a CAStride (a reshape over a transpose).  Its
+       own attach folds onward from itself, so it lends memory exactly when
+       the root it folds to does: over a computed root, attaching it
+       produces all of it. */
+    CArray   *below;
+    ca_size_t cs[CA_RANK_MAX];
+    ca_size_t base;
+    ca_stride_compose_to_root((CAStride *) root, &below, cs, &base);
+    return ca_root_lends_no_memory(below);
+  }
   return ca_func[root->obj_type].xfer_stride != NULL;
 }
 
@@ -1164,14 +1200,14 @@ ca_stride_func_allocate (void *ap)
 
   ca_stride_compose_to_root(ca, &root, composed_strides, &composed_base);
   if (ca_root_lends_no_memory(root)) {
-    ca->ptr = xmalloc(ca_length(ca));
+    ca->ptr = ca_alloc_cells((CArray *) ca);
     return;
   }
   ca_attach(root);
   if (ca_layout_is_contiguous(ca->ndim, ca->dim, composed_strides, ca->bytes)) {
     ca->ptr = root->ptr + composed_base;
   } else {
-    ca->ptr = xmalloc(ca_length(ca));
+    ca->ptr = ca_alloc_cells((CArray *) ca);
   }
 }
 
@@ -1200,14 +1236,9 @@ ca_stride_func_attach (void *ap)
        transfer slots. */
     char *buf = xmalloc(ca_length(ca));
     void *args[2];
-    int tag = 0;
     args[0] = ca;
     args[1] = buf;
-    rb_protect(ca_stride_cold_fill, (VALUE) args, &tag);   /* root stays cold */
-    if (tag) {
-      xfree(buf);
-      rb_jump_tag(tag);
-    }
+    ca_fill_or_xfree(buf, ca_stride_cold_fill, (VALUE) args);   /* root stays cold */
     ca->ptr = buf;
     return;
   }
@@ -1215,7 +1246,7 @@ ca_stride_func_attach (void *ap)
   if (ca_layout_is_contiguous(ca->ndim, ca->dim, composed_strides, ca->bytes)) {
     ca->ptr = root->ptr + composed_base;
   } else {
-    ca->ptr = xmalloc(ca_length(ca));
+    ca->ptr = ca_alloc_cells((CArray *) ca);
     ca_stride_xfer_with_layout(ca, 0, root->ptr + composed_base, composed_strides);
   }
 }
@@ -1342,6 +1373,8 @@ ca_stride_func_xfer_all (void *ap, void *data, int dir)
   char *ptr0 = ca->ptr;
   char *ptr = (char *) data;
 
+  if ( ca->elements == 0 ) return;
+
   ca_stride_compose_to_root(ca, &root, composed_strides, &composed_base);
 
   /* Partial materialise: when the fold stops at a cold boundary view that knows how to deliver a region (has an
@@ -1458,6 +1491,7 @@ ca_stride_func_xfer_all (void *ap, void *data, int dir)
     ca_size_t  idx[CA_RANK_MAX], n = 0;
     int8_t     k;
     for (k = 0; k < ca->ndim; k++) idx[k] = 0;
+    /* empty: the slot returns on an empty view at its entry */
     while (1) {
       ca_size_t off = composed_base;
       for (k = 0; k < ca->ndim; k++) off += idx[k] * composed_strides[k];
@@ -1469,6 +1503,52 @@ ca_stride_func_xfer_all (void *ap, void *data, int dir)
     ca_xfer_addrs(root, n, addrs, ptr, dir);
     ALLOCV_END(holder);
     return;
+  }
+
+  /* A read through a byte reinterpret (CAField, a refer to another width)
+     over a cold root: the root's addresses are not this view's cells, but
+     each cell lies in a run of whole root elements.  Ask the root for those
+     elements and cut the cell's bytes out of them.  A write keeps the
+     whole-root round trip below: two cells can share a root element, and
+     writing back each one's copy of it would drop the other's bytes. */
+  if ( dir == CA_XFER_GET && ca->elements > 0 && ca->bytes != root->bytes
+       && ca_func[root->obj_type].xfer_stride ) {
+    volatile VALUE ah = 0, sh = 0;
+    ca_size_t  rb = root->bytes, cb = ca->bytes;
+    ca_size_t  per = (cb + rb - 1) / rb + 1;
+    ca_size_t *addrs = ALLOCV_N(ca_size_t, ah, ca->elements * per);
+    char      *scratch;
+    ca_size_t  idx[CA_RANK_MAX], n = 0, i;
+    ca_size_t *first = ALLOCV_N(ca_size_t, sh, ca->elements);
+    int8_t     k;
+    int        ok = 1;
+    for (k = 0; k < ca->ndim; k++) idx[k] = 0;
+    for (i = 0; ok; i++) {
+      ca_size_t off = composed_base, e, e_end;
+      for (k = 0; k < ca->ndim; k++) off += idx[k] * composed_strides[k];
+      if ( off < 0 || off + cb > root->elements * rb ) { ok = 0; break; }
+      first[i] = n * rb + off % rb;
+      for (e = off / rb, e_end = (off + cb - 1) / rb; e <= e_end; e++) {
+        addrs[n++] = e;
+      }
+      k = ca->ndim - 1;
+      while (k >= 0) { if (++idx[k] < ca->dim[k]) break; idx[k] = 0; k--; }
+      if (k < 0) break;
+    }
+    if ( ok && n < root->elements ) {
+      volatile VALUE dh = 0;
+      scratch = ALLOCV_N(char, dh, n * rb);
+      ca_xfer_addrs(root, n, addrs, scratch, CA_XFER_GET);
+      for (i = 0; i < ca->elements; i++) {
+        memcpy(ptr + i * cb, scratch + first[i], cb);
+      }
+      ALLOCV_END(dh);
+      ALLOCV_END(sh);
+      ALLOCV_END(ah);
+      return;
+    }
+    ALLOCV_END(sh);
+    ALLOCV_END(ah);
   }
 
   /* Cold root without an xfer_stride slot, or an ndim mismatch the bridges
@@ -2078,9 +2158,10 @@ rb_ca_as_strided (int argc, VALUE *argv, VALUE self)
              "shape (%ld) and strides (%ld) length mismatch",
              len, RARRAY_LEN(rstrides));
   }
-  if (len <= 0 || len > CA_RANK_MAX) {
+  if (len <= 0) {
     rb_raise(rb_eArgError, "invalid ndim %ld", len);
   }
+  ca_check_rank_fits(len, NULL);
   ndim = (int8_t) len;
   for (i = 0; i < len; i++) {
     shape[i]   = NUM2SIZE(RARRAY_AREF(rshape,   i));
@@ -2118,11 +2199,7 @@ rb_ca_sliding_windows (int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, parent);
 
   ndim = parent->ndim;
-  if (2 * (int) ndim > CA_RANK_MAX) {
-    rb_raise(rb_eArgError,
-             "sliding_windows: result rank %d exceeds CA_RANK_MAX (%d)",
-             2 * (int) ndim, CA_RANK_MAX);
-  }
+  ca_check_rank_fits(2 * (long) ndim, "sliding_windows");
 
   rb_scan_args(argc, argv, "*:", (VALUE *) &rposary, (VALUE *) &ropt);
   if (! NIL_P(ropt)) {
@@ -2266,11 +2343,7 @@ rb_ca_unfold (int argc, VALUE *argv, VALUE self)
 
   ntrail = ndim - nspatial;
   outrank = (int) ndim + (int) nspatial;
-  if (outrank > CA_RANK_MAX) {
-    rb_raise(rb_eArgError,
-             "unfold: result rank %d exceeds CA_RANK_MAX (%d)",
-             outrank, CA_RANK_MAX);
-  }
+  ca_check_rank_fits(outrank, "unfold");
 
   if (NIL_P(rstep)) {
     for (i = 0; i < nspatial; i++) step[i] = 1;
@@ -2354,11 +2427,7 @@ rb_ca_block_view (int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, parent);
 
   ndim = parent->ndim;
-  if (2 * (int) ndim > CA_RANK_MAX) {
-    rb_raise(rb_eArgError,
-             "block_view: result rank %d exceeds CA_RANK_MAX (%d)",
-             2 * (int) ndim, CA_RANK_MAX);
-  }
+  ca_check_rank_fits(2 * (long) ndim, "block_view");
 
   rb_scan_args(argc, argv, "*:", (VALUE *) &rposary, (VALUE *) &ropt);
   rb_reject_options(ropt);
@@ -2461,7 +2530,7 @@ rb_ca_dim_view (int argc, VALUE *argv, VALUE self)
                (int) n_iter, (int) ndim);
     }
     for (i = 0; i < n_iter; i++) {
-      iter_axes[i] = ca_axis_integer(RARRAY_AREF(aary, i), NULL);
+      iter_axes[i] = ca_normalize_axis_arg(RARRAY_AREF(aary, i), ndim, NULL);
     }
   }
   else if (nargs >= 1) {
@@ -2472,7 +2541,7 @@ rb_ca_dim_view (int argc, VALUE *argv, VALUE self)
     }
     n_iter = (int8_t) nargs;
     for (i = 0; i < n_iter; i++) {
-      iter_axes[i] = ca_axis_integer(RARRAY_AREF(rposary, i), NULL);
+      iter_axes[i] = ca_normalize_axis_arg(RARRAY_AREF(rposary, i), ndim, NULL);
     }
   }
   else {
@@ -2480,23 +2549,16 @@ rb_ca_dim_view (int argc, VALUE *argv, VALUE self)
              "dim_view: at least one iteration axis required");
   }
 
-  /* Normalize negative indices and validate range / distinctness. */
+  /* The axes are normalized as they are read; check distinctness. */
   for (i = 0; i < ndim; i++) seen[i] = 0;
   for (i = 0; i < n_iter; i++) {
     ca_size_t a = iter_axes[i];
-    if (a < 0) a += ndim;
-    if (a < 0 || a >= ndim) {
-      rb_raise(rb_eArgError,
-               "dim_view: axis %lld out of range for ndim %d",
-               (long long) iter_axes[i], (int) ndim);
-    }
     if (seen[a]) {
       rb_raise(rb_eArgError,
                "dim_view: duplicate iteration axis %lld",
                (long long) a);
     }
     seen[a] = 1;
-    iter_axes[i] = a;
   }
 
   /* imap: iter axes first (in given order), then remaining axes
@@ -2568,12 +2630,8 @@ rb_ca_flip_axis (VALUE self, long axis)
   rb_check_carray_object(self);
   TypedData_Get_Struct(self, CArray, &carray_data_type, parent);
   int8_t ndim = parent->ndim;
-  long a = (axis < 0) ? (axis + ndim) : axis;
-  if (a < 0 || a >= ndim) {
-    rb_raise(rb_eArgError,
-             "flip_axis: axis %ld out of range for ndim %d",
-             axis, (int) ndim);
-  }
+  long a = rb_ca_normalize_axis_for_ndim(axis, ndim,   /* axis-check: a long from a C caller */
+                                         "flip_axis");
   int8_t flip[CA_RANK_MAX] = {0};
   flip[a] = 1;
   return rb_ca_flip_build_view(self, parent, flip);
@@ -2615,7 +2673,7 @@ rb_ca_flip (int argc, VALUE *argv, VALUE self)
                  (int) n_axes, (int) ndim);
       }
       for (i = 0; i < n_axes; i++) {
-        axes[i] = ca_axis_integer(RARRAY_AREF(aary, i), NULL);
+        axes[i] = ca_normalize_axis_arg(RARRAY_AREF(aary, i), ndim, NULL);
       }
     }
     else {
@@ -2626,18 +2684,12 @@ rb_ca_flip (int argc, VALUE *argv, VALUE self)
       }
       n_axes = (int8_t) nargs;
       for (i = 0; i < n_axes; i++) {
-        axes[i] = ca_axis_integer(RARRAY_AREF(rposary, i), NULL);
+        axes[i] = ca_normalize_axis_arg(RARRAY_AREF(rposary, i), ndim, NULL);
       }
     }
 
     for (i = 0; i < n_axes; i++) {
       ca_size_t a = axes[i];
-      if (a < 0) a += ndim;
-      if (a < 0 || a >= ndim) {
-        rb_raise(rb_eArgError,
-                 "flip: axis %lld out of range for ndim %d",
-                 (long long) axes[i], (int) ndim);
-      }
       if (flip[a]) {
         rb_raise(rb_eArgError,
                  "flip: duplicate axis %lld",
@@ -2711,18 +2763,8 @@ rb_ca_diagonal (int argc, VALUE *argv, VALUE self)
       rb_raise(rb_eArgError,
                "diagonal: axis: must be an Array of 2 integers");
     }
-    ai = ca_axis_integer(RARRAY_AREF(raxis, 0), NULL);
-    aj = ca_axis_integer(RARRAY_AREF(raxis, 1), NULL);
-    if (ai < 0) ai += ndim;
-    if (aj < 0) aj += ndim;
-    if (ai < 0 || ai >= ndim) {
-      rb_raise(rb_eArgError, "diagonal: axis[0] out of range for ndim %d",
-               (int) ndim);
-    }
-    if (aj < 0 || aj >= ndim) {
-      rb_raise(rb_eArgError, "diagonal: axis[1] out of range for ndim %d",
-               (int) ndim);
-    }
+    ai = ca_normalize_axis_arg(RARRAY_AREF(raxis, 0), ndim, NULL);
+    aj = ca_normalize_axis_arg(RARRAY_AREF(raxis, 1), ndim, NULL);
     if (ai == aj) {
       rb_raise(rb_eArgError, "diagonal: axis[0] and axis[1] must be distinct");
     }
@@ -2750,7 +2792,9 @@ rb_ca_diagonal (int argc, VALUE *argv, VALUE self)
     base_offset = offset * parent_byte_stride[aj];
   }
   else {
-    ca_size_t neg = -offset;
+    /* compare before negating: -offset overflows for the most negative
+       offset */
+    ca_size_t neg = ( offset <= -parent->dim[ai] ) ? parent->dim[ai] : -offset;
     if (neg >= parent->dim[ai]) {
       diag_len = 0;
     }
@@ -2760,6 +2804,9 @@ rb_ca_diagonal (int argc, VALUE *argv, VALUE self)
       diag_len = (a < b) ? a : b;
     }
     base_offset = neg * parent_byte_stride[ai];
+  }
+  if (diag_len == 0) {
+    base_offset = 0;   /* an offset past the edge can overflow the product */
   }
 
   /* build output: kept axes (in original order), then diagonal axis */

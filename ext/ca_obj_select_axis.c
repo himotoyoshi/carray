@@ -311,6 +311,7 @@ ca_select_axis_new (CArray *parent, int8_t indirect_axis,
                     CArray *selector,
                     ca_size_t *ap_start, ca_size_t *ap_count, ca_size_t *ap_step)
 {
+  /* check: the callers (clone, create_mask) pass an existing view's checked selector */
   CASelectAxis *ca = (CASelectAxis *) ca_array_alloc(CA_OBJ_SELECT_AXIS, parent->ndim);
   ca_select_axis_setup(ca, parent, indirect_axis, selector,
                        ap_start, ap_count, ap_step);
@@ -590,6 +591,7 @@ ca_select_axis_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     ca_size_t idx[CA_RANK_MAX], doff = 0, base = 0;
     for (k = 0; k < ndim; k++) base += starts[k] * cnative[k];
     for (k = 0; k < ndim; k++) idx[k] = 0;
+    /* empty: the slot returns on an empty region at its entry */
     while (1) {
       ca_size_t coff = base, cidx[CA_RANK_MAX];
       for (k = 0; k < ndim; k++) coff += idx[k] * strides[k];
@@ -673,6 +675,7 @@ ca_select_axis_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
      ca_xfer_stride/ca_xfer_addrs. */
   for (k = 0; k < ndim; k++) o[k] = 0;
 
+  /* empty: the slot returns on an empty region at its entry */
   while (1) {
     ca_size_t pbase = 0, doff = 0;
     for (k = 0; k < inner; k++) {
@@ -725,7 +728,7 @@ ca_select_axis_func_allocate (void *ap)
   if ( ! ca_parent_lends_no_memory(ca->parent) ) {
     ca_attach(ca->parent);
   }
-  ca->ptr = xmalloc(ca_length(ca));
+  ca->ptr = ca_alloc_cells((CArray *) ca);
 }
 
 static void
@@ -895,6 +898,7 @@ rb_ca_select_axis_s_new_debug (VALUE klass, VALUE rparent, VALUE rindirect,
                                 VALUE rap_count, VALUE rap_step)
 {
   CArray *parent, *selector;
+  /* fits: an axis number from the view that made it */
   int8_t indirect_axis = (int8_t) NUM2INT(rindirect);
   int8_t ndim;
   int8_t k;
@@ -966,15 +970,15 @@ rb_ca_select_axis_eligible_p (int argc, VALUE *argv, VALUE self)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   if ( argc != ca->ndim ) return 0;
 
-  /* axis 0 is the boolean (indirect).  Walk rest; require nil/Integer/Range. */
+  /* axis 0 is the boolean (indirect).  The rest are read as the indexer
+     reads them; a run of more than one step, or of no cells, goes to
+     CAGrid. */
   for ( i = 1; i < argc; i++ ) {
     VALUE arg = argv[i];
-    if ( NIL_P(arg) ) continue;
-    if ( FIXNUM_P(arg) ) continue;
-    if ( TYPE(arg) == T_DATA ) return 0;   /* CArray at axis > 0 → bail */
-    if ( rb_obj_is_kind_of(arg, rb_cRange) ) continue;
-    if ( rb_obj_is_kind_of(arg, rb_cInteger) ) continue;
-    return 0;
+    ca_size_t start, count, step;
+    if ( rb_obj_is_carray(arg) ) return 0;   /* CArray at axis > 0 → bail */
+    ca_index_axis_key(arg, ca->dim[i], i, &start, &count, &step);
+    if ( step != 1 || count < 1 ) return 0;
   }
 
   return 1;
@@ -1006,45 +1010,9 @@ rb_ca_select_axis (int argc, VALUE *argv, VALUE self)
   for ( i = 0; i < argc; i++ ) {
     VALUE arg = argv[i];
 
-    if ( NIL_P(arg) ) {
-      ap_start[i] = 0;
-      ap_count[i] = parent->dim[i];
-      ap_step[i]  = 1;
-    }
-    else if ( FIXNUM_P(arg) || rb_obj_is_kind_of(arg, rb_cInteger) ) {
-      ca_size_t n = NUM2LL(arg);
-      if ( n < 0 ) n += parent->dim[i];
-      if ( n < 0 || n >= parent->dim[i] ) {
-        rb_raise(rb_eIndexError,
-                 "CASelectAxis: index %lld out of range at axis %d",
-                 (long long) n, i);
-      }
-      ap_start[i] = n;
-      ap_count[i] = 1;
-      ap_step[i]  = 1;
-    }
-    else if ( rb_obj_is_kind_of(arg, rb_cRange) ) {
-      VALUE rfirst = rb_funcall(arg, rb_intern("first"), 0);
-      VALUE rlast  = rb_funcall(arg, rb_intern("last"),  0);
-      int exclusive = RTEST(rb_funcall(arg, rb_intern("exclude_end?"), 0));
-      ca_size_t a = NUM2LL(rfirst);
-      ca_size_t b = NUM2LL(rlast);
-      if ( a < 0 ) a += parent->dim[i];
-      if ( b < 0 ) b += parent->dim[i];
-      ca_size_t cnt = exclusive ? (b - a) : (b - a + 1);
-      if ( cnt <= 0 ) {
-        rb_raise(rb_eIndexError,
-                 "CASelectAxis: empty range at axis %d", i);
-      }
-      if ( a < 0 || a >= parent->dim[i] ||
-           (a + cnt - 1) < 0 || (a + cnt - 1) >= parent->dim[i] ) {
-        rb_raise(rb_eIndexError,
-                 "CASelectAxis: range [%lld..%lld] out of bounds at axis %d",
-                 (long long) a, (long long) (a + cnt - 1), i);
-      }
-      ap_start[i] = a;
-      ap_count[i] = cnt;
-      ap_step[i]  = 1;
+    if ( ! rb_obj_is_carray(arg) ) {
+      ca_index_axis_key(arg, parent->dim[i], i,
+                        &ap_start[i], &ap_count[i], &ap_step[i]);
     }
     else if ( rb_obj_is_carray(arg) && rb_ca_is_boolean_type(arg) ) {
       TypedData_Get_Struct(arg, CArray, &carray_data_type, selector);
