@@ -580,19 +580,12 @@ class GroupedFrame
   # A per-group result (one entry per group along axis 0) laid back over the
   # frame's rows through the group codes. A row in no group is UNDEF.
   private def spread_to_rows(result)
-    codes    = group_codes
-    excluded = codes.is_masked
-    rest     = [nil] * (result.ndim - 1)
-    if ngroup == 0
-      out = CArray.new(result.data_type, [codes.elements, *result.shape[1..]], bytes: result.bytes)
-      out[] = UNDEF
-      return out
-    end
+    # A row in no group has a masked index cell, which x[i] answers as a
+    # hole: so even with no group at all, the result keeps its type.
+    codes = group_codes
     index = codes.value.int64
-    index[excluded] = 0
-    out = result[index, *rest].copy
-    out[excluded, *rest] = UNDEF if excluded.any
-    out
+    index[codes.is_masked] = UNDEF
+    result[index, *[nil] * (result.ndim - 1)].copy
   end
 
   # A column's group reduction. An N-D column is reduced along the rows, so
