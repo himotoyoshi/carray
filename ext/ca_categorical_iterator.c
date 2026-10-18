@@ -152,7 +152,22 @@ rb_ca_categorical_scatter (VALUE self, VALUE rvalue, VALUE rcursor,
 #define CAT_NAN_NEVER(v)  (0)
 #define CAT_NAN_CHECK(v)  ((v) != (v))
 
-#define REDUCEAT_MOMENTS_BODY(T)                                                 \
+/* Whether v takes the place of the accumulator acc: never when v is NaN,
+   always when acc is NaN and v is not. */
+#define CAT_REPLACES(v, acc, CMP, ISNAN) \
+  ( ! ISNAN(v) && ( ISNAN(acc) || (v) CMP (acc) ) )
+
+/* A segment without masked cells of at least CAT_LANES_FROM cells is read
+   with eight independent sums and eight min / max lanes, so no add or
+   compare waits on the one before it; a shorter one would spend more on
+   setting up and merging the lanes than it saves.
+   Each lane starts from the segment's first value; a lane can end on NaN
+   only if every value it saw was NaN, so merging the lanes with the same
+   rule gives the answer one lane would. The sums are added in a different
+   order than the cells, which is the license every float reduction has. */
+#define CAT_LANES_FROM 64
+
+#define REDUCEAT_MOMENTS_BODY(T, ISNAN, LANES_FROM)                             \
   do {                                                                          \
     const T *gp = (const T *) grouped->ptr;                                     \
     T *minv = (T *) minp, *maxv = (T *) maxp;                                   \
@@ -162,16 +177,85 @@ rb_ca_categorical_scatter (VALUE self, VALUE rvalue, VALUE rcursor,
       ca_size_t j, cnt = 0;                                                     \
       double sacc = 0.0;                                                        \
       T mn = 0, mx = 0; int seen = 0;                                           \
-      for ( j = lo; j < hi; j++ ) {                                             \
-        if ( gm && gm[j] ) continue;            /* masked value cell */         \
-        { T v = gp[j];                                                          \
-          sacc += (double) v;                                                   \
-          if ( ! seen ) { mn = v; mx = v; seen = 1; }                           \
-          else {                                                                \
-            if ( CA_EXTREMUM_REPLACES(v, mn, <) ) mn = v;                       \
-            if ( CA_EXTREMUM_REPLACES(v, mx, >) ) mx = v;                       \
+      if ( ! gm && hi - lo < (ca_size_t) (LANES_FROM) ) {                       \
+        if ( hi > lo ) {                                                        \
+          mn = mx = gp[lo];                                                     \
+          for ( j = lo; j < hi; j++ ) {                                         \
+            T v = gp[j];                                                        \
+            sacc += (double) v;                                                 \
+            if ( CAT_REPLACES(v, mn, <, ISNAN) ) mn = v;                        \
+            if ( CAT_REPLACES(v, mx, >, ISNAN) ) mx = v;                        \
           }                                                                     \
-          cnt++; }                                                              \
+          cnt = hi - lo; seen = 1;                                              \
+        }                                                                       \
+      }                                                                         \
+      else if ( ! gm ) {                                                        \
+        {                                                                       \
+          double s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, s5 = 0, s6 = 0, s7 = 0; \
+          T n0, n1, n2, n3, n4, n5, n6, n7, x0, x1, x2, x3, x4, x5, x6, x7;     \
+          n0 = n1 = n2 = n3 = n4 = n5 = n6 = n7 = gp[lo];                       \
+          x0 = x1 = x2 = x3 = x4 = x5 = x6 = x7 = gp[lo];                       \
+          for ( j = lo; j + 8 <= hi; j += 8 ) {                                 \
+            T v0 = gp[j],   v1 = gp[j+1], v2 = gp[j+2], v3 = gp[j+3];           \
+            T v4 = gp[j+4], v5 = gp[j+5], v6 = gp[j+6], v7 = gp[j+7];           \
+            s0 += (double) v0; s1 += (double) v1;                               \
+            s2 += (double) v2; s3 += (double) v3;                               \
+            s4 += (double) v4; s5 += (double) v5;                               \
+            s6 += (double) v6; s7 += (double) v7;                               \
+            if ( CAT_REPLACES(v0, n0, <, ISNAN) ) n0 = v0;                      \
+            if ( CAT_REPLACES(v1, n1, <, ISNAN) ) n1 = v1;                      \
+            if ( CAT_REPLACES(v2, n2, <, ISNAN) ) n2 = v2;                      \
+            if ( CAT_REPLACES(v3, n3, <, ISNAN) ) n3 = v3;                      \
+            if ( CAT_REPLACES(v4, n4, <, ISNAN) ) n4 = v4;                      \
+            if ( CAT_REPLACES(v5, n5, <, ISNAN) ) n5 = v5;                      \
+            if ( CAT_REPLACES(v6, n6, <, ISNAN) ) n6 = v6;                      \
+            if ( CAT_REPLACES(v7, n7, <, ISNAN) ) n7 = v7;                      \
+            if ( CAT_REPLACES(v0, x0, >, ISNAN) ) x0 = v0;                      \
+            if ( CAT_REPLACES(v1, x1, >, ISNAN) ) x1 = v1;                      \
+            if ( CAT_REPLACES(v2, x2, >, ISNAN) ) x2 = v2;                      \
+            if ( CAT_REPLACES(v3, x3, >, ISNAN) ) x3 = v3;                      \
+            if ( CAT_REPLACES(v4, x4, >, ISNAN) ) x4 = v4;                      \
+            if ( CAT_REPLACES(v5, x5, >, ISNAN) ) x5 = v5;                      \
+            if ( CAT_REPLACES(v6, x6, >, ISNAN) ) x6 = v6;                      \
+            if ( CAT_REPLACES(v7, x7, >, ISNAN) ) x7 = v7;                      \
+          }                                                                     \
+          for ( ; j < hi; j++ ) {                                               \
+            T v = gp[j];                                                        \
+            s0 += (double) v;                                                   \
+            if ( CAT_REPLACES(v, n0, <, ISNAN) ) n0 = v;                        \
+            if ( CAT_REPLACES(v, x0, >, ISNAN) ) x0 = v;                        \
+          }                                                                     \
+          sacc = ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7));             \
+          mn = n0;                                                              \
+          if ( CAT_REPLACES(n1, mn, <, ISNAN) ) mn = n1;                        \
+          if ( CAT_REPLACES(n2, mn, <, ISNAN) ) mn = n2;                        \
+          if ( CAT_REPLACES(n3, mn, <, ISNAN) ) mn = n3;                        \
+          if ( CAT_REPLACES(n4, mn, <, ISNAN) ) mn = n4;                        \
+          if ( CAT_REPLACES(n5, mn, <, ISNAN) ) mn = n5;                        \
+          if ( CAT_REPLACES(n6, mn, <, ISNAN) ) mn = n6;                        \
+          if ( CAT_REPLACES(n7, mn, <, ISNAN) ) mn = n7;                        \
+          mx = x0;                                                              \
+          if ( CAT_REPLACES(x1, mx, >, ISNAN) ) mx = x1;                        \
+          if ( CAT_REPLACES(x2, mx, >, ISNAN) ) mx = x2;                        \
+          if ( CAT_REPLACES(x3, mx, >, ISNAN) ) mx = x3;                        \
+          if ( CAT_REPLACES(x4, mx, >, ISNAN) ) mx = x4;                        \
+          if ( CAT_REPLACES(x5, mx, >, ISNAN) ) mx = x5;                        \
+          if ( CAT_REPLACES(x6, mx, >, ISNAN) ) mx = x6;                        \
+          if ( CAT_REPLACES(x7, mx, >, ISNAN) ) mx = x7;                        \
+          cnt = hi - lo; seen = 1;                                              \
+        }                                                                       \
+      }                                                                         \
+      else {                                                                    \
+        for ( j = lo; j < hi && gm[j]; j++ ) ;  /* skip to the first present */ \
+        if ( j < hi ) { mn = mx = gp[j]; seen = 1; }                            \
+        for ( ; j < hi; j++ ) {                                                 \
+          T v = gp[j];                                                          \
+          if ( gm[j] ) continue;                /* masked value cell */         \
+          sacc += (double) v;                                                   \
+          cnt++;                                                                \
+          if ( CAT_REPLACES(v, mn, <, ISNAN) ) mn = v;                          \
+          if ( CAT_REPLACES(v, mx, >, ISNAN) ) mx = v;                          \
+        }                                                                       \
       }                                                                         \
       countp[c] = (int64_t) cnt;                                                \
       sump[c]   = sacc;                                                         \
@@ -222,16 +306,16 @@ rb_ca_reduceat_moments (VALUE self, VALUE roffsets, VALUE rcounts,
   maxm = (boolean8_t *) maxs->mask->ptr;
 
   switch ( grouped->data_type ) {
-  case CA_INT8:    REDUCEAT_MOMENTS_BODY(int8_t);    break;
-  case CA_UINT8:   REDUCEAT_MOMENTS_BODY(uint8_t);   break;
-  case CA_INT16:   REDUCEAT_MOMENTS_BODY(int16_t);   break;
-  case CA_UINT16:  REDUCEAT_MOMENTS_BODY(uint16_t);  break;
-  case CA_INT32:   REDUCEAT_MOMENTS_BODY(int32_t);   break;
-  case CA_UINT32:  REDUCEAT_MOMENTS_BODY(uint32_t);  break;
-  case CA_INT64:   REDUCEAT_MOMENTS_BODY(int64_t);   break;
-  case CA_UINT64:  REDUCEAT_MOMENTS_BODY(uint64_t);  break;
-  case CA_FLOAT32: REDUCEAT_MOMENTS_BODY(float32_t); break;
-  case CA_FLOAT64: REDUCEAT_MOMENTS_BODY(float64_t); break;
+  case CA_INT8:    REDUCEAT_MOMENTS_BODY(int8_t, CAT_NAN_NEVER, CA_LENGTH_MAX);    break;
+  case CA_UINT8:   REDUCEAT_MOMENTS_BODY(uint8_t, CAT_NAN_NEVER, CA_LENGTH_MAX);   break;
+  case CA_INT16:   REDUCEAT_MOMENTS_BODY(int16_t, CAT_NAN_NEVER, CA_LENGTH_MAX);   break;
+  case CA_UINT16:  REDUCEAT_MOMENTS_BODY(uint16_t, CAT_NAN_NEVER, CA_LENGTH_MAX);  break;
+  case CA_INT32:   REDUCEAT_MOMENTS_BODY(int32_t, CAT_NAN_NEVER, CA_LENGTH_MAX);   break;
+  case CA_UINT32:  REDUCEAT_MOMENTS_BODY(uint32_t, CAT_NAN_NEVER, CA_LENGTH_MAX);  break;
+  case CA_INT64:   REDUCEAT_MOMENTS_BODY(int64_t, CAT_NAN_NEVER, CA_LENGTH_MAX);   break;
+  case CA_UINT64:  REDUCEAT_MOMENTS_BODY(uint64_t, CAT_NAN_NEVER, CA_LENGTH_MAX);  break;
+  case CA_FLOAT32: REDUCEAT_MOMENTS_BODY(float32_t, CAT_NAN_CHECK, CAT_LANES_FROM); break;
+  case CA_FLOAT64: REDUCEAT_MOMENTS_BODY(float64_t, CAT_NAN_CHECK, CAT_LANES_FROM); break;
   default:
     rb_raise(rb_eCADataTypeError,
              "__reduceat_moments__: numeric value required (got data_type %d)",
