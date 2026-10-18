@@ -1789,8 +1789,8 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
   if ( ca->obj_type == CA_OBJ_STRING && TYPE(rval) == T_ARRAY &&
        ( info.type == CA_REG_ADDRESS || info.type == CA_REG_POINT ) ) {
     rb_raise(rb_eTypeError,
-             "[]=: an Array is not a String (one cell of a CAString holds "
-             "a String; UNDEF masks a cell)");
+             "%s: an Array is not a String (one cell of a CAString holds "
+             "a String; UNDEF masks a cell)", ca_calling_method_name());
   }
 
   switch ( info.type ) {

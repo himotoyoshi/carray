@@ -189,6 +189,7 @@ class CAFrame
   # value (a NaN stays a NaN).
   def self.holds_values?(cell, data_type)
     return true if cell.data_type == data_type
+    # coerce: the type CArray.result_type chose for the cells, tried on each
     cell.to_type(data_type).to_a.flatten.zip(cell.to_a.flatten).all? do |a, b|
       a == b || (a.respond_to?(:nan?) && b.respond_to?(:nan?) && a.nan? && b.nan?)
     end
