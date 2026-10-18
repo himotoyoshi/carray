@@ -106,7 +106,7 @@ shops = CAFrame.from_csv("shops.csv", types: :infer)
 df = sales.join(shops.select("shop", "size"), on: "shop")
 df["day_type"] = df["date"].weekday.is_in([0, 6]).then_else("weekend", "weekday")
 p df.select("size", "day_type", "visitors", "revenue").group_by("size", "day_type").mean
-# #<CAFrame nrow=4 columns=[size:CAString, day_type:object, visitors:float64, revenue:float64]>
+# #<CAFrame nrow=4 columns=[size:CAString, day_type:CAString, visitors:float64, revenue:float64]>
 # size   day_type    visitors      revenue
 # -----  --------  ----------  -----------
 # small  weekday   159.636364  2057.578333

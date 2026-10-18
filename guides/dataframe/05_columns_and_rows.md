@@ -36,7 +36,7 @@ sales["revenue"][0]   # => 2200.0
 revenue[0] = 2121.39
 ```
 
-A name the frame does not have raises `KeyError`, with a list of the names it does have.
+A name the frame does not have raises `KeyError` naming it (`no column "nope"`). `column_names` lists the names the frame has.
 
 ### Several columns
 

@@ -166,8 +166,9 @@ CArray.string(["12", "x", "34"]).to_i   # => [12, 0, 34]     (also to_f)
   does.
 - **Choosing among Strings** gives a `CAString`: `cond.then_else("yes", "no")`,
   and `choose` / `CArray.select` / `conditional` when every choice is a String
-  or a `CAString`.  A Symbol, or a String beside a value of another kind,
-  gives an object array.
+  or a `CAString`.  `CArray.select` counts its `default:` as a choice, and it
+  is `0` unless given, so pass a String (`default: ""`) to get a `CAString`.
+  A Symbol, or a String beside a value of another kind, gives an object array.
 - **In place** (`upcase!`, `strip!`, `gsub!`, …) exist on the **mutable** Faces
   (`CAString`, `CAFixlenString`) only — `CAConstString` is read-only.
 - **`CAConstString` runs the byte-level ones natively** (`eq`, `count`,

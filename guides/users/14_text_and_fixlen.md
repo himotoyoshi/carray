@@ -113,7 +113,7 @@ s = CArray.string(["a", "b"])
 (s + "!").upcase   #  => ["A!", "B!"]
 ```
 
-Choosing among Strings gives a `CAString` too: `cond.then_else("yes", "no")`, and `choose`, `CArray.select` and `conditional` when every choice is a String or a `CAString`. A Symbol, or a String beside a value of another kind, gives an object array.
+Choosing among Strings gives a `CAString` too: `cond.then_else("yes", "no")`, and `choose`, `CArray.select` and `conditional` when every choice is a String or a `CAString`. `CArray.select` counts its `default:` as a choice, and it is `0` unless given, so pass a String (`default: ""`) to get a `CAString`. A Symbol, or a String beside a value of another kind, gives an object array.
 
 In-place forms (`upcase!`, `strip!`, `gsub!`, …) exist on the **mutable** Faces only — `CAString` and `CAFixlenString`. `CAConstString` is read-only (that immutability is exactly what makes the shared buffer safe); the transforms return a fresh `CAString` instead, which you can chain into `.to_const_string` to re-compact.
 
@@ -219,18 +219,18 @@ a[0] = "foo"
 a[0]                       #  => "foo\x00"    (raw bytes; no NUL stripping)
 ```
 
-Fetch, assignment, boolean masking, sort, and comparison all work — but they all operate on the **raw bytes**, padding included. Comparisons therefore have to match the cell width byte-for-byte:
+Fetch, assignment, boolean masking, sort, and comparison all work — but they all operate on the **raw bytes**, padding included. A String compared with the cells is first padded with zero bytes to the cell width, so a shorter query matches a cell holding the same bytes followed by zero bytes:
 
 ```ruby
 labels = CArray.new(CA_FIXLEN, [4], bytes: 5)
 labels[] = ["red", "blue", "red", "green"]
 
-labels.eq("red")           #  => [0, 0, 0, 0]     no match — "red" is 3 bytes
-labels.eq("red\x00\x00")   #  => [1, 0, 1, 0]     padded to 5 bytes, now it matches
-
-def pad(s, n) = s.ljust(n, "\x00")
-labels.eq(pad("red", labels.bytes))   #  => [1, 0, 1, 0]
+labels.eq("red")           #  => [true, false, true, false]
+labels.eq("red\x00\x00")   #  => [true, false, true, false]   the same comparison
+labels.eq("re")            #  => [false, false, false, false]  "re\x00\x00\x00" is not "red\x00\x00"
 ```
+
+A cell whose bytes after `"red"` are not all zero does not match `"red"`.
 
 A `CAFixlenString` over the same storage strips the padding automatically — that is exactly what the Face is for. Use raw `CA_FIXLEN` when the bytes really are bytes; use `CAFixlenString` when they are strings.
 
@@ -308,7 +308,7 @@ Indexing by **integer** decodes a single cell to a struct instance:
 ```ruby
 v = a[0]
 v.class                      #  => GeoCoord
-v["lat"]                     #  => 1.0
+v["lat"]                     #  => 0.0
 ```
 
 Field projection composes with the ordinary view algebra — a slice or transpose of a `CARecord` can still project its fields:
