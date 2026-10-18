@@ -54,14 +54,21 @@ class CAIterator
   # the route and the core cannot disagree.  A Face is a view of the values
   # themselves rather than a blank -- a Face cannot be allocated from its
   # surface data type alone, and a zeroed record is not a valid cell for every
-  # one (a const string's record indexes a shared pool) -- so a Face with no
-  # cell has nothing to ask with, and this is nil.
+  # one (a const string's record indexes a shared pool).  A Face with no cell
+  # is asked with the blank cell its resize gives, so a reduction over no
+  # groups answers in the same kind as over some; this is nil only when the
+  # Face has no blank cell.
   def self.core_probe (value) # :nodoc:
     unless value.face?
       return CArray.new(value.data_type, [1, 1], bytes: value.bytes)
     end
-    return nil if value.elements.zero?
-    value.reshape(value.elements)[[0]].reshape(1, 1)
+    flat = value.reshape(value.elements)
+    return flat[[0]].reshape(1, 1) if value.elements > 0
+    begin
+      flat.resize(1).reshape(1, 1)
+    rescue StandardError
+      nil
+    end
   end
 
   def self.reduce_keywords (op, kw) # :nodoc:

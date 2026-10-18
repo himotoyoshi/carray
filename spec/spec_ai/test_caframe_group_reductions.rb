@@ -137,4 +137,18 @@ class TestCAFrameGroupReductions < Test::Unit::TestCase
     assert_equal ["v"], df.group_by("k").sum.column_names
     assert_equal ["s", "v"], df.group_by("k").min.column_names
   end
+
+  # A frame with no rows answers each reduction with the columns and the
+  # kinds a frame with rows does.
+  def test_a_frame_with_no_rows_answers_as_one_with_rows
+    df = CAFrame.new("k" => [1, 2, 1], "s" => %w[a b a],
+                     "t" => CArray.time(%w[2024-01-01 2024-01-02 2024-01-03], unit: :D),
+                     "v" => [1.0, 2.0, 3.0])
+    empty = df.filter { |f| f["v"] > 99 }
+    kinds = ->(f) { f.column_names.map { |c| [c, CArray::Inspector.type_label(f[c])] } }
+    %i[sum mean median min max first stddev].each do |verb|
+      assert_equal kinds.(df.group_by("k").send(verb)),
+                   kinds.(empty.group_by("k").send(verb)), verb.to_s
+    end
+  end
 end
