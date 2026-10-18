@@ -2,7 +2,8 @@
 #
 # Ruby values a frame turns into a column are typed by one rule, wherever
 # the frame takes them (CAFrame.build_record_column): Integers an int64
-# column, numbers a float64 one, arrays of one shape an N-D column, anything
+# column, numbers a float64 one, arrays of one shape an N-D column (numeric
+# CArray cells in the data type they have in common), anything
 # else object; nil and UNDEF are a missing cell; an Integer an int64 cannot
 # hold keeps the column object.  A CArray is kept as it is.
 #
@@ -39,7 +40,10 @@ class TestFrameValueTyping < Test::Unit::TestCase
     [[1, 2], [3, 4]] => [:int64, [2, 2]],
     [[1, nil], [3, 4]]   => [:int64, [2, 2]],
     [[1, UNDEF], [3, 4]] => [:int64, [2, 2]],
-    [CA_INT32([1, 2]).tap { |c| c[1] = UNDEF }, CA_INT32([3, 4])] => [:int64, [2, 2]],
+    [CA_INT32([1, 2]).tap { |c| c[1] = UNDEF }, CA_INT32([3, 4])] => [:int32, [2, 2]],
+    [CA_FLOAT32([1, 2]), CA_FLOAT32([3, 4])] => [:float32, [2, 2]],
+    [CA_INT8([1, 2]), CA_FLOAT32([3, 4])]    => [:float32, [2, 2]],
+    [CA_INT8([1, 2]), nil]                   => [:int8, [2, 2]],
     [2**70, 1]       => [:object, [2]],
   }.freeze
 

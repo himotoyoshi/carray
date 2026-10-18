@@ -112,7 +112,15 @@ class CAFrame
     # as UNDEF), the same two spellings a scalar cell has.
     nested = values.map { |v| v.nil? ? blank : undef_to_nil(v.is_a?(CArray) ? v.to_a : v) }
     leaves = nested.flatten.compact
-    type = leaves.empty? ? nil : numeric_leaf_type(leaves)
+    # Cells given as numeric CArrays keep their data type, the one the
+    # cells have in common; Ruby values are typed by their leaves.
+    type = if present.all? { |v| v.is_a?(CArray) && !v.face? && v.numeric? }
+             CArray.result_type(*present)
+           elsif leaves.empty?
+             nil
+           else
+             numeric_leaf_type(leaves)
+           end
     table = CArray.object(n, *shape) { nested }
     type ? table.to_type(type) : mask_missing(table)
   end
