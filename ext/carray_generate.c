@@ -10,6 +10,7 @@
 #include "ruby.h"
 #include "carray.h"
 #include "carray_internal.h"   /* ca_attach_window, ca_normalize_axis_arg */
+#include "ca_obj_face.h"      /* ca_face_element_to_storage */
 
 /* ----------------------------------------------------------------- */
 
@@ -218,12 +219,21 @@ ca_seq_geometry (CArray *ca, int axis,
    left as they were, as they would for an entity. */
 
 typedef struct {
+  VALUE   self;
   CArray *ca;
   VALUE   roffset;
   VALUE   rstep;
   VALUE   rmethod;
   int     axis;
 } ca_seq_ctx_t;
+
+/* A value of the progression as it goes into a cell: a Face receiver (a
+   CAString) checks it as it checks any value stored into it. */
+static VALUE
+ca_seq_cell (ca_seq_ctx_t *c, VALUE v)
+{
+  return ca_face_element_to_storage(c->self, c->ca, v);
+}
 
 static VALUE
 ca_seq_bang_object_body (VALUE arg)
@@ -243,7 +253,7 @@ ca_seq_bang_object_body (VALUE arg)
       double offset = ( NIL_P(roffset) ) ? 0 : NUM2DBL(roffset);
       double step = ( NIL_P(rstep) ) ? 1 : NUM2DBL(rstep);
       for (i=0; i<ca->elements; i++) {
-        *p++ = rb_float_new(step*i+offset);
+        *p++ = ca_seq_cell(c, rb_float_new(step*i+offset));
       }
     }
     else if ( NIL_P(roffset) ) {
@@ -252,22 +262,22 @@ ca_seq_bang_object_body (VALUE arg)
                  "nil is invalid as offset for seq([offset[,step])");
       }
       for (i=0; i<ca->elements; i++) {            /* a.seq() */
-        *p++ = LL2NUM(i);
+        *p++ = ca_seq_cell(c, LL2NUM(i));
       }
     }
     else if ( ! NIL_P(rmethod) ) {                /* a.seq(obj, :method) */
       ID id_method = SYM2ID(rmethod);
-      *p++ = rval = roffset;
+      *p++ = ca_seq_cell(c, rval = roffset);
       for (i=1; i<ca->elements; i++) {
-        *p++ = rval = rb_funcall(rval, id_method, 0);
+        *p++ = ca_seq_cell(c, rval = rb_funcall(rval, id_method, 0));
       }
     }
     else {                                        /* a.seq(obj, step) */
       ID id_plus = rb_intern("+");
       rstep   = ( NIL_P(rstep) ) ? INT2NUM(1) : rstep;
-      *p++ = rval = roffset;
+      *p++ = ca_seq_cell(c, rval = roffset);
       for (i=1; i<ca->elements; i++) {
-        *p++ = rval = rb_funcall(rval, id_plus, 1, rstep);
+        *p++ = ca_seq_cell(c, rval = rb_funcall(rval, id_plus, 1, rstep));
       }
     }
   }
@@ -285,7 +295,7 @@ ca_seq_bang_object_body (VALUE arg)
       double offset = ( NIL_P(roffset) ) ? 0 : NUM2DBL(roffset);
       double step = ( NIL_P(rstep) ) ? 1 : NUM2DBL(rstep);
       for (k=0; k<len; k++) {
-        rb_ary_push(vtbl, rb_float_new(step*k+offset));
+        rb_ary_push(vtbl, ca_seq_cell(c, rb_float_new(step*k+offset)));
       }
     }
     else if ( NIL_P(roffset) ) {
@@ -294,26 +304,26 @@ ca_seq_bang_object_body (VALUE arg)
                  "nil is invalid as offset for seq([offset[,step])");
       }
       for (k=0; k<len; k++) {
-        rb_ary_push(vtbl, LL2NUM(k));
+        rb_ary_push(vtbl, ca_seq_cell(c, LL2NUM(k)));
       }
     }
     else if ( ! NIL_P(rmethod) ) {
       ID id_method = SYM2ID(rmethod);
       rval = roffset;
-      rb_ary_push(vtbl, rval);
+      rb_ary_push(vtbl, ca_seq_cell(c, rval));
       for (k=1; k<len; k++) {
         rval = rb_funcall(rval, id_method, 0);
-        rb_ary_push(vtbl, rval);
+        rb_ary_push(vtbl, ca_seq_cell(c, rval));
       }
     }
     else {
       ID id_plus = rb_intern("+");
       rstep = ( NIL_P(rstep) ) ? INT2NUM(1) : rstep;
       rval = roffset;
-      rb_ary_push(vtbl, rval);
+      rb_ary_push(vtbl, ca_seq_cell(c, rval));
       for (k=1; k<len; k++) {
         rval = rb_funcall(rval, id_plus, 1, rstep);
-        rb_ary_push(vtbl, rval);
+        rb_ary_push(vtbl, ca_seq_cell(c, rval));
       }
     }
     p = (VALUE *)ca->ptr;
@@ -339,6 +349,7 @@ rb_ca_seq_bang_object (VALUE self, VALUE roffset, VALUE rstep, int axis)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, c.ca);
 
+  c.self    = self;
   c.rmethod = Qnil;
   if ( TYPE(rstep) == T_SYMBOL ) {                /* e.g. a.seq("a", :succ) */
     c.rmethod = rstep;

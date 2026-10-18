@@ -39,6 +39,8 @@ class CArray
   #
   #   For `:object` arrays only, `step` may be a Symbol naming the
   #   stepping method to invoke on the previous element (e.g. `:succ`).
+  #   A CAString takes only a run of Strings (`s.seq!("a", :succ)`), as a
+  #   store into it does.
   #   @param init_val [Numeric, Object]
   #   @param step [Numeric, Symbol]
   #   @return [self]
