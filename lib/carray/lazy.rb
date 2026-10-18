@@ -91,7 +91,8 @@ class CArray
   module LazyDispatch; end
   prepend LazyDispatch
 
-  CArray.send(:define_named_methods, LazyDispatch, LAZY_MONOP_OP_IDS, template: <<~'RUBY')
+  CArray.send(:define_named_methods, LazyDispatch,
+              LAZY_MONOP_OP_IDS.reject { |name, _| name == :round }, template: <<~'RUBY')
     def __NAME__
       if lazy_view?
         CAMonOp.__build__(self, __VALUE__)
@@ -100,6 +101,18 @@ class CArray
       end
     end
   RUBY
+
+  # round takes digits, which the lazy node does not carry: rounding to
+  # digits evaluates the expression and rounds the result.
+  module LazyDispatch
+    def round(*digits)
+      if digits.empty? && lazy_view?
+        CAMonOp.__build__(self, CAMonOp::OP_ROUND)
+      else
+        super
+      end
+    end
+  end
 
   # Operator aliases (`~` -> bit_neg, `-@` -> neg) were installed in
   # CArray by rb_define_alias at Init time (see MkKernel.alias_monop in

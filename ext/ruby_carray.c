@@ -61,6 +61,7 @@ void Init_carray_median_percentile ();  /* median / percentile / quantile */
 void Init_carray_sort ();         /* sort / sort_copy / sort_addr / axis2addr */
 void Init_carray_count ();
 void Init_carray_kernels ();      /* mkkernel-generated: reductions + maps */
+void Init_carray_round ();
 void Init_carray_utils ();
 void Init_carray_generate ();
 void Init_carray_copy ();
@@ -312,6 +313,7 @@ Init_carray_ext (void)
   Init_carray_sort();               /* sort / sort_copy / sort_addr / axis2addr */
   Init_carray_count();
   Init_carray_kernels();            /* mkkernel-generated: reductions + maps */
+  Init_carray_round();              /* round(ndigits); after the generated round */
 
   Init_carray_utils();
 

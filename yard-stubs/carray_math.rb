@@ -125,7 +125,33 @@ class CArray
   #   keeps its sign.  Masked elements stay masked.  An `:object`
   #   array delegates to each element's `#round`.
   #   @return [CArray] same `data_type` as `self`.
-  def round; end
+  # @overload round(ndigits)
+  #   Returns a new array with each element rounded to `ndigits` decimal
+  #   digits, to the value Ruby's `Float#round(ndigits)` gives for a float
+  #   element and `Integer#round(ndigits)` for an integer one, half away
+  #   from zero: `CA_FLOAT64([1.005, 2.675]).round(2)` is `[1.01, 2.68]`,
+  #   as `1.005.round(2)` and `2.675.round(2)` are.  A negative `ndigits`
+  #   rounds to tens, hundreds, ...: `CA_INT32([125, -125]).round(-1)` is
+  #   `[130, -130]`.  The result keeps `self`'s `data_type`, so a float
+  #   array stays float for every `ndigits`, and a `:float32` element is
+  #   rounded from its own value.  `NaN` and the infinities are left as
+  #   they are.  Masked elements stay masked.  An `:object` array calls
+  #   each element's `round(ndigits)`.  `round(0)` is `round`.
+  #   @param ndigits [Integer] decimal digits to keep; negative rounds to
+  #     the left of the decimal point.
+  #   @return [CArray] same `data_type` as `self`.
+  #   @raise [TypeError] if `ndigits` is not an Integer.
+  #   @raise [RangeError] if a rounded integer does not fit the
+  #     `data_type` (`CA_INT8([125]).round(-1)`).
+  #   @raise [CArray::DataTypeError] for a complex or fixed-length array.
+  def round(ndigits = nil); end
+
+  # @overload round!(ndigits = nil)
+  #   Rounds `self` in place, as {#round} does.  A boolean array can not
+  #   hold the rounded values and raises when `ndigits` is given.
+  #   @param ndigits [Integer, nil] decimal digits to keep.
+  #   @return [self]
+  def round!(ndigits = nil); end
 
   # @overload frac
   #   Returns a new array of the fractional part of each element:
