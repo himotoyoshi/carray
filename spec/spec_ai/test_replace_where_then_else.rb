@@ -249,4 +249,24 @@ class TestReplaceWhereThenElse < Test::Unit::TestCase
     end
   end
 
+  # Beside a Face branch, an array branch must be of the same Face class,
+  # in either position: a plain array would be read as the Face's storage
+  # (an integer as a time's ticks), and the result took the class of
+  # whichever branch came second.  A scalar branch still goes through the
+  # Face's store.
+  def test_face_branch_beside_other_array_is_refused
+    cond = CA_BOOLEAN([true, false])
+    text = CArray.string(["a", "b"])
+    time = CArray.time(["2024-01-01", "2024-01-02"], unit: :D)
+    [[text, CA_OBJECT(["c", "d"])], [time, CA_INT64([5, 6])],
+     [text, CArray.const_string(["p", "q"])]].each do |face, other|
+      [[face, other], [other, face]].each do |x, y|
+        assert_raise_message(/cannot mix Face and non-Face/) { cond.then_else(x, y) }
+      end
+    end
+    assert_equal ["a", "y"], cond.then_else(text, CArray.string(["x", "y"])).to_a
+    assert_kind_of CAString, cond.then_else(text, "y")
+    assert_kind_of CATime, cond.then_else(time, Time.utc(2025, 1, 1))
+  end
+
 end

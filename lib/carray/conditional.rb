@@ -57,6 +57,7 @@ class CArray
     face = [x, y].find { |v| v.is_a?(CArray) && !v.scalar? && v.face? }
     if face
       refuse_branch_shape(x, y) if reshaped
+      refuse_branch_mix(x, y, face)
       return face_then_else(x, y, face)
     end
     dt = CArray.send(:selection_type, [x, y])
@@ -101,6 +102,20 @@ class CArray
     bad = [x, y].find { |v| v.is_a?(CArray) && !v.scalar? && v.shape != shape }
     raise ArgumentError,
           "then_else: branch shape #{bad.shape.inspect} does not match the condition's #{shape.inspect}"
+  end
+
+  # An array branch beside a Face branch must be a Face of the same kind
+  # (the same obj_type, so a CARecord subclass and a CARecord of one data
+  # class pair, as their store takes): the Face decides what a cell means,
+  # so a plain array would be read as its storage (an integer as a time's
+  # ticks) and the result would take the class of whichever branch came
+  # second.  A scalar branch is a value and goes through the Face's store.
+  private def refuse_branch_mix (x, y, face)
+    arrays = [x, y].select { |v| v.is_a?(CArray) && !v.scalar? }
+    return if arrays.all? { |v| v.face? && v.obj_type == face.obj_type }
+    raise ArgumentError,
+          "then_else: cannot mix Face and non-Face arrays, or arrays of " \
+          "different Face classes; convert them first to one Face class or to no Face"
   end
 
   private def lazy_then_else (x, y, dt)
