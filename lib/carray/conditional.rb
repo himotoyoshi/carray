@@ -56,19 +56,7 @@ class CArray
       refuse_branch_shape(x, y) if reshaped
       return face_then_else(x, y, face)
     end
-    # Promote data_type from both branches via CArray.result_type, which
-    # lets a scalar branch take the type of an array branch as an operator
-    # does (cond.then_else(0, int32_array) is int32).  UNDEF is a missing
-    # value, not a value of some type: a branch that is UNDEF leaves the
-    # type to the other.
-    # A String or Symbol branch is a value, which result_type would read as
-    # the name of a data type ("int32"), so it makes the result object.
-    typed = [x, y].reject { |v| v.equal?(UNDEF) }
-    dt = if typed.empty? || typed.any? { |v| v.is_a?(String) || v.is_a?(Symbol) }
-           CA_OBJECT
-         else
-           CArray.result_type(*typed)
-         end
+    dt = CArray.send(:selection_type, [x, y])
     return lazy_then_else(x, y, dt) if lazy_then_else?(x, y, dt)
     # A branch shaped unlike the condition goes through the lazy select,
     # which pairs the shapes by the operator rule (equal, or size-1 axes
@@ -218,13 +206,13 @@ class CArray
     # to the subset shape; wrap it here so the scatter step below sees a
     # same-length CArray.
     unless y_then.is_a?(CArray)
-      y_then = CArray.new(data_type || CArray.result_type(y_then), x_then.shape).fill(y_then)
+      y_then = CArray.new(data_type || CArray.send(:selection_type, [y_then]), x_then.shape).fill(y_then)
     end
     unless y_else.is_a?(CArray)
-      y_else = CArray.new(data_type || CArray.result_type(y_else), x_else.shape).fill(y_else)
+      y_else = CArray.new(data_type || CArray.send(:selection_type, [y_else]), x_else.shape).fill(y_else)
     end
 
-    dt  = data_type || CArray.result_type(y_then, y_else)
+    dt  = data_type || CArray.send(:selection_type, [y_then, y_else])
     out = CArray.new(dt, self.shape)
     out[cond]     = y_then
     out[cond.not] = y_else
@@ -282,7 +270,7 @@ class CArray
     end
     shape = first.shape
 
-    dt = data_type || CArray.result_type(*choicelist, default)
+    dt = data_type || selection_type(choicelist + [default])
     # `default` can be either a same-shape CArray (per-cell fallback) or a
     # scalar (broadcast to every cell).
     default_full = default.is_a?(CArray) && !default.scalar?
@@ -307,5 +295,21 @@ class CArray
     end
     out
   end
+
+  # The data type a selection among `values` writes into: their common type,
+  # by the rule an operator promotes its operands by (a scalar takes the
+  # type of an array beside it).  UNDEF is a missing value, not a value of
+  # some type, so it leaves the type to the others.  A String or Symbol is a
+  # value, which CArray.result_type would read as the name of a data type
+  # ("int32"), so it makes the result object.
+  def self.selection_type (values)
+    typed = values.reject { |v| v.equal?(UNDEF) }
+    if typed.empty? || typed.any? { |v| v.is_a?(String) || v.is_a?(Symbol) }
+      CA_OBJECT
+    else
+      CArray.result_type(*typed)
+    end
+  end
+  private_class_method :selection_type
 
 end

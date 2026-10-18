@@ -215,4 +215,15 @@ class TestReplaceWhereThenElse < Test::Unit::TestCase
     assert_equal [1, "z", UNDEF], cond.then_else(CA_INT32([1, 2, 3]), "z").to_a
   end
 
+  # select and conditional read a String value as a value too, as
+  # then_else does, rather than as the name of a data type.
+  def test_select_and_conditional_take_string_values
+    cond = CA_BOOLEAN([true, false])
+    assert_equal ["x", "y"], CArray.select([cond], ["x"], default: "y").to_a
+    assert_equal ["int32", "z"], CArray.select([cond], ["int32"], default: "z").to_a
+    assert_equal ["x", "y"],
+                 CA_INT32([1, 2]).conditional(cond, ->(_) { "x" }, ->(_) { "y" }).to_a
+    assert_equal "int32", CArray.select([cond], [CA_INT32([1, 2])], default: 0).data_type_name
+  end
+
 end
