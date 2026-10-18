@@ -27,6 +27,25 @@ class TestKeyWindowIntegerKeys < Test::Unit::TestCase
     assert_raise(ArgumentError) { sums(CA_UINT64([0, 2**64 - 1]), 1) }
   end
 
+  # A width given as a Float does not make integer keys compare as float64:
+  # above 2**53 two keys would round to one.
+  def test_float_width_on_keys_above_2_53
+    k = CA_INT64([2**53, 2**53 + 1])
+    assert_equal [1.0, 2.0], sums(k, 0.0)
+    assert_equal [1.0, 3.0], sums(k, 1.0)
+    assert_equal [1.0, 2.0], sums(k, 0.5)
+    assert_equal [1.0, 3.0], sums(k, Float::INFINITY)
+  end
+
+  # A fractional width bounds an integer key at its floor, included, also
+  # on the side exclude: names.
+  def test_fractional_width_with_exclude
+    k = CA_INT64([0, 1, 2])
+    a = CA_FLOAT64([1, 2, 4])
+    assert_equal [1.0, 3.0, 6.0], a.windows(on: k, before: 1.5, exclude: :lower).sum.to_a
+    assert_equal [1.0, 2.0, 4.0], a.windows(on: k, before: 1.0, exclude: :lower).sum.to_a
+  end
+
 end
 
 class TestKeyWindowTimeOnAFinerGrid < Test::Unit::TestCase

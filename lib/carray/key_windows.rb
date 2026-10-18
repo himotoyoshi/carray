@@ -117,8 +117,8 @@ class CAKeyWindowIterator < CAIterator
     end
     nwin = @anchor_order.elements
 
-    ex_lo = exclude == :lower || exclude == :both
-    ex_hi = exclude == :upper || exclude == :both
+    ex_lo = (exclude == :lower || exclude == :both) && !@fraction_lower
+    ex_hi = (exclude == :upper || exclude == :both) && !@fraction_upper
     expected = iv && (bw / iv + aw / iv + 1 - (ex_lo ? 1 : 0) - (ex_hi ? 1 : 0)).round
     @lo, @hi, @complete =
       CArray.__find_key_window_row_ranges__(sk, sg, bw, aw, ex_lo, ex_hi, iv, expected, sp)
@@ -467,12 +467,36 @@ class CAKeyWindowIterator < CAIterator
     end
     both   = joined(key, points)
     widths = [before, after, interval]
-    if both.integer? && widths.compact.all? { |w| w.is_a?(Integer) }
-      bw, aw, iv = widths
-      bw ||= 0
-      aw ||= 0
+    if both.integer? && (interval.nil? || whole?(interval))
+      # Integer keys are compared as integers whatever the widths are
+      # given as: k >= t - w holds for an integer k exactly when
+      # k >= t - floor(w), and when w is not whole, k > t - w does too, so
+      # a bound at a fraction is the bound at its floor, included.  An
+      # infinite width leaves its side open; the keys are then measured
+      # from the smallest, so that a bound at the int64 limit is beyond
+      # every key.
+      open = [before, after].any? { |w| w.is_a?(Float) && w.infinite? }
+      bw, aw = [before, after].map { |w| w.nil? ? 0 : integer_width(w) }
+      iv = interval && interval.to_r.to_i
       check_widths(bw, aw, iv)
-      numbers, points = split(from_smallest(both, 1), points)
+      @fraction_lower = !before.nil? && !whole?(before)
+      @fraction_upper = !after.nil? && !whole?(after)
+      numbers, points = split(from_smallest(both, 1, shift: open), points)
+      [numbers, bw, aw, iv, points]
+    elsif both.integer?
+      # A fractional interval on integer keys: compared as float64, which
+      # is exact while the keys span less than 2**53.
+      bw, aw, iv = widths.map { |w| w && w.to_f }
+      bw ||= 0.0
+      aw ||= 0.0
+      check_widths(bw, aw, iv)
+      numbers = from_smallest(both, 1, shift: true)
+      if numbers.elements > 0 && (span = numbers.max) != UNDEF && span > 2**53
+        raise ArgumentError,
+              "windows: integer keys spanning #{span} cannot be compared with " \
+              "a fractional interval: exactly; give a whole interval:"
+      end
+      numbers, points = split(numbers.float64, points)
       [numbers, bw, aw, iv, points]
     else
       bw, aw, iv = widths.map { |w| w && w.to_f }
@@ -482,6 +506,18 @@ class CAKeyWindowIterator < CAIterator
       numbers, points = split(both.float64, points)
       [numbers, bw, aw, iv, points]
     end
+  end
+
+  # Whether a width is a whole number (an infinite one is not).
+  def whole? (w)
+    !(w.is_a?(Float) && w.infinite?) && w.to_r.denominator == 1
+  end
+
+  # A width on integer keys as an integer: its floor, or the int64 limit
+  # for an infinite one.
+  def integer_width (w)
+    return 2**63 - 1 if w.is_a?(Float) && w.infinite?
+    [w.to_r.floor, 2**63 - 1].min
   end
 
   # The keys followed by the points, one array, when there are points.
@@ -519,11 +555,11 @@ class CAKeyWindowIterator < CAIterator
   # An integer key as int64 numbers scaled by `scale`: the values
   # themselves when they fit, else measured from the smallest value,
   # refused when even the span does not fit.
-  def from_smallest (key, scale)
+  def from_smallest (key, scale, shift: false)
     lo = key.min
     return key.int64 if lo == UNDEF
     hi = key.max
-    if lo * scale >= -2**63 && hi * scale <= 2**63 - 1
+    if !shift && lo * scale >= -2**63 && hi * scale <= 2**63 - 1
       return scale == 1 ? key.int64 : key.int64 * scale
     end
     span = hi - lo
