@@ -261,20 +261,24 @@ class GroupedFrame
   # view-frame and returns a Hash of output-name => value; the values are
   # collected column-wise across groups into a new frame. +keep_rows: true+
   # gives each row its group's values, as for +aggregate+.
+  #
+  # The columns are the names any group's Hash has, in the order they
+  # first appear; a group whose Hash lacks a name is UNDEF there, as
+  # +from_records+ reads a record that lacks a key.
   def table(keep_rows: false)
-    collected = {}
-    order = nil
+    outs = []
     each_group_frame do |g|
       out = yield(g)
       unless out.is_a?(Hash)
         raise ArgumentError, "table block must return a Hash (got #{out.class})"
       end
-      order ||= out.keys.map { |k| @frame.__send__(:column_name_arg, k, "table") }
-      out.each { |k, v| (collected[k] ||= []) << v }
+      out.each_key { |k| @frame.__send__(:column_name_arg, k, "table") }
+      outs << out
     end
+    names = CAFrame.__send__(:record_key_union, outs)
     cols = {}
-    (order || []).each do |name|
-      cols[name] = column_of_values(collected[name])
+    names.each do |name|
+      cols[name] = column_of_values(outs.map { |out| out.fetch(name, nil) })
     end
     result_frame(cols, keep_rows)
   end

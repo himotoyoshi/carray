@@ -1089,6 +1089,8 @@ end
 
 The values the block returns — and those a Proc reduction of `aggregate` returns — become columns typed as [`from_records`](#caframefrom_records) types a record's values: Integers an `int64` column, numbers a `float64` one, arrays of one shape an N-D column, anything else (`true` / `false`, Strings, times) an `object` column. `nil` and `UNDEF` are missing. Arrays become an N-D column only when every group gives one of the same shape, so a list whose length varies from group to group is an `object` column.
 
+The columns are the names any group's Hash has, in the order they first appear. A group whose Hash lacks a name is `UNDEF` in that column, as `from_records` reads a record that lacks a key.
+
 ### One column — the group iterator
 
 `grp["col"]` gives the [`CACategoricalIterator`](CACategoricalIterator.md) for one column, so every per-group reduction the iterator offers is available. The result is a `CArray`, not a frame:

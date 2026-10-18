@@ -66,6 +66,20 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     assert_equal [22.1, 30.0, 15.0], t["tmax"].to_a
   end
 
+  # A name only a later group gives is a column too; a group without it
+  # is UNDEF there.
+  def test_table_takes_the_names_of_every_group
+    i = -1
+    t = @df.group_by("station").table do |g|
+      i += 1
+      i == 1 ? { "n" => g.nrow, "late" => 9 } : (i == 2 ? { "tmax" => 1.5 } : { "n" => g.nrow })
+    end
+    assert_equal %w[n late tmax], t.column_names
+    assert_equal [2, 2, UNDEF], t["n"].to_a
+    assert_equal [UNDEF, 9, UNDEF], t["late"].to_a
+    assert_equal [UNDEF, UNDEF, 1.5], t["tmax"].to_a
+  end
+
   def test_table_g_is_view_frame
     seen = nil
     @df.group_by("station").table { |g| seen = g; { "n" => g.nrow } }
