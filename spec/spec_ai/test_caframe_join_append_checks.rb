@@ -66,3 +66,32 @@ class TestAppendChecksItsArguments < Test::Unit::TestCase
   end
 
 end
+
+class TestJoinIndexNameCollision < Test::Unit::TestCase
+
+  def left
+    CAFrame.new({ "k" => CA_INT64([1, 2, 3]) }, axis_name: "name",
+                index: CA_OBJECT(%w[a b c]))
+  end
+
+  def right
+    CAFrame.new("k" => CA_INT64([2, 5]), "name" => CA_OBJECT(%w[x y]))
+  end
+
+  # The left index keeps its name; the right column takes the right suffix.
+  def test_a_right_column_named_as_the_left_index_takes_the_suffix
+    %i[left inner outer right].each do |how|
+      df = left.join(right, on: "k", how: how)
+      assert_equal %w[k name_right], df.column_names, how.inspect
+      assert_equal "name", df.axis_name
+    end
+    assert_equal %w[k name_right], left.join_asof(right, on: "k").column_names
+    assert_raise(ArgumentError) { left.join(right, on: "k", suffixes: false) }
+  end
+
+  def test_paste_does_the_same
+    l = CAFrame.new({ "v" => CA_INT32([1, 2]) }, axis_name: "name", index: CA_INT32([1, 2]))
+    r = CAFrame.new("name" => CA_INT32([3, 4]))
+    assert_equal %w[v name_right], l.paste(r).column_names
+  end
+end

@@ -203,6 +203,9 @@ class CAFrame
     # Detect columns that appear in 2+ frames (collisions across the K inputs).
     name_count = Hash.new(0)
     frames.each { |f| f.column_names.each { |name| name_count[name] += 1 } }
+    # The first frame's index keeps its name as the result's row axis, so a
+    # column of that name collides with it as with a column.
+    name_count[first.axis_name] += 1 if first.index
     collisions = name_count.select { |_, n| n > 1 }.keys
 
     if collisions.any?
@@ -328,8 +331,12 @@ class CAFrame
     [rows, start.to_a, count.to_a]
   end
 
+  # The left index keeps its name as the result's row axis, so a right
+  # column of that name collides with it as with a left column: it takes
+  # the right suffix, and there is no left column to take the left one.
   private def join_name_plan(other, names, suffixes)
-    collisions = (column_names & other.column_names) - names
+    taken = @index ? column_names | [@axis_name] : column_names
+    collisions = (taken & other.column_names) - names
     return { collisions: [], lsuf: nil, rsuf: nil } if collisions.empty?
 
     if suffixes == false

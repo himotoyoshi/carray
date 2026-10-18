@@ -1301,6 +1301,8 @@ obs.join(fcst, on: "time", suffixes: ["_obs", "_fcst"])  # name them up front
 obs.join(fcst, on: "time", suffixes: false)              # raise on collision instead
 ```
 
+A column of the other frame named as this frame's row axis collides with the index, which keeps its name: only that column takes the right suffix.
+
 Choosing meaningful `suffixes:` at join time saves a `rename` afterward. `paste` follows the same rule.
 
 ### `join_asof` — the nearest key
