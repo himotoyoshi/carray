@@ -157,4 +157,15 @@ class TestKeyWindowsAt < Test::Unit::TestCase
   def test_frame_refuses_at_with_by
     assert_raise(ArgumentError) { frame.windows(on: "time", at: grid, after: "1 hour", by: "n") }
   end
+
+  # A month has no fixed length, so a month key and day points are refused
+  # by what they are, as a width in months on a day key is.
+  def test_points_in_a_calendar_unit_and_a_fixed_one_are_refused
+    df = CAFrame.new("t" => CArray.time(%w[2024-01 2024-02], unit: :M),
+                     "v" => CA_FLOAT64([1, 2]))
+    days = CArray.time(["2024-02-15"], unit: :D)
+    err = assert_raise(ArgumentError) { df.windows(on: "t", at: days, before: "1 month") }
+    assert_match(/\Awindows: at: holds points in 1 D/, err.message)
+    assert_equal [2.0], df.windows(on: "t", at: days.to_unit(:M), before: "1 month").sum("v").to_a
+  end
 end

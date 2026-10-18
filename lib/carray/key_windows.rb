@@ -441,6 +441,12 @@ class CAKeyWindowIterator < CAIterator
                 "windows: at: holds points of the key's kind, a #{key.class} " \
                 "(got #{CArray::Inspector.type_label(points)})"
         end
+        unless CATimeUnitAlgebra.same_group?(key.unit.base, points.unit.base)
+          raise ArgumentError,
+                "windows: at: holds points in #{points.unit.count} #{points.unit.base}, " \
+                "which cannot be measured on a key in #{key.unit.count} #{key.unit.base} " \
+                "(months and years have no fixed length); convert one with to_unit"
+        end
         unit = CATimeUnitAlgebra.finer(key.unit, points.unit)
         key, points = key.to_unit(unit), points.to_unit(unit)
       end
