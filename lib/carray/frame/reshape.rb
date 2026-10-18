@@ -145,6 +145,8 @@ class CAFrame
 
     r = rkey.locate_addr(rlab)
     c = ckey.locate_addr(clab)
+    rlab = pivot_key_kind(rkey, rlab)
+    clab = pivot_key_kind(ckey, clab)
     placed = r.is_not_masked & c.is_not_masked
     cell = r[placed] * nc + c[placed]
     source = CArray.int64(nr * nc)
@@ -169,6 +171,15 @@ class CAFrame
       source[cell] = CArray.int64(nrow).seq[placed]
     end
     plan
+  end
+
+  # The distinct values of a categorical key come back as its label values;
+  # the keys that label the result are a categorical again, with the key's
+  # labels, as a group index keeps a categorical key.
+  private def pivot_key_kind(key, sorted)
+    return sorted unless key.is_a?(CACategorical)
+    CAFrame.__send__(:key_labels, key,
+                     sorted.to_type(:object).categorize(labels: key.labels))
   end
 
   # The column the plan's addresses point into: the value column itself, or

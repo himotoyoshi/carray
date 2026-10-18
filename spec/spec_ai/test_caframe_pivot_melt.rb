@@ -308,4 +308,20 @@ class TestCAFrameMelt < Test::Unit::TestCase
     assert_equal @wide["tokyo"].to_a, wide["tokyo"].to_a
     assert_equal @wide["osaka"].to_a, wide["osaka"].to_a
   end
+
+  # A categorical key labels the result with a categorical, holding the
+  # key's labels, as a group index keeps a categorical key.
+  def test_pivot_keeps_a_categorical_key
+    w = CAFrame.new("r" => CA_OBJECT(%w[y x y]).categorize,
+                    "c" => CA_OBJECT(%w[p p q]).categorize, "v" => [1, 2, 3])
+    pv = w.pivot(index: "r", columns: "c", values: "v")
+    assert_kind_of CACategorical, pv.index
+    assert_equal %w[x y], pv.index.to_a
+    assert_equal %w[y x], pv.index.labels.to_a
+    assert_equal %w[p q], pv.column_names
+    assert_equal [2, 1], pv["p"].to_a
+    _, rows, cols = w.pivot_grid(index: "r", columns: "c", values: "v")
+    assert_kind_of CACategorical, rows
+    assert_kind_of CACategorical, cols
+  end
 end
