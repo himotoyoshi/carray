@@ -822,7 +822,13 @@ class CArray
       # Sort the k levels as Ruby sorts them, then renumber every code through
       # the rank in one gather. The sentinel of an excluded cell is out of the
       # rank's range, so project makes it UNDEF and from_codes writes it back.
-      order = (0...levels.size).sort { |i, j| label_order(levels[i], levels[j]) }
+      # A boolean label reads as true or false, and sorts as its storage,
+      # false before true, as sort and unique(sort: true) put the cells.
+      order = if boolean?
+                (0...levels.size).sort_by { |i| levels[i] ? 1 : 0 }
+              else
+                (0...levels.size).sort { |i, j| label_order(levels[i], levels[j]) }
+              end
       rank = CArray.new(codes.data_type, [levels.size])
       order.each_with_index { |old, new_code| rank[old] = new_code }
       return CACategorical.from_codes(rank.project(codes), order.map { |i| levels[i] })

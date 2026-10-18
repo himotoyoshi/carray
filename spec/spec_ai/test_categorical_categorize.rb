@@ -69,4 +69,12 @@ class TestCategoricalCategorize < Test::Unit::TestCase
     assert_equal [2.0, 2.0, 4.0], df.group_by("k", "j").mean["v"].to_a
   end
 
+  # Boolean labels sort as sort puts the cells, false before true.
+  def test_boolean_labels_sort_false_first
+    b = CA_BOOLEAN([true, false, true])
+    c = b.categorize(sort_labels: true)
+    assert_equal [false, true], c.labels
+    assert_equal [true, false, true], c.to_a
+  end
+
 end
