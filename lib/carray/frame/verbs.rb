@@ -165,7 +165,9 @@ class CAFrame
     cat = col.is_a?(CACategorical) ? col : col.categorize(sort_labels: true)
     coded = cat.contrast(scheme, base: base, full: full)
     m = coded.shape[1]
-    labels = full ? cat.labels : cat.labels - [base.nil? ? cat.labels.first : base]
+    # The base is found among the labels as contrast finds it, by ==.
+    dropped = full ? nil : (base.nil? ? 0 : cat.labels.index(base))
+    labels = cat.labels.reject.with_index { |_, i| i == dropped }
     names =
       if into
         Array(into).map { |n| column_name_arg(n, "contrast_columns") }

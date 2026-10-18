@@ -130,4 +130,11 @@ class TestContrast < Test::Unit::TestCase
     wide = CAFrame.new("w" => CA_INT32([[1, 2], [3, 4]]))
     assert_raise(ArgumentError) { wide.contrast_columns("w") }
   end
+
+  # The base is found among the labels by ==, as contrast finds it.
+  def test_base_is_found_as_contrast_finds_it
+    df = CAFrame.new("x" => CA_FLOAT64([1, 2, 3, 1]), "i" => CA_INT32([1, 2, 3, 1]))
+    assert_equal %w[x_1.0 x_3.0 i], df.contrast_columns("x", base: 2).column_names
+    assert_equal %w[x i_1 i_3], df.contrast_columns("i", base: 2.0).column_names
+  end
 end
