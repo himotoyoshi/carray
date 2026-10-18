@@ -420,7 +420,8 @@ task :build_c_extension_examples => [
 # zone in use) sees the load of the other processes, so it runs alone after
 # the rest.
 SPEC_AI_ALONE = ["spec/spec_ai/test_iter_raise_cleanup.rb",
-                 "spec/spec_ai/test_copy_raise_cleanup.rb"]
+                 "spec/spec_ai/test_copy_raise_cleanup.rb",
+                 "spec/spec_ai/test_iter_delivery_detectors.rb"]
 
 SPEC_AI_COMMAND = ["ruby", "-I", "ext", "-I", "lib", "-r", "test/unit",
                    "-r", "./spec/spec_ai/attach_balance.rb", "-e",
