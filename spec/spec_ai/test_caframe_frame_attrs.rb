@@ -170,7 +170,8 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
 
   def test_protected_frame_refuses_writes
     df = frame.protect
-    assert_raise(FrozenError) { df.set_attr(:a, 1) }
+    err = assert_raise(FrozenError) { df.set_attr(:a, 1) }
+    assert_match(/\Acan't modify frozen CAFrame \(\d+ rows?, \d+ columns?\)\z/, err.message)
     assert_raise(FrozenError) { df.delete_attr(:title) }
     assert_equal ATTRS, df.attrs
   end

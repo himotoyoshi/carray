@@ -259,7 +259,11 @@ class CAFrame
   # first so a refused edit leaves the frame as it was: the edits change the
   # column table before any instance variable.
   private def refuse_if_frozen
-    raise FrozenError.new("can't modify frozen CAFrame: #{inspect}", receiver: self) if frozen?
+    return unless frozen?
+    # The size, not the table: inspect prints every row.
+    size = "#{@nrow} row#{@nrow == 1 ? "" : "s"}, #{ncol} column#{ncol == 1 ? "" : "s"}"
+    raise FrozenError.new("can't modify frozen CAFrame (#{size})",
+                          receiver: self)
   end
 
   # Make this frame read-only and return it.  It is +freeze+ extended to the
