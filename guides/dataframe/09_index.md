@@ -149,3 +149,5 @@ df.filter { |f| f.index.is_masked }
 ## When to use an index
 
 Use one when the rows have a natural label you will look up or slice by, or that should stay with the rows through every operation — dates in a time series, identifiers of records. Leave it out when no column plays that part; nothing in CAFrame requires one.
+
+One more reason to have a **unique** index: `filter(keep_masked: true)` and `df[rows] = UNDEF` make every cell of a row missing, and the index is then the only thing left that says which row it was. When no column is unique, an index of row numbers does the job (chapter 6).

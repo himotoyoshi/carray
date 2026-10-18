@@ -155,7 +155,7 @@ p north.tail(3)
 # 2024-03-11         _        _       _
 ```
 
-The rows stay in the frame with their cells missing, and the index — which is not a column — keeps their dates, so you can still see which rows they were.
+The rows stay in the frame with their cells missing, and the index — which is not a column — keeps their dates, so you can still see which rows they were. This works because the dates are unique within one shop. In a frame whose index is not unique, or that has none, number the rows and make the numbers the index first, as chapter 6 shows.
 
 In a frame without an index, `df[rows] = UNDEF` masks the identifying columns too. To mark only the figures, assign to those columns:
 

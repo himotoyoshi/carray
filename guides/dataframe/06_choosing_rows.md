@@ -112,9 +112,34 @@ p sales.filter(keep_masked: true) { |f| f["shop"].eq("north") & (f["rating"] >= 
 # 2024-03-11  north       188  2261.26     4.3
 ```
 
-The third row is the undetermined one. Its cells are all missing here because the frame has no index; a frame with an index keeps the row's label, so you can still tell which row it was (chapter 9).
+The third row is the undetermined one. Every cell of it is missing, so nothing in the row says which one it was. Only the index is left as it is, so a frame whose index is **unique** keeps track of the row. `sales` has no column that is unique on its own — each date has three rows and each shop eight — so number the rows and make the numbers the index:
 
-Unlike an ordinary `filter`, `keep_masked: true` returns a frame of its own: writing to it does not change the original.
+```ruby
+numbered = sales.append("row", CArray.int64(sales.nrow).seq!, before: "date").set_index("row")
+kept = numbered.filter(keep_masked: true) { |f| f["shop"].eq("north") & (f["rating"] >= 4.3) }
+kept.index.to_a   # => [3, 9, 15, 21]
+numbered.at(15)["date"].to_s   # => "2024-03-09"
+```
+
+Row 15 is the undetermined one, and `at(15)` finds it in the numbered frame. A column the data already has, such as an order number, serves as well as row numbers, as long as no two rows share a value.
+
+To keep the undetermined rows with their values instead, choose them together with the rows where the condition holds:
+
+```ruby
+c = sales["shop"].eq("north") & (sales["rating"] >= 4.3)
+p sales[c | c.is_masked]
+# #<CAFrame nrow=4 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop   visitors  revenue  rating
+# ----------  -----  --------  -------  ------
+# 2024-03-05  north       175   2235.1     4.3
+# 2024-03-07  north       204  2681.38     4.4
+# 2024-03-09  north       341   3974.7       _
+# 2024-03-11  north       188  2261.26     4.3
+```
+
+`c.is_masked` is `true` where the condition could not be decided, so `c | c.is_masked` is `true` for both kinds of row. Only the rating that was missing to begin with is missing here.
+
+Unlike an ordinary `filter`, `keep_masked: true` returns a frame of its own: writing to it does not change the original. `sales[c | c.is_masked]` is an ordinary row selection, and shares its cells with `sales`.
 
 To choose the undetermined rows on purpose, test the mask directly:
 
