@@ -1327,7 +1327,7 @@ obs.join_asof(radar, on: "time", by: "station", tolerance: "10 minutes")
 - Neither frame needs to be sorted by the key; the result keeps the left frame's row order.
 - Each left row gets **one** row of the other frame. When several rows there share a key, `:floor` takes the **last** of them (the latest entry for that time) and `:ceil` the **first**; `:round` takes the first on an exact match, and otherwise does what `:floor` or `:ceil` does on its nearer side. Remove the duplicates first when the choice matters.
 - A masked or NaN key in either frame matches nothing. Keys of different types or units are compared as `join` compares them.
-- `on:` must name a column in both frames; the index cannot be the key (unlike `align`). `reset_index` first if the key is the index.
+- `on:` names the key in each frame: a column, or the index by the row axis name, as `join` reads it.
 - Like a `:left` `join`, the result shares this frame's columns and index; the other frame's columns are gathered into new arrays.
 
 ### `align` — conform to a reference key set
