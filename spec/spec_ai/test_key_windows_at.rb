@@ -168,4 +168,18 @@ class TestKeyWindowsAt < Test::Unit::TestCase
     assert_match(/\Awindows: at: holds points in 1 D/, err.message)
     assert_equal [2.0], df.windows(on: "t", at: days.to_unit(:M), before: "1 month").sum("v").to_a
   end
+
+  # The points are taken when the windows are made, and each result has an
+  # index of its own.
+  def test_frame_index_is_not_the_array_given
+    g = CA_INT64([0, 1, 2])
+    df = CAFrame.new("k" => CA_INT64([0, 1, 2]), "v" => CA_FLOAT64([1, 2, 3]))
+    w = df.windows(on: "k", at: g, before: 0, exclude: nil)
+    r = w.mean
+    g[0] = 99
+    assert_equal [0, 1, 2], r.index.to_a
+    assert_equal [0, 1, 2], w.mean.index.to_a
+    r.index[1] = 55
+    assert_equal [0, 1, 2], w.mean.index.to_a
+  end
 end

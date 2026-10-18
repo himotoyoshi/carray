@@ -34,6 +34,9 @@ class CAFrame
     key      = key_column(on_name, "windows")
     by_names = by.nil? ? [] : column_keys(by.is_a?(Array) ? by : [by], "windows")
     by_cols  = by_names.map { |b| key_column(b, "windows") }
+    # The points are taken as they are now: a later write to the array
+    # given changes neither the windows nor a result's index.
+    at = at.copy if at.is_a?(CArray)
     plan = CAKeyWindowIterator.new(CArray.int64(nrow).seq, on: key,
                                    before: before, after: after, exclude: exclude,
                                    by: by_cols.empty? ? nil : by_cols,
@@ -104,7 +107,8 @@ class WindowedFrame
     end
     return out unless names.empty?
     if @at
-      CAFrame.new(out, axis_name: @key_names.first, index: @at)
+      # Each result has an index of its own, as a group's result has.
+      CAFrame.new(out, axis_name: @key_names.first, index: @at.copy)
     else
       CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index)
     end
