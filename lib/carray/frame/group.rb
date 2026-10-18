@@ -9,13 +9,23 @@
 class CAFrame
   # Group rows by one or more keys. Each key is a column name (String) or an
   # external length-N CArray. Returns a GroupedFrame.
+  #
+  # With one key, a summary's index is the key's value of each group. With
+  # several, each key is a column of a summary, holding its part of each
+  # group's key, and the summary has no index; a CArray key among several
+  # names its column by its position, "key0", "key1", ....
   def group_by(*keys)
     raise ArgumentError, "group_by needs at least one key" if keys.empty?
     CAFrame.__send__(:refuse_repeated_names, keys.grep(String), "group_by")
     cat  = grouping_categorical(keys)
-    axis = keys.size == 1 && keys.first.is_a?(String) ? keys.first : "group"
-    key  = keys.size == 1 ? key_column(keys.first) : nil
-    GroupedFrame.new(self, cat, axis, keys.grep(String), key: key)
+    if keys.size == 1
+      axis = keys.first.is_a?(String) ? keys.first : "group"
+      return GroupedFrame.new(self, cat, axis, keys.grep(String), key: key_column(keys.first))
+    end
+    names = keys.each_with_index.map { |k, i| k.is_a?(String) ? k : "key#{i}" }
+    CAFrame.__send__(:refuse_repeated_names, names, "group_by")
+    GroupedFrame.new(self, cat, "group", keys.grep(String),
+                     key_columns: names.zip(keys.map { |k| key_column(k) }).to_h)
   end
 
   # Whether each row repeats another row: a boolean column, true for the rows
@@ -191,18 +201,27 @@ class GroupedFrame
   # The result's index is +index:+ when given (one entry per group, in code
   # order); otherwise, for a single +key:+, the key's value at each group's
   # first row, so it keeps the key's data type and Face; otherwise an object
-  # array of the labels (a composite key's tuples).
+  # array of the labels.
+  #
+  # With several keys the result has no index: +key_columns:+ (name => the
+  # key, one value per row) become its first columns, each holding the key's
+  # value at each group's first row; +label_columns:+ (name => one value per
+  # group, in code order) give them directly, for groups that may have no
+  # rows (resample with fill: true).
   #
   # The grouping and the index are taken here, so a later change to the key
   # does not rename the groups; the values are read when a reduction is.
-  def initialize(frame, cat, axis_name, key_names = [], index: nil, key: nil)
+  def initialize(frame, cat, axis_name, key_names = [], index: nil, key: nil,
+                 key_columns: nil, label_columns: nil)
     @frame     = frame
     @cat       = cat
     @axis_name = axis_name
     @key_names = key_names
     @labels    = cat.labels          # group values, in code order
     @index     = index ||
-                 (key && CAFrame.__send__(:key_labels, key, key.project(group_perm[group_bounds[0...ngroup]])))
+                 (key && CAFrame.__send__(:key_labels, key, key.project(first_rows)))
+    @label_columns = label_columns ||
+                     key_columns&.transform_values { |col| CAFrame.__send__(:key_labels, col, col.project(first_rows)) }
   end
 
   # Number of groups.
@@ -585,7 +604,15 @@ class GroupedFrame
   # One row per group, indexed by the labels; or, with +keep_rows+, the
   # frame's rows, each holding its group's result.
   private def result_frame(cols, keep_rows)
-    return CAFrame.new(cols, axis_name: @axis_name, index: label_index) unless keep_rows
+    unless keep_rows
+      return CAFrame.new(cols, axis_name: @axis_name, index: label_index) unless @label_columns
+      clash = cols.keys & @label_columns.keys
+      unless clash.empty?
+        raise ArgumentError,
+              "a result column has the name of a key column: #{clash.map(&:inspect).join(', ')}"
+      end
+      return CAFrame.new(@label_columns.transform_values(&:copy).merge(cols))
+    end
     CAFrame.new(cols.transform_values { |col| spread_to_rows(col) },
                 axis_name: @frame.axis_name, index: @frame.index)
   end
@@ -644,6 +671,11 @@ class GroupedFrame
 
   private def each_group_frame
     ngroup.times { |k| yield @frame[group_address(k)] }
+  end
+
+  # The first row of each group, in code order.
+  private def first_rows
+    group_perm[group_bounds[0...ngroup]]
   end
 
   private def group_address(k)

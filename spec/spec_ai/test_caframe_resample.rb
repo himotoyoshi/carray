@@ -138,7 +138,10 @@ class TestCAFrameGroupByIndexType < Test::Unit::TestCase
     df = CAFrame.new("a" => CA_INT32([1, 1, 2]), "b" => CA_OBJECT(%w[x x y]),
                      "v" => CA_FLOAT64([1, 2, 3]))
     r = df.group_by("a", "b").sum
-    assert_equal [[1, "x"], [2, "y"]], r.index.to_a
+    assert_nil r.index
+    assert_equal [1, 2], r["a"].to_a
+    assert_equal :int32, r["a"].data_type
+    assert_equal ["x", "y"], r["b"].to_a
   end
 
   # Month and year bins keep the time column's unit with fill: true, as

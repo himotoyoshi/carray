@@ -1020,7 +1020,8 @@ grp.ngroup                 # => number of groups
 grp.labels                 # => group key values, in code order
 ```
 
-- **The result's index** is the group's key value. With a single key it keeps the key's data type and Face — an integer key gives an integer index, a `CATime` key a `CATime` index — so the result can be joined or aligned on it. A composite key gives an object index of the key tuples.
+- **The result's index** is the group's key value. With a single key it keeps the key's data type and Face — an integer key gives an integer index, a `CATime` key a `CATime` index — so the result can be joined or aligned on it.
+- **With a composite key** the result has no index; each key is a column of the result, before the reduced columns, keeping its data type and Face. A `CArray` key among several is named by its position: `key0`, `key1`, …. A result column (an `aggregate` or `table` name) with a key column's name raises `ArgumentError`.
 - **Groups appear in the order their keys first appear.**
 - **Keys are compared as values**: all NaN keys are one group, `-0.0` and `0.0` one group, and a composite key compares each of its columns the same way.
 - **A row whose key is masked belongs to no group**, as `filter` drops a row whose condition is undetermined. With a composite key, one masked component is enough. So the group sizes need not add up to `nrow` — count the masked keys (`df["k"].count_masked`) to account for the difference, or fill them first (`df.fill("k", value)`) to group them together.

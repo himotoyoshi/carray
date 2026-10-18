@@ -24,7 +24,8 @@ class TestCAFrameKeyIdentity < Test::Unit::TestCase
                     "b" => CA_OBJECT(["x", "y", "x", "x"]),
                     "v" => CA_INT64([1, 2, 3, 4]))
     g = f.group_by("a", "b").sum
-    assert_equal [[1, "x"], [1, "y"], [2, "x"]], g.index.to_a
+    assert_equal [1, 1, 2], g["a"].to_a
+    assert_equal ["x", "y", "x"], g["b"].to_a
     assert_equal [5.0, 2.0, 3.0], g["v"].to_a
   end
 
@@ -34,7 +35,8 @@ class TestCAFrameKeyIdentity < Test::Unit::TestCase
                     "v" => CA_INT64([1, 2, 3, 4]))
     f["a"][2] = UNDEF
     g = f.group_by("a", "b").sum
-    assert_equal [[1, "x"], [1, "y"]], g.index.to_a
+    assert_equal [1, 1], g["a"].to_a
+    assert_equal ["x", "y"], g["b"].to_a
     assert_equal [5.0, 2.0], g["v"].to_a
   end
 

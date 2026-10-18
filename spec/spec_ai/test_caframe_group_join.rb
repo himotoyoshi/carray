@@ -177,8 +177,8 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
                      "b" => CA_INT32([5, 5, 6]),
                      "v" => CA_FLOAT64([1, 2, 3]))
     m = df.group_by("a", "b").mean
-    assert_equal ["v"], m.column_names
-    assert_equal "group", m.axis_name
+    assert_equal ["a", "b", "v"], m.column_names
+    assert_nil m.index
     assert_equal [1.5, 3.0], m["v"].to_a
   end
 
@@ -199,9 +199,25 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
       "v" => CA_FLOAT64([10, 20, 30]),
     )
     stat = df.group_by("a", "b").aggregate("s" => ["v", :sum])
-    assert_equal "group", stat.axis_name
-    assert_equal [["x", 1], ["x", 2], ["y", 1]], stat.index.to_a
+    assert_nil stat.index
+    assert_equal ["a", "b", "s"], stat.column_names
+    assert_equal ["x", "x", "y"], stat["a"].to_a
+    assert_equal [1, 2, 1], stat["b"].to_a
+    assert_equal :int32, stat["b"].data_type
     assert_equal [10.0, 20.0, 30.0], stat["s"].to_a
+  end
+
+  # A CArray key among several names its column by its position, and a
+  # result column with a key column's name is refused.
+  def test_composite_key_with_an_unnamed_key
+    df = CAFrame.new("a" => CA_OBJECT(["x", "x", "y"]), "v" => CA_FLOAT64([10, 20, 30]))
+    stat = df.group_by("a", CA_INT32([1, 1, 2])).sum
+    assert_equal ["a", "key1", "v"], stat.column_names
+    assert_equal [1, 2], stat["key1"].to_a
+    err = assert_raise(ArgumentError) {
+      df.group_by("a", CA_INT32([1, 1, 2])).aggregate("a" => ["v", :sum])
+    }
+    assert_match(/a result column has the name of a key column: "a"/, err.message)
   end
 
   def test_external_carray_key
