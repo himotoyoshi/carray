@@ -28,7 +28,7 @@ rb_ca_where (VALUE self)
   CArray *ca, *co;
   boolean8_t *p, *m;
   ca_size_t *q;
-  ca_size_t i, count;
+  ca_size_t i, j, n, last, count;
 
   bool0 = ( ! rb_ca_is_boolean_type(self) ) ? rb_ca_to_boolean(self) : self;
 
@@ -36,20 +36,25 @@ rb_ca_where (VALUE self)
 
   ca_attach(ca);   /* window: nothing raises inside */
 
-  /* calculate elements of output array */
+  /* calculate elements of output array, and the last selected cell */
   p = (boolean8_t *) ca->ptr;
   m = ca_mask_ptr(ca);
+  n = ca->elements;
   count = 0;
   if ( m ) {
-    for (i=0; i<ca->elements; i++) {
-      if ( ( ! *m ) && ( *p ) ) { count++; }    /* not-masked && true */
-      m++; p++;
+    for (i=0; i<n; i++) {
+      count += ( ! m[i] ) & ( p[i] != 0 );     /* not-masked && true */
     }
   }
   else {
-    for (i=0; i<ca->elements; i++) {
-      if ( *p ) { count++; }                    /* true */ 
-      p++;
+    for (i=0; i<n; i++) {
+      count += ( p[i] != 0 );                   /* true */
+    }
+  }
+  last = n - 1;
+  if ( count > 0 ) {
+    while ( m ? ( m[last] || ! p[last] ) : ! p[last] ) {
+      last--;
     }
   }
 
@@ -57,20 +62,25 @@ rb_ca_where (VALUE self)
   obj = rb_carray_new(CA_SIZE, 1, &count, 0, NULL);
   TypedData_Get_Struct(obj, CArray, &carray_data_type, co);
 
-  /* store address which elements is true to output array */
-  p = (boolean8_t *) ca->ptr;
+  /* Store the address of each selected cell.  Every cell up to the last
+     selected one is written and the output position advances only on a
+     selected cell, so a selection with true and false mixed at random
+     does not mispredict a branch on most cells.  Stopping at the last
+     selected cell keeps the writes inside the count slots. */
   q = (ca_size_t *) co->ptr;
-  m = ca_mask_ptr(ca);
-  if ( m )  {
-    for (i=0; i<ca->elements; i++) {  /* not-masked && true */
-      if ( ( ! *m ) && ( *p ) ) { *q = i; q++; }
-      m++; p++; 
+  j = 0;
+  if ( count > 0 ) {
+    if ( m ) {
+      for (i=0; i<=last; i++) {           /* not-masked && true */
+        q[j] = i;
+        j += ( ! m[i] ) & ( p[i] != 0 );
+      }
     }
-  }
-  else {                              /* true */
-    for (i=0; i<ca->elements; i++) {
-      if ( *p ) { *q = i; q++; }
-      p++;
+    else {                                /* true */
+      for (i=0; i<=last; i++) {
+        q[j] = i;
+        j += ( p[i] != 0 );
+      }
     }
   }
 
