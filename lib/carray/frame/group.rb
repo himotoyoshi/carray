@@ -98,15 +98,26 @@ class CAFrame
   # as an empty reduction does: UNDEF for +mean+, 0 for +count+ and +sum+.
   # A row whose time is masked belongs to no bin.
   #
+  # +by:+ (a column name or an Array of them) bins each group of rows on its
+  # own: a group is the rows sharing the +by:+ values and a bin. The result
+  # then has no index: the +by:+ columns and the bin times (named +name+)
+  # are its first columns, the groups in the order their +by:+ values first
+  # appear and the bins of each in time order. With +fill: true+ every group
+  # has every bin from the first to the last of the whole frame. A row whose
+  # +by:+ value is masked belongs to no group.
+  #
+  #   df.resample("date", "1 week", by: "shop").sum
+  #
   # @param name [String] the time column, or the index's axis name.
   # @param unit [String, Symbol, CATime::Resolution] the bin length.
   # @param origin [nil, Time, String, CATime::Element] where bins start.
   # @param label [:left, :right] which end of a bin names it and is closed.
   # @param fill [Boolean] whether bins with no rows are rows of the result.
+  # @param by [nil, String, Array<String>] columns whose groups are binned apart.
   # @return [GroupedFrame]
   # @raise [ArgumentError] when the column is not a CATime, or +label:+ is
-  #   neither :left nor :right.
-  def resample(name, unit, origin: nil, label: :left, fill: false)
+  #   neither :left nor :right, or +by:+ names the time column.
+  def resample(name, unit, origin: nil, label: :left, fill: false, by: nil)
     name = column_key(name, "resample")
     time = key_column(name, "resample")
     unless time.is_a?(CATime)
@@ -121,9 +132,48 @@ class CAFrame
       end
     # key-labels: the bins are the index, given the column's attributes below.
     grid = fill && bins.count_not_masked > 0 ? resample_grid(bins, unit) : bins.unique(sort: true)
+    return resample_by(name, time, bins, grid, by, fill) unless by.nil?
     cat = CACategorical.from_codes(bins.locate_addr(grid), grid.to_a)
     GroupedFrame.new(self, cat, name, @columns.key?(name) ? [name] : [],
                      index: CAFrame.__send__(:key_labels, time, grid))
+  end
+
+  # resample with by:. A group is a (by values, bin) pair, coded as
+  # group * bins + bin, so the codes run through the groups in the order their
+  # by values first appear and through each group's bins in time order.
+  private def resample_by(name, time, bins, grid, by, fill)
+    by_names = column_keys(Array(by), "resample")
+    raise ArgumentError, "resample: by: names no column" if by_names.empty?
+    if by_names.include?(name)
+      raise ArgumentError, "resample: by: names the time column #{name.inspect}"
+    end
+    by_cols = by_names.map { |n| key_column(n, "resample") }
+    gcat = CACategorical.send(:from_keys, by_cols)
+    ng   = gcat.labels.size
+    nb   = grid.elements
+    comb = gcat.codes.int64 * nb + bins.locate_addr(grid).int64
+    occupied = fill ? CArray.int64(ng * nb).seq! : comb.unique(sort: true)
+    codes = fill ? comb : comb.locate_addr(occupied)
+    g_of = nb > 0 ? occupied / nb : occupied
+    b_of = nb > 0 ? occupied % nb : occupied
+    # Each group's by values, from its first row.
+    order = gcat.sort_addr
+    first = order[CArray.segment_offsets(lengths: gcat.category_sizes)[0...ng]]
+    columns = {}
+    by_names.zip(by_cols).each do |n, col|
+      columns[n] = CAFrame.__send__(:key_labels, col, col.project(first))[g_of].copy
+    end
+    columns[name] = CAFrame.__send__(:key_labels, time, grid[b_of].copy)
+    glabels = gcat.labels
+    blabels = grid.to_a
+    labels = occupied.to_a.map do |c|
+      g, b = c.divmod(nb)
+      parts = by_names.size == 1 ? [glabels[g]] : glabels[g]
+      parts + [blabels[b]]
+    end
+    cat = CACategorical.from_codes(codes, labels)
+    key_names = by_names + (@columns.key?(name) ? [name] : [])
+    GroupedFrame.new(self, cat, "group", key_names, label_columns: columns)
   end
 
   # Every bin from the first occupied one to the last, stepped from the

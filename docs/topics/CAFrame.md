@@ -1204,6 +1204,12 @@ df.resample("time", "1 hour", fill: true).mean     # every hour, UNDEF where non
 df.resample("time", "1 hour", label: :right).mean(min_count: 6)
 ```
 
+**Bins per group.** `by:` names a column (or an Array of columns) whose groups are binned apart: each group of the result is the rows sharing the `by:` values and a bin. The result then has no index; the `by:` columns and the bin times, named after the time column, are its first columns, the groups in the order their `by:` values first appear and the bins of each in time order. With `fill: true` every group has every bin from the first to the last of the whole frame. A row whose `by:` value is masked belongs to no group.
+
+```ruby
+df.resample("time", "1 day", by: "station").max("temp")   # each station's daily maximum
+```
+
 A row whose time is masked belongs to no bin. `resample` builds the bins and nothing more: it does not interpolate. To bring a series onto a grid of instants, build the grid with `CArray.time_range` and [`align`](#align--conform-to-a-reference-key-set) onto it, then `fill(name, :linear)` if values should be interpolated.
 
 ---

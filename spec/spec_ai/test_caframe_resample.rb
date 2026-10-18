@@ -172,3 +172,60 @@ class TestCAFrameGroupByIndexType < Test::Unit::TestCase
     assert_equal [7.0], r["v"].to_a
   end
 end
+
+# resample(by:) bins each group of rows on its own; the by: columns and the
+# bins are columns of the result.
+class TestCAFrameResampleBy < Test::Unit::TestCase
+  def frame
+    t = CArray.time(%w[2024-01-01 2024-01-01 2024-01-02 2024-01-03 2024-01-03 2024-01-04], unit: :D)
+    CAFrame.new("time" => t,
+                "shop" => CA_OBJECT(%w[n s n s n n]),
+                "v"    => CA_INT32([1, 2, 3, 4, 5, 6]))
+  end
+
+  def test_one_row_per_group_and_bin
+    r = frame.resample("time", "2 days", origin: "2024-01-01", by: "shop").sum
+    assert_nil r.index
+    assert_equal %w[shop time v], r.column_names
+    assert_equal %w[n n s s], r["shop"].to_a
+    assert_equal %w[2024-01-01 2024-01-03 2024-01-01 2024-01-03], r["time"].to_a.map(&:to_s)
+    assert_kind_of CATime, r["time"]
+    assert_equal [4.0, 11.0, 2.0, 4.0], r["v"].to_a
+  end
+
+  def test_fill_gives_every_group_every_bin
+    r = frame.resample("time", "1 day", by: "shop", fill: true).sum
+    assert_equal 8, r.nrow
+    assert_equal %w[n n n n s s s s], r["shop"].to_a
+    assert_equal [1.0, 3.0, 5.0, 6.0, 2.0, 0.0, 4.0, 0.0], r["v"].to_a
+    m = frame.resample("time", "1 day", by: "shop", fill: true).mean
+    assert_equal UNDEF, m["v"][5]
+  end
+
+  def test_a_masked_by_value_is_in_no_group
+    df = frame
+    df["shop"][1] = UNDEF
+    r = df.resample("time", "2 days", origin: "2024-01-01", by: "shop").sum
+    assert_equal %w[n n s], r["shop"].to_a
+    assert_equal [4.0, 11.0, 4.0], r["v"].to_a
+  end
+
+  def test_several_by_columns_and_the_time_index
+    df = frame
+    df["k"] = CA_INT32([0, 0, 0, 0, 1, 1])
+    r = df.copy.set_index("time").resample("time", "2 days", origin: "2024-01-01", by: ["shop", "k"]).count("v")
+    assert_equal [2, 1, 1, 2], r.to_a
+    names = df.resample("time", "2 days", origin: "2024-01-01", by: ["shop", "k"]).sum.column_names
+    assert_equal %w[shop k time v], names
+  end
+
+  def test_keep_rows_lines_up_with_the_frame
+    r = frame.resample("time", "2 days", origin: "2024-01-01", by: "shop").sum("v", keep_rows: true)
+    assert_equal [4.0, 2.0, 4.0, 4.0, 11.0, 11.0], r.to_a
+  end
+
+  def test_by_naming_the_time_column_raises
+    err = assert_raise(ArgumentError) { frame.resample("time", "1 day", by: "time") }
+    assert_match(/by: names the time column "time"/, err.message)
+  end
+end
