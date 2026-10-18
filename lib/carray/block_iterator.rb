@@ -837,6 +837,14 @@ class CABlockIterator < CAIterator
   def tile_grid_view
     @tile_grid_view ||= padded_source.block_view(*@sizes)
   end
+
+  # lag and strip_mask(method:) give the source's values moved or held in
+  # place, so the result shows the source's attributes, as CArray#lag and
+  # CArray#strip_mask(method:) do.
+  prepend(Module.new do
+    def lag (*args, **keywords) = @source.__send__(:carry_attrs, super)
+    def strip_mask (**keywords) = @source.__send__(:carry_attrs, super)
+  end)
 end
 
 

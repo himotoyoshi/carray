@@ -1071,6 +1071,14 @@ class CAGroupIterator
     end
     out
   end
+
+  # lag and strip_mask(method:) give the source's values moved or held in
+  # place, so the result shows the source's attributes, as CArray#lag and
+  # CArray#strip_mask(method:) do.
+  prepend(Module.new do
+    def lag (*args, **keywords) = value.__send__(:carry_attrs, super)
+    def strip_mask (**keywords) = value.__send__(:carry_attrs, super)
+  end)
 end
 
 require "carray/categorical"

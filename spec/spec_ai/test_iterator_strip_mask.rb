@@ -135,4 +135,19 @@ class TestIteratorStripMask < Test::Unit::TestCase
     it = m.group_by_category(CA_INT32([0, 1, 0, 1]).categorize)
     assert_equal [[0.0, UNDEF, 2.0, 3.0], [4.0, 5.0, 4.0, 7.0]], it.strip_mask(method: :ffill, axis: 1).to_a
   end
+
+  # A fill and a lag give the source's values held or moved in place, so
+  # they show the source's attributes, as CArray#strip_mask and #lag do.
+  def test_fill_and_lag_show_the_source_attributes
+    builders.each do |klass, build|
+      next unless build
+      d = CArray.float64(P, L).seq
+      d[0, 1] = UNDEF
+      d.set_attr(:units, "K")
+      it = build.(d)
+      group = it.is_a?(CAGroupIterator) ? { axis: :group } : {}
+      assert_equal({ "units" => "K" }, call(it, :ffill).attrs, "#{klass} strip_mask")
+      assert_equal({ "units" => "K" }, it.lag(1, **group).attrs, "#{klass} lag")
+    end
+  end
 end
