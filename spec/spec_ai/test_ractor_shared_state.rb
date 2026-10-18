@@ -36,6 +36,8 @@ class TestRactorSharedState < Test::Unit::TestCase
       require "carray"
       Warning[:experimental] = false
       require "carray/struct"    # loaded on first use, which only the main Ractor can do
+      # autoloaded on first use: a Ractor that triggers one can deadlock (Ruby 3.4)
+      [CAFrame, CArray::Fusion, CArray::FuseSource, CAStruct::Builder]
       CArray.expression_evaluator = ->(plan, out) { false } if ENV["CARRAY_TEST_EVALUATOR"]
       rs = 8.times.map { |id| Ractor.new(id) { |id| #{body} } }
       vals = rs.map { |r| r.respond_to?(:value) ? r.value : r.take }
