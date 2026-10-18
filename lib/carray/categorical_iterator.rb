@@ -63,11 +63,13 @@ require "carray"
 require "carray/segment_iterator"
 
 # A CAIterator over the categories of a CACategorical.  It is a
-# CASegmentIterator over a category-sorted copy of the value: construction
-# gathers the value through the categorical's cached grouping plan, so each
-# category is one contiguous segment, and every reduction without `axis:` is
-# the segment reduction over that copy (one value per category, in {#labels}
-# order).  This class adds the construction, the labels, and the per-fiber
+# CASegmentIterator over a category-sorted copy of the value: the value is
+# gathered through the categorical's cached grouping plan, so each category
+# is one contiguous segment, and every reduction without `axis:` is the
+# segment reduction over that copy (one value per category, in {#labels}
+# order). With few categories and a numeric value, the count / sum / min /
+# max are read from the values by code instead, and the copy is gathered
+# only for the reductions that need it.  This class adds the construction, the labels, and the per-fiber
 # form (`axis:`), which classifies each fiber along an axis and keeps the
 # other axes.
 class CACategoricalIterator < CASegmentIterator
@@ -118,9 +120,22 @@ class CACategoricalIterator < CASegmentIterator
       # rebuilt per column. With no classified cell (empty / all-excluded) there
       # is nothing to gather — an empty index into an empty source is out of
       # range — so build the empty grouped buffer directly.
-      @grouped  = nvalid > 0 ? value.reshape(value.elements)[@perm].copy
-                             : value.reshape(value.elements)[0...0].copy
-      @empty    = @grouped[0...0]         # an empty category is the values' own kind
+      #
+      # With few categories, a numeric value is instead copied as it lies:
+      # the count / sum / min / max read it in one pass by code (scattering
+      # into one slot per category beats gathering every cell first while
+      # the slots stay in cache), and the grouped copy is gathered from it
+      # only when a reduction needs the categories contiguous. Either way
+      # the iterator holds the values as they were when it was built.
+      flat = value.reshape(value.elements)
+      if @k <= SCATTER_CATEGORIES_MAX && kernel_reads?(value.data_type)
+        @as_built = flat.copy
+        @nvalid   = nvalid
+        @empty    = @as_built[0...0]
+      else
+        @grouped  = nvalid > 0 ? flat[@perm].copy : flat[0...0].copy
+        @empty    = @grouped[0...0]       # an empty category is the values' own kind
+      end
     else
       # Shape mismatch: only per-fiber axis: dispatch could still work.  With a
       # 1-D value there is no fiber structure to broadcast into, so a mismatch
@@ -147,6 +162,10 @@ class CACategoricalIterator < CASegmentIterator
     end
     self
   end
+
+  # The most categories for which the count / sum / min / max are read by
+  # scattering the values by code rather than through the grouped copy.
+  SCATTER_CATEGORIES_MAX = 4096
 
   # @overload labels
   #   Returns the category vocabulary the results are aligned to.
@@ -307,6 +326,34 @@ class CACategoricalIterator < CASegmentIterator
     @codes
   end
 
+  # With few categories the grouped copy is gathered from the values as
+  # built, the first time a reduction asks for it.
+  def grouped
+    if @as_built && ! @grouped
+      @grouped = @nvalid > 0 ? @as_built[@perm].copy : @as_built[0...0].copy
+    end
+    super
+  end
+
+  def kernel_reads? (data_type = (@as_built || grouped).data_type)
+    super(data_type)
+  end
+
+  # With few categories the count / sum / min / max come from one pass over
+  # the values as built, each cell added to the slot of its code; a cell
+  # whose value or code is masked, or whose code names no category, is in
+  # no slot, as it is in no segment of the grouped copy.
+  def moments
+    return @moments if defined?(@moments)
+    return super unless @as_built && kernel_reads?
+    counts = CArray.int64(@k)
+    sums   = CArray.float64(@k)
+    mins   = CArray.new(@as_built.data_type, [@k])
+    maxs   = CArray.new(@as_built.data_type, [@k])
+    @as_built.__send__(:__fiber_scatter_moments__, @codes, 0, @k, counts, sums, mins, maxs)
+    @moments = { count: counts, sum: sums, min: mins, max: maxs }
+  end
+
   # Axis-aware count of present cells. Counting how many cells fall in a
   # group does not look at what is in them. An integer or float payload goes
   # through the fused moments kernel, which counts in the same pass that
@@ -383,7 +430,7 @@ class CACategoricalIterator < CASegmentIterator
   BAND_ONLY_KEYS = { sum: [:sum], mean: [:sum, :count], min: [:min],
                      max: [:max], minmax: [:min, :max] }.freeze
   Ractor.make_shareable(BAND_ONLY_KEYS)
-  private_constant :BAND_ONLY_KEYS
+  private_constant :BAND_ONLY_KEYS, :SCATTER_CATEGORIES_MAX
 
   def band_only_moments (h, axis, band, op)
     nb      = band.inject(1, :*)
