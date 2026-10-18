@@ -210,6 +210,7 @@ class TestReplaceWhereThenElse < Test::Unit::TestCase
     r = cond.then_else("green", "red")
     assert_equal CA_OBJECT, r.data_type
     assert_equal ["green", "red", UNDEF], r.to_a
+    assert_kind_of CAString, r
     assert_equal ["int32", "x", UNDEF], cond.then_else("int32", "x").to_a
     assert_equal [:a, :b, UNDEF], cond.then_else(:a, :b).to_a
     assert_equal [1, "z", UNDEF], cond.then_else(CA_INT32([1, 2, 3]), "z").to_a
@@ -224,6 +225,28 @@ class TestReplaceWhereThenElse < Test::Unit::TestCase
     assert_equal ["x", "y"],
                  CA_INT32([1, 2]).conditional(cond, ->(_) { "x" }, ->(_) { "y" }).to_a
     assert_equal "int32", CArray.select([cond], [CA_INT32([1, 2])], default: 0).data_type_name
+  end
+
+  # A selection among Strings is text: a CAString, which has the String
+  # operations.  A Symbol, a String beside a value of another kind, or a
+  # data_type named by the caller keeps an object array.
+  def test_string_selections_are_castring
+    cond = CA_BOOLEAN([true, false])
+    text = CArray.string(["p", "q"])
+    assert_kind_of CAString, cond.then_else("x", UNDEF)
+    assert_kind_of CAString, cond.lazy.then_else("x", "y")
+    assert_equal ["X", "Y"], cond.then_else("x", "y").upcase.to_a
+    assert_kind_of CAString, CArray.select([cond], ["x"], default: "y")
+    assert_kind_of CAString, CArray.select([cond], [text], default: "z")
+    assert_kind_of CAString,
+                   CA_INT32([1, 2]).conditional(cond, ->(_) { "x" }, ->(_) { "y" })
+    assert_kind_of CAString, CA_INT32([0, 1]).choose(["x", text])
+    [cond.then_else(:x, :y), cond.then_else("x", 1), cond.then_else(UNDEF, UNDEF),
+     CArray.select([cond], ["x"], default: "y", data_type: :object),
+     CA_INT32([0, 1]).choose(["x", "y"], data_type: :object)].each do |r|
+      assert_equal CArray, r.class
+      assert_equal CA_OBJECT, r.data_type
+    end
   end
 
 end

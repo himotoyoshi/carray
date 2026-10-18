@@ -15,7 +15,8 @@ class CArray
   #     When `nil` it is inferred: `CArray.result_type` of the CArray
   #     choices, or `CA_OBJECT` when every choice is a scalar.
   #   @return [CArray] new CArray with the shape of `self` holding
-  #     the chosen values.
+  #     the chosen values; a {CAString} when every choice is a String
+  #     or a {CAString} and `data_type` is not given.
   #   @example
   #     ref = CA_INT([[0, 1, 2], [1, 2, 0], [2, 0, 1]])
   #     a = CArray.int(3, 3).seq(1)
@@ -24,6 +25,7 @@ class CArray
   #     ref.choose([a, b, c])       # per-cell pick from a / b / c
   #     ref.choose(["a", "b", "c"]) # recode labels to values
   def choose (choices, data_type: nil)
+    text = !data_type && CArray.send(:selection_text?, choices)
     unless data_type
       ca = choices.select { |v| v.is_a?(CArray) }
       data_type = ca.empty? ? CA_OBJECT : CArray.result_type(*ca)
@@ -33,7 +35,7 @@ class CArray
       s = self.eq(i)
       out[s] = v.is_a?(CArray) ? v[s] : v
     end
-    out
+    text ? CAString.wrap(out) : out
   end
 
 end
