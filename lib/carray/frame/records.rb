@@ -68,7 +68,8 @@ class CAFrame
   # a group's block or Proc gives).  All-Array cells of equal length -> N-D
   # native column; numeric scalars -> native scalar column (missing ->
   # UNDEF); Strings -> a text column (CAString), as from_csv reads text;
-  # anything else -> object column.
+  # time and duration elements -> a CATime / CATimedelta column in the finest
+  # resolution among them; anything else -> object column.
   def self.build_record_column(values, n)
     values = values.map { |v| UNDEF.equal?(v) ? nil : v }
     present = values.reject(&:nil?)
@@ -78,6 +79,10 @@ class CAFrame
       build_nd_column(values, present, n)
     elsif present.all? { |v| v.is_a?(String) }
       CArray.string(values)
+    elsif present.all? { |v| v.is_a?(CATime::Element) }
+      CArray.time(values)
+    elsif present.all? { |v| v.is_a?(CATimedelta::Element) }
+      build_duration_column(values, present, n)
     else
       type = numeric_leaf_type(present)
       col = CArray.object(n) { values }
@@ -85,6 +90,27 @@ class CAFrame
     end
   end
   private_class_method :build_record_column
+
+  # A CATimedelta column of duration elements, in the finest of their
+  # resolutions. Durations that have no common resolution (a month beside a
+  # second) stay an object column of the elements.
+  def self.build_duration_column(values, present, n)
+    unit = begin
+      present.map(&:unit).reduce { |a, b| CATimeUnitAlgebra.finer(a, b) }
+    rescue ArgumentError
+      return mask_missing(CArray.object(n) { values })
+    end
+    ticks = CArray.int64(n)
+    values.each_with_index do |v, i|
+      ticks[i] =
+        if v.nil? then UNDEF
+        elsif v.unit == unit then v.value
+        else CA_INT64([v.value]).timedelta(unit: v.unit).to_unit(unit).ticks[0]
+        end
+    end
+    ticks.timedelta(unit: unit)
+  end
+  private_class_method :build_duration_column
 
   # A missing cell is UNDEF, not a Ruby nil sitting in a cell.  to_records
   # writes a masked cell as nil, so nil on the way back in is the only

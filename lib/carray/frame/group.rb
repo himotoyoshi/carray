@@ -695,9 +695,6 @@ class GroupedFrame
     column_of_values(results)
   end
 
-  # A column of the Ruby values the groups gave, typed as from_records types
-  # a record's values: Integers int64, numbers float64, arrays of one shape
-  # an N-D column, anything else object. UNDEF and nil are missing.
   # The grouping holds one code per row of the frame as it was when grouped.
   # A frame whose row count changed since (a splice, a deletion) has rows
   # the grouping does not know, so every verb refuses it.
@@ -708,6 +705,10 @@ class GroupedFrame
           "was grouped; group it again"
   end
 
+  # A column of the Ruby values the groups gave, typed as from_records types
+  # a record's values: Integers int64, numbers float64, Strings text, time
+  # elements a time column, arrays of one shape an N-D column, anything else
+  # object. UNDEF and nil are missing.
   private def column_of_values(values)
     CAFrame.__send__(:build_record_column, values, values.size)
   end

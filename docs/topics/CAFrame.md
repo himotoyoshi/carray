@@ -141,6 +141,7 @@ CAFrame.new("a" => CA_INT32([1, 2, 3]), "b" => CA_FLOAT64([1.0, 2.0, 3.0]))
 | `[1, 2.5]` | `float64` |
 | `[[1, 2], [3, 4]]` | an N-D column |
 | strings | a text column (`CAString`), as `from_csv` reads text |
+| `CATime` / `CATimedelta` elements | a `CATime` / `CATimedelta` column in the finest resolution among them |
 | mixed values | `:object` |
 | `nil` or `UNDEF` | a masked cell |
 
@@ -229,6 +230,7 @@ A record value is **already a typed Ruby object** (`Float`, `Integer`, `Complex`
 | `Integer` and `Float` | `:float64` |
 | `Integer`, `Float` and `Complex` | `:cmplx128` |
 | strings | a text column (`CAString`) |
+| `CATime::Element` / `CATimedelta::Element` | a `CATime` / `CATimedelta` column in the finest resolution among them |
 | `DateTime` / booleans / `Rational` / `BigDecimal` / mixed, or an Integer an `int64` cannot hold | `:object` (left as is) |
 | numeric **arrays** of one shape | an N-D column (see [Making N-D columns](#making-n-d-columns-from-records)) |
 
@@ -1098,7 +1100,7 @@ df.group_by("station").table do |g|
 end
 ```
 
-The values the block returns — and those a Proc reduction of `aggregate` returns — become columns typed as [`from_records`](#caframefrom_records) types a record's values: Integers an `int64` column, numbers a `float64` one, Strings a text column (`CAString`), arrays of one shape an N-D column, anything else (`true` / `false`, times) an `object` column. `nil` and `UNDEF` are missing. Arrays become an N-D column only when every group gives one of the same shape, so a list whose length varies from group to group is an `object` column.
+The values the block returns — and those a Proc reduction of `aggregate` returns — become columns typed as [`from_records`](#caframefrom_records) types a record's values: Integers an `int64` column, numbers a `float64` one, Strings a text column (`CAString`), time elements a `CATime` / `CATimedelta` column, arrays of one shape an N-D column, anything else (`true` / `false`, Ruby `Time`) an `object` column. `nil` and `UNDEF` are missing. Arrays become an N-D column only when every group gives one of the same shape, so a list whose length varies from group to group is an `object` column.
 
 The columns are the names any group's Hash has, in the order they first appear. A group whose Hash lacks a name is `UNDEF` in that column, as `from_records` reads a record that lacks a key.
 
@@ -1519,7 +1521,7 @@ JSON.generate(df.to_records)          # -> a JSON array of objects
 CAFrame.from_records(df.to_records)   # the same names, values and mask
 ```
 
-`to_records` gives the rows as an `Array` of Hashes, **normalized for export**: a masked cell (`UNDEF`) becomes `nil`, and every value is a plain Ruby value. That normalization — which `each_row` does *not* do — is what lets `JSON.generate` serialize it and `from_records` read it back.
+`to_records` gives the rows as an `Array` of Hashes, **normalized for export**: a masked cell (`UNDEF`) becomes `nil`, and every value is a Ruby value — a number, a String, or for a time column its element (`CATime::Element`), as `df[i]` gives it. That normalization — which `each_row` does *not* do — is what lets `JSON.generate` serialize it and `from_records` read it back.
 
 A record carries only Ruby values, so this is what a round trip keeps:
 
@@ -1528,7 +1530,7 @@ A record carries only Ruby values, so this is what a round trip keeps:
 | column names and their order | kept |
 | every cell's value | kept |
 | the mask | kept — `nil` is read back as `UNDEF` |
-| the data type | rebuilt from the values: any integer column comes back `int64`, a `float32` column `float64`, a boolean column an object column of `true` / `false`, a time or string column an object column of its elements |
+| the data type | rebuilt from the values: any integer column comes back `int64`, a `float32` column `float64`, a boolean column an object column of `true` / `false`, a string column a text column (`CAString`), a time column a `CATime` (or `CATimedelta`) column of the same resolution |
 | the index | not kept — it comes back as an ordinary first column (call `set_index` again) |
 | the columns of a frame with no rows | not kept — `to_records` gives `[]`, which has no names in it |
 

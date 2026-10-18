@@ -989,3 +989,42 @@ class TestCAFrameStringColumns < Test::Unit::TestCase
     assert_equal CAString, t.data_types["s"]
   end
 end
+
+class TestCAFrameTimeColumnsFromRecords < Test::Unit::TestCase
+  def test_round_trip_keeps_time_and_duration_columns
+    t = CArray.time(["2024-03-04", "2024-03-05"], unit: :D)
+    df = CAFrame.new("date" => t, "v" => [1, 2])
+    df["dur"] = t - t[0]
+    back = CAFrame.from_records(df.to_records + [{ "date" => nil, "v" => 3, "dur" => nil }])
+    assert_equal({ "date" => CATime, "v" => :int64, "dur" => CATimedelta }, back.data_types)
+    assert_equal :D, back["date"].unit.base
+    assert_equal ["2024-03-04", "2024-03-05"], back["date"][0..1].to_a.map(&:to_s)
+    assert_equal UNDEF, back["date"][2]
+    assert_equal [0, 1], back["dur"][0..1].ticks.to_a
+    assert_equal UNDEF, back["dur"][2]
+  end
+
+  def test_mixed_resolutions_take_the_finest
+    d = CArray.time(["2024-03-04", "2024-03-05"], unit: :D)
+    h = CArray.time(["2024-03-04 01:00"], unit: :h)
+    df = CAFrame.from_records([{ "d" => (d - d[0])[1] }, { "d" => (h - d[0])[0] }])
+    assert_equal CATimedelta, df.data_types["d"]
+    assert_equal :h, df["d"].unit.base
+    assert_equal [24, 1], df["d"].ticks.to_a
+  end
+
+  def test_durations_without_a_common_resolution_stay_objects
+    m = CArray.time(["2024-03"], unit: :M)
+    h = CArray.time(["2024-03-04 01:00"], unit: :h)
+    df = CAFrame.from_records([{ "d" => (m - m[0])[0] }, { "d" => (h - h[0])[0] }])
+    assert_equal :object, df.data_types["d"]
+  end
+
+  def test_table_results_of_times_are_time_columns
+    t = CArray.time(["2024-03-04", "2024-03-05", "2024-03-06"], unit: :D)
+    g = CAFrame.new("k" => [1, 1, 2], "t" => t).group_by("k")
+    r = g.table { |f| { "last" => f["t"][-1] } }
+    assert_equal CATime, r.data_types["last"]
+    assert_equal ["2024-03-05", "2024-03-06"], r["last"].to_a.map(&:to_s)
+  end
+end
