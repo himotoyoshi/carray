@@ -34,7 +34,7 @@ south       909.0  15292.67    36.8
 central    2675.0  22113.01    30.1
 ```
 
-Every column that has a sum is summed — here the visitor counts, revenue and ratings (adding up ratings is not meaningful, but the frame does not know that; choose your columns, as below). The key column is not summed: its values are the labels of the result, its **index** (chapter 9). The date column is left out because dates have no sum.
+Every column that has a sum is summed — here the visitor counts, revenue and ratings. A sum of ratings means little; choose the columns to summarise, as below. The key column is not summed: its values are the labels of the result, its **index** (chapter 9). The date column is left out because dates have no sum.
 
 The visitor totals are floating-point numbers. `sum` is a statistic, and is computed in `float64` whatever the column's type, so a large total does not wrap around as a total kept in an integer type would.
 
@@ -311,4 +311,4 @@ Grouping rows into periods of time — days, weeks, months — is `resample`, co
 
 ## In the CArray User's Guide
 
-The CArray User's Guide describes the grouping machinery underneath, for arrays as well as frames, in *Categories and grouping* ([24_categories_and_grouping.md](../users/24_categories_and_grouping.md)).
+The CArray User's Guide describes grouping the cells of arrays in *Categories and grouping* ([24_categories_and_grouping.md](../users/24_categories_and_grouping.md)).

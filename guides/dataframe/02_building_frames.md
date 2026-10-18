@@ -18,7 +18,7 @@ require "carray"
 
 df = CAFrame.new(
   "shop"     => ["north", "south", "central"],
-  "revenue"  => CA_FLOAT64([2121.39, 1391.47, 3038.0]),
+  "revenue"  => [2121.39, 1391.47, 3038.0],
   "visitors" => [182, 95, nil],
 )
 p df
@@ -33,25 +33,58 @@ south    1391.47        95
 central   3038.0         _
 ```
 
-A column may be given as a CArray or as a Ruby Array.
+A column may be given as a Ruby Array, as here, or as a CArray.
 
-- **A CArray is used as it is**, without being copied. The frame holds your array, so writing to the array changes the frame and the other way around (chapter 16).
-- **A Ruby Array is turned into a column by its values**: whole numbers give an `int64` column, any decimal among them a `float64` column, strings or a mix of kinds an `object` column. An Array of equal-length Arrays gives a column with more than one value per row (chapter 14).
-- **`nil` or `UNDEF` in an Array is a missing cell.** The `visitors` column above is `int64` with its last cell missing.
+### Ruby Arrays
+
+A Ruby Array is turned into a column by its values:
+
+- whole numbers give an `int64` column, and any decimal among them a `float64` column;
+- strings, or a mix of kinds, give an `object` column;
+- an Array of equal-length Arrays gives a column with more than one value per row (chapter 14);
+- `nil` or `UNDEF` is a missing cell. The `visitors` column above is `int64` with its last cell missing.
 
 ```ruby
 df.data_types   # => {"shop" => :object, "revenue" => :float64, "visitors" => :int64}
 ```
 
+### CArrays
+
+Give a CArray when you want a particular type, or when the data is already an array. The array is used as it is, without being copied: the frame holds your array, so writing to the array changes the frame, and the other way around (chapter 16).
+
+```ruby
+counts = CA_INT16([182, 95, 310])
+df2 = CAFrame.new("shop" => ["north", "south", "central"], "visitors" => counts)
+df2.data_types["visitors"]   # => :int16
+counts[0] = 190
+df2["visitors"][0]           # => 190
+```
+
+### Choosing the types — `types:`
+
+To give a column a type other than the one its values give it, name the type with `types:`. Here the revenue is kept in 32-bit floats and the visitor counts in 16-bit integers:
+
+```ruby
+df3 = CAFrame.new({ "shop"     => ["north", "south", "central"],
+                    "revenue"  => [2121.39, 1391.47, 3038.0],
+                    "visitors" => [182, 95, 310] },
+                  types: { "revenue" => :float32, "visitors" => :int16 })
+df3.data_types   # => {"shop" => :object, "revenue" => :float32, "visitors" => :int16}
+```
+
+`types:` takes the same forms as in `from_records` and `from_csv` (chapter 3): a Hash of column name to type, `:infer`, or a Hash with `default:` for the columns it does not name. Strings are read as numbers here too, so `types: { "count" => :int32 }` turns a column of `"12"`, `"7"` into integers; a string that cannot be read becomes missing, or with `on_error: :raise` raises an error (chapter 3).
+
+The columns go in braces when `types:` is given, as with the other options below. A column converted by `types:` is a new array, so a CArray you passed for it is no longer shared with the frame.
+
 ### Column names are Strings
 
-Every column name is a String, here and in every method that names a column. A Symbol is refused rather than quietly becoming a column:
+Every column name is a String, here and in every method that names a column. A Symbol raises an error:
 
 ```ruby
 CAFrame.new(revenue: CA_FLOAT64([1.0, 2.0]))   # raises TypeError: CAFrame.new: a column name is a String
 ```
 
-Symbols are kept for options. `CAFrame.new` takes three, and when you give them the columns go in braces:
+Symbols are kept for options. Besides `types:` and `on_error:` above, `CAFrame.new` takes three more, and when you give any of them the columns go in braces:
 
 | option | what it sets |
 |---|---|
@@ -82,7 +115,7 @@ Columns of different lengths are refused when the frame is built, with the colum
 CAFrame.new("a" => [1, 2], "b" => [1, 2, 3])   # raises ArgumentError: column "b" has axis-0 length 3, expected 2
 ```
 
-There is no stretching of a single value into a column. To make a column of one repeated value, make it the right length yourself:
+A single value is not turned into a column. To make a column of one repeated value, make it the right length yourself:
 
 ```ruby
 flags = CArray.int8(3) { 0 }
@@ -147,7 +180,7 @@ central   3038.0       310  promotion
 - The columns are every key that appears in any record, in the order they first appear.
 - A key missing from a record, or a `null`, is a missing cell. The south shop has no `visitors`, and two shops have no `note`.
 - Each column's type comes from its values, which JSON has already typed: all integers give `int64`, integers and decimals `float64`. Anything else — strings, booleans, a mix — gives an `object` column holding the values as they are.
-- Strings are not parsed. A date written as a string stays a string until you convert it (chapter 7).
+- Strings are not parsed. A date written as a string stays a string until you convert it (chapter 11).
 
 `types:` converts named columns as they are built:
 

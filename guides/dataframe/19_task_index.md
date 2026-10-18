@@ -7,6 +7,7 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | I want to… | use | chapter |
 |---|---|---|
 | make a frame from arrays I have | `CAFrame.new` | 2 |
+| give columns particular types as the frame is built | `CAFrame.new(..., types:)` | 2 |
 | see an array I have as a table, without copying | `array.to_frame` | 2, 15 |
 | read parsed JSON (an Array of objects) | `CAFrame.from_records` | 2 |
 | read a CSV file | `CAFrame.from_csv` | 3 |

@@ -93,7 +93,7 @@ df["north"][0].round(3)                            # => 0.324
 
 ## Columns that are not plain numbers
 
-A frame column can be any kind of CArray, including the ones the CArray User's Guide calls *Faces*: arrays whose stored numbers stand for something else. Three appear in frames all the time:
+Besides numbers, a frame column can hold times, categories or text. These columns are CArrays too (the CArray User's Guide calls them *Faces*): each stores numbers or strings and shows them as something else. Three appear in frames all the time:
 
 | column | stores | reads as |
 |---|---|---|
@@ -101,7 +101,7 @@ A frame column can be any kind of CArray, including the ones the CArray User's G
 | categorical (`CACategorical`) | small integer codes | labels: `"north"` |
 | text (`CAString`, `CAConstString`) | strings | strings |
 
-These columns keep what they are through every frame operation: a filtered time column is a time column, a joined categorical column is categorical, a group summary keyed by time has a time index. They compare with values of their own kind — a time with `"2024-03-09"`, a categorical with `"north"` — and two of them match by meaning, not by stored numbers: a day column joins a seconds column by the instant, a categorical column joins a text column by the labels.
+These columns keep what they are through every frame operation: a filtered time column is a time column, a joined categorical column is categorical, a group summary keyed by time has a time index. They compare with values of their own kind — a time with `"2024-03-09"`, a categorical with `"north"` — and two of them match by what they mean: a day column joins a seconds column by the instant, a categorical column joins a text column by the labels.
 
 When you need the stored numbers, ask the column: `ticks` on a time column, `codes` on a categorical one:
 

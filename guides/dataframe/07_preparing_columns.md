@@ -37,7 +37,7 @@ sales["per_visitor"] = sales["revenue"] / sales["visitors"]
 sales["per_visitor"][0].round(2)   # => 11.66
 ```
 
-A new name adds a column at the end; an existing name replaces that column. The right-hand side must be a CArray or a Ruby Array with one value per row. A single value is refused, since it is not a column:
+A new name adds a column at the end; an existing name replaces that column. The right-hand side must be a CArray or a Ruby Array with one value per row. A single value raises an error:
 
 ```ruby
 sales["promotion"] = 0   # raises ArgumentError: column must be a CArray or Array (got Integer)

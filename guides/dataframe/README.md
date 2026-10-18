@@ -1,6 +1,6 @@
 # CAFrame User's Guide
 
-A guide to analysing tabular data with `CAFrame`, the data frame that comes with Ruby/CArray. A frame is a set of CArrays kept under names: it lets you take a table — a CSV export, a JSON response, a set of arrays you already have — read it, clean it, summarise it, combine it with other tables and write the results out, while every column stays a CArray you can work on directly.
+A guide to analysing tables with `CAFrame`, the data frame that comes with Ruby/CArray. A frame is a table whose columns are CArrays. With it you take a table — a CSV export, a JSON response, a set of arrays you already have — read it, clean it, summarise it, combine it with other tables and write the results out, and work on any column directly as an array.
 
 `CAFrame` is part of CArray. `require "carray"` is all it takes, and reading CSV needs no other library.
 
@@ -9,8 +9,6 @@ Every chapter is organised around what you are trying to do with your data rathe
 ## Who this guide is for
 
 This guide is for people who use CArray. A frame's columns are CArrays, and what you do with a frame is largely what you do with arrays, so the guide assumes the basics of CArray: making arrays, indexing and slicing, element-wise operations, reductions, masks and views. These are the core walkthrough of the **CArray User's Guide** (`guides/users`, its chapters 1 to 8); if you are new to CArray, read those first. Where a chapter here relies on more — times, categories, histograms — it names the chapter of the CArray User's Guide that covers it.
-
-If you have used a data frame in another language, read the [Introduction](introduction.md) first. CAFrame is built differently, and a few habits carried over from other libraries do something other than you expect here. The introduction lists them.
 
 ## The data used in the examples
 
@@ -28,7 +26,7 @@ sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
 
 ## Reading order
 
-The [Introduction](introduction.md) describes what a frame is and what sets CAFrame apart. Chapter 1 then takes you through a whole small analysis, from reading a file to writing a summary, so you see the pieces together before each is explained.
+The [Introduction](introduction.md) describes what a frame is, lists what you can do with one, and collects a few points of how frames behave that come up throughout. Chapter 1 then takes you through a whole small analysis, from reading a file to writing a summary, so you see the pieces together before each is explained.
 
 1. [A first analysis](01_first_analysis.md)
 2. [Building a frame](02_building_frames.md)
@@ -54,6 +52,5 @@ Chapters 2 to 9 are the everyday tools; read them in order the first time. Chapt
 
 ## How this guide is written
 
-- **From the user's side.** A section starts from a situation in your data — a column read as text, a code standing for missing values, two series recorded at different times — and shows what to do about it. What the library does internally appears only when it changes what you should write.
+- **From the reader's side.** A section starts from a situation in your data — a column read as text, a code standing for missing values, two series recorded at different times — and shows what to do about it. How the library works inside is mentioned only where a behaviour would otherwise be puzzling.
 - **Examples that run.** Each example was run against the library, and the output shown is what it printed. Examples later in a chapter build on the earlier ones.
-- **CAFrame in its own terms.** CAFrame is described by what it does. Where another library behaves differently in a way that could mislead you, the guide says so plainly, as a note for readers coming from it.

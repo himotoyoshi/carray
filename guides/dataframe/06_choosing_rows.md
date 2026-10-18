@@ -90,7 +90,7 @@ sales.filter { |f| f["revenue"] > shop_mean }.nrow   # => 8
 
 ### Column names in conditions
 
-Columns are written `f["revenue"]`, always with the String name. A column name may contain spaces, dots or anything else, and it never collides with a method name, so this one form works for every frame.
+Columns are written `f["revenue"]`, with the column's name as a String. This works for any name, including names with spaces or dots.
 
 The block's `f` is the frame being filtered. For conditions that mix in arrays from elsewhere, refer to them by variable, as `shop_mean` above. They must have one value per row, in the frame's row order.
 
@@ -120,7 +120,7 @@ _           _             _        _       _
 
 The third row is the undetermined one. Its cells are all missing here because the frame has no index; a frame with an index keeps the row's label, so you can still tell which row it was (chapter 9).
 
-The frame `keep_masked: true` returns is a new frame, not a view of the original: it could not show a row as missing without making it missing in the original too.
+Unlike an ordinary `filter`, `keep_masked: true` returns a frame of its own: writing to it does not change the original.
 
 To choose the undetermined rows on purpose, test the mask directly:
 
@@ -213,7 +213,7 @@ Text sorts in byte order, so `central` comes before `north` and `south`. Times s
 - **Missing values** go to the end, whichever the direction. `masked_position: :first` puts them at the start instead.
 - **NaN** goes after the numbers, and before the missing values.
 - Rows with equal keys keep their original order.
-- A categorical column cannot be a key, because its codes are not in the order of its labels; sort by its labels with `sort_by { |f| f["k"].to_type(:object) }`.
+- A categorical column cannot be a sort key. Sort by its labels with `sort_by { |f| f["k"].to_type(:object) }`.
 
 ### `sort_by` — by a value you compute
 

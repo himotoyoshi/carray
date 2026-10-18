@@ -7,9 +7,9 @@ require "carray"
 sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
 ```
 
-## Why frames share
+## Parts of a frame are views
 
-CArray never copies data unless asked: choosing part of an array gives a view, which reads from and writes to the array it came from. A frame keeps that rule. Choosing rows or columns of a frame gives a frame whose columns are views of the original's:
+Choosing rows or columns of a frame gives a frame whose columns are **views** of the original's columns: they show the original's cells rather than copies of them. Writing through one writes the other:
 
 ```ruby
 north = sales.filter { |f| f["shop"].eq("north") }
@@ -24,14 +24,7 @@ sales["revenue"][0] = 2121.39
 north["revenue"][0]   # => 2121.39
 ```
 
-This is useful:
-
-- **No time or memory is spent copying** when you take a part of a large table to look at, summarise or pass to a method.
-- **Corrections reach the whole table.** Find the rows to fix with `filter`, fix them in the result, and the original is fixed.
-
-And it is something to keep in mind: code that changes a frame it was given changes the frame the caller holds.
-
-> **Coming from another library.** In many data frame libraries, a filtered or selected frame behaves as an independent copy. Here it does not: use `copy` where you want independence.
+So a correction made in a part reaches the whole table: find the rows to fix with `filter`, fix them in the result, and the original is fixed. Taking a part of a large table also takes no memory of its own. Keep in mind, too, that code which changes a frame it was given changes the frame the caller holds.
 
 ## Cutting the link — `copy`
 

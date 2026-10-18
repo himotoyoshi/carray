@@ -35,7 +35,7 @@ The price of coffee went up at noon on 4 March.
 
 ## Time columns
 
-A time column is a `CATime`: each cell is an instant, stored as a whole number of ticks — days, seconds, milliseconds — since 1970. The tick is the column's **resolution**, shown in brackets:
+A time column is a `CATime`: each cell is an instant, kept to a fixed **resolution** — a day, a second, a millisecond. The resolution is shown in brackets:
 
 ```ruby
 sales["date"].class       # => CATime
@@ -338,7 +338,7 @@ change.to_a.first(6).map { |v| v == UNDEF ? v : v.round(2) }   # => [UNDEF, UNDE
 
 ## Times in different resolutions
 
-Two time columns of different resolutions — days and seconds, say — compare and match by the instant they name, not by their stored numbers. A day matches midnight of that day:
+Two time columns of different resolutions — days and seconds, say — compare and match by the instant they name. A day matches midnight of that day:
 
 ```ruby
 day = CArray.time(["2024-03-04"], unit: :D)

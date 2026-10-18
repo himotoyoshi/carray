@@ -1,6 +1,6 @@
 # Reading CSV files
 
-Most tables arrive as CSV, and few CSV files are tidy. This chapter goes through what you can tell `CAFrame.from_csv` about a file: the types of its columns, how it writes missing values, where its header and data are, which columns you need, and what encoding it is in.
+CSV files come in many layouts, and few of them are tidy. This chapter goes through what you can tell `CAFrame.from_csv` about a file: the types of its columns, how it writes missing values, where its header and data are, which columns you need, and what encoding it is in.
 
 Writing CSV is in chapter 17.
 
@@ -94,7 +94,7 @@ sales.data_types
 # => {"date" => CATime, "shop" => CAString, "visitors" => :int64, "revenue" => :float64, "rating" => CAString}
 ```
 
-The rules are deliberately cautious:
+A column gets a type only when every one of its present cells fits that type:
 
 - **Integers** become `:int64` when every cell is a whole number that fits.
 - **Numbers** become `:float64` when every cell is a number.
@@ -156,7 +156,7 @@ sales["visitors"].count_masked   # => 1
 sales["rating"].data_type        # => :float64
 ```
 
-Tokens are compared with the text of the field as written. `"-1"` does not match `-1.0`; list both if the file uses both. A token must be a String: a number such as `missing: -1` is refused, since it could match some spellings and not others.
+Tokens are compared with the text of the field as written. `"-1"` does not match `-1.0`; list both if the file uses both. A token must be a String; a number such as `missing: -1` raises an error.
 
 When the codes differ by column, give a Hash. `default:` gives the tokens for every column, and a column name gives that column's own, replacing the default:
 
@@ -308,11 +308,11 @@ df = CAFrame.from_csv("prices.csv", encoding: "Windows-1252:UTF-8")
 df["item"][0]   # => "Café latte", now in UTF-8
 ```
 
-Name both halves. With `encoding: "Windows-1252"` alone the file is read, but the names and cells stay in Windows-1252, so a name you type in your (UTF-8) program finds no column. A file that is not valid UTF-8, read without `encoding:`, stops with an error that says to pass `encoding:`. Which encoding a file is in cannot be worked out from its bytes, so the error names the option rather than guessing a value. Other common cases are `"ISO-8859-1:UTF-8"`, and `"CP932:UTF-8"` for a spreadsheet saved in Japanese.
+Name both halves. With `encoding: "Windows-1252"` alone the file is read, but the names and cells stay in Windows-1252, so a name you type in your (UTF-8) program finds no column. A file that is not valid UTF-8, read without `encoding:`, stops with an error that says to pass `encoding:`. Other common cases are `"ISO-8859-1:UTF-8"`, and `"CP932:UTF-8"` for a spreadsheet saved in Japanese.
 
 ## When the file is malformed
 
-A field that cannot be read as written stops the read rather than being guessed at: text after a closing quote, a quote inside an unquoted field, a quoted field that never closes, a record with more fields than there are columns. The message begins with the file and line, in the form an editor can jump to:
+A field that cannot be read as written stops the read with an error: text after a closing quote, a quote inside an unquoted field, a quoted field that never closes, a record with more fields than there are columns. The message begins with the file and line, in the form an editor can jump to:
 
 ```ruby
 text = "item,size\nposter,24\"x36\n"

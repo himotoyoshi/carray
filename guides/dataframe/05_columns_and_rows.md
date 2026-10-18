@@ -28,7 +28,7 @@ revenue.class          # => CArray
 revenue.mean.round(2)  # => 2626.11
 ```
 
-What you get is the array the frame holds — not a copy, and not an object wrapped around it. It has every CArray method, and writing to it writes to the frame:
+What you get is the column the frame holds, not a copy. It has every CArray method, and writing to it writes to the frame:
 
 ```ruby
 revenue[0] = 2200.0

@@ -114,7 +114,7 @@ south          15292.67         15000.0
 central        22113.01         25000.0
 ```
 
-`suffixes:` names them yourself, which saves a `rename` afterwards. `suffixes: false` raises an error instead, if you would rather not have it happen silently.
+`suffixes:` names them yourself, which saves a `rename` afterwards. With `suffixes: false`, a column name in both tables raises an error instead.
 
 ### Joining on the index
 

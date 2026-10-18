@@ -17,7 +17,7 @@ sales["visitors"].data_type        # => :int64
 sales["visitors"].count_masked     # => 1
 ```
 
-Because the mark is separate from the values, missing values do not change a column's type. An integer column with gaps is still an integer column; a date column with gaps is still a date column; a text column with gaps has missing cells, not empty strings. No value — not `-1`, not `0`, not an empty string — has to be set aside to mean "missing".
+Because the mark is separate from the values, missing values do not change a column's type. An integer column with gaps is still an integer column; a date column with gaps is still a date column; a text column with gaps has missing cells, not empty strings.
 
 ### NaN is not missing
 
@@ -31,8 +31,6 @@ x.is_masked.to_a      # => [false, false, true]
 ```
 
 Statistics leave out missing cells, but a NaN takes part like any number, and usually makes the result NaN. If NaN in your data means "no value", make it missing (below).
-
-> **Coming from another library.** If you are used to data frames that store missing numbers as NaN, note that here NaN and missing are different things, and an integer column keeps its type when it has gaps.
 
 ## Where missing values come from
 
@@ -66,7 +64,7 @@ any_missing.count(true)   # => 3
 
 ### Arithmetic carries them through
 
-A calculation on a missing value gives a missing value. Nothing is invented:
+A calculation with a missing input gives a missing result:
 
 ```ruby
 (sales["visitors"] * 2)[7]                         # => UNDEF

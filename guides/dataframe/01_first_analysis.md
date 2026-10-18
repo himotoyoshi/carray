@@ -101,7 +101,7 @@ date        shop     visitors  revenue  rating
 2024-03-11  central       298  3008.01     3.9
 ```
 
-The summary line gives the number of rows and each column's type. A missing cell is shown as `_`: the south shop's visitor count on 6 March. The visitor column is still a column of integers with one cell missing; nothing had to be turned into a float to hold the gap.
+The summary line gives the number of rows and each column's type. A missing cell is shown as `_`: the south shop's visitor count on 6 March. The visitor column is still a column of integers, with one cell missing.
 
 `describe` checks every column at once: its type, how many cells are present and missing, and its range.
 
@@ -280,6 +280,6 @@ central,22113.01,3939.6,402,8,Central Station,240,92.14
 - The file's own ways of writing "no value" became missing cells, and the integer column stayed integer.
 - Every summary left out the missing cells, and `count` showed how many were used.
 - Each shop's average was put back on every row as an ordinary column.
-- Nothing was copied unless needed: `busy` shares its cells with `sales`, so a correction made in `busy` would reach `sales`. Chapter 16 explains when this matters.
+- `busy` shares its cells with `sales`: a correction made in `busy` would reach `sales`. Chapter 16 explains which operations share cells.
 
 The next chapters take each of these steps in turn.
