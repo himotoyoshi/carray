@@ -70,4 +70,21 @@ class TestGroupMomentsLongSegments < Test::Unit::TestCase
       check(CArray.new(dt, [n]).tap { |a| a[] = vals }, codes)
     end
   end
+
+  # 0.0 and -0.0 are equal; the core keeps the first of equal values, so a
+  # long group gives the zero that comes first in cell order, as a short one.
+  def test_long_group_gives_the_first_zero
+    bits = ->(x) { [x].pack("G") }
+    [[0.0, -0.0], [-0.0, 0.0]].each do |first, later|
+      [:float64, :float32].each do |dt|
+        vals = [5.0, first] + [1.0] * 6 + [later] + [1.0] * 70
+        neg  = vals.map { |x| x.zero? ? x : -x }
+        [[vals, :min], [neg, :max]].each do |v, op|
+          a = CArray.new(dt, [v.size]).tap { |c| c[] = v }
+          seg = a.segments(lengths: [v.size])
+          assert_equal bits.(a.send(op)), bits.(seg.send(op)[0]), "#{dt} #{op} first=#{first}"
+        end
+      end
+    end
+  end
 end

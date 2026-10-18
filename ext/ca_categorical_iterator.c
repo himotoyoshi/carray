@@ -230,6 +230,16 @@ rb_ca_addresses_by_category (VALUE self, VALUE rcursor, VALUE rk, VALUE rnvalid)
           if ( CAT_REPLACES(x5, mx, >, ISNAN) ) mx = x5;                        \
           if ( CAT_REPLACES(x6, mx, >, ISNAN) ) mx = x6;                        \
           if ( CAT_REPLACES(x7, mx, >, ISNAN) ) mx = x7;                        \
+          /* Of equal values a lane keeps its first, but the merge does not   \
+             know which lane saw its value first in cell order.  Only 0.0 and \
+             -0.0 are equal and tell apart: take the first zero, as one loop  \
+             over the cells does. */                                          \
+          if ( mn == 0 ) {                                                      \
+            for ( j = lo; j < hi; j++ ) { if ( gp[j] == 0 ) { mn = gp[j]; break; } } \
+          }                                                                     \
+          if ( mx == 0 ) {                                                      \
+            for ( j = lo; j < hi; j++ ) { if ( gp[j] == 0 ) { mx = gp[j]; break; } } \
+          }                                                                     \
           cnt = hi - lo; seen = 1;                                              \
         }                                                                       \
       }                                                                         \
