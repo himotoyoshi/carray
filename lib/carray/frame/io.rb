@@ -42,7 +42,8 @@ class CAFrame
   #             Japanese.
   #   parser:   a callable source -> [headers, rows] to inject another parser
   #             (e.g. the stdlib +csv+, or a typed-table source); when given,
-  #             sep/quote/strip/encoding and any block are that parser's concern.
+  #             sep/quote/strip/encoding and any block are that parser's concern,
+  #             and header:/data:/column_names:/columns:/attrs: are refused.
   #   on_error: what a +types:+ cast does with a cell that does not read
   #             (:mask default, :warn, :raise); see +cast+.
   #
@@ -116,6 +117,11 @@ class CAFrame
     if block && !layout.empty?
       raise ArgumentError, "from_csv: give #{layout.keys.map { |k| "#{k}:" }.join(', ')} " \
                            "or a reading block, not both"
+    end
+    # The parser reads the header, the data and the columns itself.
+    if parser && !layout.empty?
+      raise ArgumentError, "from_csv: give #{layout.keys.map { |k| "#{k}:" }.join(', ')} " \
+                           "or parser:, not both"
     end
     if block && block.arity != 1
       raise ArgumentError, "from_csv: the reading block takes the reader as its " \

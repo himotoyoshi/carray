@@ -410,6 +410,16 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
     assert_equal :whatever, seen
   end
 
+  # The parser reads the header, the data and the columns; the options that
+  # say where they are would be dropped, so they are refused.
+  def test_layout_options_with_a_parser_are_refused
+    pr = ->(_) { [["a", "b"], [["1", "2"]]] }
+    [{ columns: ["b"] }, { attrs: [:u] }, { header: false }, { data: 1 },
+     { column_names: %w[x y] }].each do |kw|
+      assert_raise(ArgumentError, kw.inspect) { CAFrame.from_csv(:x, parser: pr, **kw) }
+    end
+  end
+
   # --- files in another encoding -----------------------------------------
 
   CP932_TEXT = "地点,備考\n東京,①髙橋㈱\n".encode("CP932")
