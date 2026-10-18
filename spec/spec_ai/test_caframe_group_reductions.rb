@@ -128,4 +128,13 @@ class TestCAFrameGroupReductions < Test::Unit::TestCase
     assert_equal [-Float::INFINITY], got["a"].to_a.map { |v| 1.0 / v }
     assert_equal [9.0], got["x"].to_a
   end
+
+  # A text column has a min but no median (two Strings do not interpolate)
+  # and no sum, so a frame-wide median and sum leave it out, as the doc says.
+  def test_frame_wide_median_leaves_out_a_text_column
+    df = CAFrame.new("k" => [1, 2, 1], "s" => %w[a b a], "v" => [1.0, 2.0, 3.0])
+    assert_equal ["v"], df.group_by("k").median.column_names
+    assert_equal ["v"], df.group_by("k").sum.column_names
+    assert_equal ["s", "v"], df.group_by("k").min.column_names
+  end
 end

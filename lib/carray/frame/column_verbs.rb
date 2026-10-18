@@ -13,8 +13,9 @@ class CAFrame
   # - given none, every column whose type has it, the key columns left out,
   #   as a Hash of name to result that the caller makes a frame of.
   #
-  # Whether a type has the operation is asked of the core on the column's
-  # first row, so the answer is about the type and not the data: a refusal
+  # Whether a type has the operation is asked of the core on two copies of
+  # the column's first row (two blank cells of its kind when it has no
+  # rows), so the answer is about the type and not the data: a refusal
   # there means the operation does not apply, while an error in the verb
   # itself is left to raise. An N-D column (each row a profile) is asked,
   # and computed, along the rows.
@@ -50,7 +51,15 @@ class CAFrame
     # type is asked about count_not_masked instead.
     def column_has? (col, verb, args, keywords)
       verb = :count_not_masked if verb == :count && args.empty?
-      probe = col.elements > 0 ? col[0..0, *[nil] * (col.ndim - 1)] : col
+      # Two cells: one cell does not reach what combines two (a String's
+      # median interpolates, its sum adds), and an empty column answers
+      # with the identity without asking the type at all.
+      tail = [nil] * (col.ndim - 1)
+      probe = if col.shape[0] > 0
+                col[CA_INT64([0, 0]), *tail]
+              else
+                col.resize(2, *col.shape[1..])
+              end
       keywords = keywords.merge(axis: 0) if col.ndim > 1
       probe.public_send(verb, *args, **keywords)
       true
