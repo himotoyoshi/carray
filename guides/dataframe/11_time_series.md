@@ -41,14 +41,11 @@ A time column is a `CATime`: each cell is an instant, kept to a fixed **resoluti
 sales["date"].class       # => CATime
 orders.data_types["time"] # => CATime
 p orders.head(2)
-```
-
-```
-#<CAFrame nrow=2 columns=[time:CATime[s], item:CAString, qty:int64]>
-time                  item    qty
---------------------  ------  ---
-2024-03-04T08:12:00Z  coffee    2
-2024-03-04T08:47:00Z  tea       1
+# #<CAFrame nrow=2 columns=[time:CATime[s], item:CAString, qty:int64]>
+# time                  item    qty
+# --------------------  ------  ---
+# 2024-03-04T08:12:00Z  coffee    2
+# 2024-03-04T08:47:00Z  tea       1
 ```
 
 `orders["time"]` is stored to the second (`CATime[s]`), and `sales["date"]` to the day (`CATime[D]`). Times are read as UTC unless the text gives a zone.
@@ -139,18 +136,15 @@ orders["time"].floor(unit: :h).to_a.map(&:to_s).first(3)
 ```ruby
 p orders.resample("time", "1 hour").sum("qty").to_a   # sold per hour
 p orders.drop("item").resample("time", "1 hour").sum
-```
-
-```
-[3.0, 1.0, 5.0, 3.0, 1.0]
-#<CAFrame nrow=5 columns=[qty:float64] index="time">
-time                  qty
---------------------  ---
-2024-03-04T08:00:00Z  3.0
-2024-03-04T09:00:00Z  1.0
-2024-03-04T11:00:00Z  5.0
-2024-03-04T14:00:00Z  3.0
-2024-03-04T16:00:00Z  1.0
+# [3.0, 1.0, 5.0, 3.0, 1.0]
+# #<CAFrame nrow=5 columns=[qty:float64] index="time">
+# time                  qty
+# --------------------  ---
+# 2024-03-04T08:00:00Z  3.0
+# 2024-03-04T09:00:00Z  1.0
+# 2024-03-04T11:00:00Z  5.0
+# 2024-03-04T14:00:00Z  3.0
+# 2024-03-04T16:00:00Z  1.0
 ```
 
 The result's index is each period's start, as a time column, and its rows are in time order. The time column itself becomes the index rather than a summarised column. With a time index, give the index's name as the time column.
@@ -161,14 +155,11 @@ Weekly totals of the daily figures, one column per shop, combine a week key made
 weekly = sales.select("date", "shop", "revenue").copy
 weekly["week"] = weekly["date"].floor(unit: :W)
 p weekly.pivot(index: "week", columns: "shop", values: "revenue", aggregate: :sum)
-```
-
-```
-#<CAFrame nrow=2 columns=[central:float64, north:float64, south:float64] index="week">
-week        central     north     south
-----------  -------  --------  --------
-2024-03-04  19105.0  20733.67  13767.57
-2024-03-11  3008.01   2261.26    1525.1
+# #<CAFrame nrow=2 columns=[central:float64, north:float64, south:float64] index="week">
+# week        central     north     south
+# ----------  -------  --------  --------
+# 2024-03-04  19105.0  20733.67  13767.57
+# 2024-03-11  3008.01   2261.26    1525.1
 ```
 
 Weeks begin on Monday.
@@ -179,21 +170,18 @@ A period with no rows does not appear. The till above recorded nothing between 1
 
 ```ruby
 p orders.drop("item").resample("time", "1 hour", fill: true).sum
-```
-
-```
-#<CAFrame nrow=9 columns=[qty:float64] index="time">
-time                  qty
---------------------  ---
-2024-03-04T08:00:00Z  3.0
-2024-03-04T09:00:00Z  1.0
-2024-03-04T10:00:00Z  0.0
-2024-03-04T11:00:00Z  5.0
-2024-03-04T12:00:00Z  0.0
-2024-03-04T13:00:00Z  0.0
-2024-03-04T14:00:00Z  3.0
-2024-03-04T15:00:00Z  0.0
-2024-03-04T16:00:00Z  1.0
+# #<CAFrame nrow=9 columns=[qty:float64] index="time">
+# time                  qty
+# --------------------  ---
+# 2024-03-04T08:00:00Z  3.0
+# 2024-03-04T09:00:00Z  1.0
+# 2024-03-04T10:00:00Z  0.0
+# 2024-03-04T11:00:00Z  5.0
+# 2024-03-04T12:00:00Z  0.0
+# 2024-03-04T13:00:00Z  0.0
+# 2024-03-04T14:00:00Z  3.0
+# 2024-03-04T15:00:00Z  0.0
+# 2024-03-04T16:00:00Z  1.0
 ```
 
 ### Which end names a period — `label:`
@@ -202,10 +190,7 @@ By default a period is named by its start, and holds the times at or after it: t
 
 ```ruby
 p orders.resample("time", "2 hours", label: :right).count("qty").to_a
-```
-
-```
-[3, 2, 2, 1]
+# [3, 2, 2, 1]
 ```
 
 `origin:` shifts the periods: `"1 hour"` with `origin: "2024-03-04 00:30"` gives periods starting at half past each hour. Month and year periods always start on calendar boundaries.
@@ -232,18 +217,15 @@ Each row's window is the hour ending at its own time: the start is left out and 
 ```ruby
 roll = sales.windows(on: "date", before: "3 days", by: "shop")
 sales.select("date", "shop", "revenue").copy.append("avg3", roll.mean("revenue")).head(6).then { |f| p f }
-```
-
-```
-#<CAFrame nrow=6 columns=[date:CATime[D], shop:CAString, revenue:float64, avg3:float64]>
-date        shop     revenue      avg3
-----------  -------  -------  --------
-2024-03-04  north    2121.39   2121.39
-2024-03-04  south    1391.47   1391.47
-2024-03-04  central   3038.0    3038.0
-2024-03-05  north     2235.1  2178.245
-2024-03-05  south    1632.61   1512.04
-2024-03-05  central  2717.54   2877.77
+# #<CAFrame nrow=6 columns=[date:CATime[D], shop:CAString, revenue:float64, avg3:float64]>
+# date        shop     revenue      avg3
+# ----------  -------  -------  --------
+# 2024-03-04  north    2121.39   2121.39
+# 2024-03-04  south    1391.47   1391.47
+# 2024-03-04  central   3038.0    3038.0
+# 2024-03-05  north     2235.1  2178.245
+# 2024-03-05  south    1632.61   1512.04
+# 2024-03-05  central  2717.54   2877.77
 ```
 
 The rows need not be in time order. A row whose time is missing has no window, and its results are `UNDEF`.
@@ -269,20 +251,17 @@ north = north[north["date"].ne("2024-03-07")]       # suppose one day is not in 
 days = CArray.time_range("2024-03-04", "2024-03-11", unit: :D)
 full = north.align("date", days)
 p full
-```
-
-```
-#<CAFrame nrow=8 columns=[date:CATime[D], visitors:int64, revenue:float64, rating:float64]>
-date        visitors  revenue  rating
-----------  --------  -------  ------
-2024-03-04       182  2121.39     4.2
-2024-03-05       175   2235.1     4.3
-2024-03-06       190  2285.32     4.1
-2024-03-07         _        _       _
-2024-03-08       268   3323.2     4.0
-2024-03-09       341   3974.7       _
-2024-03-10       322  4112.58     4.1
-2024-03-11       188  2261.26     4.3
+# #<CAFrame nrow=8 columns=[date:CATime[D], visitors:int64, revenue:float64, rating:float64]>
+# date        visitors  revenue  rating
+# ----------  --------  -------  ------
+# 2024-03-04       182  2121.39     4.2
+# 2024-03-05       175   2235.1     4.3
+# 2024-03-06       190  2285.32     4.1
+# 2024-03-07         _        _       _
+# 2024-03-08       268   3323.2     4.0
+# 2024-03-09       341   3974.7       _
+# 2024-03-10       322  4112.58     4.1
+# 2024-03-11       188  2261.26     4.3
 ```
 
 `CArray.time_range` makes every day from the first to the last; `"1 hour"` or `"15 minutes"` make other grids. Once the gaps are rows, they can be filled. With the dates as the index, `:linear` interpolates in time:
@@ -301,20 +280,17 @@ Each order should be priced at the price in effect when it was placed. The price
 priced = orders.join_asof(prices.rename("since" => "time"), on: "time", by: "item")
 priced["amount"] = priced["qty"] * priced["price"]
 p priced
-```
-
-```
-#<CAFrame nrow=8 columns=[time:CATime[s], item:CAString, qty:int64, price:float64, amount:float64]>
-time                  item    qty  price  amount
---------------------  ------  ---  -----  ------
-2024-03-04T08:12:00Z  coffee    2    3.2     6.4
-2024-03-04T08:47:00Z  tea       1    2.8     2.8
-2024-03-04T09:05:00Z  coffee    1    3.2     3.2
-2024-03-04T11:30:00Z  cake      3    4.5    13.5
-2024-03-04T11:58:00Z  coffee    2    3.2     6.4
-2024-03-04T14:20:00Z  tea       2    2.8     5.6
-2024-03-04T14:41:00Z  coffee    1    3.4     3.4
-2024-03-04T16:03:00Z  cake      1    4.5     4.5
+# #<CAFrame nrow=8 columns=[time:CATime[s], item:CAString, qty:int64, price:float64, amount:float64]>
+# time                  item    qty  price  amount
+# --------------------  ------  ---  -----  ------
+# 2024-03-04T08:12:00Z  coffee    2    3.2     6.4
+# 2024-03-04T08:47:00Z  tea       1    2.8     2.8
+# 2024-03-04T09:05:00Z  coffee    1    3.2     3.2
+# 2024-03-04T11:30:00Z  cake      3    4.5    13.5
+# 2024-03-04T11:58:00Z  coffee    2    3.2     6.4
+# 2024-03-04T14:20:00Z  tea       2    2.8     5.6
+# 2024-03-04T14:41:00Z  coffee    1    3.4     3.4
+# 2024-03-04T16:03:00Z  cake      1    4.5     4.5
 ```
 
 The coffee at 11:58 is at the old price, the one at 14:41 at the new.

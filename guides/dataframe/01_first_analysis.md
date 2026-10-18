@@ -82,23 +82,20 @@ sales.data_types
 
 ```ruby
 p sales
-```
-
-```
-#<CAFrame nrow=24 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
-date        shop     visitors  revenue  rating
-----------  -------  --------  -------  ------
-2024-03-04  north         182  2121.39     4.2
-2024-03-04  south          95  1391.47     4.6
-2024-03-04  central       310   3038.0     3.8
-2024-03-05  north         175   2235.1     4.3
-2024-03-05  south         102  1632.61     4.7
-2024-03-05  central       295  2717.54     3.9
-2024-03-06  north         190  2285.32     4.1
-2024-03-06  south           _   1479.8     4.5
-:           :               :        :       :
-2024-03-11  south         101   1525.1     4.7
-2024-03-11  central       298  3008.01     3.9
+# #<CAFrame nrow=24 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop     visitors  revenue  rating
+# ----------  -------  --------  -------  ------
+# 2024-03-04  north         182  2121.39     4.2
+# 2024-03-04  south          95  1391.47     4.6
+# 2024-03-04  central       310   3038.0     3.8
+# 2024-03-05  north         175   2235.1     4.3
+# 2024-03-05  south         102  1632.61     4.7
+# 2024-03-05  central       295  2717.54     3.9
+# 2024-03-06  north         190  2285.32     4.1
+# 2024-03-06  south           _   1479.8     4.5
+# :           :               :        :       :
+# 2024-03-11  south         101   1525.1     4.7
+# 2024-03-11  central       298  3008.01     3.9
 ```
 
 The summary line gives the number of rows and each column's type. A missing cell is shown as `_`: the south shop's visitor count on 6 March. The visitor column is still a column of integers, with one cell missing.
@@ -107,16 +104,13 @@ The summary line gives the number of rows and each column's type. A missing cell
 
 ```ruby
 puts sales.describe.to_table
-```
-
-```
-column    type       count  masked  unique  min         max         mean         stddev
---------  ---------  -----  ------  ------  ----------  ----------  -----------  ----------
-date      CATime[D]     24       0       8  2024-03-04  2024-03-11  2024-03-08   2D
-shop      CAString      24       0       3  _           _           _            _
-visitors  int64         23       1      22  95          402         237.130435   97.370569
-revenue   float64       23       1      23  1391.47     4112.58     2626.113478  809.768975
-rating    float64       23       1      14  3.5         4.8         4.186957     0.384122
+# column    type       count  masked  unique  min         max         mean         stddev
+# --------  ---------  -----  ------  ------  ----------  ----------  -----------  ----------
+# date      CATime[D]     24       0       8  2024-03-04  2024-03-11  2024-03-08   2D
+# shop      CAString      24       0       3  _           _           _            _
+# visitors  int64         23       1      22  95          402         237.130435   97.370569
+# revenue   float64       23       1      23  1391.47     4112.58     2626.113478  809.768975
+# rating    float64       23       1      14  3.5         4.8         4.186957     0.384122
 ```
 
 One missing cell in each of `visitors`, `revenue` and `rating` — exactly the three problems in the file. A `masked` count you did not expect is the usual sign that a column was read with the wrong type, so this table is worth a look after every read.
@@ -128,20 +122,17 @@ One missing cell in each of `visitors`, `revenue` and `rating` — exactly the t
 ```ruby
 busy = sales.filter { |f| f["visitors"] >= 300 }
 p busy
-```
-
-```
-#<CAFrame nrow=8 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
-date        shop     visitors  revenue  rating
-----------  -------  --------  -------  ------
-2024-03-04  central       310   3038.0     3.8
-2024-03-06  central       305  3078.67     3.7
-2024-03-07  central       322  3060.93     4.0
-2024-03-08  central       388        _     3.6
-2024-03-09  north         341   3974.7       _
-2024-03-09  central       402   3939.6     3.5
-2024-03-10  north         322  4112.58     4.1
-2024-03-10  central       355  3270.26     3.7
+# #<CAFrame nrow=8 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop     visitors  revenue  rating
+# ----------  -------  --------  -------  ------
+# 2024-03-04  central       310   3038.0     3.8
+# 2024-03-06  central       305  3078.67     3.7
+# 2024-03-07  central       322  3060.93     4.0
+# 2024-03-08  central       388        _     3.6
+# 2024-03-09  north         341   3974.7       _
+# 2024-03-09  central       402   3939.6     3.5
+# 2024-03-10  north         322  4112.58     4.1
+# 2024-03-10  central       355  3270.26     3.7
 ```
 
 The south shop's 6 March row is not a candidate: its count is missing, so whether it had 300 visitors cannot be decided, and a row that cannot be decided is left out.
@@ -158,15 +149,12 @@ sales.filter { |f| f["shop"].eq("north") & (f["rating"] >= 4.3) }.nrow   # => 3
 
 ```ruby
 p sales.drop("date").group_by("shop").mean
-```
-
-```
-#<CAFrame nrow=3 columns=[visitors:float64, revenue:float64, rating:float64] index="shop">
-shop       visitors      revenue  rating
--------  ----------  -----------  ------
-north        233.75   2874.36625     4.2
-south    129.857143   1911.58375     4.6
-central     334.375  3159.001429  3.7625
+# #<CAFrame nrow=3 columns=[visitors:float64, revenue:float64, rating:float64] index="shop">
+# shop       visitors      revenue  rating
+# -------  ----------  -----------  ------
+# north        233.75   2874.36625     4.2
+# south    129.857143   1911.58375     4.6
+# central     334.375  3159.001429  3.7625
 ```
 
 The shop names became the row labels of the result, its **index**. Each mean leaves out the missing cells: the south shop's mean visitor count is over its seven counted days.
@@ -181,15 +169,12 @@ summary = sales.group_by("shop").aggregate(
   "days_counted" => ["visitors", :count],
 )
 p summary
-```
-
-```
-#<CAFrame nrow=3 columns=[revenue:float64, best_day:float64, busiest:int64, days_counted:int64] index="shop">
-shop      revenue  best_day  busiest  days_counted
--------  --------  --------  -------  ------------
-north    22994.93   4112.58      341             8
-south    15292.67   2785.04      186             7
-central  22113.01    3939.6      402             8
+# #<CAFrame nrow=3 columns=[revenue:float64, best_day:float64, busiest:int64, days_counted:int64] index="shop">
+# shop      revenue  best_day  busiest  days_counted
+# -------  --------  --------  -------  ------------
+# north    22994.93   4112.58      341             8
+# south    15292.67   2785.04      186             7
+# central  22113.01    3939.6      402             8
 ```
 
 `days_counted` counts the visitor numbers actually present, which tells you how much each figure rests on. The central shop's total revenue leaves out 8 March, which has no figure; that is worth knowing before comparing the totals.
@@ -200,14 +185,11 @@ central  22113.01    3939.6      402             8
 
 ```ruby
 p sales.select("date", "revenue").resample("date", "1 week").sum
-```
-
-```
-#<CAFrame nrow=2 columns=[revenue:float64] index="date">
-date         revenue
-----------  --------
-2024-03-04  53606.24
-2024-03-11   6794.37
+# #<CAFrame nrow=2 columns=[revenue:float64] index="date">
+# date         revenue
+# ----------  --------
+# 2024-03-04  53606.24
+# 2024-03-11   6794.37
 ```
 
 Weeks start on Monday, and each row is labelled with the week's first day. The second week has only its Monday so far.
@@ -220,18 +202,15 @@ How did each day compare with that shop's usual revenue? A group reduction with 
 shop_mean = sales.group_by("shop").mean("revenue", keep_rows: true)
 sales["vs_usual"] = sales["revenue"] / shop_mean
 p sales.head(6)
-```
-
-```
-#<CAFrame nrow=6 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64, vs_usual:float64]>
-date        shop     visitors  revenue  rating  vs_usual
-----------  -------  --------  -------  ------  --------
-2024-03-04  north         182  2121.39     4.2  0.738037
-2024-03-04  south          95  1391.47     4.6  0.727915
-2024-03-04  central       310   3038.0     3.8  0.961696
-2024-03-05  north         175   2235.1     4.3  0.777597
-2024-03-05  south         102  1632.61     4.7  0.854061
-2024-03-05  central       295  2717.54     3.9  0.860253
+# #<CAFrame nrow=6 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64, vs_usual:float64]>
+# date        shop     visitors  revenue  rating  vs_usual
+# ----------  -------  --------  -------  ------  --------
+# 2024-03-04  north         182  2121.39     4.2  0.738037
+# 2024-03-04  south          95  1391.47     4.6  0.727915
+# 2024-03-04  central       310   3038.0     3.8  0.961696
+# 2024-03-05  north         175   2235.1     4.3  0.777597
+# 2024-03-05  south         102  1632.61     4.7  0.854061
+# 2024-03-05  central       295  2717.54     3.9  0.860253
 ```
 
 `sales["vs_usual"] = ...` adds the new column to the frame. A value above 1 is a better day than that shop's average.
@@ -245,15 +224,12 @@ shops = CAFrame.from_csv("shops.csv", types: :infer)
 report = summary.reset_index.join(shops.select("shop", "name", "floor_m2"), on: "shop")
 report["revenue_per_m2"] = (report["revenue"] / report["floor_m2"] * 100).round / 100.0
 p report
-```
-
-```
-#<CAFrame nrow=3 columns=[shop:CAString, revenue:float64, best_day:float64, busiest:int64, days_counted:int64, name:CAString, floor_m2:int64, revenue_per_m2:float64]>
-shop      revenue  best_day  busiest  days_counted  name             floor_m2  revenue_per_m2
--------  --------  --------  -------  ------------  ---------------  --------  --------------
-north    22994.93   4112.58      341             8  North Street          120          191.62
-south    15292.67   2785.04      186             7  South Mall             85          179.91
-central  22113.01    3939.6      402             8  Central Station       240           92.14
+# #<CAFrame nrow=3 columns=[shop:CAString, revenue:float64, best_day:float64, busiest:int64, days_counted:int64, name:CAString, floor_m2:int64, revenue_per_m2:float64]>
+# shop      revenue  best_day  busiest  days_counted  name             floor_m2  revenue_per_m2
+# -------  --------  --------  -------  ------------  ---------------  --------  --------------
+# north    22994.93   4112.58      341             8  North Street          120          191.62
+# south    15292.67   2785.04      186             7  South Mall             85          179.91
+# central  22113.01    3939.6      402             8  Central Station       240           92.14
 ```
 
 The west shop is in the shop table but has no sales, so it does not appear: by default `join` keeps the rows of the left table, here the summary.
@@ -266,13 +242,10 @@ The west shop is in the shop table but has no sales, so it does not appear: by d
 report["revenue"] = (report["revenue"] * 100).round / 100.0
 report.to_csv("report.csv")
 puts report.to_csv
-```
-
-```
-shop,revenue,best_day,busiest,days_counted,name,floor_m2,revenue_per_m2
-north,22994.93,4112.58,341,8,North Street,120,191.62
-south,15292.67,2785.04,186,7,South Mall,85,179.91
-central,22113.01,3939.6,402,8,Central Station,240,92.14
+# shop,revenue,best_day,busiest,days_counted,name,floor_m2,revenue_per_m2
+# north,22994.93,4112.58,341,8,North Street,120,191.62
+# south,15292.67,2785.04,186,7,South Mall,85,179.91
+# central,22113.01,3939.6,402,8,Central Station,240,92.14
 ```
 
 ## What happened along the way

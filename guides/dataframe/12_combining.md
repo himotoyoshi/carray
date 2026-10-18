@@ -23,16 +23,13 @@ shops = CAFrame.from_csv("shops.csv", types: :infer)
 ```ruby
 detail = sales.join(shops.select("shop", "size", "floor_m2"), on: "shop")
 p detail.head(4)
-```
-
-```
-#<CAFrame nrow=4 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64, size:CAString, floor_m2:int64]>
-date        shop     visitors  revenue  rating  size   floor_m2
-----------  -------  --------  -------  ------  -----  --------
-2024-03-04  north         182  2121.39     4.2  small       120
-2024-03-04  south          95  1391.47     4.6  small        85
-2024-03-04  central       310   3038.0     3.8  large       240
-2024-03-05  north         175   2235.1     4.3  small       120
+# #<CAFrame nrow=4 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64, size:CAString, floor_m2:int64]>
+# date        shop     visitors  revenue  rating  size   floor_m2
+# ----------  -------  --------  -------  ------  -----  --------
+# 2024-03-04  north         182  2121.39     4.2  small       120
+# 2024-03-04  south          95  1391.47     4.6  small        85
+# 2024-03-04  central       310   3038.0     3.8  large       240
+# 2024-03-05  north         175   2235.1     4.3  small       120
 ```
 
 The key column appears once, and the other table's columns follow this table's.
@@ -103,15 +100,12 @@ A column other than the key that both tables have would appear twice. By default
 target = CAFrame.new("shop" => ["north", "south", "central"], "revenue" => [20000.0, 15000.0, 25000.0])
 actual = sales.select("shop", "revenue").group_by("shop").sum.reset_index
 p actual.join(target, on: "shop", suffixes: ["_actual", "_target"])
-```
-
-```
-#<CAFrame nrow=3 columns=[shop:CAString, revenue_actual:float64, revenue_target:float64]>
-shop     revenue_actual  revenue_target
--------  --------------  --------------
-north          22994.93         20000.0
-south          15292.67         15000.0
-central        22113.01         25000.0
+# #<CAFrame nrow=3 columns=[shop:CAString, revenue_actual:float64, revenue_target:float64]>
+# shop     revenue_actual  revenue_target
+# -------  --------------  --------------
+# north          22994.93         20000.0
+# south          15292.67         15000.0
+# central        22113.01         25000.0
 ```
 
 `suffixes:` names them yourself, which saves a `rename` afterwards. With `suffixes: false`, a column name in both tables raises an error instead.
@@ -134,16 +128,13 @@ The result keeps this table's index.
 ```ruby
 summary = sales.select("shop", "visitors", "revenue").group_by("shop").sum.reset_index
 p summary.align("shop", ["central", "north", "south", "west"])
-```
-
-```
-#<CAFrame nrow=4 columns=[shop:object, visitors:float64, revenue:float64]>
-shop     visitors   revenue
--------  --------  --------
-central    2675.0  22113.01
-north      1870.0  22994.93
-south       909.0  15292.67
-west            _         _
+# #<CAFrame nrow=4 columns=[shop:object, visitors:float64, revenue:float64]>
+# shop     visitors   revenue
+# -------  --------  --------
+# central    2675.0  22113.01
+# north      1870.0  22994.93
+# south       909.0  15292.67
+# west            _         _
 ```
 
 `align` is how you make sure a report has a row for every member of a list — every shop, every product, every day (chapter 11 uses it with a list of days) — whether or not the data has one. It only matches rows; filling the gaps is up to you.

@@ -54,15 +54,12 @@ per_visitor[0].round(2)   # => 11.66
 
 ```ruby
 p sales.select("shop", "revenue").head(3)
-```
-
-```
-#<CAFrame nrow=3 columns=[shop:CAString, revenue:float64]>
-shop     revenue
--------  -------
-north    2121.39
-south    1391.47
-central   3038.0
+# #<CAFrame nrow=3 columns=[shop:CAString, revenue:float64]>
+# shop     revenue
+# -------  -------
+# north    2121.39
+# south    1391.47
+# central   3038.0
 ```
 
 `select` with one name still gives a frame. The frame `select` returns holds the same column arrays as `sales`, so writing through it reaches `sales` (chapter 16).
@@ -99,15 +96,12 @@ A Range gives the rows at those positions, as a frame:
 
 ```ruby
 p sales[3..5]
-```
-
-```
-#<CAFrame nrow=3 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
-date        shop     visitors  revenue  rating
-----------  -------  --------  -------  ------
-2024-03-05  north         175   2235.1     4.3
-2024-03-05  south         102  1632.61     4.7
-2024-03-05  central       295  2717.54     3.9
+# #<CAFrame nrow=3 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop     visitors  revenue  rating
+# ----------  -------  --------  -------  ------
+# 2024-03-05  north         175   2235.1     4.3
+# 2024-03-05  south         102  1632.61     4.7
+# 2024-03-05  central       295  2717.54     3.9
 ```
 
 Ranges are positions, counted from 0. To choose rows by their label — a date, a name — use `filter` (chapter 6) or `at` (chapter 9).
@@ -157,12 +151,9 @@ That is useful for correcting values in part of a table. When you want an indepe
 
 ```ruby
 sales.head(3).each_row { |r| puts "#{r["shop"]}: #{r["visitors"]} visitors" }
-```
-
-```
-north: 182 visitors
-south: 95 visitors
-central: 310 visitors
+# north: 182 visitors
+# south: 95 visitors
+# central: 310 visitors
 ```
 
 Without a block it returns an Enumerator, so `each_row.map`, `each_row.select` and the like work. Row by row is the slow way to work on a frame; whenever a computation can be written with whole columns, write it that way.

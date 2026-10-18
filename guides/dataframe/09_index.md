@@ -15,20 +15,17 @@ north = sales.filter { |f| f["shop"].eq("north") }.drop("shop").copy
 ```ruby
 north.set_index("date")
 p north
-```
-
-```
-#<CAFrame nrow=8 columns=[visitors:int64, revenue:float64, rating:float64] index="date">
-date        visitors  revenue  rating
-----------  --------  -------  ------
-2024-03-04       182  2121.39     4.2
-2024-03-05       175   2235.1     4.3
-2024-03-06       190  2285.32     4.1
-2024-03-07       204  2681.38     4.4
-2024-03-08       268   3323.2     4.0
-2024-03-09       341   3974.7       _
-2024-03-10       322  4112.58     4.1
-2024-03-11       188  2261.26     4.3
+# #<CAFrame nrow=8 columns=[visitors:int64, revenue:float64, rating:float64] index="date">
+# date        visitors  revenue  rating
+# ----------  --------  -------  ------
+# 2024-03-04       182  2121.39     4.2
+# 2024-03-05       175   2235.1     4.3
+# 2024-03-06       190  2285.32     4.1
+# 2024-03-07       204  2681.38     4.4
+# 2024-03-08       268   3323.2     4.0
+# 2024-03-09       341   3974.7       _
+# 2024-03-10       322  4112.58     4.1
+# 2024-03-11       188  2261.26     4.3
 ```
 
 The index is printed first, under its name. It is no longer a column:

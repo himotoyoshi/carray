@@ -13,23 +13,20 @@ sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
 
 ```ruby
 p sales
-```
-
-```
-#<CAFrame nrow=24 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
-date        shop     visitors  revenue  rating
-----------  -------  --------  -------  ------
-2024-03-04  north         182  2121.39     4.2
-2024-03-04  south          95  1391.47     4.6
-2024-03-04  central       310   3038.0     3.8
-2024-03-05  north         175   2235.1     4.3
-2024-03-05  south         102  1632.61     4.7
-2024-03-05  central       295  2717.54     3.9
-2024-03-06  north         190  2285.32     4.1
-2024-03-06  south           _   1479.8     4.5
-:           :               :        :       :
-2024-03-11  south         101   1525.1     4.7
-2024-03-11  central       298  3008.01     3.9
+# #<CAFrame nrow=24 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop     visitors  revenue  rating
+# ----------  -------  --------  -------  ------
+# 2024-03-04  north         182  2121.39     4.2
+# 2024-03-04  south          95  1391.47     4.6
+# 2024-03-04  central       310   3038.0     3.8
+# 2024-03-05  north         175   2235.1     4.3
+# 2024-03-05  south         102  1632.61     4.7
+# 2024-03-05  central       295  2717.54     3.9
+# 2024-03-06  north         190  2285.32     4.1
+# 2024-03-06  south           _   1479.8     4.5
+# :           :               :        :       :
+# 2024-03-11  south         101   1525.1     4.7
+# 2024-03-11  central       298  3008.01     3.9
 ```
 
 The summary line gives the number of rows and, for each column, its name and type. `CATime[D]` is a time column stored to the day.
@@ -38,17 +35,14 @@ The summary line gives the number of rows and, for each column, its name and typ
 
 ```ruby
 puts sales.to_table(rows: 4, precision: 1)
-```
-
-```
-date        shop     visitors  revenue  rating
-----------  -------  --------  -------  ------
-2024-03-04  north         182   2121.4     4.2
-2024-03-04  south          95   1391.5     4.6
-:           :               :        :       :
-2024-03-11  south         101   1525.1     4.7
-2024-03-11  central       298   3008.0     3.9
-(24 rows, 5 columns)
+# date        shop     visitors  revenue  rating
+# ----------  -------  --------  -------  ------
+# 2024-03-04  north         182   2121.4     4.2
+# 2024-03-04  south          95   1391.5     4.6
+# :           :               :        :       :
+# 2024-03-11  south         101   1525.1     4.7
+# 2024-03-11  central       298   3008.0     3.9
+# (24 rows, 5 columns)
 ```
 
 | option | effect | default |
@@ -65,16 +59,13 @@ In the table, numbers are aligned to the right and everything else to the left, 
 
 ```ruby
 puts sales.describe.to_table
-```
-
-```
-column    type       count  masked  unique  min         max         mean         stddev
---------  ---------  -----  ------  ------  ----------  ----------  -----------  ----------
-date      CATime[D]     24       0       8  2024-03-04  2024-03-11  2024-03-08   2D
-shop      CAString      24       0       3  _           _           _            _
-visitors  int64         23       1      22  95          402         237.130435   97.370569
-revenue   float64       23       1      23  1391.47     4112.58     2626.113478  809.768975
-rating    float64       23       1      14  3.5         4.8         4.186957     0.384122
+# column    type       count  masked  unique  min         max         mean         stddev
+# --------  ---------  -----  ------  ------  ----------  ----------  -----------  ----------
+# date      CATime[D]     24       0       8  2024-03-04  2024-03-11  2024-03-08   2D
+# shop      CAString      24       0       3  _           _           _            _
+# visitors  int64         23       1      22  95          402         237.130435   97.370569
+# revenue   float64       23       1      23  1391.47     4112.58     2626.113478  809.768975
+# rating    float64       23       1      14  3.5         4.8         4.186957     0.384122
 ```
 
 | column | what it tells you |
@@ -94,10 +85,7 @@ The result of `describe` is itself a frame, indexed by column name, so you can f
 ```ruby
 d = sales.describe
 p d.filter { |f| f["masked"] > 0 }.index.to_a
-```
-
-```
-["visitors", "revenue", "rating"]
+# ["visitors", "revenue", "rating"]
 ```
 
 `describe("visitors", "revenue")` describes only the columns you name.
@@ -158,13 +146,10 @@ Eight days from each shop: the table has no missing rows.
 
 ```ruby
 p sales[sales["revenue"].is_masked]
-```
-
-```
-#<CAFrame nrow=1 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
-date        shop     visitors  revenue  rating
-----------  -------  --------  -------  ------
-2024-03-08  central       388        _     3.6
+# #<CAFrame nrow=1 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop     visitors  revenue  rating
+# ----------  -------  --------  -------  ------
+# 2024-03-08  central       388        _     3.6
 ```
 
 To find the rows missing anything at all, combine the columns' tests with `|`:
@@ -172,15 +157,12 @@ To find the rows missing anything at all, combine the columns' tests with `|`:
 ```ruby
 any_missing = sales.columns.map(&:is_masked).inject(:|)
 p sales[any_missing]
-```
-
-```
-#<CAFrame nrow=3 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
-date        shop     visitors  revenue  rating
-----------  -------  --------  -------  ------
-2024-03-06  south           _   1479.8     4.5
-2024-03-08  central       388        _     3.6
-2024-03-09  north         341   3974.7       _
+# #<CAFrame nrow=3 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop     visitors  revenue  rating
+# ----------  -------  --------  -------  ------
+# 2024-03-06  south           _   1479.8     4.5
+# 2024-03-08  central       388        _     3.6
+# 2024-03-09  north         341   3974.7       _
 ```
 
 Chapter 8 covers what to do about them.

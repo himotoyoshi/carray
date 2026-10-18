@@ -22,15 +22,12 @@ df = CAFrame.new(
   "visitors" => [182, 95, nil],
 )
 p df
-```
-
-```
-#<CAFrame nrow=3 columns=[shop:object, revenue:float64, visitors:int64]>
-shop     revenue  visitors
--------  -------  --------
-north    2121.39       182
-south    1391.47        95
-central   3038.0         _
+# #<CAFrame nrow=3 columns=[shop:object, revenue:float64, visitors:int64]>
+# shop     revenue  visitors
+# -------  -------  --------
+# north    2121.39       182
+# south    1391.47        95
+# central   3038.0         _
 ```
 
 A column may be given as a Ruby Array, as here, or as a CArray.
@@ -81,7 +78,7 @@ The columns go in braces when `types:` is given, as with the other options below
 Every column name is a String, here and in every method that names a column. A Symbol raises an error:
 
 ```ruby
-CAFrame.new(revenue: CA_FLOAT64([1.0, 2.0]))   # raises TypeError: CAFrame.new: a column name is a String
+CAFrame.new(revenue: [1.0, 2.0])   # raises TypeError: CAFrame.new: a column name is a String
 ```
 
 Symbols are kept for options. Besides `types:` and `on_error:` above, `CAFrame.new` takes three more, and when you give any of them the columns go in braces:
@@ -93,18 +90,15 @@ Symbols are kept for options. Besides `types:` and `on_error:` above, `CAFrame.n
 | `attrs:` | a Hash of attributes describing the table (below) |
 
 ```ruby
-df = CAFrame.new({ "revenue" => CA_FLOAT64([2121.39, 1391.47, 3038.0]) },
+df = CAFrame.new({ "revenue" => [2121.39, 1391.47, 3038.0] },
                  index: ["north", "south", "central"], axis_name: "shop")
 p df
-```
-
-```
-#<CAFrame nrow=3 columns=[revenue:float64] index="shop">
-shop     revenue
--------  -------
-north    2121.39
-south    1391.47
-central   3038.0
+# #<CAFrame nrow=3 columns=[revenue:float64] index="shop">
+# shop     revenue
+# -------  -------
+# north    2121.39
+# south    1391.47
+# central   3038.0
 ```
 
 ### Lengths must agree
@@ -132,15 +126,12 @@ m = CA_FLOAT64([[1.62, 58.0, 41],
                 [1.68, 63.2, 29]])
 df = m.to_frame("height", "weight", "age")
 p df
-```
-
-```
-#<CAFrame nrow=3 columns=[height:float64, weight:float64, age:float64]>
-height  weight   age
-------  ------  ----
-  1.62    58.0  41.0
-  1.75    71.5  35.0
-  1.68    63.2  29.0
+# #<CAFrame nrow=3 columns=[height:float64, weight:float64, age:float64]>
+# height  weight   age
+# ------  ------  ----
+#   1.62    58.0  41.0
+#   1.75    71.5  35.0
+#   1.68    63.2  29.0
 ```
 
 Nothing is copied. Each column is a view of the matrix — a way of looking at part of it — so the frame and the matrix are the same data seen two ways:
@@ -166,15 +157,12 @@ json = <<~JSON
 JSON
 df = CAFrame.from_records(JSON.parse(json))
 p df
-```
-
-```
-#<CAFrame nrow=3 columns=[shop:object, revenue:float64, visitors:int64, note:object]>
-shop     revenue  visitors  note
--------  -------  --------  ---------
-north    2121.39       182  _
-south    1391.47         _  _
-central   3038.0       310  promotion
+# #<CAFrame nrow=3 columns=[shop:object, revenue:float64, visitors:int64, note:object]>
+# shop     revenue  visitors  note
+# -------  -------  --------  ---------
+# north    2121.39       182  _
+# south    1391.47         _  _
+# central   3038.0       310  promotion
 ```
 
 - The columns are every key that appears in any record, in the order they first appear.

@@ -20,16 +20,13 @@ The result is a frame, so filters chain into everything else — another filter,
 
 ```ruby
 p sales.filter { |f| f["shop"].eq("north") }.filter { |f| f["visitors"] < 200 }
-```
-
-```
-#<CAFrame nrow=4 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
-date        shop   visitors  revenue  rating
-----------  -----  --------  -------  ------
-2024-03-04  north       182  2121.39     4.2
-2024-03-05  north       175   2235.1     4.3
-2024-03-06  north       190  2285.32     4.1
-2024-03-11  north       188  2261.26     4.3
+# #<CAFrame nrow=4 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop   visitors  revenue  rating
+# ----------  -----  --------  -------  ------
+# 2024-03-04  north       182  2121.39     4.2
+# 2024-03-05  north       175   2235.1     4.3
+# 2024-03-06  north       190  2285.32     4.1
+# 2024-03-11  north       188  2261.26     4.3
 ```
 
 ### Building conditions
@@ -106,16 +103,13 @@ Sometimes you want to keep those rows to look at later, because they might belon
 
 ```ruby
 p sales.filter(keep_masked: true) { |f| f["shop"].eq("north") & (f["rating"] >= 4.3) }
-```
-
-```
-#<CAFrame nrow=4 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
-date        shop   visitors  revenue  rating
-----------  -----  --------  -------  ------
-2024-03-05  north       175   2235.1     4.3
-2024-03-07  north       204  2681.38     4.4
-_           _             _        _       _
-2024-03-11  north       188  2261.26     4.3
+# #<CAFrame nrow=4 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop   visitors  revenue  rating
+# ----------  -----  --------  -------  ------
+# 2024-03-05  north       175   2235.1     4.3
+# 2024-03-07  north       204  2681.38     4.4
+# _           _             _        _       _
+# 2024-03-11  north       188  2261.26     4.3
 ```
 
 The third row is the undetermined one. Its cells are all missing here because the frame has no index; a frame with an index keeps the row's label, so you can still tell which row it was (chapter 9).
@@ -140,16 +134,13 @@ report = unchecked.verify(
   "revenue positive"      => ->(f) { f["revenue"] > 0 },
 )
 p report[6..9]
-```
-
-```
-#<CAFrame nrow=4 columns=[visitors not negative:boolean, rating from 1 to 5:boolean, revenue positive:boolean]>
-visitors not negative  rating from 1 to 5  revenue positive
----------------------  ------------------  ----------------
-true                   true                true
-false                  true                true
-true                   true                true
-true                   true                true
+# #<CAFrame nrow=4 columns=[visitors not negative:boolean, rating from 1 to 5:boolean, revenue positive:boolean]>
+# visitors not negative  rating from 1 to 5  revenue positive
+# ---------------------  ------------------  ----------------
+# true                   true                true
+# false                  true                true
+# true                   true                true
+# true                   true                true
 ```
 
 A rule is a name and a lambda. The lambda receives the frame, as a `filter` block does, and returns one boolean per row. In the report, `true` means the rule holds, `false` means the row breaks it, and a missing cell means the rule could not be checked because a value it reads is missing.
@@ -160,13 +151,10 @@ Count the verdicts, and use a rule's column to pick out the rows that break it:
 report["visitors not negative"].count(false)   # => 1
 report["revenue positive"].count_masked        # => 1
 p unchecked[report["visitors not negative"].eq(false)]
-```
-
-```
-#<CAFrame nrow=1 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
-date        shop   visitors  revenue  rating
-----------  -----  --------  -------  ------
-2024-03-06  south        -1   1479.8     4.5
+# #<CAFrame nrow=1 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop   visitors  revenue  rating
+# ----------  -----  --------  -------  ------
+# 2024-03-06  south        -1   1479.8     4.5
 ```
 
 That is the `-1` the till wrote for a missing count. `count(false)` counts the rows that break a rule; `count_masked` the rows it could not judge.
@@ -181,31 +169,25 @@ This is a good step right after reading a file you will use more than once: writ
 
 ```ruby
 p sales.sort_by_key("revenue").head(3)
-```
-
-```
-#<CAFrame nrow=3 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
-date        shop   visitors  revenue  rating
-----------  -----  --------  -------  ------
-2024-03-04  south        95  1391.47     4.6
-2024-03-06  south         _   1479.8     4.5
-2024-03-11  south       101   1525.1     4.7
+# #<CAFrame nrow=3 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop   visitors  revenue  rating
+# ----------  -----  --------  -------  ------
+# 2024-03-04  south        95  1391.47     4.6
+# 2024-03-06  south         _   1479.8     4.5
+# 2024-03-11  south       101   1525.1     4.7
 ```
 
 `order: :desc` sorts every key from largest to smallest. To give each key its own direction, give `[name, :asc]` or `[name, :desc]` pairs:
 
 ```ruby
 p sales.sort_by_key(["shop", :asc], ["revenue", :desc]).head(4)
-```
-
-```
-#<CAFrame nrow=4 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
-date        shop     visitors  revenue  rating
-----------  -------  --------  -------  ------
-2024-03-09  central       402   3939.6     3.5
-2024-03-10  central       355  3270.26     3.7
-2024-03-06  central       305  3078.67     3.7
-2024-03-07  central       322  3060.93     4.0
+# #<CAFrame nrow=4 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop     visitors  revenue  rating
+# ----------  -------  --------  -------  ------
+# 2024-03-09  central       402   3939.6     3.5
+# 2024-03-10  central       355  3270.26     3.7
+# 2024-03-06  central       305  3078.67     3.7
+# 2024-03-07  central       322  3060.93     4.0
 ```
 
 Text sorts in byte order, so `central` comes before `north` and `south`. Times sort in time order.
@@ -222,15 +204,12 @@ Text sorts in byte order, so `central` comes before `north` and `south`. Times s
 ```ruby
 target = 3000.0
 p sales.sort_by { |f| (f["revenue"] - target).abs }.head(3)
-```
-
-```
-#<CAFrame nrow=3 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
-date        shop     visitors  revenue  rating
-----------  -------  --------  -------  ------
-2024-03-11  central       298  3008.01     3.9
-2024-03-04  central       310   3038.0     3.8
-2024-03-07  central       322  3060.93     4.0
+# #<CAFrame nrow=3 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop     visitors  revenue  rating
+# ----------  -------  --------  -------  ------
+# 2024-03-11  central       298  3008.01     3.9
+# 2024-03-04  central       310   3038.0     3.8
+# 2024-03-07  central       322  3060.93     4.0
 ```
 
 The block can return an Array of keys, which then work as `sort_by_key`'s several keys do. For a key in descending order, use `order(descending: true)` on it, which works for any type of column:
@@ -266,15 +245,12 @@ With column names, only those columns are compared. One row per shop, the first:
 
 ```ruby
 p sales[sales.is_duplicate("shop").not]
-```
-
-```
-#<CAFrame nrow=3 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
-date        shop     visitors  revenue  rating
-----------  -------  --------  -------  ------
-2024-03-04  north         182  2121.39     4.2
-2024-03-04  south          95  1391.47     4.6
-2024-03-04  central       310   3038.0     3.8
+# #<CAFrame nrow=3 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop     visitors  revenue  rating
+# ----------  -------  --------  -------  ------
+# 2024-03-04  north         182  2121.39     4.2
+# 2024-03-04  south          95  1391.47     4.6
+# 2024-03-04  central       310   3038.0     3.8
 ```
 
 | `except:` | the row left unmarked |

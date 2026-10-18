@@ -178,15 +178,12 @@ df["num"].to_a   # => [12, 7, 3]
 df = CAFrame.new("code" => ["A-12", "B-7", "C"])
 parts = df.split_column("code", "-", into: ["kind", "num"])
 p parts
-```
-
-```
-#<CAFrame nrow=3 columns=[kind:CAString, num:CAString]>
-kind  num
-----  ---
-A     12
-B     7
-C     _
+# #<CAFrame nrow=3 columns=[kind:CAString, num:CAString]>
+# kind  num
+# ----  ---
+# A     12
+# B     7
+# C     _
 ```
 
 A cell with too few pieces leaves the remaining columns missing; with too many, the rest stays in the last column. The new columns are text; `cast` the numeric ones.
@@ -198,16 +195,13 @@ A model that takes numbers cannot take a column of categories directly. `contras
 ```ruby
 orders = CAFrame.new("payment" => ["card", "cash", "online", "cash"], "amount" => [31.5, 12.0, 54.2, 8.4])
 p orders.contrast_columns("payment")
-```
-
-```
-#<CAFrame nrow=4 columns=[payment_cash:int8, payment_online:int8, amount:float64]>
-payment_cash  payment_online  amount
-------------  --------------  ------
-           0               0    31.5
-           1               0    12.0
-           0               1    54.2
-           1               0     8.4
+# #<CAFrame nrow=4 columns=[payment_cash:int8, payment_online:int8, amount:float64]>
+# payment_cash  payment_online  amount
+# ------------  --------------  ------
+#            0               0    31.5
+#            1               0    12.0
+#            0               1    54.2
+#            1               0     8.4
 ```
 
 The categories are taken in sorted order unless the column is already categorical, so `card` is the baseline here. `base:` names another baseline, and `full: true` keeps a column for every category.
@@ -243,7 +237,7 @@ Assigning a frame to a span of rows replaces those rows with its rows, which may
 ```ruby
 df = sales.copy
 fix = df[0..2].copy
-fix["revenue"] = CA_FLOAT64([2150.0, 1400.0, 3050.0])
+fix["revenue"] = [2150.0, 1400.0, 3050.0]
 df[0..2] = fix
 df["revenue"][0..2].to_a   # => [2150.0, 1400.0, 3050.0]
 df[24...24] = fix          # an empty span at the end appends the rows

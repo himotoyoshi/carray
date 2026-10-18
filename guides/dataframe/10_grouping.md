@@ -23,15 +23,12 @@ A summary gives one row per group, labelled by the key:
 
 ```ruby
 p by_shop.sum
-```
-
-```
-#<CAFrame nrow=3 columns=[visitors:float64, revenue:float64, rating:float64] index="shop">
-shop     visitors   revenue  rating
--------  --------  --------  ------
-north      1870.0  22994.93    29.4
-south       909.0  15292.67    36.8
-central    2675.0  22113.01    30.1
+# #<CAFrame nrow=3 columns=[visitors:float64, revenue:float64, rating:float64] index="shop">
+# shop     visitors   revenue  rating
+# -------  --------  --------  ------
+# north      1870.0  22994.93    29.4
+# south       909.0  15292.67    36.8
+# central    2675.0  22113.01    30.1
 ```
 
 Every column that has a sum is summed — here the visitor counts, revenue and ratings. A sum of ratings means little; choose the columns to summarise, as below. The key column is not summed: its values are the labels of the result, its **index** (chapter 9). The date column is left out because dates have no sum.
@@ -52,15 +49,12 @@ To keep a frame, `select` or `drop` columns before grouping:
 
 ```ruby
 p sales.select("shop", "visitors", "revenue").group_by("shop").mean
-```
-
-```
-#<CAFrame nrow=3 columns=[visitors:float64, revenue:float64] index="shop">
-shop       visitors      revenue
--------  ----------  -----------
-north        233.75   2874.36625
-south    129.857143   1911.58375
-central     334.375  3159.001429
+# #<CAFrame nrow=3 columns=[visitors:float64, revenue:float64] index="shop">
+# shop       visitors      revenue
+# -------  ----------  -----------
+# north        233.75   2874.36625
+# south    129.857143   1911.58375
+# central     334.375  3159.001429
 ```
 
 ### The summaries
@@ -81,15 +75,12 @@ Each leaves out missing values, as the same summary on a whole column does (chap
 
 ```ruby
 p sales.group_by("shop").last
-```
-
-```
-#<CAFrame nrow=3 columns=[date:CATime[D], visitors:int64, revenue:float64, rating:float64] index="shop">
-shop     date        visitors  revenue  rating
--------  ----------  --------  -------  ------
-north    2024-03-11       188  2261.26     4.3
-south    2024-03-11       101   1525.1     4.7
-central  2024-03-11       298  3008.01     3.9
+# #<CAFrame nrow=3 columns=[date:CATime[D], visitors:int64, revenue:float64, rating:float64] index="shop">
+# shop     date        visitors  revenue  rating
+# -------  ----------  --------  -------  ------
+# north    2024-03-11       188  2261.26     4.3
+# south    2024-03-11       101   1525.1     4.7
+# central  2024-03-11       298  3008.01     3.9
 ```
 
 `last` gives, for each column, the latest value present in each group — a quick way to see the most recent state of every shop. A missing value is passed over, so a column whose last row is missing gives the value before it.
@@ -115,16 +106,13 @@ shops = CAFrame.from_csv("shops.csv", types: :infer)
 df = sales.join(shops.select("shop", "size"), on: "shop")
 df["day_type"] = df["date"].weekday.is_in([0, 6]).then_else("weekend", "weekday")
 p df.select("size", "day_type", "visitors", "revenue").group_by("size", "day_type").mean
-```
-
-```
-#<CAFrame nrow=4 columns=[visitors:float64, revenue:float64] index="group">
-group                   visitors      revenue
---------------------  ----------  -----------
-["small", "weekday"]  159.636364  2057.578333
-["large", "weekday"]  319.666667      2980.63
-["small", "weekend"]      255.75     3399.165
-["large", "weekend"]       378.5      3604.93
+# #<CAFrame nrow=4 columns=[visitors:float64, revenue:float64] index="group">
+# group                   visitors      revenue
+# --------------------  ----------  -----------
+# ["small", "weekday"]  159.636364  2057.578333
+# ["large", "weekday"]  319.666667      2980.63
+# ["small", "weekend"]      255.75     3399.165
+# ["large", "weekend"]       378.5      3604.93
 ```
 
 With several keys, each group's label is the Array of its key values, and the index is named `group`. `reset_index` turns the labels into a column of such Arrays; to have one column per key instead, put the parts back as columns:
@@ -175,15 +163,12 @@ p sales.group_by("shop").aggregate(
   "p25_visitors" => ["visitors", :percentile, 25],
   "range"       => ["visitors", ->(v) { v.max - v.min }],
 )
-```
-
-```
-#<CAFrame nrow=3 columns=[revenue:float64, best_day:float64, p25_visitors:float64, range:int64] index="shop">
-shop      revenue  best_day  p25_visitors  range
--------  --------  --------  ------------  -----
-north    22994.93   4112.58         186.5    166
-south    15292.67   2785.04         101.5     91
-central  22113.01    3939.6        303.25    107
+# #<CAFrame nrow=3 columns=[revenue:float64, best_day:float64, p25_visitors:float64, range:int64] index="shop">
+# shop      revenue  best_day  p25_visitors  range
+# -------  --------  --------  ------------  -----
+# north    22994.93   4112.58         186.5    166
+# south    15292.67   2785.04         101.5     91
+# central  22113.01    3939.6        303.25    107
 ```
 
 - A Symbol names a summary; its arguments follow it (`:percentile, 25`), with keywords last (`:mean, min_count: 7`).
@@ -198,15 +183,12 @@ p sales.group_by("shop").table { |g|
   best = g.sort_by_key("revenue", order: :desc)[0]
   { "days" => g.nrow, "best_date" => best["date"], "per_visitor" => g["revenue"].sum / g["visitors"].sum }
 }
-```
-
-```
-#<CAFrame nrow=3 columns=[days:int64, best_date:object, per_visitor:float64] index="shop">
-shop     days  best_date   per_visitor
--------  ----  ----------  -----------
-north       8  2024-03-10    12.296754
-south       8  2024-03-10    16.823619
-central     8  2024-03-09     8.266546
+# #<CAFrame nrow=3 columns=[days:int64, best_date:object, per_visitor:float64] index="shop">
+# shop     days  best_date   per_visitor
+# -------  ----  ----------  -----------
+# north       8  2024-03-10    12.296754
+# south       8  2024-03-10    16.823619
+# central     8  2024-03-09     8.266546
 ```
 
 Integers in the returned Hashes become an integer column and other numbers a float column; anything else — times, strings, `true`/`false` — becomes an object column. `nil` and `UNDEF` are missing.
@@ -234,18 +216,15 @@ sales["share"] = sales["revenue"] / shop_total
 shop_mean = by_shop.mean("revenue", keep_rows: true)
 sales["vs_mean"] = sales["revenue"] - shop_mean
 p sales.head(6)
-```
-
-```
-#<CAFrame nrow=6 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64, share:float64, vs_mean:float64]>
-date        shop     visitors  revenue  rating     share      vs_mean
-----------  -------  --------  -------  ------  --------  -----------
-2024-03-04  north         182  2121.39     4.2  0.092255   -752.97625
-2024-03-04  south          95  1391.47     4.6  0.090989   -520.11375
-2024-03-04  central       310   3038.0     3.8  0.137385  -121.001429
-2024-03-05  north         175   2235.1     4.3    0.0972   -639.26625
-2024-03-05  south         102  1632.61     4.7  0.106758   -278.97375
-2024-03-05  central       295  2717.54     3.9  0.122893  -441.461429
+# #<CAFrame nrow=6 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64, share:float64, vs_mean:float64]>
+# date        shop     visitors  revenue  rating     share      vs_mean
+# ----------  -------  --------  -------  ------  --------  -----------
+# 2024-03-04  north         182  2121.39     4.2  0.092255   -752.97625
+# 2024-03-04  south          95  1391.47     4.6  0.090989   -520.11375
+# 2024-03-04  central       310   3038.0     3.8  0.137385  -121.001429
+# 2024-03-05  north         175   2235.1     4.3    0.0972   -639.26625
+# 2024-03-05  south         102  1632.61     4.7  0.106758   -278.97375
+# 2024-03-05  central       295  2717.54     3.9  0.122893  -441.461429
 ```
 
 A row whose key is missing gets `UNDEF`, since it has no group.
@@ -261,20 +240,17 @@ df["change"]  = df["revenue"] - g.lag("revenue")
 df["rank"]    = g.order("revenue", descending: true)
 df["to_date"] = g.cumsum("revenue")
 p df.filter { |f| f["shop"].eq("north") }.select("date", "revenue", "change", "rank", "to_date")
-```
-
-```
-#<CAFrame nrow=8 columns=[date:CATime[D], revenue:float64, change:float64, rank:int64, to_date:float64]>
-date        revenue    change  rank   to_date
-----------  -------  --------  ----  --------
-2024-03-04  2121.39         _     7   2121.39
-2024-03-05   2235.1    113.71     6   4356.49
-2024-03-06  2285.32     50.22     4   6641.81
-2024-03-07  2681.38    396.06     3   9323.19
-2024-03-08   3323.2    641.82     2  12646.39
-2024-03-09   3974.7     651.5     1  16621.09
-2024-03-10  4112.58    137.88     0  20733.67
-2024-03-11  2261.26  -1851.32     5  22994.93
+# #<CAFrame nrow=8 columns=[date:CATime[D], revenue:float64, change:float64, rank:int64, to_date:float64]>
+# date        revenue    change  rank   to_date
+# ----------  -------  --------  ----  --------
+# 2024-03-04  2121.39         _     7   2121.39
+# 2024-03-05   2235.1    113.71     6   4356.49
+# 2024-03-06  2285.32     50.22     4   6641.81
+# 2024-03-07  2681.38    396.06     3   9323.19
+# 2024-03-08   3323.2    641.82     2  12646.39
+# 2024-03-09   3974.7     651.5     1  16621.09
+# 2024-03-10  4112.58    137.88     0  20733.67
+# 2024-03-11  2261.26  -1851.32     5  22994.93
 ```
 
 | method | each row gets |

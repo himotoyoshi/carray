@@ -147,15 +147,12 @@ A period when a shop's till was recording wrongly, say, can be marked in every c
 north = sales.filter { |f| f["shop"].eq("north") }.drop("shop").copy.set_index("date")
 north[north.index >= "2024-03-10"] = UNDEF
 p north.tail(3)
-```
-
-```
-#<CAFrame nrow=3 columns=[visitors:int64, revenue:float64, rating:float64] index="date">
-date        visitors  revenue  rating
-----------  --------  -------  ------
-2024-03-09       341   3974.7       _
-2024-03-10         _        _       _
-2024-03-11         _        _       _
+# #<CAFrame nrow=3 columns=[visitors:int64, revenue:float64, rating:float64] index="date">
+# date        visitors  revenue  rating
+# ----------  --------  -------  ------
+# 2024-03-09       341   3974.7       _
+# 2024-03-10         _        _       _
+# 2024-03-11         _        _       _
 ```
 
 The rows stay in the frame with their cells missing, and the index — which is not a column — keeps their dates, so you can still see which rows they were.
@@ -183,7 +180,7 @@ df["revenue"].count_masked   # => 3
 | a value | that value |
 
 ```ruby
-s = CAFrame.new("v" => CA_FLOAT64([1.0, UNDEF, UNDEF, 4.0, UNDEF]))
+s = CAFrame.new("v" => [1.0, nil, nil, 4.0, nil])
 s.copy.fill("v", :ffill)["v"].to_a    # => [1.0, 1.0, 1.0, 4.0, 4.0]
 s.copy.fill("v", :bfill)["v"].to_a    # => [1.0, 4.0, 4.0, 4.0, UNDEF]
 s.copy.fill("v", :linear)["v"].to_a   # => [1.0, 2.0, 3.0, 4.0, UNDEF]

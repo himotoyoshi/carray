@@ -24,13 +24,10 @@ With a path, `to_csv` writes a file; without one, it returns the CSV as a String
 ```ruby
 summary.to_csv("summary.csv")
 puts summary.to_csv
-```
-
-```
-shop,visitors,revenue
-north,233.75,2874.36625
-south,129.85714285714286,1911.58375
-central,334.375,3159.0014285714287
+# shop,visitors,revenue
+# north,233.75,2874.36625
+# south,129.85714285714286,1911.58375
+# central,334.375,3159.0014285714287
 ```
 
 - The index, when there is one, is written as the first column, under its name. `index: false` leaves it out.
@@ -42,12 +39,9 @@ central,334.375,3159.0014285714287
 
 ```ruby
 puts sales.head(3).to_csv(sep: ";", header: false)
-```
-
-```
-2024-03-04;north;182;2121.39;4.2
-2024-03-04;south;95;1391.47;4.6
-2024-03-04;central;310;3038.0;3.8
+# 2024-03-04;north;182;2121.39;4.2
+# 2024-03-04;south;95;1391.47;4.6
+# 2024-03-04;central;310;3038.0;3.8
 ```
 
 ### Writing a code for missing values — `missing:`
@@ -56,13 +50,10 @@ Some programs expect missing values written as a code. `missing:` writes one —
 
 ```ruby
 puts sales[6..8].to_csv(missing: "NA")
-```
-
-```
-date,shop,visitors,revenue,rating
-2024-03-06,north,190,2285.32,4.1
-2024-03-06,south,NA,1479.8,4.5
-2024-03-06,central,305,3078.67,3.7
+# date,shop,visitors,revenue,rating
+# 2024-03-06,north,190,2285.32,4.1
+# 2024-03-06,south,NA,1479.8,4.5
+# 2024-03-06,central,305,3078.67,3.7
 ```
 
 Reading the file back with the same `missing:` restores the gaps. If a real value would be written the same as the code, `to_csv` raises rather than write a file in which the two cannot be told apart.
@@ -83,13 +74,10 @@ df.to_csv("for_excel.csv", encoding: "Windows-1252")
 df = sales.select("shop", "revenue").head(2).copy
 df["revenue"].set_attr(:units, "USD")
 puts df.to_csv(attrs: [:units])
-```
-
-```
-shop,revenue
-,USD
-north,2121.39
-south,1391.47
+# shop,revenue
+# ,USD
+# north,2121.39
+# south,1391.47
 ```
 
 ### What does not fit in a CSV
@@ -105,10 +93,7 @@ records = sales[6..7].to_records
 records.first
 # => {"date" => #<CATime::Element 2024-03-06 (19788D)>, "shop" => "north", "visitors" => 190, "revenue" => 2285.32, "rating" => 4.1}
 puts JSON.generate(records)
-```
-
-```
-[{"date":"2024-03-06","shop":"north","visitors":190,"revenue":2285.32,"rating":4.1},{"date":"2024-03-06","shop":"south","visitors":null,"revenue":1479.8,"rating":4.5}]
+# [{"date":"2024-03-06","shop":"north","visitors":190,"revenue":2285.32,"rating":4.1},{"date":"2024-03-06","shop":"south","visitors":null,"revenue":1479.8,"rating":4.5}]
 ```
 
 `from_records` reads such records back (chapter 2). What a round trip through records keeps:
@@ -130,14 +115,11 @@ For a report to read rather than a file to process, `to_table` gives the frame a
 ```ruby
 File.write("summary.txt", summary.to_table(rows: nil, precision: 1))
 puts File.read("summary.txt")
-```
-
-```
-shop     visitors  revenue
--------  --------  -------
-north       233.8   2874.4
-south       129.9   1911.6
-central     334.4   3159.0
+# shop     visitors  revenue
+# -------  --------  -------
+# north       233.8   2874.4
+# south       129.9   1911.6
+# central     334.4   3159.0
 ```
 
 `to_table` is for people; to read data back into a program, write CSV.

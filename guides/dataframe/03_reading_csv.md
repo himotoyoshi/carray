@@ -52,15 +52,12 @@ text = <<~CSV
 CSV
 df = CAFrame.from_csv(StringIO.new(text), types: { "price" => :float64, "stock" => :int32 })
 p df
-```
-
-```
-#<CAFrame nrow=3 columns=[item:CAString, price:float64, stock:int32]>
-item    price  stock
-------  -----  -----
-coffee    3.2     40
-tea         _     25
-cake      4.5      _
+# #<CAFrame nrow=3 columns=[item:CAString, price:float64, stock:int32]>
+# item    price  stock
+# ------  -----  -----
+# coffee    3.2     40
+# tea         _     25
+# cake      4.5      _
 ```
 
 - An **empty cell** is missing, in every column.

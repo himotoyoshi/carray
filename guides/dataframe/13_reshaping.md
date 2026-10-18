@@ -14,20 +14,17 @@ sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
 ```ruby
 wide = sales.pivot(index: "date", columns: "shop", values: "revenue")
 p wide
-```
-
-```
-#<CAFrame nrow=8 columns=[central:float64, north:float64, south:float64] index="date">
-date        central    north    south
-----------  -------  -------  -------
-2024-03-04   3038.0  2121.39  1391.47
-2024-03-05  2717.54   2235.1  1632.61
-2024-03-06  3078.67  2285.32   1479.8
-2024-03-07  3060.93  2681.38  1561.34
-2024-03-08        _   3323.2  2192.97
-2024-03-09   3939.6   3974.7  2724.34
-2024-03-10  3270.26  4112.58  2785.04
-2024-03-11  3008.01  2261.26   1525.1
+# #<CAFrame nrow=8 columns=[central:float64, north:float64, south:float64] index="date">
+# date        central    north    south
+# ----------  -------  -------  -------
+# 2024-03-04   3038.0  2121.39  1391.47
+# 2024-03-05  2717.54   2235.1  1632.61
+# 2024-03-06  3078.67  2285.32   1479.8
+# 2024-03-07  3060.93  2681.38  1561.34
+# 2024-03-08        _   3323.2  2192.97
+# 2024-03-09   3939.6   3974.7  2724.34
+# 2024-03-10  3270.26  4112.58  2785.04
+# 2024-03-11  3008.01  2261.26   1525.1
 ```
 
 - The rows and the columns are each sorted: dates in time order, shop names alphabetically.
@@ -60,14 +57,11 @@ both.column_names
 weekly = sales.select("date", "shop", "revenue").copy
 weekly["week"] = weekly["date"].floor(unit: :W)
 p weekly.pivot(index: "week", columns: "shop", values: "revenue", aggregate: :sum)
-```
-
-```
-#<CAFrame nrow=2 columns=[central:float64, north:float64, south:float64] index="week">
-week        central     north     south
-----------  -------  --------  --------
-2024-03-04  19105.0  20733.67  13767.57
-2024-03-11  3008.01   2261.26    1525.1
+# #<CAFrame nrow=2 columns=[central:float64, north:float64, south:float64] index="week">
+# week        central     north     south
+# ----------  -------  --------  --------
+# 2024-03-04  19105.0  20733.67  13767.57
+# 2024-03-11  3008.01   2261.26    1525.1
 ```
 
 Any summary name works: `:mean`, `:max`, `:count`, `:median`, and so on. A cell that no row fills stays missing even with `aggregate: :count`, so "counted zero" and "no such combination" remain different.
@@ -93,16 +87,13 @@ grid.max(axis: 1).to_a # => [310, 295, 305, 322, 388, 402, 355, 298]
 ```ruby
 long = wide.reset_index.melt(id: "date", var_name: "shop", value_name: "revenue")
 p long.head(4)
-```
-
-```
-#<CAFrame nrow=4 columns=[date:CATime[D], shop:object, revenue:float64]>
-date        shop     revenue
-----------  -------  -------
-2024-03-04  central   3038.0
-2024-03-05  central  2717.54
-2024-03-06  central  3078.67
-2024-03-07  central  3060.93
+# #<CAFrame nrow=4 columns=[date:CATime[D], shop:object, revenue:float64]>
+# date        shop     revenue
+# ----------  -------  -------
+# 2024-03-04  central   3038.0
+# 2024-03-05  central  2717.54
+# 2024-03-06  central  3078.67
+# 2024-03-07  central  3060.93
 ```
 
 - `id:` names the columns to repeat on every row — here the date.
