@@ -45,7 +45,11 @@ class CAFrame
       results.size == 1 ? results.first : results
     end
 
+    # count with no value counts the present cells, which every type has;
+    # a Face's own count takes a value (CACategorical#count(label)), so the
+    # type is asked about count_not_masked instead.
     def column_has? (col, verb, args, keywords)
+      verb = :count_not_masked if verb == :count && args.empty?
       probe = col.elements > 0 ? col[0..0, *[nil] * (col.ndim - 1)] : col
       keywords = keywords.merge(axis: 0) if col.ndim > 1
       probe.public_send(verb, *args, **keywords)

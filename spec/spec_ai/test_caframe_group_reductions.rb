@@ -85,4 +85,29 @@ class TestCAFrameGroupReductions < Test::Unit::TestCase
     assert_raise(ArgumentError) { grp.first("temp", min_count: 1) }
     assert_raise(CArray::DataTypeError) { grp.all("temp") }   # a float column has no all
   end
+
+  # count with no value counts the present cells of any type, a Face's
+  # included, though CACategorical#count itself takes a label.
+  def test_count_counts_a_categorical_column
+    c = CA_OBJECT(["x", nil, "x", "z"])
+    c[1] = UNDEF
+    df = CAFrame.new("k" => CA_INT32([1, 1, 2, 2]), "c" => c.categorize,
+                     "f" => CA_FLOAT64([1, 2, 3, 4]))
+    grp = df.group_by("k")
+    assert_equal [1, 2], grp.count("c").to_a
+    assert_equal %w[c f], grp.count.column_names
+    assert_equal [1, 1, 1, 2],
+                 df.windows(on: "f", before: 1, exclude: nil).count("c").to_a
+  end
+
+  # With no group at all, keep_rows: answers in the type the reduction has.
+  def test_keep_rows_with_no_group_keeps_the_type
+    k = CArray.float64(3)
+    k[] = UNDEF
+    t = CArray.time(%w[2024-01-01 2024-01-02 2024-01-03], unit: :D)
+    grp = CAFrame.new("k" => k, "t" => t).group_by("k")
+    got = grp.mean("t", keep_rows: true)
+    assert_kind_of CATime, got
+    assert_equal [UNDEF] * 3, got.to_a
+  end
 end
