@@ -68,7 +68,7 @@ An array can be given a domain meaning without changing how its values are store
 
 An array need not hold values at all. Subclass `CAObject` in Ruby and say how the element at a given position is obtained — computed on demand, read from a file, fetched from a database, taken from an instrument — and what you have written is a CArray. It is indexed and sliced as one, views can be built on it, reductions run over it, and anything that accepts an array accepts it. An array of a million elements that stores none of them costs nothing to make.
 
-Arrays of all these kinds are what a data frame — `CAFrame`, which comes with the library — holds in its columns. A column is a plain CArray and nothing else, so masks, views, groupings and the arrays you define yourself go on working inside a table, and a column taken out of a frame is an array like any other.
+Arrays of all these kinds are what a data frame — `CAFrame`, which comes with the library — holds in its columns. A column is a plain CArray and nothing else, so masks, views, groupings and the arrays you define yourself go on working inside a table, and a column taken out of a frame is an array like any other. Working with frames is the subject of a companion book, the CAFrame User's Guide ([../dataframe/README.md](../dataframe/README.md)).
 
 ## How this guide is arranged
 

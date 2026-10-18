@@ -623,8 +623,18 @@ namespace :pdf do
     )
   end
 
-  desc "Bundle both developer and user guides."
-  task :all => [:devel, :users]
+  desc "Bundle guides/dataframe into a single PDF (CAFrame User's Guide). md-to-pdf required."
+  task :dataframe do
+    build_md_bundle_pdf(
+      src_dir:  "guides/dataframe",
+      out:      "guides/pdf/CAFrame-Users-Guide.pdf",
+      title:    "CAFrame User's Guide",
+      subtitle: "guides/dataframe — bundled edition",
+    )
+  end
+
+  desc "Bundle the developer, user and CAFrame guides."
+  task :all => [:devel, :users, :dataframe]
 end
 
 # ---------------------------------------------------------------------------

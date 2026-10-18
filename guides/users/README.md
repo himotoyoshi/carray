@@ -62,6 +62,10 @@ These can be read in any order, once the core walkthrough is comfortable. Each i
 
 * [Vocabulary](08_vocabulary.md) — CArray-specific terms (entity/view, address, mask/UNDEF, data_type, Face), with a NumPy/Numo correspondence table. Can be read first or used as a glossary.
 
+## Companion guide
+
+* The CAFrame User's Guide ([../dataframe/README.md](../dataframe/README.md)) — analysing tables with `CAFrame`, the data frame whose columns are CArrays.
+
 ## Out of scope
 
 These chapters cover what a CArray user needs to know. Material aimed at C extension authors — writing kernels (`docs/authoring/HOW_TO_WRITE_KERNEL.md`), the sweep author surface (`docs/authoring/Sweep_Author_Surface.md`), and writing C extensions generally (`docs/authoring/WritingCExtensions.md`) — is out of scope here. (The user-facing MemoryView format reference is `docs/interop/MemoryViewFormat.md`, linked from chapter 15.)
