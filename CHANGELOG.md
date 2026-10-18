@@ -34,997 +34,269 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
      neighbour ("as well", "the producer above") or leave unnamed the
      method, class or keyword it is about. -->
 
-## 3.0.4 (unreleased)
+## 3.0.4
 
-- Fix: `tolerance:` of `locate_nearest_addr`, `align_nearest_addr` and
-  `CAFrame#join_asof` refuses NaN and a negative length with
-  ArgumentError, as `windows` refuses them for `before:` and `after:`;
-  NaN had kept every match and a negative length dropped every one. A
-  zero duration String such as `"0 minutes"` is taken by both.
-- Fix: the index of `CAFrame#resample` shows the time column's
-  attributes, as the index of `group_by` and `pivot` shows its key's;
-  it had none, with or without `fill:`, `label:` and `origin:`.
-- Change: a CAFrame column name given as a Symbol raises TypeError
-  "<verb>: a column name is a String" everywhere: `CAFrame.new` with a
-  stray Symbol key, `cast` and the `types:` and `missing:` of
-  `from_csv` with a Symbol key other than `:default`, and `group_by(:x)`
-  raised ArgumentError before. `CAFrame.new(axis_name: :row)` is now
-  refused too; pass `"row"`. `df[:x]` stays the predicate syntax.
-- Change: a Face is named one way wherever a type is read, as `p df`
-  names it: `describe`'s `type` column and the refusals of the CAFrame
-  verbs, key windows, `bincount` and `locate_nearest_addr` read
-  `CATime[D]` where some read `CATime`.
+- New: `CAFrame#verify(rules)` judges every row against named rules (each
+  a callable that returns a boolean CArray) and returns the verdicts as a
+  frame, one column per rule; a row whose rule read a masked value is
+  `UNDEF`, so `count(false)` counts the rows that break it.
 
-- New: CAFrame `join` and `join_asof` take the index as a key, by the row
-  axis name, as `group_by`, `sort_by_key` and `align` do; they raised
-  `KeyError`. The key is kept once: the left index stays the result's
-  index, and an unmatched right row of an `:outer` or `:right` join takes
-  its label from the right.
+- New: `CAFrame#join` takes `how: :semi` and `:anti` (the left rows that
+  have, or have no, match), several key columns (`on: ["station",
+  "date"]`), and the index as a key by the row axis name.
+  `CAFrame#join_asof` takes the index too, and `by:` columns that must
+  match exactly before the nearest key is taken.
 
-- Change: an N-D column given as a key to any CAFrame verb is refused in
-  one wording, "<verb>: the key "p" has shape [...], not one value per
-  row; use one of its components (e.g. df[name][nil, 0])".
+- New: a `CAFrame` grouping has more verbs. The short form of `prod`,
+  `accumulate`, `median`, `variance`, `stddev`, `variancep`, `stddevp`,
+  `first`, `last`, `nunique`, `count`, `all` and `any`, beside `sum` /
+  `mean` / `min` / `max`; `filter` (keep the groups a block chooses);
+  `lag`, `order`, `cumsum` and the other running values, and
+  `fill(name, :ffill)` / `:bfill`, all kept on the frame's rows; and
+  `to_frame`. The reductions take column names (`grp.mean("temp")` is a
+  CArray) and `keep_rows: true`, which gives each row its own group's
+  result.
 
-- Change: a CAFrame verb that takes a list of columns refuses a name given
-  twice, as the verbs that make columns do: `select("a", "a")` gave one
-  column, `group_by`, `sort_by_key`, `is_duplicate` and `describe` took
-  the name as if once, and `drop("a", "a")` raised `KeyError`; all raise
-  `ArgumentError` ("select: names "a" more than once"). `df["a", "a"]`
-  still returns the column twice. Every such refusal now reads
-  "<verb>: <what> <name> more than once".
+- New: `CAFrame#resample` takes `by:`, columns whose groups are binned
+  apart: `df.resample("time", "1 day", by: "station").max("temp")`.
 
-- Change: a Ruby Array given to a CAFrame as a column (`CAFrame.new("x"
-  => [1, 2])`, `df["x"] = [...]`) is typed by its values as
-  `from_records` types a record's: Integers an `int64` column, numbers a
-  `float64` one, arrays of one shape an N-D column, anything else
-  `:object`; it was always `:object`. Wrap the values in `CA_OBJECT(...)`
-  to keep an object column. `from_records` and the values of a group's
-  block read `UNDEF` as missing, as `nil` is, and keep an Integer an
-  `int64` cannot hold in an `:object` column instead of raising
-  `RangeError`. A CArray column is kept as it is.
+- New: `CArray#windows(on:, before:, after:)` bounds each window by a
+  width of a key (a time, a duration or a number) instead of a count of
+  cells, with `by:`, `exclude:`, `interval:` and `at:` (windows placed at
+  given points, which may overlap). The key need not be sorted, and the
+  value may have several columns (shape `(N, ...)`). `CAFrame#windows(on:
+  "time", ...)` does the same for a frame's columns.
 
-- New: windows on a key take a value of several columns (each row a
-  profile, shape `(N, ...)`): every reduction is taken column by column
-  over the same windows and keeps the trailing shape, and `each` yields
-  the rows of a window. In a CAFrame, `windows` reductions now include an
-  N-D column, reduced along the rows as `group_by` reduces it, where they
-  left it out of the frame and refused it by name. A block `reduce` still
-  takes a one-column value.
+- New: `CArray#lag(n = 1, axis:)` is the value `n` steps earlier along an
+  axis, `UNDEF` where there is none, so `x - x.lag` starts with `UNDEF`.
 
-- Change: a CAFrame group or window verb given a column whose type lacks
-  it raises `CArray::DataTypeError` for every verb ("sum: column "name"
-  (object) has no sum"); the group and window reductions raised
-  `ArgumentError`, the group transforms `DataTypeError`.
+- New: the slab, block, segment, categorical and axis-group iterators
+  have `lag`, `order` (each cell's rank within its piece) and
+  `strip_mask(method: :ffill / :bfill)`; each of them works within one
+  piece and never takes a value from another. Every iterator has `first`,
+  `last` and `nunique`.
 
-- Change: a store that cannot convert a cell names the method, as the
-  other refusals do: "[]=: NaN cannot be converted to int32" and "[]=:
-  out of range to cast to boolean (0 or 1)". The exception classes are
-  unchanged.
+- New: `CArray#is_between(lo, hi, exclude:)` (or a Range) is true where a
+  value lies between two bounds; `exclude: :lower`, `:upper` or `:both`
+  leaves bounds out, and `nil` or an open end leaves a side unbounded.
 
-- Change: a write into a read-only array that is not frozen (a lazy
-  expression or a view of one, a `CAConstString`, a view of a frozen array)
-  raises "<method>: can not modify read-only array", naming the method that
-  wrote: "fill: can not modify read-only array". The exception class is
-  unchanged (`RuntimeError`; a frozen array raises `FrozenError`).
+- New: `CArray#round(ndigits)` rounds each element to `ndigits` decimal
+  places (negative for tens, hundreds, ...), as `Float#round` and
+  `Integer#round` do.
 
-- Fix: a lazy operator with no kernel for the data type refuses as the
-  eager one does, "atan2: not defined for data_type int8", instead of
-  "invalid data_type for binop (not implemented)"; the lazy `abs` and
-  `arg` of a boolean no longer give a type code. A refusal that comes from
-  the cells (comparing an object with a number) still waits for the
-  evaluation and names the method that evaluates.
+- New: `CArray#to_frame(*names, axis: -1)` shows an array as a CAFrame
+  whose columns are views of it, one per position along `axis`.
 
-- Change: the common refusals open with the method you called, as the
-  others do: a shape mismatch between operands or in a store, a negative
-  size, a data type that is not one, a fixlen without `bytes:`, an index
-  that is not one, a value that cannot be read as the cell's type, and a
-  `load_binary` of the wrong size. "shape mismatch between operands ..."
-  now reads "+: shape mismatch between operands ...". The exception
-  classes are unchanged.
+- New: `CACategorical#contrast(base:, full:)` gives one int8 column per
+  category (1 in the cell's category, the base left out unless `full:
+  true`), and `CAFrame#contrast_columns(name, ...)` puts those columns in
+  the frame in place of the categorical.
 
-- Change: an error names the method you called rather than one it calls
-  inside. `value_counts` no longer says `sort_index`, `CA_INT32` and
-  `to_ca` no longer say `guess_array_shape`, and `CArray.int32` and
-  `CArray.new` no longer say `initialize`. The exception classes are
-  unchanged; code that matched the old names in a message needs the new
-  ones.
+- New: `CAFrame#is_duplicate(*names, except:)` is true for the rows that
+  repeat an earlier row in the named columns; `except: :last` or `:none`
+  chooses which occurrence stays unmarked.
 
-- Fix: an array of more than `CA_RANK_MAX` (16) axes is refused before it
-  is built. A Ruby Array nested 17 deep given to `CA_INT32`, `to_ca` or
-  any other conversion crashed the process; `CArray.stack` of 16-axis
-  arrays built a 17-axis array that crashed on an index or `inspect`.
-  Both raise `ArgumentError`. Every refusal of a rank above the limit
-  now reads "<method>: ndim <n> exceeds CA_RANK_MAX 16".
+- New: `CAFrame#append(name, col, before:, after:)` puts the column next
+  to another one.
 
-- Fix: an axis is out of range whatever the width of the Integer given.
-  `cumsum`, `sort_addr`, `bsearch`, `insert_axis` and the slab iterators
-  took an axis past 32 bits, such as `2**32 + 1`, as a small one and
-  answered on that axis; they now raise `ArgumentError`. A Bignum axis
-  raises `ArgumentError` naming the method instead of `RangeError`.
-  `join(axis:)` raises `TypeError` for a Float or a String, as every other
-  `axis:` does.
+- New: a `CAFrame` carries attributes of the frame as a whole (`attr`,
+  `set_attr`, `attrs`, ..., and `CAFrame.new(..., attrs:)`), separate from
+  each column's. A row selection or a change of columns keeps them; a
+  summary, a join or a reshape does not.
 
-- Fix: `CACategorical#eq` and `#ne` compare a CArray operand cell by cell,
-  by label. Another categorical is matched whatever order its labels are
-  in, and a masked cell on either side gives UNDEF. Before, any array was
-  looked up as one label and every cell answered false, `c.eq(c)`
-  included. A scalar or a Ruby Array is still one label, as for
-  `CArray#eq`.
+- New: `CAFrame#to_csv(attrs: [:units, ...])` writes one line per
+  attribute key below the names, and `CAFrame.from_csv(attrs: [...])`
+  reads them back as column attributes; in a reading block,
+  `r.header(:units)` does the same for a line anywhere in the header.
 
-- Fix: a Face written in Ruby over fixed-length storage that does not pass
-  `orderable_storage: true` is no longer ordered by its bytes. `min`,
-  `max`, `minmax` and their `axis:` forms raise `ArgumentError` instead of
-  answering by memcmp, and `sort`, `sort_addr`, `rank_index`,
-  `partition_copy`, `nlargest` and `max_by_key` raise `ArgumentError`
-  instead of `SystemStackError`. A Face that defines its own `order` is
-  still sorted by it. The built-in Faces answer as before.
+- New: `CAFrame.from_csv` `columns:` takes a Hash that selects and names
+  columns, and the names `c0`, `c1`, ... of a file without a header;
+  `cast` and `from_csv` `types:` take `:categorical`. `CAFrame.new` takes
+  `types:` and `on_error:`, as `from_records` does.
 
-- New: `CArray#delete_attr(key)` removes an attribute from the array and
-  returns its value. On a view it removes only the view's own key; a key
-  the view shows from its parent stays visible.
+- New: `CArray#delete_attr(key)` removes an attribute and returns its
+  value.
 
-- Change: attributes follow conversions and not reductions. `categorize`
-  and a CAFrame `cast` (to boolean, time and categorical too),
-  `parse_to_time` and `to_time` keep a column's attributes. The `first`
-  and `last` of a categorical, segment or CAFrame group iterator no
-  longer carry them, as no other reduction does. A CAFrame index built
-  from a key column (group, `pivot`, `pivot_grid`) shows that column's
-  attributes. `set_attr` / `set_attrs` on a mask array raise `TypeError`.
+- New: `CATime#end_of(unit:, origin:)` (the last tick of each time's
+  bucket), `days_in_month`, `quarter`, and the ISO 8601 week `iso_week`
+  with its year `iso_year`.
 
-- Fix: C extensions: a whole-array kernel iterator write walk
-  (`ca_iter_state_init_l1` with `CA_KERNEL_WRITE`) over a view that
-  shows a cell of its array twice, such as `a[CA_INT64([0, 0, 2]), nil]`,
-  keeps what the kernel wrote into one copy; the copy it left alone
-  used to overwrite it.
+- New: a time or duration array takes a single value in `+` and `-`
+  (`t + "3 days"`, `t - t.min`, `t - Time.utc(2024, 1, 1)`), and a month
+  or year duration moves a time on a day or finer grid as `Date#>>` does
+  (`2024-01-31 + 1 month` is `2024-02-29`). A bare number is still
+  refused.
 
-- Fix: C extensions: a kernel iterator write walk along the last axis
-  (`CA_FOR_EACH_FIBER` with `CA_KERNEL_WRITE`) of a type-converting
-  view, such as `a.fake(:float64)` over an int64 array, leaves the cells
-  the kernel did not write as they were. They were written back through
-  the conversion, so an int64 above 2**53 came back rounded.
+- New: a time array compares with a value off its grid (`days.eq(
+  "2024-01-03T05:00")`, `<`, `search_nearest`, `is_in`, ...) in the finer
+  unit the two share, where it raised `ArgumentError`. An assignment
+  still raises.
 
-- Change: C extensions: fifteen kernel iterator macros that only
-  shortened another one are removed. Write what they stood for:
-  `CA_SLAB_REDUCE_F64` / `_F32` / `_I32` / `_I64` are
-  `CA_SLAB_REDUCE_T` with `double` / `float` / `int32_t` / `int64_t`.
-  `CA_SLAB_REDUCE_T_PLUS` is `CA_SLAB_REDUCE_T_PLUS_EX`, and
-  `CA_SLAB_REDUCE_ARRAY_T` / `_ARRAY_T_PLUS` are
-  `CA_SLAB_REDUCE_ARRAY_T_EX` / `_ARRAY_T_PLUS_EX`, each given a
-  throwaway `ca_size_t` for the masked count. `CA_SLAB_REDUCE_T_MIN` /
-  `_T_MAX` / `_T_STAR` are `CA_SLAB_REDUCE_T` with the min, max or
-  product written in the reduce expression (the loop is not given the
-  SIMD reduction pragma they asked for). `CA_SLAB_MAP_F64` is
-  `CA_SLAB_MAP_T(double, double, ...)`. For `CA_L2_FOR_EACH_UNMASKED`,
-  `CA_FOR_EACH_INDEX_UNMASKED`, `CA_COUNT_UNMASKED` and `CA_MASK_GET`,
-  test the mask in the body of `CA_L2_FOR_EACH` or
-  `CA_FOR_EACH_UNMASKED`, or read it directly. `CA_SLAB_REDUCE_T_MIN_EX`
-  / `_MAX_EX` / `_STAR_EX` stay in the header for the kernel generator
-  but are no longer part of the author surface.
+- New: `CATime#pmax` / `pmin` (and `maximum` / `minimum` / `fmax` /
+  `fmin`) give the later / earlier time cell by cell.
 
-- Change: an attribute value is stored as a frozen copy, nested Arrays
-  and Hashes included, and `set_attr` / `set_attrs` raise `FrozenError`
-  on a frozen array. Change an attribute by setting it again: changing
-  a value in place (`a.attr(:h)["k"] << 2`) now raises `FrozenError`,
-  where it changed the array and every copy sharing the value.
+- New: CArray can be used in a Ractor other than the main one, `fuse`
+  included, and a frozen array is shared between Ractors without
+  copying. See `docs/topics/Ractor.md`.
 
-- Fix: attributes set on a Face (`CATime`, `CAString`, `CAConstString`,
-  `CACategorical`, `CARecord`) show on its views, so a row selection of
-  a CAFrame text or time column keeps them. They were lost on every
-  view.
+- New: C extensions: `CA_FOR_EACH_WHOLE` and `CA_FOR_EACH_WHOLE_MASKED`
+  hand a kernel the whole array as one contiguous run.
 
-- Fix: attributes are kept by `dup` and `clone` (as the copy's own, no
-  longer shared with the receiver), by Marshal of an array, an object
-  array and a record array, and by `sort_copy`, `partition_copy`,
-  `project`, `strip_mask` and `CAConstString#copy`; and through more
-  than 64 views. In a CAFrame they are kept by a text column's `cast` to
-  a number, by every `join`, and by the key of an outer `join`.
+- Change: `CArray#rank` is removed; use `#ndim`.
 
-- New: `CAFrame#to_csv(attrs: [:units, ...])` writes, below the name row,
-  one line per attribute key, holding each column's value of that
-  attribute; `CAFrame.from_csv(attrs: [:units, ...])` reads those lines
-  back as column attributes (as Strings). A file with the attribute
-  lines elsewhere is read with a reading block and `r.header(:units)`.
-
-- Change: C extensions: `ca_iter_state_next_slab_strided` is removed,
-  and `ca_iter_state_init_l2` takes `CA_SLAB_AXES` only (`CA_SLAB_WHOLE`
-  returns `CA_ITER_ERR_POLICY`). The walk it gave, one strided run per
-  innermost row, is `ca_iter_state_init_l2` with `CA_SLAB_AXES` and the
-  last axis, read with `ca_iter_state_next_slab_axes` (`st->slab_dims[0]`
-  cells, `st->slab_strides[0]` bytes apart). The whole array as one
-  contiguous run is `CA_FOR_EACH_WHOLE`.
-
-- New: in a `CAFrame.from_csv` reading block, a header read with a name,
-  as `r.header(:units)`, gives each column an attribute of that name:
-  `df["temp"].attr(:units)` answers that column's field of the line. An
-  empty field gives no attribute. Before, the line was read and dropped.
-
-- Fix: a view joining several arrays (`CArray.stack`, `CArray.meld`,
-  `CArray.montage`) no longer shows the first array's attributes
-  (`attr`, `attrs`) as its own. It shows the keys every joined array
-  shows with the same value; a key they disagree on or that some lack
-  is not shown.
-
-- Change: `CArray.concatenate`, `CArray.mosaic` and `CArray.tabulate`
-  give the result the attribute keys every piece shows with the same
-  value, where they gave it none. `CAFrame.concatenate` keeps a column's
-  attributes the same way.
-
-- Change: a lazy type conversion, such as the view
-  `CArray.wrap_readonly(a, CA_FLOAT64)` returns for an `a` of another
-  type, shows `a`'s attributes, as `to_type` does. Lazy arithmetic still
-  shows none.
-
-- Change: `CArray::TableMethods` (`column_names=`, `column`, `row`,
-  `rows`, `select` on a 2-D array) is removed. Show the array as a table
-  with `CArray#to_frame` instead: `a.to_frame("x", "y")` gives a CAFrame
-  whose columns are views of `a`, so `df["x"]` takes a column and
-  `df.to_records[i]` a row as a Hash.
-
-- New: `CArray#to_frame(*names, axis: -1)` shows an array as a CAFrame:
-  rows along axis 0, one column per position along `axis`, each column a
-  view of the array (a 2-D array gives 1-D columns, a larger one N-D
-  columns). Names default to `"c0"`, `"c1"`, ... A 1-D array is refused;
-  give it a column axis with `a[nil, :_]`.
+- Change: `CArray::TableMethods` (`column_names=`, `column`, `row`, `rows`
+  and `select` on a 2-D array) is removed; use `a.to_frame("x", "y")`,
+  then `df["x"]` for a column or `df.to_records[i]` for a row.
 
 - Change: `CArray.load_arrow_tensor`, `CArray#save_arrow_tensor` and
   `CArray::ArrowTensor`, the experimental Arrow tensor IPC reader and
   writer, are removed.
 
-- New: C extensions: `CA_FOR_EACH_WHOLE(st, ca, flags, p, n)` and
-  `CA_FOR_EACH_WHOLE_MASKED(st, ca, flags, p, n, m)` hand a kernel the
-  whole array as one contiguous run in row-major order, gathering a copy
-  when the array does not lend contiguous memory. A body that can raise
-  opens them inside `ca_iter_ensure`, as with the other block macros.
+- Change: methods whose names start and end with `__` that were public
+  internals are now private, renamed or removed. Call the public method
+  they served instead.
 
-- Fix: C extensions: a kernel iterator write walk over a single slab
-  axis (`CA_FOR_EACH_SLAB` with `CA_KERNEL_WRITE`) of a shifted view or
-  one selected by an index array (`a.shift(...)`,
-  `a[CA_INT64([0, 2]), nil]`) along the shifted or selected axis no
-  longer fails with "flag combination is not supported" (rc=3); the
-  write reaches the array.
+- Change: CAFrame takes column names as Strings only. A Symbol name
+  (`df.drop(:a)`, `join(on: :a)`, `CAFrame.new(axis_name: :row)`) raises
+  `TypeError`; write `"a"`. Record keys given to `from_records` may still
+  be Symbols, and `df[:x]` stays the predicate syntax.
 
-- Fix: C extensions: a whole-array kernel iterator write walk
-  (`ca_iter_state_init_l1`) over a selection of a type-converting view,
-  such as `a.fake(:float64)[sel, nil]`, now writes the cells that are
-  masked in the array as well, as every other walk does.
+- Change: a masked cell of an integer index array keeps its place:
+  `x[i]`, the grid forms and `CAFrame` row selection `df[i]` give a
+  result shaped like `i`, `UNDEF` where `i` is masked, where they dropped
+  those positions. To drop them as before, index by
+  `i[i.is_not_masked]`.
 
-- Change: an index that mixes a CArray with other keys (`a[i, 1..3]`,
-  `a[mask, -1..1]`) reads every other key as an index without a CArray
-  does.  A range there picked other cells: one ending before its start
-  read forwards (`a[i, -1..1]` read columns 3, 0, 1 where `a[2, -1..1]`
-  reads 3, 2, 1), `2..1` read nothing, and endless ranges and the
-  `[start, count]` form raised.  An Integer key there now drops its axis
-  (`a[i, 1]` has the shape of `i`; it kept a length-1 axis); a String or
-  a Float is refused (`a[i, "x"]` read nothing, `a[i, 1.5]` read column
-  1); a boolean key must be as long as its axis; and the rubber marker
-  (`false` / `:~`) and `:_` work there.
+- Change: an index beside a CArray key is read as it is without one: a
+  range ending before its start reads backwards (`a[i, -1..1]`), and an
+  Integer key drops its axis (`a[i, 1]` has the shape of `i`; add `:_`
+  or use `1..1` to keep it).
 
-- Change: a step says the direction, as in Ruby.  A step that points away
-  from the end of a run reads nothing (`a[(0..4).step(-1)]` read `a[0]`),
-  and an endless sequence with a negative step goes down to the first
-  cell (`a[3.step(by: -1)]` read only `a[3]`).
+- Change: an index with a Float that has a fraction (`a[1.5..3]`, a step
+  of `0.5`) raises `IndexError`; it was cut to an integer. Convert with
+  `to_i` or `round` first. A Float that holds an integer, such as a count
+  from `sum`, is still that position.
 
-- Change: a Float with a fraction in a range, an Array form or a step is
-  refused with `IndexError`; it was cut to an integer (`a[1.5..3]` read
-  from 1).  A Float that holds an integer, such as a count from `sum`, is
-  still read as that integer.  A Bignum index is out of range
-  (`IndexError`; it was `RangeError`); a Bignum step is a step larger than
-  any axis.
+- Change: an index step says the direction, as in Ruby: a step pointing
+  away from the end reads nothing (`a[(0..4).step(-1)]` read `a[0]`).
 
 - Change: a boolean selector of more than one axis must have the array's
-  shape (`a[mask]` with a (4, 3) mask on a (3, 4) array picked cells by
-  flat position); a 1-D one still picks by position among all the cells.
+  shape; it picked cells by flat position. Flatten both sides to keep the
+  old reading.
 
-- Change: `a[idx]` with an integer index array of `a`'s own shape takes
-  the indices as they are at the call and checks them then: an index out
-  of range raises from `a[idx]` (it raised at the first read), and a
-  later change to `idx` does not reach the view.
-
-- Change: an index of a single String is a member name.  A String
-  starting with `@` was read as an attribute, which no array has, and
-  raised `NoMethodError`.
-
-- Fix: `a[:eq, 2] = v` (and every `a[:method, ...] = v`) writes only the
-  cells the method picks.  It wrote the whole view back, so a view that
-  converts its values (`fake`, a `wrap_writable` of another type) rounded
-  every other cell.  The arguments after the symbol are the method's:
-  `:_` and `:>` among them are passed to it, not read as index markers.
-
-- Fix: storing a Ruby Array clears the mask of the cells it writes
-  (`a[] = [7, 8, 9]` left a masked cell masked).
-
-- Fix: a store into no cells checks the value as a store into some cells
-  does (`a[2...2] = [1, 2, 3]` and `a[2...2] = "x"` passed).
-  `CArray.<type>(0) { ... }` does not call its block, as
-  `Array.new(0) { ... }` does not.
-
-- Fix: on an axis of length 0, a range starting at 0 reads no cells
-  (`z[0..-1]` raised `IndexError`).
-
-- Fix: `CArray.wrap_memory_view` and `from_memory_view` check a
-  producer's shape against the bytes it reports.  A shape larger than
-  the buffer was read (and, for a writable wrap, written) past its end;
-  it now raises `ArgumentError`, as do a negative shape, one too large
-  to count, and a typeless producer whose own layout is strided.  A
-  producer that omits `strides` is read as row-major instead of
-  crashing.  A strided view's strides are still trusted: its
-  `byte_size` is by convention the element count, which does not bound
-  them.
-
-- Fix: masking a cell of an array that `wrap_memory_view` returned for
-  a strided producer no longer corrupts memory.
-
-- Fix: an import that raises releases the producer's views at once;
-  a negative or overflowing shape left them taken.
-
-- Change: a boolean MemoryView holds 0 or 1 in every byte.
-  `from_memory_view` reads any other byte as true (it was kept, so
-  `count(true)` and `to_type` disagreed with `to_a`); `wrap_memory_view`
-  refuses a boolean buffer or a `mask:` that holds one.
-
-- Change: `wrap_memory_view(obj, mask: m)` is read-only when the mask
-  buffer is, since a store writes the mask cell of each element it
-  stores; it refuses a mask that shares bytes with the data.
-
-- Change: `CArray.wrap_writable` asks a MemoryView producer for a
-  writable view, and `wrap_readonly` / `wrap_writable` read a typeless
-  producer as the data type they are given (it was refused).
-
-- Change: the MemoryView format reader takes Ruby's vocabulary for
-  byte order: a suffix (`i<`, `s!>`), `_` for `!`, `j` / `J`, and
-  `e` `E` `v` `V` `g` `G` `n` `N` in the machine's order (they were
-  all refused).  The prefixes `!` and `@` are read too, and a one-byte
-  type takes any byte order.  A `mask:` format is read whole (`C3` was
-  taken as `C`).
-
-- Change: `from_memory_view` raises `TypeError` on a receiver it cannot
-  return, such as a Face class or `CScalar` (it returned a plain
-  `CArray`).  `CArray::Int32.from_memory_view` /
-  `wrap_memory_view` take `mask:`.
-
-- Change: `CArray.memory_view_reject_reason` returns `nil` for an
-  object that is not a CArray (it said "not a CArray").
-
-- Change: `window(..., bounds: "strict")` raises `IndexError` when it is
-  made if a range reaches outside the array, and `bounds: "ruby"` when a
-  range reaches past the end or before the first cell counted from the end.
-  Such a window raised on every read and write anyway, and a write changed
-  the cells in range before raising.
-
-- Fix: `convert` yields `true` / `false` for a boolean array and the element
-  for a Face (a `CATime` gave its storage bytes), as `map!` and `ca[i]` do.
-  A `CAObject` of boolean type receives `true` / `false` in `store_addr`,
-  `store_index` and `fill_data`, and a boolean window's `fill_value` is
-  `true` or `false`; they were 1 and 0. For C extensions, `rb_ca_ptr2obj`
-  (`rb_ca_fetch_ptr`) answers with the value `ca[i]` gives.
-
-- Fix: a whole-array store whose conversion raised part way (a NaN stored
-  into an integer array, `ints[] = floats`) left the target's mask cleared,
-  and a store through a view cleared the parent's mask. The mask now comes
-  back as it was.
-
-- Change: `seq` and `seq!` on an integer array given a Float, Rational or
-  BigDecimal `init_val` or `step` make each cell `init_val + step*i` cut
-  toward zero, as a store takes a float: `int32.seq(0.5, 0.5)` is
-  `[0, 1, 1, 2]`, where the offset used to be cut first (`[0, 0, 1, 1]`)
-  and a Rational step was cut to an integer (`seq(0, 1/2r)` was all
-  zeros). Such a run whose first or last value does not fit the type
-  raises `RangeError`, and NaN raises `FloatDomainError`. An argument that
-  is not a number raises `TypeError` and leaves the array and its mask as
-  they were; the mask used to be cleared first.
-
-- Fix: for C extensions, `carray.h` declares `ca_unmask_copy` (it named
-  `ca_unmasked_copy`, which does not exist) and no longer declares
-  `camapping_mask_data_type`. `ca_setup_mask` and `ca_mask_overlay_safe`
-  refuse a mask or operand of another size, and `ca_setup_mask` one that is
-  not boolean; they read past it or wrote outside the output. A raise while
-  `ca_attach` makes a mask no longer leaves the array attached, a refused
-  `ca_install_obj_type` no longer uses up an obj_type, `ca_create_mask` on
-  an unmasked lazy expression no longer crashes, and the `CA_CHECK_*`
-  macros take an expression as their argument.
-
-- Fix: storing an object whose `to_c` does not return a Complex into a
-  complex array raises `TypeError`, as `Complex()` does; it crashed the
-  process. `inherit_mask` and `inherit_mask_replace` refuse an array that
-  has fewer elements than the receiver (a scalar is still applied to every
-  cell); they read past its end. `bitfield` refuses a descending range such
-  as `3..1`, which read a different field. A `fake` over a `refer` that
-  reads the bytes as another type answers the same through an index array
-  or a boolean selection as through `copy`.
-
-- Change: `nsmallest`, `nlargest` and their `_index` forms break ties by
-  position for every type, as `order` and `sort_index` do:
-  `nsmallest_index(k)` is the first k of `sort_index`. Integer arrays put
-  tied cells in reverse order for `nlargest_index`, and `nsmallest_index`
-  left ties in no fixed order.
-
-- Change: `bin(v, v, ...)` (a range of one point) puts a value equal to v
-  in bin 0 and treats the others as out of range, using `lfill:` /
-  `ufill:`; it put every value in bin 0. The step form now answers the same
-  instead of raising. `bin_to` and the histograms refuse edges that
-  decrease, a NaN edge or a masked one; equal and infinite edges are kept.
-  `random!` and `randomn!` clear the mask, as `seq!` and `fill` do.
-
-- Fix: in an object array, `unique`, `nunique`, `value_counts`,
-  `mask_duplicates`, `is_mode`, `is_in` and the set operations take two
-  Complex values with a NaN part as one value when their parts match with
-  every NaN as one, as a complex array already did. Each such value was
-  counted apart. A Float NaN was already one value.
-
-- Fix: a complex array's `linear_fetch` and `strip_mask(method: :linear)` /
-  `unmask(method: :linear)` dropped the imaginary part; both parts are now
-  interpolated. `linear_section`, `elem_min` and `elem_max` refuse a complex
-  array, which has no order. `put_along_axis` and `put_nd` with a masked
-  index wrote the other values as `scatter_replace!` does rather than as
-  the store does (an object array was refused, a broadcast or Face value
-  read differently); they now go through the store either way. `put_nd` on
-  a frozen array raises FrozenError.
-
-- Change: arguments of the binning, counting and random methods are
-  checked instead of cut or wrapped. `random!` on an integer array takes
-  Integer bounds whose values all fit the type (`int8.random!(0, 1000)` and
-  `random!(1.5)` raise; the whole int64 and uint64 ranges now work), and on
-  a float array finite bounds. `bin(bins:)`, `bincount(length:)` and
-  `bincount_nd(lengths:)` take Integers, `bincount(length:)` a non-negative
-  one. `bin_to(lfill: n)` (n the number of bins) wrote `ufill` under the
-  range. `histogram`, `histogram1d` and `bincount_nd` take `axis: nil` as
-  the default.
-
-- Fix: `windows(on:)` with a uint64 key above 2**63 - 1, or with a time
-  key whose widths need a finer grid late in the time range, wrapped the
-  key and gave wrong windows; such keys are now measured from the smallest
-  one, and a span that int64 cannot hold raises. A `before:` or `after:` of
-  NaN raises, as `interval:` of NaN does, and `bounds:` / `fill_value:` with
-  `on:` raise instead of being ignored.
-
-- Fix: `shuffle!` and `shuffle` moved the values but not the mask, so a
-  masked cell's value came into view and another cell went masked; the mask
-  now moves with the values. `project(idx, UNDEF)` filled out-of-range cells
-  with 0 instead of masking them. `count` with a query array that has a
-  masked cell counted self's masked cells there; that count is now masked.
-
-- Fix: `nlargest`, `nsmallest`, their `_index` forms, `partition`,
-  `sort_by_key`, `max_by_key`, `min_by_key` and `range` ordered a
-  CAConstString by its storage offsets and a record array by its bytes. They
-  now order them as `sort` does: by string, and by the struct's `order_by:`
-  members; a struct that declares no order raises, as it does for `sort`.
-  The `*_by_key` methods also refuse a key of another shape, and answer UNDEF
-  instead of raising when no key cell can be compared.
-
-- Change: `scatter_*!`, `put_nd`, `elem_store`, `elem_min` and
-  `elem_max` convert a scalar value the way `self[i] = v` does, so a value
-  that does not fit the type now raises (`RangeError`, `FloatDomainError`
-  for NaN into an integer type) instead of wrapping: `int8.scatter_add!([0],
-  300)` used to add 44. `scatter_*!` also take an Integer above the fixnum
-  range, a Rational, or a BigDecimal as one value for every address, and
-  `scatter_replace!(addrs, UNDEF)` masks the cells. Index arrays and element
-  indices are read as `self[idx]` reads them: a float index array (to
-  `scatter_*!`, `project`, `take_along_axis`) or a Float element index
-  raises IndexError instead of being cut to an integer, and a uint64 index
-  of 2**63 or more is out of range instead of counting from the end.
-  `count` with a Rational or BigDecimal query compares it as a number
-  instead of cutting it to the array's type.
-
-- Fix: three methods read or wrote outside their memory. `project` (and
-  `take_along_axis` with a masked index) on an object array computed
-  lazily could crash in the garbage collector. `bincount_nd` with a uint64
-  label of 2**63 or more counted it in another cell, or wrote before the
-  counts; it now counts in the overflow cell, as any label past the last
-  bin does. The `elem_*` methods given an index array whose length is not
-  the array's ndim read past the Ruby Array or ignored the extra entries;
-  they now raise IndexError, as `[]` does.
-
-- Fix: `diagonal(offset)` returns an empty view for the most negative
-  offset (`-2**63`), as for any offset past the edge. It raised
-  `IndexError`.
-
-- Change: `seq` and `seq!` on an integer array raise `RangeError` when the
-  first value does not fit the type (`int8.seq(300)`), or an Integer step
-  is larger than the type can hold (`int32.seq(0, 2**40)` came out all
-  zeros). An unsigned array still takes a negative step, and a run that
-  passes the end of the type still wraps.
-
-- Change: reading a NaN into an integer cell through `as_type` (and
-  `as_int32` etc.), `fake`, `CArray.wrap_readonly`, `clip_int32` etc., or
-  storing a float array into an integer array (`ints[] = floats`), raises
-  `FloatDomainError`, as storing a single NaN already did. It wrote a value
-  that depended on the machine (`0` on ARM). A masked NaN (as left by
-  `mask_invalid`) reads UNDEF. `to_type` is unchanged: a NaN cell becomes
-  UNDEF. `clip_uint64` gave `0` for NaN and now raises too.
-
-- Change: NaN comes after the numbers in descending order too, as it
-  already did ascending: `order(descending: true)`, `sort_by_key(..., order:
-  :desc)`, and `order(descending: true)` on groups put NaN last instead of
-  first. `nlargest` no longer returns NaN or masked cells ahead of the
-  numbers, so `nlargest(1)` agrees with `max`. To place NaN with the masked
-  cells instead, mask it first (`a[:is_nan] = UNDEF`).
-
-- Change: adding a duration to a time, or subtracting it, raises when the
-  duration is coarser than the time's unit and not a whole number of its
-  ticks (`"1 day"` on a `"7 hours"` time, `"15 minutes"` on `"10 minutes"`).
-  It used to be cut to the grid. Convert the time to a unit both share
-  first. A duration finer than the unit is still truncated.
-
-- Change: `CArray#time(unit:, origin:)` raises when `origin` falls between
-  two ticks of `unit` (`origin: "…T10:00"` on `"3 hours"`, a midday origin on
-  `:D`, a mid-month origin on `:M`). It used to move to the tick before it.
-
-- Fix: time and duration arithmetic (`+`, `-`, `td * n`) raises `RangeError`
-  when a result leaves the range of int64 ticks, as the documentation says.
-  It wrapped around, e.g. a 500-year difference in `:ns` came out negative.
-
-- Fix: `CArray.time` without `unit:` reads an Integer as seconds when other
-  values make the chosen unit finer (`[1700000000, "2024-01-01T00:00:00.5"]`);
-  it read the Integer as milliseconds. A uint64 count that int64 cannot hold
-  raises `RangeError` in `CArray.time`, `#time` and `#timedelta` instead of
-  turning negative.
-
-- Fix: `CATime::Element` and `CATimedelta::Element` keep their value and
-  unit through `dup`, `clone` and `Marshal`; the copy used to be unusable,
-  and Marshal raised. A time element is `==` to the `Date` of its midnight,
-  as an array's `eq(Date)` already was.
-
-- Fix: `CArray.time` reads a date written by its day of the year
-  (`"2024-015"`, `%j`), its ISO week (`"2024-W03-1"`, `%G-W%V-%u`) or its
-  week of the year (`%U` / `%W` with a weekday) as that date; it used to
-  give January 1. A clock field out of range (`"10:75"`, `"25:00"`,
-  `"10:20:61"`) raises instead of carrying into the next field. `24:00` and
-  the leap second `:60` are still accepted.
-
-- Fix: a time on a tick that does not divide a day (`"7 hours"`,
-  `"36 hours"`, `"7 seconds"`) converts to months and years by its date.
-  `to_unit(:M)` / `to_unit(:Y)` gave 1970, and storing such a value into a
-  month or year array stored 1970.
-
-- Fix: a Ruby Array given to a comparison of a `CATime` or `CATimedelta`
-  (`eq`, `<`, `<=>`, `mask_eq`, ...) is compared cell by cell, and given to
-  `count` counts each of its values. Every cell used to be compared with the
-  Array's first value. A nested Array keeps its shape; an Array of the wrong
-  length raises.
-
-- Fix: copying the view that `sort` or `partition` returns without `axis:`
-  (`a.sort.copy`, `a.partition(k).copy`) is as fast as with `axis:` again,
-  about a third less time than in 3.0.3. More generally, reading a flattened
-  or reshaped array through an index (`a.flatten[idx]`) no longer pays a
-  division per cell.
-
-- Change: `order(descending: true)` (the default `method: :ordinal`) keeps
-  tied cells in their original order, as the ascending ranks do:
-  `[5, 3, 5, 1, 5]` gives `[0, 3, 1, 4, 2]`, was `[2, 3, 1, 4, 0]`. The same
-  holds for `order` on groups (`CAFrame#group_by`, `group_by_category`).
-  Code that relied on `order(descending: true) == (n - 1) - order` with ties
-  needs the old formula written out.
-
-- Fix: arithmetic on a masked array (`a + 1.0`, `a.add!(1)` and the like)
-  is as fast as in 3.0.2 again. Since 3.0.3 combining the operands' masks
-  took about a quarter longer (0.4 ms more per million cells).
-
-- Fix: `windows(on:).bounds` with a time key reports the bounds the windows
-  were cut at when the width is not a whole number of the key's unit (a
-  "15 minutes" width on a 10-minute key, "6 months" on a year key): the
-  bounds are given on the finer unit the two share instead of being cut
-  down to the key's unit.
-
-- Fix: `windows(on:)` with an int64 or time key no longer empties windows
-  when `t - before` or `t + after` goes beyond the int64 range (a width of
-  a few hundred years on a nanosecond time key, or a key near the int64
-  ends): such a bound now holds every key on its side.
-
-- Fix: `CAFrame#resample(..., fill: true)` with a month or year unit and an
-  `origin:` or `label: :right` no longer drops every row: the empty bins it
-  adds now keep the phase of the occupied ones.
-
-- Fix: `order(descending: true, method: :dense)` gives dense ranks: `0` is
-  the largest value and the ranks have no gaps (`[1, 1, 2]` gives `[1, 1, 0]`,
-  was `[2, 2, 1]`). The same holds for `order` on groups (`CAFrame#group_by`,
-  `group_by_category`). Sorting by such a key is unaffected.
-
-- Fix: `order(method: :dense)` gives every NaN the same rank, after the
-  numbers, as sorting and `unique` already treat NaN as one value. With it,
-  `sort_by_key(..., order: :desc)` passes NaN ties on to the next key and
-  keeps their rows in order.
-
-- Fix: `CAConstString#sort_index` with no arguments is fast again: since
-  3.0.2 it decoded every cell into a Ruby String first and was about 8 times
-  slower than in 3.0.0. With no arguments, `sort_index` and `sort_addr` now
-  keep equal strings in their original order, as `CArray#sort_index` does and
-  as they already did with `axis:` or a masked column.
-
-- Fix: a face-mode `CAObject` (`CAObject.new(..., parent: p, face: true)`)
-  over a masked parent no longer leaks its mask, about 100 to 200 bytes
-  per object.
-
-- Change: a masked cell of an integer index array keeps its place when
-  indexing: `x[i]`, `x[i, nil]` and the other grid forms, and `CAFrame`
-  row selection `df[i]`, now give a result shaped like `i` with the masked
-  positions reading as `UNDEF`, as `project`, `take_along_axis` and
-  `gather_nd` already did. They dropped those positions, so the result was
-  shorter than `i`. A write through `x[i] = values` takes one value per
-  position of `i` and leaves the masked positions alone. A
-  multi-dimensional index array with a masked cell (`x[a]` with a 2-D `a`)
-  is accepted the same way instead of raising `ArgumentError`. A masked
-  cell of a boolean selector still selects nothing and adds no position.
-  To drop the masked positions as before, index by the unmasked cells:
-  `x[i[i.is_not_masked]]`.
-
-- Fix: a view taken from a masked Face (`CATime`, `CATimedelta`, ...) or
-  from a masked array through `.lazy`, and kept after the intermediate
-  array was dropped, such as `t.reshape(4, 5)[nil, 1..3]` or
-  `a.lazy.reshape(4, 5)[nil, 1..3]`, could read its mask from freed memory
-  once the garbage collector ran. The mask came out wrong, and reading it,
-  `each_slab` or the iterator reductions over such a view could crash.
-
-- New: `windows(on:, before:, after:)` bounds each window by a width of a
-  key -- a time, a duration or a number -- instead of a count of cells:
-  `temp.windows(on: time, before: "1 hour").mean`. The keys need not be
-  sorted, `by:` keeps each window within a group, and `exclude:` picks the
-  end left out (the lower one by default). The iterator also says what each
-  window held (`first_key`, `last_key`, `elements`), and with `interval:`
-  whether it holds every point of the key's grid (`is_complete`).
-  `CAFrame#windows(on: "time", ...)` does the same for a frame's columns.
+- Change: storing an integer a cell cannot hold raises `RangeError`
+  (`CA_INT8([300])`, `a[0] = 300`, `fill`, `scatter_add!`, a record
+  member); it wrapped (`300` into int8 was `44`). Storing or reading a
+  NaN into an integer cell (`ints[] = floats`, `as_type`, `fake`) raises
+  `FloatDomainError`. To keep C's conversion, use `to_type`, which is
+  unchanged.
 
 - Change: `CArray.time` reads an Integer as a count of ticks of `unit:`
-  from the epoch: `CArray.time(CA_INT64([0, 10]), unit: :m)` is 00:00 and
-  00:10, as `CA_INT64([0, 10]).time(unit: :m)` is. It read every Integer as
-  Unix seconds and cut it down to the unit. Without `unit:` nothing changes
-  (the unit is seconds); to read Unix seconds onto another unit, convert
-  after reading: `CArray.time(secs).to_unit(:m)`. An Integer given as an
-  `origin:`, an `epoch:` or a start of `time_series` / `time_range` is still
-  an instant in Unix seconds.
+  (`CArray.time(CA_INT64([0, 10]), unit: :m)` is 00:00 and 00:10); it
+  read Unix seconds. To read Unix seconds onto another unit, write
+  `CArray.time(secs).to_unit(:m)`.
 
-- New: `CATime#end_of(unit:, origin:)` gives each time the last tick of its
-  bucket on the array's own grid, as `floor` gives its head: a day array's
-  `end_of(unit: :M)` is the last day of the month, a second array's
-  23:59:59 of it, and `origin:` makes fiscal years and quarters. A bucket
-  that is not a whole number of the grid's ticks raises.
-  `CATime#days_in_month` gives the length of each time's month.
+- Change: `CArray.time` without `unit:`, and `CAFrame#parse_to_time` with
+  a format or `:mixed`, read the values in the finest unit they show
+  (dates alone `:D`, fractions of a second `:ms` / `:us` / `:ns`); it was
+  always `:s`. Pass `unit: :s` to keep the old unit.
 
-- New: `CATime#quarter` (1..4) and the ISO 8601 week, `iso_week` (1..53)
-  with `iso_year`, the year a week is counted in, which differs from the
-  calendar year in the few days around New Year whose week belongs to the
-  neighbouring year.
+- Change: adding a duration that is coarser than a time's unit and not a
+  whole number of its ticks (`"1 day"` on a `"7 hours"` time) raises, and
+  so does `CArray#time(origin:)` between two ticks of `unit:`; both were
+  cut to the grid. Convert the time to a unit both share first.
 
-- Change: a month or year duration can be added to or subtracted from a
-  time on a day, hour, minute or finer grid, and moves each date as Ruby's
-  `Date#>>` does: the day stays unless the new month is shorter (then it is
-  that month's last day), and the time of day stays, so
-  `2024-01-31 + 1 month` is `2024-02-29`. It raised `ArgumentError` before.
-  A grid a month would leave (`:W`, `"3 days"`, `"7 hours"`) still raises,
-  as does a day duration on a month grid. As with `Date#>>`, a month is not
-  a fixed step: `+ 1 month - 1 month` need not undo it.
+- Change: `order(descending: true)` puts NaN last and keeps tied cells in
+  their original order (`[5, 3, 5, 1, 5]` gives `[0, 3, 1, 4, 2]`, was
+  `[2, 3, 1, 4, 0]`); with `method: :dense` the largest value is 0 and
+  the ranks have no gaps. Code that used `(n - 1) - order` for the
+  descending rank needs that formula written out. `nlargest` no longer
+  returns NaN or masked cells first, and `nsmallest` / `nlargest` and
+  their `_index` forms break ties by position.
 
-- Change: `clip` refuses a bound that is `UNDEF` or has a masked cell,
-  with `ArgumentError`; fill the bound first. A masked bound cell gave a
-  masked result, and `clip(UNDEF, nil)` an `:object` array with every cell
-  masked. A NaN in a bound array still leaves its cell unbounded, as `nil`
-  does a whole side. To mask the cells out of range, pass `UNDEF` as the
-  fill (`clip(0, 10, UNDEF)`, `lfill:` / `ufill:`).
+- Change: a CAFrame column built from Ruby values is typed by them:
+  Integers `int64`, numbers `float64`, Strings a text column (`CAString`),
+  arrays of one shape an N-D column, anything else `:object`; it was
+  `:object`. This holds for `CAFrame.new("x" => [...])`, `df["x"] = [...]`,
+  a group's `table` block and a Proc in `aggregate`. Wrap the values in
+  `CA_OBJECT(...)` to keep an object column. A returned array is read
+  from the N-D column as `col[i, nil]`.
 
-- Change: `search`, `bsearch` and `search_nearest` (and their `_addr`
-  forms) find nothing for an `UNDEF` query or a masked cell of a query
-  array: `nil`, or `UNDEF` in that cell of the result. They searched the
-  value under the mask, so `CA_INT64([0, 1, 2]).search(UNDEF)` gave 0.
+- Change: `CAFrame#melt` names each row's source in a text column
+  (`CAString`); it was an object column.
 
-- Change: a time array (`CATime`, `CATimedelta`) compares with a value off
-  its grid in the finer unit the two share, where it raised
-  `ArgumentError`: `days.eq("2024-01-03T05:00")` is all false, `<` orders
-  by the instant, `bsearch` finds nothing, `search_nearest` and
-  `linear_section` give the nearest cell and the fractional position.
-  This holds for the operators, `count(v)`, `mask_eq`, the searches,
-  `linear_section`, `is_in`, the set operations and `locate_addr`. An
-  assignment still raises for a value off the grid.
+- Change: `CAFrame#group_by` on several keys gives a result with no
+  index: each key is a column, before the reduced columns. Read the keys
+  with `result["station"]` and so on, where the index held tuples.
 
-- New: `CATime#pmax` / `#pmin` (and `maximum` / `minimum` / `fmax` /
-  `fmin`) give the later / earlier time cell by cell, against a time
-  array, an element, a `Time`, a `Date` or a String. They were refused for
-  a time array and returned an `:object` array mixing `Time` and elements
-  for a `Time`.
+- Change: `CAFrame#data_types`, `describe` and `p df` name a Face column
+  by its class (`CATime[D]`, `CAString`) where they gave its storage
+  `data_type` (`:fixlen` for most). Read the storage through the Face's
+  accessor (`ticks`, `codes`, ...).
 
-- Fix: a `CATimedelta` takes durations in a Ruby Array or an `:object`
-  array in `is_in`, the set operations, `locate_addr` and `to_comparable`,
-  as a `CATime` takes times; it raised `TypeError`. `UNDEF` given to the
-  search family or `is_in` of a time array answers as for a plain array
-  instead of raising `TypeError`.
+- Change: a CAFrame verb that takes a list of columns refuses a name
+  given twice (`select("a", "a")`, `group_by("a", "a")`) with
+  `ArgumentError`. `df["a", "a"]` still gives the column twice.
 
-- Fix: the reductions of the iterators answer as the core reduction does
-  over each piece in more cases. `quantile` of a categorical, segment or
-  axis-group iterator is NaN at a position next to a NaN, where it skipped
-  the NaN. `variancep` / `stddevp` of a group or segment holding one value
-  that is a NaN or an infinity is NaN, not 0.0. A window iterator's
-  `accumulate` over a boolean array answers by parity instead of raising.
-  An empty segment or category over a Face such as `CATime` answers
-  `UNDEF` where its reductions raised.
+- Change: a CAFrame group or window reduction over a column whose type
+  lacks it raises `CArray::DataTypeError`; it raised `ArgumentError`.
 
-- Fix: `each_slab`, `map_slab` and `reduce_slab`, and `each` of a slab or
-  block iterator, hand each piece of a Face such as `CATime` over as that
-  Face, and `map_slab` / `reduce_slab` answer in that Face when no
-  `data_type:` is given. Slabs came as the raw storage and the results in
-  the storage data type, and a block iterator's `each` raised `TypeError`.
-  A read-only Face (`CAConstString`, `CACategorical`) answers in `:object`.
+- Change: a `CAString` holds only Strings: storing `nil`, a number or an
+  Array into it raises (use `UNDEF` to mask a cell). A selection among
+  Strings (`then_else`, `choose`, `select`, `conditional`) and a
+  `CAString`'s String operators give a `CAString`, where they gave an
+  object array.
 
-- Fix: `UNDEF` returned from a `reduce_slab` block masks that cell of the
-  result. It was written as 0.
+- Change: attributes follow conversions, views and copies but not
+  reductions: `categorize`, `cast`, `parse_to_time`, `dup`, Marshal and a
+  Face's views keep them, and `first` / `last` of a grouping no longer
+  carry them. A joined or concatenated array shows the keys every piece
+  shows with the same value. An attribute value is stored frozen; change
+  it by setting it again.
 
-- New: `CAFrame#join_asof` takes `by:`, columns that must match exactly:
-  `obs.join_asof(radar, on: "time", by: "station")` matches each row to the
-  nearest time among the rows of the same station. `by:` takes one name or
-  several; a row with a masked `by:` cell matches nothing.
+- Change: an error names the method you called, and the common refusals
+  open with it ("+: shape mismatch between operands ...", "fill: can not
+  modify read-only array"). The exception classes are unchanged; code
+  that matches a message needs the new text.
 
-- New: `CAFrame#join` takes several key columns, `on: ["station", "date"]`.
-  Rows match when every key column matches; a row with any key cell masked
-  matches nothing.
+- Change: `clip` refuses `UNDEF` or a masked cell as a bound with
+  `ArgumentError`. To mask the cells out of range, pass `UNDEF` as the
+  fill (`clip(0, 10, UNDEF)`).
 
-- New: a `CAFrame` group has the short form of `sum` / `mean` / `min` /
-  `max` for more reductions: `prod`, `accumulate`, `median`, `variance`,
-  `stddev`, `variancep`, `stddevp` (taking `min_count:` and `fill_value:`),
-  and `first`, `last`, `nunique`, `count`, `all`, `any` (taking neither, as
-  the core ones do not). Each reduces every column whose type has it, or the
-  named ones, and takes `keep_rows:`: `df.group_by("station").median`.
+- Change: `is_in`, `intersection`, `difference` and `union` refuse a
+  Range; pass an Array (`(1..3).to_a`), or use `is_between` for an
+  interval.
 
-- Fix: `CAFrame#group_by` and `is_duplicate` take the index as a key, named
-  by the row axis name, as `resample` and `pivot` already did: after
-  `set_index("station")`, `group_by("station")` groups by it. It raised
-  `KeyError` before. A column of that name, if there is one, comes first.
+- Change: `median`, `percentile` and `quantile` along the only axis of a
+  1-D array give a bare value, as `sum` does. `nunique(axis:)` naming
+  every axis gives an Integer; pass `keep_axis: true` to keep an array.
 
-- New: masked cells can be filled within each group. The slab, block,
-  segment, categorical and axis-group iterators have
-  `strip_mask(method: :ffill)` / `:bfill` (also `:forward` / `:backward`),
-  which fill from the same piece only and return a new array, and a
-  `CAFrame` group has `fill(name, :ffill)` / `:bfill`, which fills the
-  column in place: `df.group_by("station").fill("temp", :ffill)`. A cell
-  with nothing to carry in its group stays masked. `:linear` within groups
-  is not provided.
+- Change: `valid_index?` and `valid_addr?` count a negative index from
+  the end, as `[]` does. `elem_fetch` on an empty array raises
+  `IndexError`; it returned `nil`.
 
-- Change: `CArray.time` without `unit:` reads the values in the finest
-  unit they show, where it always used `:s`: dates alone give `:D`, a
-  fraction of a second `:ms` / `:us` / `:ns` (it was cut off before), a
-  format the finest field it writes; a Unix-seconds Integer is still `:s`.
-  `CAFrame#parse_to_time` with a format or `:mixed` reads in the same unit,
-  where it too used `:s`. Pass `unit: :s` to keep the old unit.
+- Change: `seq` / `seq!` on an integer array take a Float or Rational
+  start or step as `init_val + step*i` cut toward zero
+  (`int32.seq(0.5, 0.5)` is `[0, 1, 1, 2]`, was `[0, 0, 1, 1]`), and
+  raise `RangeError` for a start or Integer step the type cannot hold.
 
-- Change: `elem_fetch` on an empty array raises `IndexError`, as it does
-  for any index that names no cell; it returned `nil`. `elem_store` and
-  `[]` already raised.
+- Change: `random!` on an integer array raises for bounds the type
+  cannot hold or a Float bound, and clears the mask. `bin`, `bincount`,
+  `bincount_nd` and the histograms raise for a non-Integer count and for
+  edges that decrease.
 
-- Fix: an index that picks no cells may start at the end of an axis, as an
-  empty slice at the end of a Ruby Array does: `a[2...2]`, `a[2..]`,
-  `a[[2, 0]]` and `(2...2).step(1)` of a length-2 array are empty, and
-  `df[0...0]` of a `CAFrame` with no rows is an empty frame. These raised
-  `IndexError`. `[nil, step]` of an axis of length 0 is empty too.
-  An index past the end still raises, and a range that ends before it
-  starts still reads backwards.
+- Change: MemoryView: `wrap_memory_view` refuses a boolean buffer (any
+  byte other than 0 or 1 cannot be told apart; use `from_memory_view`,
+  which reads it as true), and a wrap with a read-only `mask:` is
+  read-only. `CArray.memory_view_reject_reason` returns `nil` for an
+  object that is not a CArray.
 
-- New: `CArray#is_between(lo, hi, exclude:)` is true where a value lies
-  between two bounds, both included unless `exclude: :lower`, `:upper` or
-  `:both` leaves them out; a Range says the same (`a.is_between(2...4)`),
-  and a `nil` bound or an open end leaves that side unbounded. It is the
-  two comparisons joined by `&`, so a time array is bounded by Strings or
-  `Time`. `is_in` given a Range now points at it.
-
-- New: `CArray#is_between(lo, hi, exclude:)` is true where a value lies
-  between two bounds, both included unless `exclude: :lower`, `:upper` or
-  `:both` leaves them out; a Range says the same (`a.is_between(2...4)`),
-  and a `nil` bound or an open end leaves that side unbounded. It is the
-  two comparisons joined by `&`, so a time array is bounded by Strings or
-  `Time`. `is_in` given a Range now points at it.
-
-- Fix: an operator over an array with an axis of length 0 could crash or
-  write past its result when the other operand was a row broadcast to it
-  or a view that is not contiguous: `CArray.int64(0, 4096) +
-  CArray.int64(1, 4096)` crashed, and an integer division raised
-  ZeroDivisionError for cells that do not exist. It now returns the empty
-  result. The same holds for the unary operators and the comparisons.
-
-- Fix: `then_else` and the lazy `fma` / `fms` / `clip` refused an operand
-  with no cells beside a row to broadcast (`CArray.boolean(0, 5).then_else(
-  CArray.int64(1, 5), CArray.int64(0, 5))` raised). They now answer the
-  empty result, as the binary operators do.
-
-- Fix: an in-place operator (`add!`, ...) refused a source whose size-1
-  axis is repeated onto an axis of length 0, which assignment (`x[] = row`)
-  accepted. It now accepts it too.
-
-- Fix: `windows` called with ranges on a view made by `window` rolled over
-  the array the view was cut from, not over the view: `x.window(-1..2)
-  .windows(-1..1).sum` had the length of `x`. It now rolls over the view.
-  `CAWindowIterator.new(view)` with no ranges still reads its ranges from
-  the view.
-
-- New: `GroupedFrame#to_frame` gives the rows a `CAFrame` grouping was
-  made from as a frame, with the same columns and index, for code that
-  holds only the grouping. It shares the cells, so a write to one reaches
-  the grouped frame, but adding a column to it does not.
-
-- New: a `CAFrame` group has `filter`, which keeps the rows of the groups
-  its block chooses: the block gets the grouped frame and returns one
-  boolean per group, as in
-  `df.group_by("station").filter { |g| g["temp"].count_not_masked >= 20 }`.
-  The rows keep the frame's order and share its columns, and
-  `keep_masked:` works as for `CAFrame#filter`.
-
-- Change: `valid_index?` and `valid_addr?` accept a negative index or
-  address, counting from the end as `[]` does: `a.valid_addr?(-1)` is
-  true for a non-empty `a`. They answer whether the index names a cell,
-  which is what every door that takes an index already does with it.
-
-- Fix: a block index whose start counts from the end, or whose step runs
-  backwards, read and wrote past the array: `a[[-1, 2]]` on a length-6
-  array returned the last cell and a cell after it, and `a[[1, 2, -2]]`
-  a cell before the first. Such a block now raises IndexError, as
-  `a[[0, 7]]` always did. A C extension calling `ca_parse_range` gets the
-  same check.
-
-- New: a `CAFrame` group has `lag`, `order` and the running values
-  `cumsum`, `cumprod`, `cummax`, `cummin`, `cumcount`, computed among the
-  rows of each row's own group and kept on the frame's rows:
-  `df["temp"] - df.group_by("station").lag("temp")` is the change since
-  the station's previous row. They take column names as `mean` does, and
-  `lag` its step as `n:`. "Previous" is the previous row, so sort a frame
-  that is not in time order first.
-
-- New: a time or duration array can be added to or subtracted from a
-  single value: `t + "3 days"`, `t - t.min`, `t - "2024-01-02"`,
-  `t - Time.utc(2024, 1, 1)`, `t.min + durations`. A duration is a
-  `CATimedelta::Element` or a String that reads as one; a time is a
-  `CATime::Element`, a `Time`, a `Date` or another String. These raised
-  `TypeError` before. A bare number is still refused, since it has no unit.
-
-- New: the slab, block, segment, categorical and axis-group iterators have
-  `order`: each cell's rank among the cells of its own piece, int64, as
-  `CArray#order` ranks the piece alone, with its keywords (`descending:`,
-  `method: :ordinal` or `:dense`, `kind:`). `it.order` ranks a station's
-  readings among that station's only. The window iterator refuses it.
-
-- Fix: reading a few cells of a view over a CAObject or a lazy expression
-  no longer makes it produce all of its cells when the view goes through a
-  reshape or flatten of a transpose (`r.transpose.flatten[idx]`), or reads
-  the cells in another width (`r.field(0, CA_INT16)[...]`, a `refer` to
-  another data type). The values were right; for a CAObject over a file or
-  a remote source the whole of it was read for each such view.
-
-- New: `CArray#lag(n = 1, axis:)` is the value `n` steps earlier along one
-  axis, UNDEF where there is none, so `x - x.lag` is UNDEF at the start
-  instead of a difference against 0. An array of more than one dimension
-  must name the axis. It is `shift` with `UNDEF` as the fill value and
-  returns a view like it; `shift` itself still fills with 0. The
-  slab, block, segment, categorical and axis-group iterators have `lag(n)`
-  too, which never reaches into another piece: `it.lag` is the previous
-  value of the same station. The window iterator refuses it.
-
-- Change: the values a `CAFrame` group's `table` block or a Proc
-  reduction of `aggregate` returns become typed columns, as `from_records`
-  types a record's values: Integers int64, numbers float64, arrays of one
-  shape an N-D column, the rest object; `nil` and `UNDEF` are missing.
-  Every such column was object before. Read a returned array from the N-D
-  column as `col[i, nil]`, where `col[i]` gave it before.
-
-- Change: `CAFrame#data_types` gives a Face column's class (`CATime`,
-  `CAString`, `CACategorical`, ...) where it gave its `data_type`, which
-  for most Faces is `:fixlen` -- the surface their kernels dispatch on,
-  not what the column holds. Plain columns still give a Symbol. The column
-  list of `p df` and the head of a Face's `inspect` name the Face the same
-  way (`time:CATime[D]`, `<CAConstString(3)`). To test a column's storage
-  type, use `df[name].parent.data_type`.
-
-- New: every iterator (slab, block, window, segment, categorical and axis
-  group) has `first`, `last` and `nunique`: the first and last present
-  value of each piece (UNDEF for none) and its number of distinct present
-  values (0 for none). A `CAFrame` group reduction reaches them too, so
-  `df.resample("time", "1 hour").aggregate("open" => ["v", :first], ...)`
-  keeps the column's type. Like the core ones, they take no `min_count:`
-  or `fill_value:`.
-
-- Change: `CArray#nunique(axis:)` takes an Array of axes, and naming every
-  axis returns an Integer, as `sum(axis:)` does. Before, a 1-D
-  `a.nunique(axis: 0)` returned a one-element CArray; read it as an
-  Integer, or pass `keep_axis: true` to keep an array.
-
-- Change: storing an integer that an integer cell cannot hold raises
-  `RangeError`, as an operator already did (`int8_array + 300`). Before,
-  `CA_INT8([300])`, `a[0] = 300`, `a[] = [-1]` on an unsigned array,
-  `fill`, `elem_store`, a record member and `fill_value:` wrapped it
-  (`300` into `int8` was `44`, `-1` into `uint8` was `255`). A Float is
-  truncated first, so `1.9` still stores as `1`, but `1000.0` into `int8`
-  raises. To keep the wrap, cast between arrays: `to_type` (including from
-  an object array) still converts as C does.
-
-- Fix: copying a Face (`refer`, a slice of a time or string array) read
-  past the end of its struct, which could crash.
-
-- Fix: `CAFrame#resample` with month or year bins and `fill: true` gave
-  labels in the bins' unit (`2024-01`) where the same call without
-  `fill:` gave them in the time column's unit (`2024-01-01`). Both are
-  now in the time column's unit.
-
-- Fix: `CArray.time` with `format:` read an Integer as Unix seconds, so
-  `CArray.time(CA_INT64([20000101]), format: "%Y%m%d")` gave 1970-08-20.
-  With a format, an Integer is now read as its digits. `%s` and `%Q`
-  (seconds and milliseconds since the epoch) are now read, for Integers
-  and Strings alike; they raised before.
-
-- Fix: dividing a `CATimedelta` array by another truncated the ratio to
-  an integer (90 s / 60 s gave 1). It is now a float64 array (1.5), the
-  two durations brought to a common unit first.
-
-- Fix: `locate_addr` with a reference given as an Array or Range compared
-  in the object lane, so `float_array.locate_addr(1..3)` and
-  `float_array.locate_addr([1, 3])` found nothing. The values now meet the
-  array at a common type, as `is_in` meets them, so `2` finds `2.0`.
-
-- Change: `is_in`, `intersection`, `difference` and `union` refuse a Range
-  (`ArgumentError`). They read it as the set of its steps, so
-  `float_array.is_in(2..4)` missed 2.5, a float or endless Range raised,
-  and a long one built every step. Pass the values as an Array
-  (`a.is_in((1..3).to_a)`), or compare an interval as
-  `(a >= lo) & (a <= hi)`. `locate_addr` and `CAFrame#align` still take a
-  Range as the list of its steps.
-
-- Fix: `is_in` with a single value (`float_array.is_in(2)`) compared in the
-  object lane, so a float array never found an Integer; the set operations
-  (`intersection` and the others) did the same. A single value is now a set
-  of one, as `[2]` is. A String looked for in a numeric array, as a single
-  value or in an Array, raised `unknown data_type representation`; it is now
-  a value that matches nothing.
-
-- New: `CAFrame#is_duplicate(*names)` gives a boolean column, true for the
-  rows that repeat an earlier row in the named columns (every column when
-  none are named); `df[df.is_duplicate.not]` keeps one row of each.
-  `except: :last` leaves the last occurrence unmarked instead of the first,
-  and `except: :none` marks every repeated row, so its negation is the rows
-  that appear once. A row with a masked cell in those columns is never a
-  duplicate.
-
-- Fix: `CAFrame.from_records` with records that spell one column both as a
-  Symbol and as a String (`{ :temp => 1, "temp" => 2 }`, or `temp:` in one
-  record and `"temp"` in another) kept one of the values and dropped the
-  other. It now raises `ArgumentError`; use one spelling.
-
-- Change: CAFrame takes column names as Strings only. `CAFrame.new({ a:
-  col })`, `df.drop(:a)`, `df.select(:a)`, `df.rename("a" => :b)`,
-  `df.join(other, on: :a)` and the other verbs that name a column turned a
-  Symbol into a String; they now raise `TypeError` naming the verb. Write
-  the name as a String (`"a"`). The keys of the records given to
-  `from_records` may still be Symbols.
-
-- New: `CAFrame.from_csv(path, columns: { 2 => "code", "c7" => "area" })`
-  selects columns by the Hash's keys (names or indexes, as `columns:` takes
-  them) and names them with its values; `types:` and `missing:` use the new
-  names. `column_names:` still names the file's columns.
-
-- New: the `sum` / `mean` / `min` / `max` of `CAFrame#group_by` and
-  `resample` take column names and return those columns as `df[...]` does:
-  `grp.mean("temp")` is a CArray, `grp.max("temp", "rh")` an Array of two.
-  Without names they return a frame of every column, as before.
-
-- New: `keep_rows: true` on the reductions of `CAFrame#group_by` and
-  `resample` (`sum` / `mean` / `min` / `max`, `aggregate`, `table`) gives
-  each row the result of its own group, in the frame's rows and index:
-  `df["temp"] - df.group_by("station").mean("temp", keep_rows: true)` is the
-  anomaly from the station mean. A row whose key is masked is `UNDEF`.
-
-- Fix: a raise while an array's mask is read no longer leaks memory.
-  Converting an array whose mask a `CAObject` answers in Ruby (`to_type`,
-  `int32` and the like), taking a view of such an array (a slice,
-  `transpose`, `reshape`, `tile`, `roll`, `shift` and the like), indexing
-  it with an index array, and
-  `CArray.wrap_memory_view` / `from_memory_view` with a `mask:` whose
-  MemoryView export raises left the new array's buffers, the index copy or
-  the MemoryView holders behind. Nothing to change in calling code.
-
-- Fix: `cond.then_else("yes", "no")` raised `ArgumentError` (`"yes" is
-  unknown data_type representation`), and `then_else("int32", ...)` took
-  the String as a data type. A String or Symbol branch is now a value,
-  and the result is an object array.
-
-- New: `CAFrame.from_csv(path, header: false, columns: ["c1", "c2"])`
-  selects columns by the names a file without a header gets (`c0`, `c1`,
-  ...). Before, only indexes selected there.
-
-- New: `CAFrame#cast` takes `:categorical`, which makes the column a
-  `CACategorical` of its values, so `from_csv(path, types: { "station" =>
-  :categorical })` reads a column of repeated text as categories. A text
-  column read with `types:` becomes categories without a String made per
-  cell, only one per distinct value.
+- Change: C extensions: fifteen kernel iterator shorthand macros
+  (`CA_SLAB_REDUCE_F64`, `CA_SLAB_REDUCE_T_PLUS`,
+  `CA_L2_FOR_EACH_UNMASKED` and others) are removed; write the macro they
+  stood for (`CA_SLAB_REDUCE_T` with `double`, ...).
+  `ca_iter_state_next_slab_strided` is removed, and
+  `ca_iter_state_init_l2` takes `CA_SLAB_AXES` only.
 
 ## 3.0.3
 
