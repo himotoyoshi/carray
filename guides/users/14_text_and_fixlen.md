@@ -50,6 +50,7 @@ Two shared conventions to know about:
 
 Type-specific:
 
+- **`string`** — every cell of a `CAString` is a Ruby `String`. A value that is neither a String nor `nil` (a Symbol, a number, a nested Array) raises `TypeError`. The Array form makes a 1-D array; for more dimensions, build an object array first and pass it in: `CArray.string(CA_OBJECT([["a", "b"], ["c", "d"]]))`.
 - **`fixlen_string`** — `bytes:` is the slot width (default: the widest input). A value longer than the slot at construction time is governed by `truncate:`: `:error` (default) raises, `:silent` keeps the leading `bytes` bytes. Once the array exists, a per-cell `fix[i] = long` always truncates silently — the fixed-width store has no length check.
 - **`const_string`** — element encoding must match `:encoding` (default UTF-8); pure-ASCII passes regardless. Every element's bytes are stored once in logical order, with no offset-sharing dedup, so for a high-duplication column reach for `CACategorical` instead.
 
@@ -105,6 +106,15 @@ CArray.string(["12", "x", "34"]).to_i   #  => [12, 0, 34]     (also to_f)
 
 Two naming quirks are worth calling out. Methods use the plain Ruby `String` name where it does not collide with a CArray method (`upcase`, `strip`, `start_with?`, `to_i`, …). The few names that clash keep a `str_` prefix: `str_len` and `str_index`, because `#length` and `#index` already mean array-level things (element count, first-occurrence flat address).
 
+On a `CAString`, the operators work cell by cell as a `String`'s do, and give a `CAString`: `s + "!"`, `s + other`, `s * 2`, `s % args`, and `pmax` / `pmin` (also named `maximum` / `minimum`). `CAConstString` and `CAFixlenString` do not take operators; `to_string` gives a `CAString` that does.
+
+```ruby
+s = CArray.string(["a", "b"])
+(s + "!").upcase   #  => ["A!", "B!"]
+```
+
+Choosing among Strings gives a `CAString` too: `cond.then_else("yes", "no")`, and `choose`, `CArray.select` and `conditional` when every choice is a String or a `CAString`. A Symbol, or a String beside a value of another kind, gives an object array.
+
 In-place forms (`upcase!`, `strip!`, `gsub!`, …) exist on the **mutable** Faces only — `CAString` and `CAFixlenString`. `CAConstString` is read-only (that immutability is exactly what makes the shared buffer safe); the transforms return a fresh `CAString` instead, which you can chain into `.to_const_string` to re-compact.
 
 ### Numbers → strings: explicit format
@@ -155,7 +165,7 @@ a.include?("b").to_a         #  => [false, UNDEF, false]    (masked cell propaga
 a.include?("b").count(true)  #  => 0
 ```
 
-Assignment accepts `UNDEF`; on a `CAString` or `CAFixlenString` a `nil` in the source literal is also read as `UNDEF`.
+Assignment accepts `UNDEF`, which masks the cell. Assigning `nil` raises `TypeError`: `nil` stands for a masked cell only when an array is built from Ruby values.
 
 ## Numeric gate
 
@@ -180,7 +190,7 @@ face.to_const_string(encoding:)             #  → CAConstString
 
 For example `ct.upcase` returns a `CAString`; chain `.to_const_string` (or `.to_fixlen_string(bytes: K)`) to re-compact the transformed result into the storage shape you want.
 
-For a **non-Face** source — a raw `CA_FIXLEN` array or an object array of Strings — use the builders instead. They accept a CArray directly: a raw `CA_FIXLEN` reads as NUL-stripped strings; an object array of Strings wraps zero-copy:
+For a **non-Face** source — a raw `CA_FIXLEN` array or an object array of Strings — use the builders instead. They accept a CArray directly: a raw `CA_FIXLEN` reads as NUL-stripped strings; an object array of Strings wraps zero-copy, and every cell that is not masked must be a String (`nil` raises; mask it with `UNDEF` instead):
 
 ```ruby
 CArray.string(obj_array)          #  CA_OBJECT of Strings → CAString (zero-copy wrap)
@@ -193,7 +203,8 @@ CArray.fixlen_string(raw_fixlen)  #  → CAFixlenString (zero-copy wrap)
 Portability is what usually decides the type at a boundary:
 
 - **`CAFixlenString`** is portable — its fixed-width bytes survive `CArray.stack`, `Marshal`, and MemoryView export. This is the type to reach for when the strings must cross a boundary as a single contiguous block.
-- **`CAConstString`** and **`CAString`** are per-process (a shared buffer, or Ruby `VALUE`s on the heap), so they do not participate in those multi-parent constructions as one block. `copy` gives an independent in-process column; `to_fixlen_string(bytes: K)` gives a portable one.
+- **`CAString`** is per-process (Ruby `String`s on the heap), so it has no MemoryView of the strings. It stacks and concatenates with other `CAString`s; an object array of Strings joins them after `CArray.string(o)`.
+- **`CAConstString`** is per-process too (a shared buffer), and does not participate in multi-parent constructions: each array's cells point into its own buffer. `copy` gives an independent in-process column; `to_fixlen_string(bytes: K)` gives a portable one.
 - **Variable-length + MemoryView.** MemoryView is fixed-item-size and cannot represent a variable-length column in a single view. A `CAConstString`'s `(start, end)` pairs and byte buffer can be exported as two integer MemoryViews and reassembled out of band, but there is no single zero-copy MemoryView of "the strings".
 
 The `CAConstString` buffer is a pure concatenation of the element bytes (= the Apache Arrow values layout, no length prefix), so it can back an Arrow string array directly, and an Arrow `String` / `LargeString` column imports into a `CAConstString`.
