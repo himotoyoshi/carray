@@ -14,7 +14,7 @@
 # Phase B reject patterns (= deferred):
 #   - slab contains INDEX axis (e.g., csa.sum(axis: 0))     → Phase C T3
 #   - outer SHIFT axis (CAShift / negative window range) → B.1.5 materialise
-#   - CASelect / CAMapping (descriptor.ndim = 1, kind=INDEX) → Phase C T3
+#   - CASelect (descriptor.ndim = 1, kind=INDEX) → Phase C T3
 #
 # Pinning byte parity vs ca.sum() reference for accept cases, and
 # CA_ITER_ERR_POLICY (= rc=2) for reject cases.

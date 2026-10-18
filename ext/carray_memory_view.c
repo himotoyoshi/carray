@@ -83,8 +83,6 @@ typedef enum {
 static ca_mv_runtime_type_t ca_mv_runtime_types[CA_MV_NUM_RUNTIME_OBJ_TYPES] = {
   { "CAFarray",    "CA_OBJ_FARRAY",    -1, Qnil, /* CA_MV_FARRAY  */ 4 },
   { "CATranspose", "CA_OBJ_TRANSPOSE", -1, Qnil, /* CA_MV_TRANS   */ 5 },
-  /* CAMapping is retired; a[mapper] now builds a CAGrid/CAStride chain
-     whose layers are covered above. */
   { "CAGrid",      "CA_OBJ_GRID",      -1, Qnil, /* CA_MV_ATTACH  */ 7 },
   { "CAShift",     "CA_OBJ_SHIFT",     -1, Qnil, /* CA_MV_ATTACH  */ 7 },
   { "CAWindow",    "CA_OBJ_WINDOW",    -1, Qnil, /* CA_MV_ATTACH  */ 7 },

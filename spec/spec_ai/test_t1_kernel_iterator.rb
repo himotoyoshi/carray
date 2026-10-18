@@ -197,11 +197,6 @@ class TestT1KernelIterator < Test::Unit::TestCase
     assert_equal v.to_ca.dump_binary, r[:data]
   end
 
-  # CAMapping was removed in R.3 (PROPOSAL_CAMAPPING_REMOVAL); a[mapper]
-  # now normalises to a CAStride/CAGrid chain, each layer of which has
-  # descriptor.ndim == view.ndim and is already covered by entity /
-  # CAStride / CAGrid tests above.
-
   def test_cawindow_with_bounds_fill
     # CAWindow with fill bounds → SHIFT axes, materialise via engine.
     a = CArray.float64(5).seq
@@ -425,9 +420,6 @@ class TestT1KernelIterator < Test::Unit::TestCase
     assert_equal ALIAS_PER_SLAB, r[:alias_mode] unless CArray.__iter_by_transfer_only__   # gathered one row at a time
     assert_equal v.to_ca.dump_binary, r[:data]
   end
-
-  # CAMapping L2 entry removed in R.3; chain layers (CAStride/CAGrid) are
-  # exercised by test_l2_cagrid_materialise et al.
 
   def test_l2_cawindow_materialise
     a = CArray.float64(5).seq

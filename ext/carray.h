@@ -937,8 +937,6 @@ extern const rb_data_type_t cabyteswap_data_type;
 /* cafield_data_type was retired in 3.0 (Phase F: CAField is now a
    CAStride subclass; use castride_data_type). */
 extern const rb_data_type_t cagrid_data_type;
-/* camapping_data_type was retired in 3.0 (R.3: CAMapping removed; a[mapper]
-   now builds a CAGrid/CAStride normalize chain). */
 extern const rb_data_type_t caobject_data_type;
 extern const rb_data_type_t careduce_data_type;
 extern const rb_data_type_t carefer_data_type;

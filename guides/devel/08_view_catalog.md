@@ -57,9 +57,6 @@ strides).
 | CASelectAxis | (runtime) | `ca_obj_select_axis.c` | descriptor | per-axis selection |
 | CARemap | (runtime) | `ca_obj_remap.c` | own | address remap (sort/partition consumption) |
 
-> **CAMapping was retired in 3.0 (R.3).** `a[mapper]` now builds a CAGrid/CAStride
-> chain instead. Do not reference `CAMapping` in new code or docs.
-
 ## Bounds-fill views
 
 Shifted/windowed access with an out-of-bounds policy. Connected to the descriptor
@@ -226,11 +223,6 @@ partition family (`sort_addr` emits CARemap addresses); its access
 pattern is "permutation of parent->elements" expressed as a flat
 address list. Not a kernel-author surface; do not construct
 CARemap directly.
-
-> **CAMapping was retired in 3.0 (R.3).** `a[mapper]` now builds a
-> CAGrid / CAStride normalize chain instead. Do not reference
-> `CAMapping` in new code or docs; the `camapping_data_type` extern
-> is gone.
 
 ### Bounds-fill views
 

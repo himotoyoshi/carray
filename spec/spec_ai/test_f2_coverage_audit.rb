@@ -96,10 +96,6 @@ class TestF2CoverageAudit < Test::Unit::TestCase
     assert_kernel_iterator_accepts(a[a > 5.0], "CASelect")
   end
 
-  # CAMapping was removed in R.3 (PROPOSAL_CAMAPPING_REMOVAL); a[mapper]
-  # normalises to a CAStride/CAGrid chain that is already covered by the
-  # CASelect / CAGrid entries above.
-
   # ==== SRC_ATTACH views (view-specific transform) ====================
 
   def test_cafake

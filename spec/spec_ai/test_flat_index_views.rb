@@ -2,13 +2,14 @@
 #
 # spec_ai/test_flat_index_views.rb
 #
-# Tier 2.A integration tests for CASelect and CAMapping after they were
-# wired through the per-axis descriptor engine.  Validates:
+# Integration tests for CASelect and the index-array view (a[mapper]: a
+# CAGrid over the flattened array, reshaped by a CARefer for an N-D mapper)
+# through the per-axis descriptor engine.  Validates:
 #
 #   - binary identity vs an independent Ruby-side ground truth
-#   - view.ndim != descriptor.ndim handling (CAMapping LUT shape)
-#   - duplicate INDEX last-write-wins (CAMapping scatter)
-#   - mid-chain transparency (CAMapping -> CASelect, CASelect over
+#   - the mapper's shape carried to the result
+#   - duplicate INDEX last-write-wins (index-array scatter)
+#   - mid-chain transparency (index array -> CASelect, CASelect over
 #     non-contig parents)
 #   - MIGRATION_CASELECT_COPY: selector snapshot semantics
 #   - S1 (axis-merge) + S2 (prefix pre-classify) automatic inheritance
@@ -133,22 +134,21 @@ class TestFlatIndexViews < Test::Unit::TestCase
   end
 
   # ---------------------------------------------------------------
-  # CAMapping gather: shape preservation
+  # index-array gather: shape preservation
   # ---------------------------------------------------------------
 
-  def test_camapping_1d_gather
+  def test_index_array_1d_gather
     a = CArray.int(10).seq + 100
     m = CArray.int(4).tap { |__a| __a[] = [0, 2, 5, 9] }
     v = a[m]
-    # After R.3 (CAMapping removal): a[m] with 1-D mapper routes to CAGrid
-    # directly via CA_REG_GRID; with N-D mapper it builds a normalize chain
-    # (CAStride flatten <- CAGrid <- CAStride reshape).  Class identity is
-    # an internal detail of the chain; semantic assertions follow.
+    # a[m] with a 1-D mapper is a CAGrid; an N-D mapper builds a chain
+    # (flatten <- CAGrid <- reshape).  Class identity is an internal detail
+    # of the chain; semantic assertions follow.
     assert_equal [4], v.shape.to_a
     assert_equal [100, 102, 105, 109], v.to_a
   end
 
-  def test_camapping_lut_shape_preserved
+  def test_index_array_lut_shape_preserved
     # LUT use case: parent (1-D) + mapper (2-D) -> view inherits mapper.shape.
     bt = CArray.float64(256).seq * 0.5
     ir = CArray.int(3, 4).tap { |__a| __a[] = Array.new(12) { |i| i * 10 } }
@@ -159,7 +159,7 @@ class TestFlatIndexViews < Test::Unit::TestCase
     assert_equal expected, img.to_a
   end
 
-  def test_camapping_3d_mapper_shape
+  def test_index_array_3d_mapper_shape
     a = CArray.int(100).seq
     m = CArray.int(2, 3, 4).tap { |__a| __a[] = Array.new(24) { |i| i * 4 } }
     v = a[m]
@@ -168,10 +168,10 @@ class TestFlatIndexViews < Test::Unit::TestCase
   end
 
   # ---------------------------------------------------------------
-  # CAMapping scatter: last-write-wins for duplicate INDEX
+  # index-array scatter: last-write-wins for duplicate INDEX
   # ---------------------------------------------------------------
 
-  def test_camapping_scatter_unique_mapper
+  def test_index_array_scatter_unique_mapper
     a = CArray.int(8).seq
     m = CArray.int(3).tap { |__a| __a[] = [1, 3, 5] }
     v = a[m]
@@ -179,7 +179,7 @@ class TestFlatIndexViews < Test::Unit::TestCase
     assert_equal [0, -10, 2, -30, 4, -50, 6, 7], a.to_a
   end
 
-  def test_camapping_scatter_duplicate_mapper_last_write_wins
+  def test_index_array_scatter_duplicate_mapper_last_write_wins
     a = CArray.int(5).seq
     # Three writes to position 0, one to position 1.  Engine iterates
     # output row-major, so position 0 gets 10, 20, 40 in that order
@@ -190,14 +190,14 @@ class TestFlatIndexViews < Test::Unit::TestCase
     assert_equal [40, 30, 2, 3, 4], a.to_a
   end
 
-  def test_camapping_fill
+  def test_index_array_fill
     a = CArray.int(8).seq
     m = CArray.int(2, 2).tap { |__a| __a[] = [0, 2, 4, 6] }
     a[m] = 99
     assert_equal [99, 1, 99, 3, 99, 5, 99, 7], a.to_a
   end
 
-  def test_camapping_fill_with_duplicate_mapper
+  def test_index_array_fill_with_duplicate_mapper
     a = CArray.int(5).fill(0)
     m = CArray.int(6).tap { |__a| __a[] = [0, 1, 0, 1, 2, 0] }
     a[m] = 7
@@ -220,21 +220,21 @@ class TestFlatIndexViews < Test::Unit::TestCase
     assert_equal expected.to_a, v.to_a
   end
 
-  def test_camapping_then_caselect_chain
-    # bt[ir_level] -> CAMapping (2-D), then filter through CASelect
+  def test_index_array_then_caselect_chain
+    # bt[ir_level] -> index-array view (2-D), then filter through CASelect
     bt = CArray.float64(256).seq * 0.5
     ir = CArray.int(3, 4).tap { |__a| __a[] = Array.new(12) { |i| i * 10 } }
-    img = bt[ir]                  # CAMapping, shape [3, 4]
+    img = bt[ir]                  # index-array view, shape [3, 4]
     threshold_mask = CArray.boolean(3, 4).tap { |__a| __a[] = Array.new(12) { |i| i > 5 ? 1 : 0 } }
-    bright = img[threshold_mask]  # CASelect over CAMapping
+    bright = img[threshold_mask]  # CASelect over the index-array view
     assert_equal CASelect, bright.class
     # Expected: img elements where i > 5 (i = 6..11) at multiplier 10 * 0.5 = 5
     expected = (6..11).map { |i| (i * 10) * 0.5 }
     assert_equal expected, bright.to_a
   end
 
-  def test_camapping_with_partial_csa_parent
-    # CSA parent (per-axis mask) -> CAMapping over the resulting view
+  def test_index_array_with_partial_csa_parent
+    # CSA parent (per-axis mask) -> index-array view over the result
     a = CArray.int(5, 4).seq
     m = CArray.boolean(5).tap { |__a| __a[] = [1, 0, 1, 1, 0] }
     csa_view = a[m, nil]        # CASelectAxis, shape [3, 4]
@@ -262,7 +262,7 @@ class TestFlatIndexViews < Test::Unit::TestCase
     assert_equal expected, v.to_a
   end
 
-  def test_camapping_engine_passes_2d_shape
+  def test_index_array_engine_passes_2d_shape
     a = CArray.float64(1000).seq
     m = CArray.int(20, 25).tap { |__a| __a[] = Array.new(500) { |i| (i * 2) % 1000 } }
     v = a[m]
@@ -286,7 +286,7 @@ class TestFlatIndexViews < Test::Unit::TestCase
     end
   end
 
-  def test_camapping_data_type_variety
+  def test_index_array_data_type_variety
     [:int8, :int16, :int32, :int64, :float32, :float64].each do |dt|
       a = CArray.send(dt, 8).seq
       m = CArray.int(3).tap { |__a| __a[] = [1, 3, 5] }
@@ -298,7 +298,7 @@ class TestFlatIndexViews < Test::Unit::TestCase
   # ---------------------------------------------------------------
   # gather then whole-view scatter (= engine attach + sync_data round-trip)
   #
-  # CASelect / CAMapping per-element writes go directly to parent
+  # CASelect / CAGrid per-element writes go directly to parent
   # (bypassing ca->ptr) per the pre-framework store_addr semantics;
   # to exercise both engine directions in one operation, use whole-view
   # assignment `v[] = computed_src`, which goes through sync_data.
@@ -314,7 +314,7 @@ class TestFlatIndexViews < Test::Unit::TestCase
     assert_equal [1000, 1, 1002, 3, 1004, 5, 1006, 7], a.to_a
   end
 
-  def test_camapping_gather_then_whole_view_scatter
+  def test_index_array_gather_then_whole_view_scatter
     a = CArray.int(8).seq
     m = CArray.int(2, 2).tap { |__a| __a[] = [0, 2, 4, 6] }
     v = a[m]

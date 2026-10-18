@@ -1586,12 +1586,6 @@ kernels using the §10 helpers, the source kind is fully invisible — the
 same kernel body works regardless of which path the iterator takes
 internally.
 
-(Historical note: CAMapping previously appeared here as an explicit
-reject because its descriptor.ndim differed from view.ndim.  The class
-was removed in 3.0; `a[mapper]` now
-normalises to a CAGrid/CAStride chain whose layers each satisfy
-descriptor.ndim == view.ndim, so the reject is gone.)
-
 ## 10. Argument helpers (Phase B)
 
 Phase B (CArray 3.0 Coverage) ships two helpers that compress the

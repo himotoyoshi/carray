@@ -19,7 +19,6 @@
 #
 # Phase C out-of-scope rejects:
 #   - WRITE on T3 (= CA_KERNEL_WRITE flag) → CA_ITER_ERR_FLAGS (rc=4)
-#   - CAMapping (view.ndim != descriptor.ndim) → CA_ITER_ERR_POLICY (rc=2)
 
 require "test/unit"
 require_relative "../../lib/carray"
@@ -211,12 +210,6 @@ class TestCASlabAxesT3 < Test::Unit::TestCase
   # it doesn't directly trigger; this is pinned via the low-level
   # smoke surface if exposed.  For now, we trust the init_l2 source
   # check (= no Ruby-visible WRITE T3 entry point yet).
-
-  # CAMapping was removed in R.3 (PROPOSAL_CAMAPPING_REMOVAL); the
-  # raw_ndim != src->ndim reject branch is gone since no remaining view
-  # type triggers it.  a[mapper] now normalises to a CARefer/CAGrid chain
-  # whose layers each satisfy raw_ndim == src->ndim and exercise the
-  # standard Phase A/B paths.
 
   # ---- regression: Phase A entity / CAStride family unchanged ---------
 

@@ -1351,7 +1351,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
        Output ca3 is contig entity; per-row output offset = row_idx *
        inner_count.  The use_chunked / ALLOCV blocks below remain as a
        fallback (dead on the success path) but fire for views outside the
-       CAStride+entity family (CASelect / CAMapping / CAReduce
+       CAStride+entity family (CASelect / CAGrid / CAReduce
        etc.). */
     if ( i1 == 1 && i2 == 1 && nonalias_arrays >= 1 ) {
       extern ca_operation_function_t ca_stride_func;

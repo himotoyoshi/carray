@@ -218,6 +218,6 @@ through the items below and update its status row.
   `copy_data`/`sync_data` (ch02/ch04) are landing incrementally — revisit those
   chapters when they do.
 - [ ] **Cross-check against the source tree** periodically: this guide already
-  corrected several stale facts (CAMapping retired in R.3, the real `ca_func`
-  `xfer_*` fields, `rb_carray_new` returning `VALUE`). Treat the code as ground
+  corrected several stale facts (the real `ca_func` `xfer_*` fields,
+  `rb_carray_new` returning `VALUE`). Treat the code as ground
   truth.

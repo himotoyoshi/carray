@@ -5,9 +5,9 @@
 #  Treats the trailing K axes of `indices.shape = (..., K)` as coordinate tuples
 #  and consumes the first K axes of params while carrying the remaining axes (= rest).
 #
-#  Implementation goes through a CAMapping view of the flattened array:
+#  Implementation goes through an index view (CAGrid) of the flattened array:
 #  `params.flatten[flat_addr]`.  Pure Ruby, no additional framework, composed
-#  entirely from existing indexers as in `take_along_axis`.  Since CAMapping is
+#  entirely from existing indexers as in `take_along_axis`.  Since the view is
 #  writable, write-through via `put_nd` uses last-write-wins semantics (= last
 #  value wins on duplicate indices, same contract as `put_along_axis`).  For
 #  accumulate semantics, route to the `scatter_*!` family instead.
@@ -63,7 +63,7 @@ class CArray
   def gather_nd (indices)
     flat_addr, outer, rest = gather_nd_flat_addr(indices, "gather_nd")
     out_shape = outer + rest
-    # flatten + 1-D fancy indexing -> CAMapping view -> materialise via .copy.
+    # flatten + 1-D fancy indexing -> CAGrid view -> materialise via .copy.
     # A masked coordinate reads as UNDEF: project carries the address mask.
     result = flat_addr.has_mask? ? flatten.project(flat_addr) : self.flatten[flat_addr].copy
     out_shape.empty? ? result : result.reshape(*out_shape)

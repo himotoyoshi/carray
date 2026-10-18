@@ -242,7 +242,7 @@ class TestCAGridRebuild < Test::Unit::TestCase
 
   def test_grid_over_block_view
     # CAGrid over a CABlock parent — parent is non-contig view; tests
-    # mid-chain transparency same as for CASelect/CAMapping.
+    # mid-chain transparency same as for CASelect.
     a = CArray.int(10, 10).seq
     parent_view = a[2..7, nil]   # CABlock 6x10
     v = parent_view.grid(nil, 0..4)

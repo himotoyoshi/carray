@@ -1100,10 +1100,9 @@ rb_ca_fancy_index_chain (VALUE self, VALUE rmapper)
   return result;
 }
 
-/* The CAMapping class is gone; rb_ca_mapping_new and rb_ca_mapping build
-   the normalize chain via rb_ca_fancy_index_chain.  The public C API
-   signatures are preserved so external ext gems keep linking; the runtime
-   class of the returned VALUE is CARefer (chain outermost), not CAMapping. */
+/* rb_ca_mapping_new and rb_ca_mapping index cary by a mapper array through
+   rb_ca_fancy_index_chain: the result is a CAGrid over the flattened array,
+   reshaped (CARefer, the outermost layer) to the mapper's shape. */
 
 VALUE
 rb_ca_mapping_new (VALUE cary, CArray *mapper)
@@ -1458,7 +1457,7 @@ rb_ca_slab_iter_new (VALUE self, CAIndexInfo *info)
    align with the post-expansion ndim, replace :> with nil (full axis),
    promote Integer to length-1 Range so the base view preserves ndim,
    recurse through the regular indexer dispatch to build the base
-   reference (CABlock / CASelectAxis / CAGrid / CAMapping / ...), then
+   reference (CABlock / CASelectAxis / CAGrid / ...), then
    wrap in CASlabIterator with the recorded slab_axes positions. */
 static VALUE
 rb_ca_fetch_slab_sigil (int argc, VALUE *argv, VALUE self)

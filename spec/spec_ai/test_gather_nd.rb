@@ -241,7 +241,7 @@ class TestGatherNd < Test::Unit::TestCase
   end
 
   def test_put_nd_duplicate_last_write_wins
-    # duplicate coords: last write wins (CAMapping xfer_addrs semantic).
+    # duplicate coords: last write wins (the index view's xfer_addrs).
     # NOTE: 順序は実装依存だが、同一 address に複数値を投入する operation
     # 自体は受け入れる (= NotImplementedError にしない).
     a = CArray.int32(3, 3) { 0 }

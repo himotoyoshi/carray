@@ -380,7 +380,7 @@ CArray            (entity)
 │   │                CARepeat, CAField
 │   ├── CAWindow  ── CAShift
 │   ├── CASelectAxis, CAGrid                 (per-axis scatter family)
-│   ├── CASelect, CAMapping                  (flat-index family)
+│   ├── CASelect, CARemap                    (flat-index family)
 │   ├── CAFake, CAByteSwap, CABitarray, CABitfield  (overlays)
 │   └── CAReduce                             (reduction view)
 └── CAObject     (Ruby-callback bridge; may be entity or view)
@@ -2125,7 +2125,7 @@ span of `n` elements of a known data_type, do the work — and the iterator
 handles everything else:
 
 - accepts any of CArray's view kinds as input (CAStride family,
-  CASelect, CAMapping, CAWindow, CAShift, CAGrid, CAFake, CAByteSwap,
+  CASelect, CAWindow, CAShift, CAGrid, CAFake, CAByteSwap,
   CABitfield, CABitarray, CAReduce, CAObject, …), without your kernel
   having to know which it got;
 - folds view chains down to the root entity where possible, yielding
