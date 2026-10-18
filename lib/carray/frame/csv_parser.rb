@@ -379,7 +379,9 @@ class CAFrame
                                           lineno: @tok.lineno + 1)
       end
       if name.nil?
-        @names = fields.map(&:to_s)
+        # An empty field names no column: the column takes the name a file
+        # without a header gives it, from its place in the line.
+        @names = fields.each_with_index.map { |f, j| f.to_s.empty? ? "c#{j}" : f.to_s }
         @header_line = @tok.record_line
         @names_to_check = nil
       else
@@ -400,6 +402,9 @@ class CAFrame
     # one.
     def column_names(*names)
       names = names.flatten.map(&:to_s)
+      if names.include?("")
+        raise ArgumentError, "from_csv: column_names: a column name can not be empty"
+      end
       if @header_line
         check_column_names(names, @names.size, @header_line)
       else
@@ -450,6 +455,10 @@ class CAFrame
         end
         CAFrame.__send__(:column_key, name, "from_csv", "columns: a column name",
                          hint: "given for #{key.inspect}")
+        if name.empty?
+          raise ArgumentError, "from_csv: columns: a column name can not be empty " \
+                               "(given for #{key.inspect})"
+        end
       end
       CAFrame.__send__(:refuse_repeated_names, map.values, "from_csv", "columns: names")
       map.values

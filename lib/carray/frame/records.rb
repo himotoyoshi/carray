@@ -28,6 +28,9 @@ class CAFrame
     return new if records.empty?
 
     keys = record_key_union(records)
+    if keys.any? { |k| k.to_s.empty? }
+      raise ArgumentError, "from_records: a key names a column, and a column name can not be empty"
+    end
     refuse_repeated_names(keys.map(&:to_s), "from_records", "the keys name the column",
                           hint: "a String key and a Symbol key spell it both ways; use one spelling")
     n = records.size

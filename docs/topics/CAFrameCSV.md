@@ -124,6 +124,8 @@ CAFrame.from_csv("raw.csv", header: false)               # names c0, c1, ...
 CAFrame.from_csv("obs.csv", attrs: [:units])             # units on line 1, as attributes
 ```
 
+An empty field of the header names no column, so that column takes the name `header: false` would give it, by its place in the line (`c2` for the third field).
+
 `header:` is the line of the column names (default 0), or `false` for none. `data:` is the first line of the data (default the line after the header), or a Range of lines (`4..`, `...101`). A record that starts within `data:` is read whole, even when a quoted field carries it past the last line. A malformed-record error names the line from 1, as an editor numbers it, so the line `e.lineno` is index `e.lineno - 1`.
 
 `column_names:` names the columns. Given alone, the file is taken to have no header line; given with `header:`, it replaces the names on that line. There have to be as many names as the file has columns -- those of the header line, or else of the first record -- or it raises `ArgumentError`.

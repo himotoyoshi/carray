@@ -85,6 +85,7 @@ class CAFrame
     n_from = nil
     columns.each do |name, col|
       key = column_key(name, "CAFrame.new")
+      raise ArgumentError, "CAFrame.new: a column name can not be empty" if key.empty?
       ca  = coerce_column(col)
       len = ca.shape[0]
       if n.nil?
@@ -332,6 +333,7 @@ class CAFrame
   # leaves the old one alone (the same rule +cast+ follows, for the physical
   # reason that a type change cannot reuse the buffer).
   private def rebind_column(key, column)
+    raise ArgumentError, "df[name] =: a column name can not be empty" if key.empty?
     if @index && key == @axis_name
       raise ArgumentError,
             "#{key.inspect} names the index, not a column; " \

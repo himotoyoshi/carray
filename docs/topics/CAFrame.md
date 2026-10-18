@@ -161,7 +161,7 @@ CAFrame.new({ "v" => CA_FLOAT64([1, 2, 3]) },
             index: CArray.int64([100, 200, 300]))
 ```
 
-**Column names are Strings**, here and in every verb that names a column. Symbols are used for options and types, so a Symbol keyword that is not one of the three options is refused instead of becoming a column. A mistyped option cannot turn into a column without notice. A column named `"index"` is written the ordinary way:
+**Column names are non-empty Strings**, here and in every verb that names a column. Symbols are used for options and types, so a Symbol keyword that is not one of the three options is refused instead of becoming a column. A mistyped option cannot turn into a column without notice. A column named `"index"` is written the ordinary way:
 
 ```ruby
 CAFrame.new(temp: CA_INT32([1, 2, 3]))

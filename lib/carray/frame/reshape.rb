@@ -64,6 +64,11 @@ class CAFrame
   def pivot(index:, columns:, values:, aggregate: nil)
     plan = pivot_plan(column_key(index, "pivot"), column_key(columns, "pivot"), aggregate, "pivot")
     labels = Array.new(plan[:nc]) { |j| plan[:clab][j].to_s }
+    if labels.include?("") && !values.is_a?(Array)
+      raise ArgumentError,
+            "pivot: a value of columns: #{columns.inspect} is the empty string, " \
+            "which cannot name a column; recode it first"
+    end
     value_names = values.is_a?(Array) ? column_keys(values, "pivot") : nil
     names =
       if value_names

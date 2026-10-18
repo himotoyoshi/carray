@@ -151,6 +151,7 @@ class CArray
       names = Array.new(ncol) { |j| "c#{j}" }
     else
       names.each { |name| CAFrame.__send__(:column_key, name, "to_frame") }
+      raise ArgumentError, "to_frame: a column name can not be empty" if names.include?("")
       unless names.size == ncol
         raise ArgumentError,
               "to_frame: #{names.size} names for #{ncol} columns " \
