@@ -36,6 +36,7 @@ class TestFaceFillValue < Test::Unit::TestCase
         verbs = {
           "store"      => -> { b = a.copy; b[0] = v; b[0] },
           "shift"      => -> { a.shift(1, fill_value: v)[0] },
+          "template"   => -> { a.template { v }[0] },
           "project"    => -> { a.project(CA_INT64([-1, 0]), v)[0] },
           "unmask"     => -> { b = a.copy; b[0] = UNDEF; b.unmask(v); b[0] },
           "strip_mask" => -> { b = a.copy; b[0] = UNDEF; b.strip_mask(v)[0] },

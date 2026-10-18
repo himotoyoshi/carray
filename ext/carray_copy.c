@@ -297,6 +297,19 @@ rb_ca_template_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
     obj = ca_wrap_struct(co);
   }
 
+  /* Preserve the Face identity only for a same-type template (no explicit
+   * retype).  A retype (template(:boolean)) is a different-typed buffer and
+   * must not be re-wrapped as the Face.  A same-type template of a Face with
+   * a valid blank form (CARecord carries its data_class through the struct
+   * tail; identity Faces alias same-type storage) is lifted so the class is
+   * preserved.  A Face with no valid blank form (CAConstString's content-
+   * defined offset+buffer) overrides `template` in Ruby to return a plain
+   * array instead of a broken same-class shell.  The lift comes before the
+   * block initialiser so its values are stored through the Face. */
+  if ( NIL_P(rtype) ) {
+    CA_FACE_LIFT_IF_FACE(obj, self, ca);
+  }
+
   if ( rb_block_given_p() ) {
     if ( rb_proc_arity(rb_block_proc()) == 0 ) {
       volatile VALUE rval = rb_yield_values2(0, NULL);
@@ -317,18 +330,6 @@ rb_ca_template_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
         rb_ca_store_addr(obj, 0, rval);
       }
     }
-  }
-
-  /* Preserve the Face identity only for a same-type template (no explicit
-   * retype).  A retype (template(:boolean)) is a different-typed buffer and
-   * must not be re-wrapped as the Face.  A same-type template of a Face with
-   * a valid blank form (CARecord carries its data_class through the struct
-   * tail; identity Faces alias same-type storage) is lifted so the class is
-   * preserved.  A Face with no valid blank form (CAConstString's content-
-   * defined offset+buffer) overrides `template` in Ruby to return a plain
-   * array instead of a broken same-class shell. */
-  if ( NIL_P(rtype) ) {
-    CA_FACE_LIFT_IF_FACE(obj, self, ca);
   }
 
   return obj;

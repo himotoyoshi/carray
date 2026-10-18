@@ -69,12 +69,14 @@ class CArray
   # @overload template { value }
   #   With a 0-arity block, fills every element of the result with
   #   the block's return value (broadcast). Equivalent to
-  #   `template.tap { |t| t[] = value }`.
+  #   `template.tap { |t| t[] = value }`.  On a Face the value is
+  #   stored as a store writes it (a String for a CAString).
   #   @yieldreturn [Object] value to broadcast to every element.
   #   @return [CArray]
   # @overload template { |*idx| ... }
   #   With a block of arity > 0, calls the block once per cell with
-  #   the multi-dimensional index `*idx` and stores the result.
+  #   the multi-dimensional index `*idx` and stores the result, as a
+  #   store writes it.
   #   @yieldparam idx [Array<Integer>] per-axis indices.
   #   @yieldreturn [Object]
   #   @return [CArray]
