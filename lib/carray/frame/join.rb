@@ -304,31 +304,88 @@ class CAFrame
 
   # The other side's row for each left row of an as-of join with exact
   # keys: the nearest by +lkey+ / +rkey+ among the right rows with the
-  # same code.
+  # same code, as locate_nearest_addr finds it within one group.
+  #
+  # All groups are searched at once.  The right rows are sorted by (code,
+  # key, row); sorting the left keys in among them by (code, key) counts,
+  # for each left row, the right rows of its group below it, and the
+  # nearest is one of the two right rows on either side of that count.
   private def join_asof_by(lkey, rkey, lcode, rcode, k, direction, tolerance)
-    # direction: and tolerance: are checked once here, on no rows: the
-    # loop below meets them only for a group both frames have.
+    # direction: and tolerance: are checked here, on no rows, whether or
+    # not any group is in both frames.
     lkey[0...0].locate_nearest_addr(rkey[0...0], direction: direction, tolerance: tolerance)
+    limit = tolerance && CArray::DistanceLimit.read(tolerance, lkey, "tolerance:")
     addr = CArray.int64(lkey.elements).fill(UNDEF)
-    lrows, lstart, lcount = join_code_runs(lcode, k)
-    rrows, rstart, rcount = join_code_runs(rcode, k)
-    k.times do |g|
-      next if lcount[g] == 0 || rcount[g] == 0
-      li = lrows[lstart[g]...(lstart[g] + lcount[g])]
-      ri = rrows[rstart[g]...(rstart[g] + rcount[g])]
-      found = lkey[li].locate_nearest_addr(rkey[ri], direction: direction, tolerance: tolerance)
-      addr[li] = ri.project(found)
+
+    # The right rows that can be found: a code, and a key that is present
+    # and not NaN.  Each group's rows in key order, a tie in row order.
+    rvalid = asof_searchable(rkey, rcode)
+    rrows = CArray.int64(rkey.elements).seq[rvalid].copy
+    return addr if rrows.elements == 0
+    rrows = rrows.project(CArray.sort_addr(rcode.project(rrows), rkey.project(rrows), rrows))
+    lvalid = asof_searchable(lkey, lcode)
+    lrows = CArray.int64(lkey.elements).seq[lvalid].copy
+    return addr if lrows.elements == 0
+
+    rk, qk = lkey.__send__(:nearest_keys, rkey.project(rrows), lkey.project(lrows))
+    rc = rcode.project(rrows).int64
+    qc = lcode.project(lrows).int64
+    n = rrows.elements
+    gcount = rc.bincount(length: k).int64
+    gstart = gcount.cumsum.int64 - gcount
+
+    # How many right rows of its group each left row has below it (at or
+    # below when +inclusive+): the left keys sorted in among the right
+    # ones, a tie putting the right one first when it counts.
+    below = lambda do |inclusive|
+      tag = CArray.int8(n + qk.elements)
+      tag[0...n] = inclusive ? 0 : 1
+      tag[n..-1] = inclusive ? 1 : 0
+      perm = CArray.sort_addr(CArray.concatenate([rc, qc]), CArray.concatenate([rk, qk]), tag)
+      seen = perm.lt(n).cumsum.int64
+      query = perm.ge(n)
+      count = CArray.int64(qk.elements)
+      count[perm[query] - n] = seen[query]
+      count - gstart.project(qc)
     end
+
+    size = gcount.project(qc)
+    local =
+      case direction
+      when :floor then below.(true) - 1
+      when :ceil  then below.(false)
+      when :round
+        lt = below.(false)
+        start = gstart.project(qc)
+        has_lo = lt.gt(0)
+        has_hi = lt.lt(size)
+        lo = rk.project((start + lt - 1).tap { |a| a[has_lo.not] = UNDEF })
+        hi = rk.project((start + lt).tap { |a| a[has_hi.not] = UNDEF })
+        # an exact match takes its first reference; otherwise the nearer
+        # neighbour, the upper one on a tie
+        upper = (hi - qk).le(qk - lo).strip_mask(false)
+        upper[has_lo.not] = true
+        upper[has_hi.not] = false
+        upper[hi.eq(qk).strip_mask(false)] = true
+        lt - 1 + upper.int64
+      end
+    local[local.lt(0) | local.ge(size)] = UNDEF
+    found = rrows.project(gstart.project(qc) + local)
+    if limit
+      dist = (rkey.project(found) - lkey.project(lrows)).abs
+      found[dist > limit] = UNDEF
+    end
+    addr[lrows] = found
     addr
   end
 
-  # The rows of each code, in row order: count[g] rows from rows[start[g]] on
-  # have code g.  Rows without a code come after them all.
-  private def join_code_runs(code, k)
-    rows  = CArray.sort_addr(code, CArray.int64(code.elements).seq)
-    count = code.bincount(length: k).int64
-    start = count.cumsum.int64 - count
-    [rows, start.to_a, count.to_a]
+  # The rows of a key that an as-of search can place: a group code, and a
+  # key cell that is neither masked nor NaN.
+  private def asof_searchable(key, code)
+    ok = code.is_not_masked.strip_mask(false)
+    ok &= key.is_not_masked.strip_mask(false) if key.has_mask?
+    ok &= key.is_nan.strip_mask(false).not if key.float?
+    ok
   end
 
   # The left index keeps its name as the result's row axis, so a right
