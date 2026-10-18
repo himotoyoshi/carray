@@ -261,6 +261,12 @@ class TestCAFrameMelt < Test::Unit::TestCase
     assert_equal [10.0, 20.0, 30.0, 11.0, 21.0, 31.0], long["value"].to_a
   end
 
+  def test_melt_names_the_sources_in_a_text_column
+    long = @wide.melt(id: "time")
+    assert_equal CAString, long.data_types["variable"]
+    assert_equal %w[TOKYO OSAKA], long["variable"].upcase[CA_INT64([0, 3])].to_a
+  end
+
   def test_melt_takes_value_columns_and_names
     long = @wide.melt(id: "time", value_columns: ["osaka"],
                       var_name: "station", value_name: "temp")

@@ -190,8 +190,8 @@ class CAFrame
 
   # Gather a wide frame into a long one.  The +value_columns+ are stacked one
   # after another into a single +value_name+ column, a +var_name+ column says
-  # which of them each row came from, and every +id+ column repeats once per
-  # value column.
+  # which of them each row came from (a text column), and every +id+ column
+  # repeats once per value column.
   #
   #   wide.melt(id: "time")     # time / variable / value
   #
@@ -247,7 +247,7 @@ class CAFrame
       end
     end
     n = nrow
-    out[var_name]   = CArray.object(n * k) { |i| vars[i / n] }
+    out[var_name]   = CArray.string(Array.new(n * k) { |i| vars[i / n] })
     out[value_name] = CArray.meld(pieces)
     CAFrame.new(out)
   end

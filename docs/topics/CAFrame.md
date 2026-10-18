@@ -1495,7 +1495,7 @@ long["variable"].to_a   # => ["tokyo", "tokyo", "tokyo", "osaka", "osaka", "osak
 long["value"].to_a      # => [10.0, 20.0, 30.0, 11.0, 21.0, 31.0]
 ```
 
-- With no `value_columns:`, every column that is not an id is melted. `var_name:` and `value_name:` rename the two new columns.
+- With no `value_columns:`, every column that is not an id is melted. `var_name:` and `value_name:` rename the two new columns. The column naming each row's source is a text column (`CAString`).
 - When the frame has an index, it is carried as an id column named after the row axis.
 - Masked cells stay masked.
 - **The result is a sub-frame**: its value column is a view of the melted columns, so writing the result reaches the wide frame. `copy` it to detach it.

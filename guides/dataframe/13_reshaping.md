@@ -87,7 +87,7 @@ grid.max(axis: 1).to_a # => [310, 295, 305, 322, 388, 402, 355, 298]
 ```ruby
 long = wide.reset_index.melt(id: "date", var_name: "shop", value_name: "revenue")
 p long.head(4)
-# #<CAFrame nrow=4 columns=[date:CATime[D], shop:object, revenue:float64]>
+# #<CAFrame nrow=4 columns=[date:CATime[D], shop:CAString, revenue:float64]>
 # date        shop     revenue
 # ----------  -------  -------
 # 2024-03-04  central   3038.0
