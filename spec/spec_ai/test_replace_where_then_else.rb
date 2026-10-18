@@ -269,4 +269,28 @@ class TestReplaceWhereThenElse < Test::Unit::TestCase
     assert_kind_of CATime, cond.then_else(time, Time.utc(2025, 1, 1))
   end
 
+  # A masked label gives a masked cell, whatever the choices are.
+  def test_choose_masks_the_cell_of_a_masked_label
+    l = CA_INT32([0, 1, 0, 1])
+    l[0] = UNDEF
+    assert_equal [UNDEF, 20, 10, 20], l.choose([10, 20]).to_a
+    assert_equal [UNDEF, 2, 1, 2], l.choose([CA_INT32([1] * 4), CA_INT32([2] * 4)]).to_a
+    t = l.choose(%w[a b])
+    assert_kind_of CAString, t
+    assert_equal [UNDEF, "b", "a", "b"], t.to_a
+  end
+
+  # A label with no choice is refused, naming it; a masked one is not.
+  def test_choose_refuses_a_label_out_of_range
+    [CA_INT32([0, 1, 2]), CA_INT32([0, -1])].each do |l|
+      assert_raise(IndexError) { l.choose([10, 20]) }
+      assert_raise(IndexError) { l.choose(%w[a b]) }
+    end
+    e = assert_raise(IndexError) { CA_INT32([0, 5]).choose([10, 20]) }
+    assert_match(/label 5/, e.message)
+    m = CA_INT32([0, 9])
+    m[1] = UNDEF
+    assert_equal [7, UNDEF], m.choose([7, 8]).to_a
+  end
+
 end
