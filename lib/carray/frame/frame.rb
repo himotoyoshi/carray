@@ -590,6 +590,20 @@ class CAFrame
     @attrs   = @attrs.dup if @attrs
   end
 
+  # Marshal writes the instance variables as they are.  Loading stores the
+  # attribute values again as set_attr does, as frozen copies: Marshal
+  # brings back a value thawed.
+  private def marshal_dump
+    instance_variables.to_h { |name| [name, instance_variable_get(name)] }
+  end
+
+  private def marshal_load(ivars)
+    ivars.each { |name, value| instance_variable_set(name, value) }
+    if @attrs
+      @attrs = @attrs.transform_values { |v| CArray.__send__(:attr_coerce_value, v) }
+    end
+  end
+
   # --- attributes of the frame ------------------------------------------
   #
   # Key/value metadata about the table as a whole (a title, a source), apart

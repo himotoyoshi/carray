@@ -179,6 +179,14 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     assert_equal ATTRS, Marshal.load(Marshal.dump(frame)).attrs
   end
 
+  # A loaded value is a frozen copy, as set_attr stores one.
+  def test_marshal_round_trip_keeps_values_frozen
+    df = frame
+    df.set_attr(:note, "x")
+    loaded = Marshal.load(Marshal.dump(df))
+    assert_predicate loaded.attr(:note), :frozen?
+  end
+
   def test_frame_and_column_attributes_are_separate
     df = frame
     df["v"].set_attr(:units, "m")
