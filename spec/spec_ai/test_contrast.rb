@@ -137,4 +137,12 @@ class TestContrast < Test::Unit::TestCase
     assert_equal %w[x_1.0 x_3.0 i], df.contrast_columns("x", base: 2).column_names
     assert_equal %w[x i_1 i_3], df.contrast_columns("i", base: 2.0).column_names
   end
+
+  # A NaN label is found by NaN, as join and at match NaN keys.
+  def test_nan_base
+    c = CA_FLOAT64([1, Float::NAN, 1]).categorize(sort_labels: true)
+    assert_equal [[1], [0], [1]], c.contrast(base: Float::NAN).to_a
+    df = CAFrame.new("x" => CA_FLOAT64([1, Float::NAN, 2]))
+    assert_equal %w[x_1.0 x_2.0], df.contrast_columns("x", base: Float::NAN).column_names
+  end
 end

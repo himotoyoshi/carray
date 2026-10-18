@@ -687,6 +687,13 @@ class CACategorical < CAObject
     CACategorical.from_codes(recoded.codes, recoded.labels.map { |c| label_at(c) })
   end
 
+  # The position of +label+ among the labels, found by ==, a NaN label by a
+  # NaN, as join and at match NaN keys; nil when it is not one of them.
+  private def label_position (label)
+    return @labels.index(label) unless label.is_a?(Float) && label.nan?
+    @labels.index { |l| l.is_a?(Float) && l.nan? }
+  end
+
   # The categorical as numeric columns, one per category, for a model that
   # takes numbers: row i holds 1 in the column of its category and 0
   # elsewhere.  With an intercept in the model the k columns would sum to the
@@ -725,7 +732,7 @@ class CACategorical < CAObject
       kept = (0...k).to_a
     else
       raise ArgumentError, "contrast: there are no labels, so no base column to leave out" if k == 0
-      dropped = base.nil? ? 0 : @labels.index(base)
+      dropped = base.nil? ? 0 : label_position(base)
       raise ArgumentError, "contrast: #{base.inspect} is not one of the labels #{@labels.inspect}" unless dropped
       kept = (0...k).to_a - [dropped]
     end
