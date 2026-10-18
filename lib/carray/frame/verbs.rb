@@ -22,9 +22,10 @@ class CAFrame
       raise ArgumentError, "append: give before: or after:, not both"
     end
     # Checked here: the new frame would take N from whichever witness comes
-    # first, and blame the frame's own column for the new one's length.
-    # Without another column or an index, the column is the only witness.
-    if ((@columns.keys - [key]).any? || @index) && ca.shape[0] != @nrow
+    # first, and blame the frame's own column for the new one's length.  A
+    # column that replaces the only one is held to N too, as df[name] = is;
+    # only a frame with no column and no index takes N from the new column.
+    if (@columns.any? || @index) && ca.shape[0] != @nrow
       raise ArgumentError,
             "append: column #{key.inspect} has axis-0 length #{ca.shape[0]}, expected #{@nrow}"
     end

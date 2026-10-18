@@ -38,6 +38,14 @@ class TestAppendChecksItsArguments < Test::Unit::TestCase
     assert_match(/"a"/, err.message)
   end
 
+  # The only column is held to N too, as df[name] = holds it.
+  def test_replacing_the_only_column_keeps_the_length
+    one = CAFrame.new("a" => CA_INT64([1, 2, 3]))
+    assert_raise(ArgumentError) { one.append("a", CA_INT64([1, 2])) }
+    assert_raise(ArgumentError) { one.append("a", CA_INT64([1, 2]), after: "a") }
+    assert_equal 2, CAFrame.new({}).append("a", CA_INT32([1, 2])).nrow
+  end
+
   def test_the_index_is_a_witness_of_the_length
     df = CAFrame.new({ "a" => CA_INT64([1, 2, 3]) }, index: CA_INT64([7, 8, 9]))
     err = assert_raise(ArgumentError) { df.append("a", CA_INT64([1, 2])) }
