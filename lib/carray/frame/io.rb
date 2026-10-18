@@ -338,7 +338,7 @@ class CAFrame
       raise ArgumentError, "to_csv: missing: is the String written for a masked " \
                            "cell (got #{text.inspect})"
     end
-    attr_keys = CAFrame.send(:csv_attr_keys, attrs, "to_csv")
+    attr_keys = attrs.nil? ? [] : CAFrame.send(:csv_attr_keys, attrs, "to_csv")
     if !header && !attr_keys.empty?
       raise ArgumentError, "to_csv: attrs: writes lines below the name row, " \
                            "so it needs header: true"

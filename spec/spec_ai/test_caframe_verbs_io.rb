@@ -290,6 +290,12 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
     assert_equal [0, []], [back.nrow, back.column_names]
   end
 
+  # attrs: nil means no attribute line, as from_csv reads it.
+  def test_attrs_nil_writes_no_attribute_line
+    df = CAFrame.new("a" => CA_INT32([1]))
+    assert_equal df.to_csv, df.to_csv(attrs: nil)
+  end
+
   def test_to_csv_attrs_of_the_index
     df = CAFrame.new({ "v" => CA_INT32([1, 2]).tap { |c| c.set_attr(:units, "m") } },
                      index: CA_INT32([10, 20]).tap { |c| c.set_attr(:units, "s") },
