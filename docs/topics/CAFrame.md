@@ -140,7 +140,8 @@ CAFrame.new("a" => CA_INT32([1, 2, 3]), "b" => CA_FLOAT64([1.0, 2.0, 3.0]))
 | `[1, 2]` | `int64` |
 | `[1, 2.5]` | `float64` |
 | `[[1, 2], [3, 4]]` | an N-D column |
-| strings, or mixed values | `:object` |
+| strings | a text column (`CAString`), as `from_csv` reads text |
+| mixed values | `:object` |
 | `nil` or `UNDEF` | a masked cell |
 
 `df["x"] = [...]` and the values a group's block gives are typed the same way.
@@ -220,14 +221,15 @@ records = JSON.parse(File.read("obs.json"))   # => [ {...}, {...}, ... ]
 df = CAFrame.from_records(records)
 ```
 
-A record value is **already a typed Ruby object** (`Float`, `Integer`, `Complex`, `DateTime`, `String`), so `from_records` builds each column from the types of its values. Strings are not parsed: a date written as a string stays a string, and a column of mixed values stays `:object`.
+A record value is **already a typed Ruby object** (`Float`, `Integer`, `Complex`, `DateTime`, `String`), so `from_records` builds each column from the types of its values. Strings are not parsed: a date written as a string stays a string (a column of strings is a text column, `CAString`), and a column of mixed values stays `:object`.
 
 | the column's non-nil values are… | column built as |
 |---|---|
 | all `Integer` | `:int64` |
 | `Integer` and `Float` | `:float64` |
 | `Integer`, `Float` and `Complex` | `:cmplx128` |
-| strings / `DateTime` / booleans / `Rational` / `BigDecimal` / mixed, or an Integer an `int64` cannot hold | `:object` (left as is) |
+| strings | a text column (`CAString`) |
+| `DateTime` / booleans / `Rational` / `BigDecimal` / mixed, or an Integer an `int64` cannot hold | `:object` (left as is) |
 | numeric **arrays** of one shape | an N-D column (see [Making N-D columns](#making-n-d-columns-from-records)) |
 
 - The column set is the **union of keys** in first-appearance order; keys are stringified (String- or Symbol-keyed records both work).
@@ -1096,7 +1098,7 @@ df.group_by("station").table do |g|
 end
 ```
 
-The values the block returns — and those a Proc reduction of `aggregate` returns — become columns typed as [`from_records`](#caframefrom_records) types a record's values: Integers an `int64` column, numbers a `float64` one, arrays of one shape an N-D column, anything else (`true` / `false`, Strings, times) an `object` column. `nil` and `UNDEF` are missing. Arrays become an N-D column only when every group gives one of the same shape, so a list whose length varies from group to group is an `object` column.
+The values the block returns — and those a Proc reduction of `aggregate` returns — become columns typed as [`from_records`](#caframefrom_records) types a record's values: Integers an `int64` column, numbers a `float64` one, Strings a text column (`CAString`), arrays of one shape an N-D column, anything else (`true` / `false`, times) an `object` column. `nil` and `UNDEF` are missing. Arrays become an N-D column only when every group gives one of the same shape, so a list whose length varies from group to group is an `object` column.
 
 The columns are the names any group's Hash has, in the order they first appear. A group whose Hash lacks a name is `UNDEF` in that column, as `from_records` reads a record that lacks a key.
 

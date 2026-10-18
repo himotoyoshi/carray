@@ -407,7 +407,7 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     df["v"][3] = UNDEF
     g = df.group_by("k")
     t = g.table { |f| { "n" => f.nrow, "hi" => f["v"].max, "big" => f.nrow > 1, "s" => "x" } }
-    assert_equal({ "n" => :int64, "hi" => :float64, "big" => :object, "s" => :object }, t.data_types)
+    assert_equal({ "n" => :int64, "hi" => :float64, "big" => :object, "s" => CAString }, t.data_types)
     assert_equal [3.0, 2.0, UNDEF], t["hi"].to_a
     a = g.aggregate("r" => ["v", ->(c) { c.count_not_masked == 0 ? nil : c.max - c.min }])
     assert_equal :float64, a["r"].data_type

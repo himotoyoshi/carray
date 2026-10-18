@@ -67,7 +67,8 @@ class CAFrame
   # them (CAFrame.new and df[name]= given an Array, from_records, the values
   # a group's block or Proc gives).  All-Array cells of equal length -> N-D
   # native column; numeric scalars -> native scalar column (missing ->
-  # UNDEF); anything else -> object column.
+  # UNDEF); Strings -> a text column (CAString), as from_csv reads text;
+  # anything else -> object column.
   def self.build_record_column(values, n)
     values = values.map { |v| UNDEF.equal?(v) ? nil : v }
     present = values.reject(&:nil?)
@@ -75,6 +76,8 @@ class CAFrame
 
     if present.all? { |v| v.is_a?(Array) || v.is_a?(CArray) }
       build_nd_column(values, present, n)
+    elsif present.all? { |v| v.is_a?(String) }
+      CArray.string(values)
     else
       type = numeric_leaf_type(present)
       col = CArray.object(n) { values }

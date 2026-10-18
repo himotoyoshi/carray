@@ -28,7 +28,7 @@ class TestCAFrameConstruction < Test::Unit::TestCase
   def test_types_casts_named_columns
     df = CAFrame.new({ "r" => [1.5, 2.5], "n" => [1, 2], "s" => ["x", "y"] },
                      types: { "r" => :float32, "n" => :int16 })
-    assert_equal({ "r" => :float32, "n" => :int16, "s" => :object }, df.data_types)
+    assert_equal({ "r" => :float32, "n" => :int16, "s" => CAString }, df.data_types)
     assert_equal [1.5, 2.5], df["r"].to_a
   end
 
@@ -968,5 +968,24 @@ class TestCAFrameRowAndFilterMessages < Test::Unit::TestCase
   def test_filter_refuses_an_nd_mask
     e = assert_raise(ArgumentError) { @df.filter { |f| f["w"] > 2 } }
     assert_equal "filter mask has shape [3, 2], expected [3] (one value per row)", e.message
+  end
+end
+
+# A column given as Ruby Strings is a text column, as from_csv reads text,
+# with the String methods; a mix of kinds stays an object column.
+class TestCAFrameStringColumns < Test::Unit::TestCase
+  def test_strings_make_a_text_column
+    df = CAFrame.new("a" => ["x", nil, "y"], "b" => [1, "x", 2])
+    assert_equal({ "a" => CAString, "b" => :object }, df.data_types)
+    assert_equal ["x", UNDEF, "y"], df["a"].to_a
+    df["a"].upcase!
+    assert_equal ["X", UNDEF, "Y"], df["a"].to_a
+  end
+
+  def test_records_and_table_results_are_text_columns
+    df = CAFrame.from_records([{ "s" => "a" }, { "s" => nil }])
+    assert_equal CAString, df.data_types["s"]
+    t = CAFrame.new("k" => [1, 1, 2]).group_by("k").table { |g| { "s" => "n#{g.nrow}" } }
+    assert_equal CAString, t.data_types["s"]
   end
 end
