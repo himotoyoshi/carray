@@ -445,6 +445,11 @@ class CAFrame
     verdicts = {}
     rules.each do |name, rule|
       key = column_name_arg(name, "verify")
+      if @index && key == @axis_name
+        raise ArgumentError,
+              "verify: rule #{key.inspect} has the name of the row axis, " \
+              "which the index has in the result; name the rule otherwise"
+      end
       unless rule.respond_to?(:call)
         raise ArgumentError, "verify: rule #{key.inspect} is not callable (got #{rule.class})"
       end

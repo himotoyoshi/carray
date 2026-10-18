@@ -83,6 +83,13 @@ class TestFrameVerify < Test::Unit::TestCase
     assert_raise(ArgumentError) { df.verify("scalar" => ->(f) { CA_BOOLEAN([true])[0] }) }
   end
 
+  # The result has the frame's index, so a rule cannot take its name.
+  def test_a_rule_named_after_the_row_axis_is_named_as_such
+    df = CAFrame.new({ "a" => CA_INT32([1, 2]) }, index: CA_INT32([1, 2]), axis_name: "t")
+    err = assert_raise(ArgumentError) { df.verify("t" => ->(f) { f["a"] > 1 }) }
+    assert_match(/\Averify: rule "t" has the name of the row axis/, err.message)
+  end
+
   def test_an_error_in_a_rule_passes_through
     assert_raise(KeyError) { frame.verify("missing" => ->(f) { f["nope"] > 0 }) }
   end
