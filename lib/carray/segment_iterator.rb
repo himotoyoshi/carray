@@ -842,8 +842,9 @@ class CASegmentIterator < CAIterator
 
   # Lay a per-cell weight array out in segment-contiguous order (same layout as
   # @grouped), so wsum / wmean can pair each segment's values with its weights.
-  # Weights are coerced to float64; the same counting-sort scatter propagates
-  # the weight mask and skips excluded cells, so wg lines up with @grouped.
+  # Weights are coerced to float64 and gathered through the same permutation
+  # as the values, which carries the weight mask and leaves out the excluded
+  # cells, so wg lines up with @grouped.
   # The weighted kernel reads float64 weights; the per-segment fallback hands
   # them to the core as they are, so an object weight stays exact.
   def scatter_weights (weights, as_float64 = true)
@@ -853,10 +854,10 @@ class CASegmentIterator < CAIterator
             "value.elements (#{codes.elements})"
     end
     wf = as_float64 ? weights.float64 : weights
-    wg = CArray.new(wf.data_type, [grouped.elements], bytes: wf.bytes)
-    codes.send(:__categorical_scatter__, wf.reshape(wf.elements),
-                @offsets.copy, wg, @k)
-    wg
+    wf = wf.reshape(wf.elements)
+    # An empty index into an empty source is out of range, so take the empty
+    # layout directly.
+    grouped.elements > 0 ? wf[perm].copy : wf[0...0].copy
   end
 
   # Map a per-segment index to the flat source address via the

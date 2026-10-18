@@ -1,36 +1,26 @@
 /* ---------------------------------------------------------------------------
 
-  ca_categorical_iterator.c — counting-sort scatter for CACategoricalIterator.
+  ca_categorical_iterator.c — kernels for CACategorical and CACategoricalIterator.
 
-  __categorical_scatter__ lays a flat payload out as a category-contiguous
-  copy in a single pass, driven by the categorical codes and a per-category
-  write cursor (a mutable copy of reduceat_index's segment starts).  No
-  permutation array is built; O(n), stable (ascending scan keeps each
-  category's members in source order).  It is the discrete, value-carrying
-  sibling of histogram_scatter_ki (ext/carray_histogram.c): where the histogram
-  scatters a +1 into counts, this scatters the payload cell into grouped.
+  addresses_by_category orders the cells of a categorical by category, the
+  counting sort behind CACategorical#sort_addr: one pass over the codes
+  writes each cell's address at its category's cursor (a mutable copy of the
+  segment starts), so every cell of category 0 comes first, then 1, ..., in
+  source order within a category (stable). A cell in no category -- a masked
+  code, or a code outside 0...k -- is written in the same pass at a second
+  cursor that starts after the last category, so the excluded cells follow
+  in source order.
 
-  Two masks meet here and are kept distinct:
-    - the CODES mask is authoritative for exclusion — a masked code cell does
-      not join any group (the sentinel value never has to be read; `c < k` is a
-      defensive assert only).
-    - the VALUE mask propagates into grouped, so a group with a masked payload
-      cell reduces as CArray does (the cell is skipped by mask-aware reductions).
+  The output position depends on the code, which the aligned kernel_iterator
+  macros do not model, so the codes are materialised here: ca_attach aliases a
+  contiguous entity and gathers a view.
 
-  The output position is data-dependent (cursor[code]++), which the aligned
-  kernel_iterator macros do not model, so the flat inputs are materialised here:
-  ca_attach aliases a contiguous entity (codes / a contiguous value) and gathers
-  a view.  Codes dispatch on their native integer type (no coercion); the value
-  move is a bytes-wide memcpy (grouped shares the value data type, so no value-type
-  dispatch is needed).
-
-  Surface (private): codes.__categorical_scatter__(value, cursor, grouped, k)
+  Surface (private): codes.addresses_by_category(cursor, k, nvalid)
     self    = codes   (integer, carries the exclusion mask), read flat
-    value   = payload (any data type, may carry a mask), read flat, same length
     cursor  = int64 length-k segment starts (mutated in place, consumed)
-    grouped = pre-allocated contiguous entity of the value data type, length nvalid
     k       = number of categories
-  Returns grouped.
+    nvalid  = number of cells in a category (where the excluded cells start)
+  Returns a new int64 CArray of codes.elements addresses.
 
 --------------------------------------------------------------------------- */
 
@@ -40,82 +30,80 @@
 #include <stdlib.h>   /* qsort */
 #include <math.h>     /* floor */
 
-#define CATEGORICAL_SCATTER_BODY(CODE_T)                                        \
+#define ADDRESSES_BY_CATEGORY_BODY(CODE_T)                                      \
   do {                                                                          \
     const CODE_T *cp = (const CODE_T *) codes->ptr;                             \
     for ( j = 0; j < n; j++ ) {                                                 \
-      if ( cmask && cmask[j] ) continue;          /* excluded by codes mask */  \
       c = (int64_t) cp[j];                                                      \
-      if ( c < 0 || c >= k ) continue;            /* defensive */               \
-      pos = (ca_size_t) cur[c];                                                 \
-      cur[c] = (int64_t) (pos + 1);                                            \
-      memcpy(gp + pos * bytes, vp + j * bytes, (size_t) bytes);                 \
-      if ( vmask && vmask[j] ) gmask[pos] = 1;    /* propagate value mask */    \
+      if ( ( cmask && cmask[j] ) || c < 0 || c >= k ) {                         \
+        if ( tail >= (int64_t) n ) { overrun = 1; break; }                      \
+        out[tail++] = (int64_t) j;              /* in no category */            \
+        continue;                                                               \
+      }                                                                         \
+      if ( cur[c] < 0 || cur[c] >= nvalid ) { overrun = 1; break; }             \
+      out[cur[c]++] = (int64_t) j;                                              \
     }                                                                           \
   } while (0)
 
 static VALUE
-rb_ca_categorical_scatter (VALUE self, VALUE rvalue, VALUE rcursor,
-                           VALUE rgrouped, VALUE rk)
+rb_ca_addresses_by_category (VALUE self, VALUE rcursor, VALUE rk, VALUE rnvalid)
 {
-  CArray     *codes, *value, *cursor, *grouped;
-  int64_t     k, c, *cur;
-  ca_size_t   n, j, pos, bytes;
-  boolean8_t *cmask, *vmask, *gmask = NULL;
-  char       *gp, *vp;
+  CArray     *codes, *cursor, *result;
+  VALUE       rresult;
+  int64_t     k, c, *cur, *out, tail, nvalid;
+  ca_size_t   n, j, dim;
+  int         overrun = 0;
+  boolean8_t *cmask;
 
-  GetCArray(self,     codes);
-  GetCArray(rvalue,   value);
-  GetCArray(rcursor,  cursor);
-  GetCArray(rgrouped, grouped);
-  k = (int64_t) NUM2LL(rk);
+  GetCArray(self,    codes);
+  GetCArray(rcursor, cursor);
+  k      = (int64_t) NUM2LL(rk);
+  nvalid = (int64_t) NUM2LL(rnvalid);
+  n      = codes->elements;
 
-  n     = codes->elements;
-  bytes = value->bytes;
-  if ( value->elements != n ) {
-    rb_raise(rb_eArgError,
-             "__categorical_scatter__: value length %lld != codes length %lld",
-             (long long) value->elements, (long long) n);
+  if ( cursor->data_type != CA_INT64 || cursor->elements != k ||
+       ! ca_is_entity(cursor) ) {
+    rb_raise(rb_eArgError, "addresses_by_category: cursor must be an int64[k] entity");
   }
-  if ( cursor->data_type != CA_INT64 || cursor->elements != k ) {
-    rb_raise(rb_eArgError, "__categorical_scatter__: cursor must be int64[k]");
+  if ( nvalid < 0 || nvalid > (int64_t) n ) {
+    rb_raise(rb_eArgError, "addresses_by_category: nvalid %lld out of 0..%lld",
+             (long long) nvalid, (long long) n);
   }
-  if ( grouped->bytes != bytes ) {
-    rb_raise(rb_eArgError, "__categorical_scatter__: grouped/value data type mismatch");
-  }
-
-  ca_attach_n(2, codes, value);   /* window: detached before each raise inside */
-  cmask = ca_mask_ptr(codes);
-  vmask = ca_mask_ptr(value);
-  cur   = (int64_t *) cursor->ptr;
-  gp    = grouped->ptr;
-  vp    = value->ptr;
-
-  if ( vmask ) {                        /* grouped needs a mask to receive it */
-    ca_create_mask(grouped);
-    gmask = (boolean8_t *) grouped->mask->ptr;
-  }
-
   switch ( codes->data_type ) {
-  case CA_INT8:   CATEGORICAL_SCATTER_BODY(int8_t);   break;
-  case CA_UINT8:  CATEGORICAL_SCATTER_BODY(uint8_t);  break;
-  case CA_INT16:  CATEGORICAL_SCATTER_BODY(int16_t);  break;
-  case CA_UINT16: CATEGORICAL_SCATTER_BODY(uint16_t); break;
-  case CA_INT32:  CATEGORICAL_SCATTER_BODY(int32_t);  break;
-  case CA_UINT32: CATEGORICAL_SCATTER_BODY(uint32_t); break;
-  case CA_INT64:  CATEGORICAL_SCATTER_BODY(int64_t);  break;
-  case CA_UINT64: CATEGORICAL_SCATTER_BODY(uint64_t); break;
+  case CA_INT8: case CA_UINT8: case CA_INT16: case CA_UINT16:
+  case CA_INT32: case CA_UINT32: case CA_INT64: case CA_UINT64:
+    break;
   default:
-    ca_detach(codes);
-    ca_detach(value);
     rb_raise(rb_eCADataTypeError,
-             "__categorical_scatter__: integer codes required (got data_type %d)",
+             "addresses_by_category: integer codes required (got data_type %d)",
              codes->data_type);
   }
 
+  dim     = n;
+  rresult = rb_carray_new(CA_INT64, 1, &dim, 0, NULL);
+  GetCArray(rresult, result);
+  out  = (int64_t *) result->ptr;
+  cur  = (int64_t *) cursor->ptr;
+  tail = nvalid;
+
+  ca_attach(codes);   /* window: nothing below raises */
+  cmask = ca_mask_ptr(codes);
+  switch ( codes->data_type ) {
+  case CA_INT8:   ADDRESSES_BY_CATEGORY_BODY(int8_t);   break;
+  case CA_UINT8:  ADDRESSES_BY_CATEGORY_BODY(uint8_t);  break;
+  case CA_INT16:  ADDRESSES_BY_CATEGORY_BODY(int16_t);  break;
+  case CA_UINT16: ADDRESSES_BY_CATEGORY_BODY(uint16_t); break;
+  case CA_INT32:  ADDRESSES_BY_CATEGORY_BODY(int32_t);  break;
+  case CA_UINT32: ADDRESSES_BY_CATEGORY_BODY(uint32_t); break;
+  case CA_INT64:  ADDRESSES_BY_CATEGORY_BODY(int64_t);  break;
+  case CA_UINT64: ADDRESSES_BY_CATEGORY_BODY(uint64_t); break;
+  }
   ca_detach(codes);
-  ca_detach(value);
-  return rgrouped;
+  if ( overrun ) {
+    rb_raise(rb_eArgError,
+             "addresses_by_category: the cursor and nvalid do not match the codes");
+  }
+  return rresult;
 }
 
 /* ---------------------------------------------------------------------------
@@ -930,7 +918,7 @@ rb_ca_reduceat_wsum_wmean (VALUE self, VALUE roffsets, VALUE rwg,
 
   Not aligned kernel_iterator: output position depends on the codes value
   (data-dependent scatter), so ca_attach materialises the inputs into
-  contiguous flat buffers — same pattern as sibling __categorical_scatter__.
+  contiguous flat buffers — same pattern as sibling addresses_by_category.
 
   Surface (private):
     h.__fiber_scatter_moments__(codes, axis, K, counts_out, sums_out)
@@ -1470,8 +1458,8 @@ rb_ca_fiber_scatter_wsum_wmean (VALUE self, VALUE rcodes, VALUE rweights,
 void
 Init_ca_categorical_iterator (void)
 {
-  rb_define_private_method(rb_cCArray, "__categorical_scatter__",
-                           rb_ca_categorical_scatter, 4);
+  rb_define_private_method(rb_cCArray, "addresses_by_category",
+                           rb_ca_addresses_by_category, 3);
   rb_define_private_method(rb_cCArray, "__fiber_scatter_moments__",
                            rb_ca_fiber_scatter_moments, 7);
   rb_define_private_method(rb_cCArray, "__fiber_scatter_prod__",

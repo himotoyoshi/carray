@@ -85,7 +85,6 @@ CAWindow#__boundary_rule_of_each_axis__
 #     current names (the user's decision: the long names read worse)
 CArray#__bincount_count__
 CArray#__bincount_weighted__
-CArray#__categorical_scatter__
 CArray#__fiber_scatter_moments__
 CArray#__fiber_scatter_prod__
 CArray#__fiber_scatter_wsum_wmean__

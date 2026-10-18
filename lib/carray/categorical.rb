@@ -628,28 +628,9 @@ class CACategorical < CAObject
   #   @return [CArray]
   def sort_addr
     return @sort_addr if @sort_addr
-    n      = elements
-    k      = @labels.size
-    nvalid = category_sizes.sum
-    cur    = reduceat_index.copy                  # segment starts, consumed as cursor
-    flat   = codes.reshape(n)
-    seq    = CArray.int64(n).seq!                 # source indices, scattered as payload
-    out    = CArray.int64(n)
-    if nvalid == n
-      flat.send(:__categorical_scatter__, seq, cur, out, k) # all valid: scatter straight in
-    else
-      if nvalid > 0
-        valid = CArray.int64(nvalid)              # scatter target must be an entity, not a view
-        flat.send(:__categorical_scatter__, seq, cur, valid, k)
-        out[0...nvalid] = valid
-      end
-      # Excluded = every cell the scatter skips: code out of [0, k), OR masked
-      # (a from_codes pre-masked cell keeps a valid code but is excluded). Both
-      # must be caught or the tail slot count would not add up to n - nvalid.
-      excluded = flat.value.ge(k).or(flat.value.lt(0))
-      excluded = excluded.or(flat.is_masked) if flat.has_mask?
-      out[nvalid..-1] = seq[excluded]             # excluded cells, source order
-    end
+    out = codes.reshape(elements).__send__(:addresses_by_category,
+                                           reduceat_index.copy, @labels.size,
+                                           category_sizes.sum)
     @sort_addr = out
     out
   end
