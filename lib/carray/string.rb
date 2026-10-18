@@ -66,4 +66,52 @@ end
 class CAString
   include CArray::StringOperationMixin
   include CArray::StringOperationMixin::Mutable
+
+  # The String operators and the picks by order run on the object storage,
+  # cell by cell, as on any object array.  A String's +, * and % give a
+  # String (or raise), and a pick gives one of the operands, so the result
+  # is text and comes back as a CAString, as the bang forms (add!, mul!)
+  # keep it.  A lazy operand is computed here.
+
+  # Per-cell `String#+`.
+  # @return [CAString] shape and mask carried.
+  def + (other) ; as_text(super) ; end
+  # Per-cell `String#+` (the word form of {#+}).
+  # @return [CAString]
+  def add (other) ; as_text(super) ; end
+  # Per-cell `String#*`.
+  # @return [CAString] shape and mask carried.
+  def * (other) ; as_text(super) ; end
+  # Per-cell `String#*` (the word form of {#*}).
+  # @return [CAString]
+  def mul (other) ; as_text(super) ; end
+  # Per-cell `String#%` (format).
+  # @return [CAString] shape and mask carried.
+  def % (other) ; as_text(super) ; end
+  # Per-cell `String#%` (the word form of {#%}).
+  # @return [CAString]
+  def mod (other) ; as_text(super) ; end
+  # The later String of each cell and `other`, cell by cell.
+  # @return [CAString]
+  def pmax (other) ; as_text(super) ; end
+  # The earlier String of each cell and `other`, cell by cell.
+  # @return [CAString]
+  def pmin (other) ; as_text(super) ; end
+  # Another name of {#pmax} (a String has no NaN to let win).
+  # @return [CAString]
+  def maximum (other) ; as_text(super) ; end
+  # Another name of {#pmin}.
+  # @return [CAString]
+  def minimum (other) ; as_text(super) ; end
+  # Another name of {#pmax}.
+  # @return [CAString]
+  def fmax (other) ; as_text(super) ; end
+  # Another name of {#pmin}.
+  # @return [CAString]
+  def fmin (other) ; as_text(super) ; end
+
+  private def as_text (result)
+    result = result.copy if result.lazy_view?
+    CAString.wrap(result)
+  end
 end

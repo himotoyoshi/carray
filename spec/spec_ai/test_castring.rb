@@ -118,4 +118,23 @@ class TestCAString < Test::Unit::TestCase
     assert_equal "4", s[1, 1]
   end
 
+  # The String operators and the picks by order give text, so they give a
+  # CAString back, as the String methods and the bang forms do.  The
+  # receiver decides: an object array's operator stays an object array.
+  def test_operators_give_castring
+    s = CArray.string(["a", nil])
+    o = CA_OBJECT(["c", "d"])
+    [s + s, s + "x", s.add("x"), s * 2, s.mul(2), s % "x", s.mod("x"),
+     s + o, s + o.lazy, s.pmax("m"), s.pmin(o), s.maximum(o), s.minimum(o),
+     s.fmax(o), s.fmin(o)].each do |r|
+      assert_kind_of CAString, r
+      assert_equal true, r.is_masked[1]
+    end
+    assert_equal ["ac", UNDEF], (s + o).to_a
+    assert_equal ["aa", UNDEF], (s * 2).to_a
+    assert_equal ["A", UNDEF], (s + "").upcase.to_a
+    assert_equal CArray, (o + s).class
+    assert_raise(TypeError) { s + 1 }
+  end
+
 end
