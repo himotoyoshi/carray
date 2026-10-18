@@ -34,6 +34,8 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
      neighbour ("as well", "the producer above") or leave unnamed the
      method, class or keyword it is about. -->
 
+## 3.0.5 (unreleased)
+
 ## 3.0.4
 
 - New: `CAFrame#verify(rules)` judges every row against named rules (each
