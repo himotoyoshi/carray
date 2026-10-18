@@ -17,20 +17,28 @@ class CArray
   #     CArray.string([a, nil, b])              # nil → masked element
   #     CArray.string(other_ca)                 # from a String Face / object / raw fixlen
   #
-  # `nil` entries become masked cells; "" (empty) is a valid distinct value.
-  # A CArray source is normalised through a String Face ({CArray.string_face_of}):
-  # a String Face converts, CA_OBJECT storage wraps, a raw CA_FIXLEN reads as
-  # NUL-stripped strings; a numeric / boolean array is rejected (stringify with
-  # {#format} / {CArray.format}).
+  # A cell of a CAString is a String.  In the Array and block forms `nil`
+  # becomes a masked cell; "" (empty) is a valid distinct value.  Any other
+  # value (a Symbol, a number, a nested Array) is refused: the values are one
+  # cell each, so a CAString of more than one dimension is built from an
+  # object array (`CArray.string(CA_OBJECT(nested))`).
+  # A CArray source is normalised through a String Face: a String Face
+  # converts, CA_OBJECT storage wraps zero-copy (every cell that is not
+  # masked must be a String, `nil` included: mask it instead), a raw
+  # CA_FIXLEN reads as NUL-stripped strings; a numeric / boolean array is
+  # rejected (stringify with {#format} / {CArray.format}).
   # @overload string(values)
   #   Returns a {CAString} wrapping a CA_OBJECT entity of the given values.
   #   @param values [Array<String, nil>] source values.
   #   @return [CAString]
+  #   @raise [TypeError] if a value is neither a String nor `nil`.
   # @overload string(ca)
   #   Returns a {CAString} of the string-bearing CArray `ca`.
   #   @param ca [CArray] a String Face, CA_OBJECT, or raw CA_FIXLEN array.
   #   @return [CAString]
   #   @raise [CArray::DataTypeError] if `ca` is numeric / boolean.
+  #   @raise [TypeError] if a cell of an object array that is not masked is
+  #     not a String.
   # @overload string(n) { |i| ... }
   #   Returns an `n`-element {CAString} filled by the block, following the
   #   arity-0 broadcast convention.
@@ -55,6 +63,12 @@ class CArray
 
     entity = CArray.object(values.size)
     values.each_with_index do |s, i|
+      if s.is_a?(Array)
+        raise TypeError,
+              "CArray.string: value #{i} is an Array; a CAString cell is a " \
+              "String (for a CAString of another shape, give " \
+              "CArray.string an object array: CArray.string(CA_OBJECT(values)))"
+      end
       entity[i] = s.nil? ? UNDEF : s
     end
     CAString.wrap(entity)

@@ -104,6 +104,10 @@ void Init_ca_face (void);
 extern int8_t CA_OBJ_RECORD;
 VALUE   rb_ca_record_get_data_class (CArray *ca);
 
+/* CA_OBJ_STRING identifies CAString, read by the store path
+   (carray_access.c) to send an array source through the write hook. */
+extern int8_t CA_OBJ_STRING;
+
 /* -- Convenience macro for view-creating method deployment --
    Insert at the tail of each view-creating Ruby method (= rb_ca_transpose
    / rb_ca_reshape / etc.) just before return. `ca` is self's CArray *,

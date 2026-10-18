@@ -1648,6 +1648,14 @@ ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
       return ca_face_convert_store_rval(self, ca,
                                         rb_funcall(val, rb_intern("to_a"), 0));
     }
+    /* A CAString takes Strings: an array that is not a CAString goes in as
+       its values, each through the write hook (a text Face gives Strings,
+       an object or numeric array is checked cell by cell); masked cells
+       come back as UNDEF and stay masked. */
+    if ( ca->obj_type == CA_OBJ_STRING && cval->obj_type != CA_OBJ_STRING ) {
+      return ca_face_convert_store_rval(self, ca,
+                                        rb_funcall(val, rb_intern("to_a"), 0));
+    }
     /* Face RHS: reconcile to self's unit and descend to storage.  Mirror of
        the scalar path (ca_face_element_to_storage) for a bulk CArray source.
        Guarded on self having to_comparable so a Face without a reconcile

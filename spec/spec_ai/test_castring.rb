@@ -137,4 +137,38 @@ class TestCAString < Test::Unit::TestCase
     assert_raise(TypeError) { s + 1 }
   end
 
+  # A cell of a CAString is a String, through every way in: the builders,
+  # CAString.wrap, and a store.  UNDEF masks a cell; nil does so only in the
+  # builder from Ruby values.
+  def test_cells_are_strings
+    assert_raise(TypeError) { CArray.string(["a", 1]) }
+    assert_raise(TypeError) { CArray.string([:a]) }
+    assert_raise_message(/CA_OBJECT/) { CArray.string([["a", "b"], ["c", "d"]]) }
+    assert_raise(TypeError) { CArray.string(2) { |i| i } }
+    assert_raise(TypeError) { CArray.string(CA_OBJECT(["a", nil])) }
+    assert_raise(TypeError) { CAString.wrap(CA_OBJECT([1])) }
+    o = CA_OBJECT(["a", 5])
+    o[1] = UNDEF
+    assert_equal ["a", UNDEF], CArray.string(o).to_a
+    assert_equal [2, 2], CArray.string(CA_OBJECT([["a", "b"], ["c", "d"]])).shape
+    assert_equal ["a", UNDEF], CArray.string(["a", nil]).to_a
+
+    fresh = -> { CArray.string(["a", "b"]) }
+    [->(s) { s[0] = 1 }, ->(s) { s[0] = nil }, ->(s) { s[] = :x },
+     ->(s) { s.fill(1) }, ->(s) { s[] = [3, 4] }, ->(s) { s[] = CA_OBJECT([1, 2]) },
+     ->(s) { s[] = CA_INT32([1, 2]) }, ->(s) { s[CA_BOOLEAN([1, 0])] = 3 }].each do |store|
+      assert_raise(TypeError) { store.(fresh.()) }
+    end
+    s = fresh.()
+    s[0] = UNDEF
+    assert_equal [UNDEF, "b"], s.to_a
+    s = fresh.()
+    s[] = ["x", UNDEF]
+    assert_equal ["x", UNDEF], s.to_a
+    s = fresh.()
+    s[] = CArray.const_string(["p", "q"])
+    assert_equal ["p", "q"], s.to_a
+    assert_equal ["-", "a"], fresh.().shift(1, fill_value: "-").to_a
+  end
+
 end

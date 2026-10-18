@@ -76,7 +76,7 @@ const rb_data_type_t castring_data_type = {
     .flags = RUBY_TYPED_FREE_IMMEDIATELY
 };
 
-static int8_t CA_OBJ_STRING;
+int8_t CA_OBJ_STRING;     /* non-static: read by the store path in carray_access.c */
 static VALUE rb_cCAString;
 
 /* ------------------------------------------------------------------- */
@@ -198,6 +198,69 @@ ca_operation_function_t ca_string_func = {
 
 /* ------------------------------------------------------------------- */
 
+/* A CAString cell is a String; UNDEF (a masked cell) is no value.  Refuse
+   anything else, naming what it is, so a cell of a CAString always answers
+   the String operations. */
+NORETURN(static void ca_string_refuse_cell (VALUE v, const char *where));
+
+static void
+ca_string_refuse_cell (VALUE v, const char *where)
+{
+  if ( NIL_P(v) ) {
+    rb_raise(rb_eTypeError,
+             "%s is nil, not a String (a CAString holds Strings; "
+             "UNDEF masks a cell)", where);
+  }
+  rb_raise(rb_eTypeError,
+           "%s is of class %s, not a String (a CAString holds Strings; "
+           "UNDEF masks a cell)", where, rb_obj_classname(v));
+}
+
+/* Every cell of `parent` that is not masked is a String. */
+static void
+ca_string_check_cells (VALUE parent_val, CArray *parent)
+{
+  ca_size_t i;
+  char where[64];
+  if ( ca_is_entity(parent) && parent->ptr ) {
+    VALUE *p = (VALUE *) parent->ptr;
+    boolean8_t *m = ( parent->mask && parent->mask->ptr )
+                    ? (boolean8_t *) parent->mask->ptr : NULL;
+    for (i = 0; i < parent->elements; i++) {
+      if ( m && m[i] ) continue;
+      if ( ! RB_TYPE_P(p[i], T_STRING) ) {
+        snprintf(where, sizeof(where), "cell %" PRId64, (int64_t) i);
+        ca_string_refuse_cell(p[i], where);
+      }
+    }
+  }
+  else {
+    volatile VALUE list =
+      rb_funcall(rb_funcall(parent_val, rb_intern("flatten"), 0),
+                 rb_intern("to_a"), 0);
+    long n = RARRAY_LEN(list), j;
+    for (j = 0; j < n; j++) {
+      VALUE v = rb_ary_entry(list, j);
+      if ( v == CA_UNDEF ) continue;
+      if ( ! RB_TYPE_P(v, T_STRING) ) {
+        snprintf(where, sizeof(where), "cell %ld", j);
+        ca_string_refuse_cell(v, where);
+      }
+    }
+  }
+}
+
+/* The write hook: a value stored into a CAString is a String. */
+static VALUE
+ca_string_element_to_storage (VALUE self, VALUE v)
+{
+  (void) self;
+  if ( ! RB_TYPE_P(v, T_STRING) ) {
+    ca_string_refuse_cell(v, "a value stored into a CAString");
+  }
+  return v;
+}
+
 /* CAString.wrap(object_array) — zero-copy Face wrap of a CA_OBJECT array */
 VALUE
 rb_ca_string_wrap (VALUE parent_val)
@@ -209,6 +272,8 @@ rb_ca_string_wrap (VALUE parent_val)
   rb_check_carray_object(parent_val);
   TypedData_Get_Struct(parent_val, CArray, &carray_data_type, parent);
 
+  ca_string_setup(NULL, parent);
+  ca_string_check_cells(parent_val, parent);
   ca  = ca_string_new(parent);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, parent_val);
@@ -264,6 +329,9 @@ Init_ca_obj_string (void)
   rb_define_method(rb_cCAString, "initialize_copy",
                                  rb_ca_string_initialize_copy, 1);
   rb_define_singleton_method(rb_cCAString, "wrap", rb_ca_string_wrap_method, 1);
+
+  ca_face_register_element_to_storage(CA_OBJ_STRING,
+                                      ca_string_element_to_storage);
 
   /* A cell is the String itself, so the Face is the same over any parent:
      CAStack / CAMeld / concatenate can carry it (unlike CAConstString, whose
