@@ -94,6 +94,12 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     end
   end
 
+  def test_filter_names_the_type_the_block_gave
+    grp = CAFrame.new("g" => CA_INT32([1, 1, 2]), "v" => CA_FLOAT64([1, 2, 3])).group_by("g")
+    err = assert_raise(ArgumentError) { grp.filter { |x| x.mean("v") } }
+    assert_match(/\(got a float64 CArray\)/, err.message)
+  end
+
   def test_table_g_is_view_frame
     seen = nil
     @df.group_by("station").table { |g| seen = g; { "n" => g.nrow } }

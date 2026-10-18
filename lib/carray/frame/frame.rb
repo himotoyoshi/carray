@@ -411,7 +411,7 @@ class CAFrame
     mask = yield(self)
     unless mask.is_a?(CArray) && mask.data_type == :boolean
       raise ArgumentError,
-            "filter block must return a boolean CArray (got #{mask.class})"
+            "filter block must return a boolean CArray (got #{mask.is_a?(CArray) ? "a #{CArray::Inspector.type_label(mask)} CArray" : mask.class})"
     end
     unless mask.shape == [@nrow]
       raise ArgumentError,
