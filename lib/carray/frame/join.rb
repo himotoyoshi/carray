@@ -519,8 +519,8 @@ class CAFrame
   # categorical with the labels of both, the left's first), and keys of
   # two different Faces, or of a Face and a plain array, are objects.
   private def joined_key_kind(col, lkey, rkey)
-    lface = lkey.face? ? lkey.class : nil
-    rface = rkey.face? ? rkey.class : nil
+    lface = lkey.class if lkey.face?
+    rface = rkey.class if rkey.face?
     return col if lface.nil? && rface.nil?
     if lface == rface
       return col unless lface <= CACategorical
