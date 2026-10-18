@@ -726,8 +726,20 @@ class GroupedFrame
   end
 
   # The first row of each group, in code order.
+  # With few groups each row's number is folded into its group's slot by the
+  # smallest, which needs no sort of the rows (a numeric column then reduces
+  # without one too); a row in no group (masked code) is in no slot, and a
+  # group without rows keeps no row (UNDEF). With more groups the columns
+  # are gathered through the sort anyway, so the first rows are read off it.
   private def first_rows
-    group_perm[group_bounds[0...ngroup]]
+    if ngroup > CACategoricalIterator::SCATTER_CATEGORIES_MAX
+      return group_perm[group_bounds[0...ngroup]]
+    end
+    n     = @cat.elements
+    first = CArray.int64(ngroup).fill(n)
+    first.scatter_min!(@cat.codes, CArray.int64(n).seq!)
+    first[first.eq(n)] = UNDEF if ngroup > 0
+    first
   end
 
   private def group_address(k)

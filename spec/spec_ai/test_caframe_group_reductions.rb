@@ -110,4 +110,22 @@ class TestCAFrameGroupReductions < Test::Unit::TestCase
     assert_kind_of CATime, got
     assert_equal [UNDEF] * 3, got.to_a
   end
+
+  # A group's key in the result is the key at the group's first row, which
+  # shows when equal keys differ in form: -0.0 and 0.0 are one group.
+  def test_the_key_of_a_group_is_its_first_rows
+    df = CAFrame.new("k" => CA_FLOAT64([-0.0, 1.0, 0.0, 1.0]), "x" => CA_FLOAT64([1, 2, 3, 4]))
+    assert_equal [-Float::INFINITY, 1.0], df.group_by("k").sum.index.to_a.map { |v| 1.0 / v }
+    df = CAFrame.new("k" => CA_FLOAT64([0.0, 1.0, -0.0, 1.0]), "x" => CA_FLOAT64([1, 2, 3, 4]))
+    assert_equal [Float::INFINITY, 1.0], df.group_by("k").sum.index.to_a.map { |v| 1.0 / v }
+  end
+
+  def test_the_key_columns_of_a_group_are_its_first_rows
+    k = CA_FLOAT64([1.0, -0.0, 0.0, 0.0])
+    k[0] = UNDEF                                   # a row in no group comes first
+    df = CAFrame.new("a" => k, "b" => CA_INT64([1, 1, 1, 1]), "x" => CA_FLOAT64([1, 2, 3, 4]))
+    got = df.group_by("a", "b").sum
+    assert_equal [-Float::INFINITY], got["a"].to_a.map { |v| 1.0 / v }
+    assert_equal [9.0], got["x"].to_a
+  end
 end

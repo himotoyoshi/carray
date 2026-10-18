@@ -108,10 +108,9 @@ class CACategoricalIterator < CASegmentIterator
       nvalid    = counts.sum
       @offsets  = cat.reduceat_index                # cached segment STARTS (int64[k])
       @bounds   = CArray.segment_offsets(lengths: @elements)  # every boundary (int64[k+1])
-      # Group-major source indices = the valid prefix of the cached sort_addr.
-      # With no classified cell the prefix is empty (and slicing a length-0
-      # sort_addr would be out of range), so take the empty permutation directly.
-      @perm     = nvalid > 0 ? cat.sort_addr[0...nvalid] : CArray.int64(0)
+      # The group-major source indices (#perm) are taken from the cached
+      # sort_addr when first asked for.
+      @nvalid   = nvalid
       @codes    = cat.codes.reshape(cat.elements)   # flat codes view (map re-walk / weights)
       # Gather value into category-contiguous order via the cached permutation
       # and materialise (the reduceat kernels read the grouped buffer's raw ptr,
@@ -130,10 +129,9 @@ class CACategoricalIterator < CASegmentIterator
       flat = value.reshape(value.elements)
       if @k <= SCATTER_CATEGORIES_MAX && kernel_reads?(value.data_type)
         @as_built = flat.copy
-        @nvalid   = nvalid
         @empty    = @as_built[0...0]
       else
-        @grouped  = nvalid > 0 ? flat[@perm].copy : flat[0...0].copy
+        @grouped  = nvalid > 0 ? flat[perm].copy : flat[0...0].copy
         @empty    = @grouped[0...0]       # an empty category is the values' own kind
       end
     else
@@ -318,7 +316,13 @@ class CACategoricalIterator < CASegmentIterator
 
   # Both are built with the grouping plan, and only on the flat path; the
   # per-fiber form has neither and must not build a segment's.
+  # Group-major source indices = the valid prefix of the cached sort_addr.
+  # With no classified cell the prefix is empty (and slicing a length-0
+  # sort_addr would be out of range), so take the empty permutation directly.
   def perm
+    if @nvalid && ! @perm
+      @perm = @nvalid > 0 ? @cat.sort_addr[0...@nvalid] : CArray.int64(0)
+    end
     @perm
   end
 
@@ -330,7 +334,7 @@ class CACategoricalIterator < CASegmentIterator
   # built, the first time a reduction asks for it.
   def grouped
     if @as_built && ! @grouped
-      @grouped = @nvalid > 0 ? @as_built[@perm].copy : @as_built[0...0].copy
+      @grouped = @nvalid > 0 ? @as_built[perm].copy : @as_built[0...0].copy
     end
     super
   end
@@ -430,7 +434,7 @@ class CACategoricalIterator < CASegmentIterator
   BAND_ONLY_KEYS = { sum: [:sum], mean: [:sum, :count], min: [:min],
                      max: [:max], minmax: [:min, :max] }.freeze
   Ractor.make_shareable(BAND_ONLY_KEYS)
-  private_constant :BAND_ONLY_KEYS, :SCATTER_CATEGORIES_MAX
+  private_constant :BAND_ONLY_KEYS
 
   def band_only_moments (h, axis, band, op)
     nb      = band.inject(1, :*)
