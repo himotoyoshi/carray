@@ -220,4 +220,26 @@ class TestCAString < Test::Unit::TestCase
     end
   end
 
+  def test_one_cell_does_not_take_an_array
+    [->(x) { x[1] = ["q"] }, ->(x) { x[1] = [["q", "r"]] },
+     ->(x) { CArray.stack([x, x])[0, 1] = ["q"] },
+     ->(x) { CArray.meld(x, x)[1] = ["q"] }].each do |store|
+      x = CArray.string(%w[a b c d])
+      assert_raise(TypeError) { store.(x) }
+      assert_equal %w[a b c d], x.to_a
+    end
+  end
+
+  def test_an_object_array_source_is_stored_by_its_shape
+    x = CArray.string(%w[a b c d])
+    x[] = CA_OBJECT([["p"], ["q"], ["r"], ["s"]])
+    assert_equal %w[p q r s], x.parent.to_a
+    m = CA_OBJECT(%w[p q r s])
+    m[1] = UNDEF
+    x[] = m
+    assert_equal ["p", UNDEF, "r", "s"], x.to_a
+    assert_raise(TypeError) { x[] = CA_OBJECT(["p", 1, "r", "s"]) }
+    assert_raise(ArgumentError) { x[] = CA_OBJECT(%w[p q r]) }
+  end
+
 end

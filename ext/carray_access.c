@@ -1648,11 +1648,20 @@ ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
       return ca_face_convert_store_rval(self, ca,
                                         rb_funcall(val, rb_intern("to_a"), 0));
     }
-    /* A CAString takes Strings: an array that is not a CAString goes in as
-       its values, each through the write hook (a text Face gives Strings,
-       an object or numeric array is checked cell by cell); masked cells
-       come back as UNDEF and stay masked. */
+    /* A CAString takes Strings.  A text Face goes in as the CAString its
+       to_string gives, and an object array as itself wrapped in a CAString,
+       which checks every cell that is not masked; either keeps its shape,
+       so it meets the shape rule of a store as an object array would.  Any
+       other array goes in as its values, each through the write hook. */
     if ( ca->obj_type == CA_OBJ_STRING && cval->obj_type != CA_OBJ_STRING ) {
+      if ( ca_is_face(cval) && rb_respond_to(val, rb_intern("to_string")) ) {
+        return ca_face_convert_store_rval(self, ca,
+                                          rb_funcall(val, rb_intern("to_string"), 0));
+      }
+      if ( ! ca_is_face(cval) && cval->data_type == CA_OBJECT ) {
+        return ca_face_convert_store_rval(self, ca,
+                 rb_funcall(rb_obj_class(self), rb_intern("wrap"), 1, val));
+      }
       return ca_face_convert_store_rval(self, ca,
                                         rb_funcall(val, rb_intern("to_a"), 0));
     }
@@ -1772,6 +1781,16 @@ rb_ca_store_method (int argc, VALUE *argv, VALUE self)
   dest = self;
   if ( converted && ca_is_face(ca) && ! rb_obj_is_carray(rval) ) {
     dest = rb_ca_strip_face_value(self);
+  }
+
+  /* One cell of a CAString holds a String.  Stored into the object storage,
+     a Ruby Array would become the cell's value, which a plain object array
+     allows. */
+  if ( ca->obj_type == CA_OBJ_STRING && TYPE(rval) == T_ARRAY &&
+       ( info.type == CA_REG_ADDRESS || info.type == CA_REG_POINT ) ) {
+    rb_raise(rb_eTypeError,
+             "[]=: an Array is not a String (one cell of a CAString holds "
+             "a String; UNDEF masks a cell)");
   }
 
   switch ( info.type ) {
