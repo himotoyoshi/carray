@@ -18,30 +18,31 @@ class CAFrame
   def append(name, col, before: nil, after: nil)
     key = column_name_arg(name, "append")
     ca  = coerce_column(col)
-    if before && after
+    unless before.nil? || after.nil?
       raise ArgumentError, "append: give before: or after:, not both"
     end
-    anchor = before || after
+    # Checked here: the new frame would take N from whichever witness comes
+    # first, and blame the frame's own column for the new one's length.
+    # Without another column or an index, the column is the only witness.
+    if ((@columns.keys - [key]).any? || @index) && ca.shape[0] != @nrow
+      raise ArgumentError,
+            "append: column #{key.inspect} has axis-0 length #{ca.shape[0]}, expected #{@nrow}"
+    end
+    anchor = before.nil? ? after : before
     return rebuild(@columns.merge(key => ca)) if anchor.nil?
 
     anchor = column_key(anchor, "append")
     unless @columns.key?(anchor)
-      raise KeyError, "append: no column #{anchor.inspect} to put #{key.inspect} #{before ? "before" : "after"}"
+      raise KeyError, "append: no column #{anchor.inspect} to put #{key.inspect} #{before.nil? ? "after" : "before"}"
     end
     return rebuild(@columns.merge(key => ca)) if anchor == key
 
-    # Checked here: the new frame would take N from whichever column comes
-    # first, and blame the frame's own column for the new one's length.
-    if ca.shape[0] != @nrow
-      raise ArgumentError,
-            "column #{key.inspect} has axis-0 length #{ca.shape[0]}, expected #{@nrow}"
-    end
     cols = {}
     @columns.each do |k, v|
       next if k == key
-      cols[key] = ca if before && k == anchor
+      cols[key] = ca if !before.nil? && k == anchor
       cols[k] = v
-      cols[key] = ca if after && k == anchor
+      cols[key] = ca if !after.nil? && k == anchor
     end
     rebuild(cols)
   end
