@@ -34,10 +34,12 @@ class TestMeldFace < Test::Unit::TestCase
   def test_the_refusal_names_the_way_out
     a = CArray.const_string(%w[alpha beta])
     err = assert_raise(ArgumentError) { CArray.meld(a, CArray.const_string(%w[g])) }
-    assert_match(/\.parent/, err.message)
-    # and the way out works
-    welded = CArray.meld(a.parent, CArray.const_string(%w[g]).parent)
-    assert_equal 3, welded.elements
+    assert_match(/#to_string/, err.message)
+    # The storage of a const string is ranges into a buffer of its own, so
+    # the message does not offer it; the way out keeps the strings.
+    assert_no_match(/\.parent/, err.message)
+    welded = CArray.meld(a.to_string, CArray.const_string(%w[g]).to_string)
+    assert_equal %w[alpha beta g], welded.to_a
   end
 
   def test_caframe_meld_is_covered_by_the_same_check

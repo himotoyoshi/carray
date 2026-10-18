@@ -120,7 +120,8 @@ class CArray::Serializer   # :nodoc:
   #     `Marshal.dump(ca)` instead), or carries a data_class the
   #     v1.0 flat-primitive schema cannot express.
   #   @raise [TypeError] when `ca` is a Face other than a record (save
-  #     its storage with `.parent`).
+  #     its storage through the Face's own accessor, such as `#ticks` or
+  #     `#codes`, or its values with `Marshal.dump(ca.to_type(:object))`).
   def save (ca, endian: nil)
     if ca.data_type == :object
       raise ArgumentError,
@@ -132,9 +133,12 @@ class CArray::Serializer   # :nodoc:
     # would carry its storage without what makes it the Face (a unit, the
     # string buffer, the labels), and load could not put that back.
     if ca.face? && !ca.is_a?(CARecord)
+      storage = ca.__send__(:face_storage_method)
       raise TypeError,
             "CArray.save cannot carry a #{ca.class} yet (its Face would be " \
-            "lost); save its storage with .parent"
+            "lost); " +
+            (storage ? "save its storage, which ##{storage} gives, or " : "") +
+            "keep its values with Marshal.dump(ca.to_type(:object))"
     end
 
     file_endian = endian || CArray.endian
@@ -676,9 +680,11 @@ end
     # @return [String]
     def _dump (_level)
       if face?
+        storage = face_storage_method
         raise TypeError,
               "Marshal cannot carry a #{self.class} yet (its Face would be lost); " \
-              "dump its storage with .parent"
+              "dump its values with to_type(:object)" +
+              (storage ? ", or its storage, which ##{storage} gives" : "")
       end
       Marshal.dump(CArray.instance_method(:marshal_dump).bind_call(self))
     end

@@ -719,6 +719,16 @@ ca_face_storage_method (VALUE face)
   return NULL;
 }
 
+/* ca.face_storage_method -- the name of the method that gives the storage
+   under ca (ca_face_storage_method), as a String, or nil.  For refusals
+   written in Ruby. */
+static VALUE
+rb_ca_face_storage_method (VALUE self)
+{
+  const char *name = ca_face_storage_method(self);
+  return name ? rb_str_new_cstr(name) : Qnil;
+}
+
 /* Refuse to order (or, with verb "count", to count by value) a Face whose
    storage does not hold its values in order, pointing at what does: its
    values, or its storage when that is what is meant. */
@@ -1040,7 +1050,7 @@ ca_face_list_class (VALUE list, const char *who)
 {
   long n = RARRAY_LEN(list), i;
   int any_face = 0, all_face = 1;
-  VALUE face_class = Qnil;
+  VALUE face_class = Qnil, face = Qnil;
   CArray *ref = NULL;
 
   for ( i = 0; i < n; i++ ) {
@@ -1052,6 +1062,7 @@ ca_face_list_class (VALUE list, const char *who)
     any_face = 1;
     if ( NIL_P(face_class) ) {
       face_class = rb_obj_class(p);
+      face = p;
       ref = ca;
     }
     else if ( rb_obj_class(p) != face_class ) {
@@ -1060,19 +1071,28 @@ ca_face_list_class (VALUE list, const char *who)
   }
   if ( ! any_face ) return Qnil;
   if ( ! all_face ) {
+    const char *storage = ca_face_storage_method(face);
+    if ( storage ) {
+      rb_raise(rb_eArgError,
+               "%s: cannot mix Face and non-Face arrays, or arrays of "
+               "different Face classes; convert them first to one Face "
+               "class or to no Face, or combine their storage (#%s gives "
+               "the storage of a %s)",
+               who, storage, rb_obj_classname(face));
+    }
     rb_raise(rb_eArgError,
              "%s: cannot mix Face and non-Face arrays, or arrays of "
-             "different Face classes; convert them to one Face class, or "
-             "none, first, or take .parent of each to combine the storage",
+             "different Face classes; convert them first to one Face "
+             "class or to no Face",
              who);
   }
   if ( n > 1 && ! ca_face_state_portable(ref->obj_type, face_class) ) {
     rb_raise(rb_eArgError,
              "%s: %s state is not portable across several arrays (each "
              "keeps its values in storage of its own); convert them first "
-             "(a CAConstString with to_string), or take .parent of each to "
-             "combine the storage",
-             who, rb_class2name(face_class));
+             "(%s)",
+             who, rb_class2name(face_class),
+             ca_face_conversion_hint(face));
   }
   for ( i = 1; i < n; i++ ) {
     VALUE p = rb_ary_entry(list, i);
@@ -1264,4 +1284,6 @@ Init_ca_face (void)
                            rb_ca_face_storage, 0);
   rb_define_private_method(rb_cCArray, "reconcile_operand",
                            rb_ca_reconcile_operand, 2);
+  rb_define_private_method(rb_cCArray, "face_storage_method",
+                           rb_ca_face_storage_method, 0);
 }

@@ -56,8 +56,11 @@ class CAFrame
       # The core names the conversion as an array method; in a frame it is
       # written with sort_by.
       reason = "#{reason.split(";").first}; sort by its values with " \
-               "sort_by { |f| f[#{name.inspect}].to_type(:object) }, or by its " \
-               "storage with sort_by { |f| f[#{name.inspect}].parent }"
+               "sort_by { |f| f[#{name.inspect}].to_type(:object) }"
+      if (storage = col.__send__(:face_storage_method))
+        reason += ", or by its storage with " \
+                  "sort_by { |f| f[#{name.inspect}].#{storage} }"
+      end
     end
     raise e.class, "sort_by_key: the column #{name.inspect} cannot be sorted: #{reason}"
   end
