@@ -303,6 +303,9 @@ class CAFrame
   # keys: the nearest by +lkey+ / +rkey+ among the right rows with the
   # same code.
   private def join_asof_by(lkey, rkey, lcode, rcode, k, direction, tolerance)
+    # direction: and tolerance: are checked once here, on no rows: the
+    # loop below meets them only for a group both frames have.
+    lkey[0...0].locate_nearest_addr(rkey[0...0], direction: direction, tolerance: tolerance)
     addr = CArray.int64(lkey.elements).fill(UNDEF)
     lrows, lstart, lcount = join_code_runs(lcode, k)
     rrows, rstart, rcount = join_code_runs(rcode, k)
