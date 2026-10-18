@@ -57,6 +57,25 @@ class TestFrameValueTyping < Test::Unit::TestCase
     end
   end
 
+  # A common data type that would change a cell's value is not used:
+  # the column is typed by its values, as Ruby values are.
+  CELLS_A_COMMON_TYPE_WOULD_CHANGE = {
+    [CA_INT64([-5]), CA_UINT64([3])]      => [:int64, [[-5], [3]]],
+    [CA_UINT8([200]), CA_INT8([-3])]      => [:int64, [[200], [-3]]],
+    [CA_INT32([-7]), CA_UINT32([4e9])]    => [:int64, [[-7], [4_000_000_000]]],
+    [CA_UINT64([2**63]), CA_INT8([-1])]   => [:object, [[2**63], [-1]]],
+  }.freeze
+
+  def test_a_common_type_that_changes_a_value_is_not_used
+    CELLS_A_COMMON_TYPE_WOULD_CHANGE.each do |v, (type, values)|
+      ENTRIES.each do |entry, make|
+        col = make.(v)
+        assert_equal type, col.data_type, "#{entry} #{v.inspect}"
+        assert_equal values, col.to_a, "#{entry} #{v.inspect}"
+      end
+    end
+  end
+
   def test_nil_and_undef_are_a_missing_cell
     ENTRIES.each do |entry, make|
       assert_equal [1, UNDEF], make.([1, nil]).to_a, entry

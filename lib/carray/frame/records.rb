@@ -142,9 +142,14 @@ class CAFrame
     nested = values.map { |v| v.nil? ? blank : undef_to_nil(v.is_a?(CArray) ? v.to_a : v) }
     leaves = nested.flatten.compact
     # Cells given as numeric CArrays keep their data type, the one the
-    # cells have in common; Ruby values are typed by their leaves.
-    type = if present.all? { |v| v.is_a?(CArray) && !v.face? && v.numeric? }
-             CArray.result_type(*present)
+    # cells have in common, when that type holds every cell's values;
+    # otherwise (int64 beside uint64, a large int64 beside float32), and
+    # for Ruby values, the column is typed by its leaves.
+    common = if present.all? { |v| v.is_a?(CArray) && !v.face? && v.numeric? }
+               CArray.result_type(*present)
+             end
+    type = if common && present.all? { |v| holds_values?(v, common) }
+             common
            elsif leaves.empty?
              nil
            else
@@ -179,6 +184,16 @@ class CAFrame
   # does an Integer an int64 cannot hold: it is kept as it is, not refused.
   INT64_RANGE = (-2**63..2**63 - 1)
   private_constant :INT64_RANGE
+
+  # Whether converting the numeric CArray +cell+ to +data_type+ keeps every
+  # value (a NaN stays a NaN).
+  def self.holds_values?(cell, data_type)
+    return true if cell.data_type == data_type
+    cell.to_type(data_type).to_a.flatten.zip(cell.to_a.flatten).all? do |a, b|
+      a == b || (a.respond_to?(:nan?) && b.respond_to?(:nan?) && a.nan? && b.nan?)
+    end
+  end
+  private_class_method :holds_values?
 
   def self.numeric_leaf_type(values)
     return nil if values.any? { |v| v.is_a?(Integer) && !INT64_RANGE.cover?(v) }
