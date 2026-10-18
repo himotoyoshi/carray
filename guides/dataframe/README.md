@@ -26,8 +26,9 @@ sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
 
 ## Reading order
 
-The [Introduction](introduction.md) describes what a frame is, lists what you can do with one, and collects a few points of how frames behave that come up throughout. Chapter 1 then takes you through a whole small analysis, from reading a file to writing a summary, so you see the pieces together before each is explained.
+Read the Introduction first. It describes what a frame is, lists what you can do with one, and collects a few points of how frames behave that the later chapters take as known. Chapter 1 then takes you through a whole small analysis, from reading a file to writing a summary, so you see the pieces together before each is explained.
 
+0. [Introduction](introduction.md)
 1. [A first analysis](01_first_analysis.md)
 2. [Building a frame](02_building_frames.md)
 3. [Reading CSV files](03_reading_csv.md)
