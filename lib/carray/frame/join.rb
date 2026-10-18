@@ -115,9 +115,9 @@ class CAFrame
   # Conform every column to an externally supplied reference key set (the
   # asymmetric sibling of +join+; pandas +reindex+). Given a +reference+ array
   # of key values, each column is gathered onto it by exact key match
-  # (+locate_addr+): the aligned key column (or index) becomes the reference
-  # itself, and a reference key absent from the source comes back UNDEF in
-  # every other column.
+  # (+locate_addr+): the aligned key column (or index) holds a copy of the
+  # reference, with the key's attributes, and a reference key absent from
+  # the source comes back UNDEF in every other column.
   #
   # CAFrame measures no interval and generates nothing -- the caller owns the
   # reference. This is the primitive for reindexing to a caller-built axis
@@ -143,10 +143,15 @@ class CAFrame
             "align: the reference has shape #{ref.shape.inspect}; give one key value per row of the result"
     end
     addr = ref.locate_addr(keys)
+    # The result's keys are the reference's values, taken as they are now
+    # and shown with the key's attributes; the caller's array is left as
+    # it is.
+    ref = CAFrame.__send__(:key_labels, keys, reference.is_a?(CArray) ? ref.copy : ref)
 
     cols = {}
     column_names.each { |name| cols[name] = project_rows(self[name], addr) }
     if on_index
+      # key-labels: ref was given the key's attributes above
       CAFrame.new(cols, axis_name: key, index: ref)
     else
       cols[key] = ref

@@ -1,16 +1,17 @@
 # Lint: an index a CAFrame verb makes from a key column -- group_by's single
 # key, resample's bins, pivot's sorted keys -- is given the key's
 # attributes by one part, CAFrame.key_labels (lib/carray/frame/frame.rb).
-# resample had built its index by hand and left them behind.  In group.rb
-# and reshape.rb, a GroupedFrame index or a key's sorted distinct values
+# resample had built its index by hand and left them behind.  In group.rb,
+# reshape.rb, join.rb (align's reference) and windows.rb (the at: points),
+# a GroupedFrame index or a key's sorted distinct values
 # made without the part is a copy; a line that is not an index from a key
 # says so with `key-labels:` on the line or the line above.
 #
 # Run via `rake frame_key_labels_check`, or `ruby utils/check_frame_key_labels.rb`.
 
 ROOT = File.expand_path("..", __dir__)
-FILES = %w[group.rb reshape.rb]
-RULE = /\bunique\(|GroupedFrame\.new\(.*\bindex:|@index\s*=\s*index\b/
+FILES = %w[group.rb reshape.rb join.rb windows.rb]
+RULE = /\bunique\(|GroupedFrame\.new\(.*\bindex:|@index\s*=\s*index\b|\bindex:\s*(?:ref|@at)\b/
 
 found = []
 FILES.each do |base|

@@ -1336,7 +1336,7 @@ obs.join_asof(radar, on: "time", by: "station", tolerance: "10 minutes")
 
 ### `align` — conform to a reference key set
 
-`align(key, reference)` conforms every column to a **reference array of key values that you supply** — the one-sided sibling of `join` (pandas `reindex`). Each column is gathered onto the reference by exact key match; the key column (or the index) **becomes** the reference, and a reference key absent from the frame comes back as a row that has only its key, `UNDEF` everywhere else.
+`align(key, reference)` conforms every column to a **reference array of key values that you supply** — the one-sided sibling of `join` (pandas `reindex`). Each column is gathered onto the reference by exact key match; the key column (or the index) **becomes** the reference's values, and a reference key absent from the frame comes back as a row that has only its key, `UNDEF` everywhere else.
 
 `align` measures no interval and generates nothing — you build the reference axis: a complete time grid, a canonical station list, a master key set. That is how gaps in a series become visible as rows:
 
@@ -1351,6 +1351,7 @@ gapped.align("time", reftime)
 - `key` may be a column name or the index's axis name.
 - When a key value appears more than once in the frame, the **first** row with it is taken.
 - `reference` is a `CArray` or a Ruby `Array`. Its values are matched against the key **by value**, as `join` compares keys. An `Array` is read as values of the key's kind: `[1, 2.5]` against a float key gives float keys, and `[Time.utc(2024, 1, 2), "2024-01-03"]` against a time key gives times, so the key column keeps its type.
+- The key column (or the index) of the result is a copy of `reference`, with the key's attributes: a later write to `reference` does not reach the result, and the result's attributes are not written onto `reference`.
 - `align` only gathers; it does not interpolate or resample. Fill the gaps afterward with [`fill`](#masking-and-filling-cells) or your own column arithmetic.
 
 ### `CAFrame.meld` / `CAFrame.concatenate` — rows after rows

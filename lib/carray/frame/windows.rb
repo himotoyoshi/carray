@@ -108,7 +108,8 @@ class WindowedFrame
     return out unless names.empty?
     if @at
       # Each result has an index of its own, as a group's result has.
-      CAFrame.new(out, axis_name: @key_names.first, index: @at.copy)
+      key = @frame.__send__(:key_column, @key_names.first, "windows")
+      CAFrame.new(out, axis_name: @key_names.first, index: CAFrame.__send__(:key_labels, key, @at.copy))
     else
       CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index)
     end

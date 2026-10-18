@@ -32,6 +32,23 @@ class TestCAFrameKeyLabels < Test::Unit::TestCase
     assert_time_labels on_index.resample("t", :h).mean.index, "by the index"
   end
 
+  # align and windows(at:) take the caller's array as the keys: a copy,
+  # shown with the key's attributes, the caller's array left as it was.
+  def test_align_and_windows_at_show_the_key
+    ref = CA_INT32([2, 1, 5])
+    a = @df.align("k", ref)
+    assert_equal({ "units" => "station" }, a["k"].attrs)
+    assert_not_same ref, a["k"]
+    ref[0] = 9
+    assert_equal [2, 1, 5], a["k"].to_a
+    on_index = CAFrame.new({ "v" => CA_FLOAT64([1, 2, 3]) }, axis_name: "k", index: @k)
+    assert_equal({ "units" => "station" }, on_index.align("k", ref).index.attrs)
+    assert_equal({}, ref.attrs)
+    at = CArray.time(["2024-01-01 01:00"], unit: :m)
+    assert_time_labels @df.windows(on: "t", at: at, before: "1 hour").mean.index, "windows at"
+    assert_equal({}, at.attrs)
+  end
+
   def test_group_by_and_pivot_show_the_key
     assert_time_labels @df.group_by("t").mean.index, "group_by"
     assert_equal({ "units" => "station" }, @df.group_by("k").mean.index.attrs)
