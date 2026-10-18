@@ -145,4 +145,10 @@ class TestContrast < Test::Unit::TestCase
     df = CAFrame.new("x" => CA_FLOAT64([1, Float::NAN, 2]))
     assert_equal %w[x_1.0 x_2.0], df.contrast_columns("x", base: Float::NAN).column_names
   end
+
+  def test_labels_without_an_order_are_named_by_contrast_columns
+    df = CAFrame.new("x" => CA_OBJECT([1, "1", 1]))
+    err = assert_raise(ArgumentError) { df.contrast_columns("x") }
+    assert_match(/\Acontrast_columns: "x" has the labels/, err.message)
+  end
 end

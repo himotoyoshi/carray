@@ -163,6 +163,16 @@ class CAFrame
     unless col.ndim == 1
       raise ArgumentError, "contrast_columns: #{key.inspect} is not a one-dimensional column"
     end
+    # The labels are sorted as categorize(sort_labels: true) sorts them;
+    # labels of an object column that cannot be put in order are named here.
+    if col.object? && !col.is_a?(CACategorical)
+      col.unique.to_a.sort do |a, b|
+        CArray.__send__(:object_order_cmp, a, b) or
+          raise ArgumentError,
+                "contrast_columns: #{key.inspect} has the labels #{a.inspect} and " \
+                "#{b.inspect}, which cannot be put in order; categorize it with labels: first"
+      end
+    end
     cat = col.is_a?(CACategorical) ? col : col.categorize(sort_labels: true)
     coded = cat.contrast(scheme, base: base, full: full)
     m = coded.shape[1]
