@@ -1072,6 +1072,14 @@ ca_face_list_class (VALUE list, const char *who)
   if ( ! any_face ) return Qnil;
   if ( ! all_face ) {
     const char *storage = ca_face_storage_method(face);
+    if ( ref->obj_type == CA_OBJ_STRING ) {
+      rb_raise(rb_eArgError,
+               "%s: cannot mix Face and non-Face arrays, or arrays of "
+               "different Face classes; convert them first to one Face "
+               "class or to no Face (CArray.string(a) makes a CAString of "
+               "an object array of Strings)",
+               who);
+    }
     if ( storage ) {
       rb_raise(rb_eArgError,
                "%s: cannot mix Face and non-Face arrays, or arrays of "

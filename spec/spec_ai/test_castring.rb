@@ -171,4 +171,17 @@ class TestCAString < Test::Unit::TestCase
     assert_equal ["-", "a"], fresh.().shift(1, fill_value: "-").to_a
   end
 
+  # A CAString beside an object array of Strings is refused, as any Face
+  # beside a plain array is, and the refusal names the builder that makes
+  # the object array a CAString.
+  def test_mix_with_object_array_names_the_builder
+    s = CArray.string(["a"])
+    o = CA_OBJECT(["b"])
+    [-> { CArray.concatenate([s, o]) }, -> { CArray.meld(o, s) },
+     -> { CA_BOOLEAN([1]).then_else(s, o) }].each do |mix|
+      assert_raise_message(/CArray\.string\(a\)/) { mix.() }
+    end
+    assert_equal ["a", "b"], CArray.concatenate([s, CArray.string(o)]).to_a
+  end
+
 end

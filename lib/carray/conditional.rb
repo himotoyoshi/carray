@@ -113,9 +113,11 @@ class CArray
   private def refuse_branch_mix (x, y, face)
     arrays = [x, y].select { |v| v.is_a?(CArray) && !v.scalar? }
     return if arrays.all? { |v| v.face? && v.obj_type == face.obj_type }
+    hint = face.is_a?(CAString) ?
+      " (CArray.string(a) makes a CAString of an object array of Strings)" : ""
     raise ArgumentError,
           "then_else: cannot mix Face and non-Face arrays, or arrays of " \
-          "different Face classes; convert them first to one Face class or to no Face"
+          "different Face classes; convert them first to one Face class or to no Face" + hint
   end
 
   private def lazy_then_else (x, y, dt)
