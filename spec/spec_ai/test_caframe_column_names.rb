@@ -18,7 +18,7 @@ class TestCAFrameColumnNames < Test::Unit::TestCase
   def test_every_entry_refuses_a_symbol_name_alike
     df = CAFrame.new("a" => CA_INT32([1, 2]), "s" => CA_OBJECT(["x", "y"]))
     assert_refused("CAFrame.new: a column name is a String (got :b); " \
-                   "axis_name:, index: and attrs: are the options") {
+                   "axis_name:, index:, attrs:, types: and on_error: are the options") {
       CAFrame.new("a" => CA_INT32([1, 2]), b: CA_INT32([3, 4]))
     }
     assert_refused("CAFrame.new: axis_name: is a String (got :row)") {

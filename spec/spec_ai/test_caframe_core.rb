@@ -24,12 +24,53 @@ class TestCAFrameConstruction < Test::Unit::TestCase
     assert_equal [10, 20], df.index.to_a
   end
 
+  # types: casts the built frame as from_records does.
+  def test_types_casts_named_columns
+    df = CAFrame.new({ "r" => [1.5, 2.5], "n" => [1, 2], "s" => ["x", "y"] },
+                     types: { "r" => :float32, "n" => :int16 })
+    assert_equal({ "r" => :float32, "n" => :int16, "s" => :object }, df.data_types)
+    assert_equal [1.5, 2.5], df["r"].to_a
+  end
+
+  def test_types_infer_and_default
+    df = CAFrame.new({ "a" => ["1", "2"], "b" => ["x", "y"] }, types: :infer)
+    assert_equal :int64, df.data_types["a"]
+    df = CAFrame.new({ "a" => [1, 2], "b" => [3, 4] }, types: { default: :float32, "b" => nil })
+    assert_equal({ "a" => :float32, "b" => :int64 }, df.data_types)
+  end
+
+  def test_types_unreadable_cells_follow_on_error
+    df = CAFrame.new({ "s" => ["1", "x"] }, types: { "s" => :int32 })
+    assert_equal [1, UNDEF], df["s"].to_a
+    err = assert_raise(CAFrame::UnreadableColumn) {
+      CAFrame.new({ "s" => ["1", "x"] }, types: { "s" => :int32 }, on_error: :raise)
+    }
+    assert_match(/column "s", row 1 "x" cannot be read as int32/, err.message)
+  end
+
+  def test_types_names_an_unknown_column
+    err = assert_raise(KeyError) { CAFrame.new({ "r" => [1.5] }, types: { "q" => :float32 }) }
+    assert_equal 'types: names no column "q"', err.message
+  end
+
+  # A cast column is a new array: the CArray given for it is no longer the
+  # frame's column, while an uncast one still is.
+  def test_types_casts_a_given_carray_into_a_new_column
+    r = CA_FLOAT64([1.5, 2.5])
+    n = CA_INT32([1, 2])
+    df = CAFrame.new({ "r" => r, "n" => n }, types: { "r" => :float32 })
+    r[0] = 9.0
+    n[0] = 9
+    assert_equal 1.5, df["r"][0]
+    assert_equal 9, df["n"][0]
+  end
+
   def test_bare_symbol_key_rejected
     # Column keys are strings (memo §3.7); a bare symbol key is ambiguous
     # with the :axis_name / :index options, so it is rejected loudly.
     err = assert_raise(TypeError) { CAFrame.new(a: CA_INT32([1, 2])) }
     assert_equal "CAFrame.new: a column name is a String (got :a); " \
-                 "axis_name:, index: and attrs: are the options", err.message
+                 "axis_name:, index:, attrs:, types: and on_error: are the options", err.message
   end
 
   # Column names are Strings in every verb; a Symbol is refused, in an

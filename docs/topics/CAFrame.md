@@ -145,13 +145,15 @@ CAFrame.new("a" => CA_INT32([1, 2, 3]), "b" => CA_FLOAT64([1.0, 2.0, 3.0]))
 
 `df["x"] = [...]` and the values a group's block gives are typed the same way.
 
-**Options.** Three keywords control the frame rather than adding a column:
+**Options.** These keywords control the frame rather than adding a column:
 
 | keyword | meaning |
 |---|---|
 | `axis_name:` | the name of the row axis |
 | `index:` | the index (see [The index](#the-index)) |
 | `attrs:` | a Hash of the frame's attributes (see [Attributes of the frame](#attributes-of-the-frame)) |
+| `types:` | casts named columns after the frame is built, in the forms [`cast`](#changing-a-columns-type) takes (a map, `:infer`, or a map with `default:`) |
+| `on_error:` | what an unreadable cell does under `types:`, as for `cast` |
 
 Pass the columns as a Hash in braces when you give options with them:
 
@@ -161,11 +163,17 @@ CAFrame.new({ "v" => CA_FLOAT64([1, 2, 3]) },
             index: CArray.int64([100, 200, 300]))
 ```
 
-**Column names are non-empty Strings**, here and in every verb that names a column. Symbols are used for options and types, so a Symbol keyword that is not one of the three options is refused instead of becoming a column. A mistyped option cannot turn into a column without notice. A column named `"index"` is written the ordinary way:
+`types:` gives a column a type other than the one its values give it. A cast column is a new array, so a CArray given for it is no longer shared with the frame:
+
+```ruby
+CAFrame.new({ "r" => [1.5, 2.5], "n" => [1, 2] }, types: { "r" => :float32, "n" => :int16 })
+```
+
+**Column names are non-empty Strings**, here and in every verb that names a column. Symbols are used for options and types, so a Symbol keyword that is not one of the options is refused instead of becoming a column. A mistyped option cannot turn into a column without notice. A column named `"index"` is written the ordinary way:
 
 ```ruby
 CAFrame.new(temp: CA_INT32([1, 2, 3]))
-# => TypeError: CAFrame.new: a column name is a String (got :temp); axis_name:, index: and attrs: are the options
+# => TypeError: CAFrame.new: a column name is a String (got :temp); axis_name:, index:, attrs:, types: and on_error: are the options
 CAFrame.new("index" => CA_INT32([1, 2, 3]))     # a column named "index"
 ```
 

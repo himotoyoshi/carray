@@ -56,13 +56,20 @@ class CAFrame
   # Column names are Strings, in an explicit column hash as in inline pairs.
   # A stray Symbol among the keywords is a mistyped control option
   # (+:axis_name+ / +:index+), not a column, and is named as such.
+  #
+  # +types:+ casts the built frame as +from_records+ does: it takes anything
+  # +cast+ takes as a map (a name => type map, :infer, or a map with
+  # +default:+), with +on_error:+ as for +cast+. A cast column is a new array,
+  # so a CArray given for it is no longer shared with the frame.
   def initialize(columns = {}, **opts)
     axis_name = opts.delete(:axis_name)
     index     = opts.delete(:index)
     attrs     = opts.delete(:attrs)
+    types     = opts.delete(:types)
+    on_error  = opts.key?(:on_error) ? opts.delete(:on_error) : :mask
     opts.each_key do |k|
       CAFrame.__send__(:column_key, k, "CAFrame.new",
-                       hint: "axis_name:, index: and attrs: are the options")
+                       hint: "axis_name:, index:, attrs:, types: and on_error: are the options")
     end
     @attrs = nil
     unless attrs.nil?
@@ -123,6 +130,8 @@ class CAFrame
       raise ArgumentError,
             "axis_name #{@axis_name.inspect} collides with a column of the same name"
     end
+
+    cast(types, on_error: on_error, option_name: :types) unless types.nil?
   end
 
   # --- df[...] : key type decides the axis (memo §13.2) ------------------
