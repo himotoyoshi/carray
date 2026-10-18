@@ -46,7 +46,7 @@ class CArray
   #   @return [CAFixlenString]
   def self.fixlen_string (arg, bytes: nil, truncate: :error, &block)
     if arg.is_a?(CArray)
-      return string_face_of(arg).to_fixlen_string(bytes: bytes, truncate: truncate)
+      return string_face_of(arg, "CArray.fixlen_string").to_fixlen_string(bytes: bytes, truncate: truncate)
     end
     unless [:error, :silent].include?(truncate)
       raise ArgumentError, "truncate: must be :error or :silent (got #{truncate.inspect})"

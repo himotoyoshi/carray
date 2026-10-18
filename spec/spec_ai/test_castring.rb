@@ -242,4 +242,18 @@ class TestCAString < Test::Unit::TestCase
     assert_raise(ArgumentError) { x[] = CA_OBJECT(%w[p q r]) }
   end
 
+  # A Face that is not text has storage that is not its text: a CATime's
+  # cells are ticks, a categorical's are codes.
+  def test_a_face_that_is_not_text_is_refused
+    t = CArray.time(["2024-01-01"], unit: :D)
+    c = CA_OBJECT(%w[a b a]).categorize
+    [t, t - t, c].each do |f|
+      %i[string const_string fixlen_string].each do |m|
+        e = assert_raise(TypeError) { CArray.send(m, f) }
+        assert_match(/CArray.#{m}: a #{f.class} is not text/, e.message)
+      end
+    end
+    assert_equal %w[a b], CArray.string(CArray.string(%w[a b]).to_const_string).to_a
+  end
+
 end

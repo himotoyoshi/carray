@@ -55,7 +55,7 @@ class CArray
   #   @return [CAConstString]
   def self.const_string (arg, encoding: Encoding::UTF_8, &block)
     if arg.is_a?(CArray)
-      return string_face_of(arg).to_const_string(encoding: encoding)
+      return string_face_of(arg, "CArray.const_string").to_const_string(encoding: encoding)
     end
     if block
       n = Integer(arg)
