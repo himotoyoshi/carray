@@ -105,13 +105,21 @@ class CAFrame
     end
 
     blank = shape.reverse.inject(nil) { |cell, d| Array.new(d) { cell } }
-    nested = values.map { |v| v.nil? ? blank : (v.is_a?(CArray) ? v.to_a : v) }
+    # A missing leaf is nil or UNDEF (a masked cell of a CArray cell reads
+    # as UNDEF), the same two spellings a scalar cell has.
+    nested = values.map { |v| v.nil? ? blank : undef_to_nil(v.is_a?(CArray) ? v.to_a : v) }
     leaves = nested.flatten.compact
     type = leaves.empty? ? nil : numeric_leaf_type(leaves)
     table = CArray.object(n, *shape) { nested }
     type ? table.to_type(type) : mask_missing(table)
   end
   private_class_method :build_nd_column
+
+  def self.undef_to_nil(v)
+    return v.map { |e| undef_to_nil(e) } if v.is_a?(Array)
+    UNDEF.equal?(v) ? nil : v
+  end
+  private_class_method :undef_to_nil
 
   # The shape of a rectangular nested Array, or nil when it is not
   # rectangular.  A leaf (anything but an Array) has shape [].

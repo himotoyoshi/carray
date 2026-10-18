@@ -37,6 +37,9 @@ class TestFrameValueTyping < Test::Unit::TestCase
     %w[a b]          => [:object, [2]],
     [true, false]    => [:object, [2]],
     [[1, 2], [3, 4]] => [:int64, [2, 2]],
+    [[1, nil], [3, 4]]   => [:int64, [2, 2]],
+    [[1, UNDEF], [3, 4]] => [:int64, [2, 2]],
+    [CA_INT32([1, 2]).tap { |c| c[1] = UNDEF }, CA_INT32([3, 4])] => [:int64, [2, 2]],
     [2**70, 1]       => [:object, [2]],
   }.freeze
 
