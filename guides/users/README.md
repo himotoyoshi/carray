@@ -4,18 +4,6 @@ An introduction to Ruby/CArray 3.0, written for readers new to it. No prior know
 
 The tone is plain and example-driven, introducing one topic at a time. Only settled, confirmed methods are shown.
 
-## How this guide is written
-
-A few editorial principles guide these chapters. They are worth stating up front, both to set reader expectations and to keep later revisions consistent.
-
-- **Complete explanation, not a quick tutorial.** Each chapter aims to cover its topic in full for a CArray user — including reference tables of every operator, function, or form available, so a reader can see the whole surface in one place. Breadth in the chapter is deliberate; do not thin a chapter out into a "getting started" sketch and push the rest to a separate reference.
-
-- **CArray is described in its own vocabulary, on its own terms.** The behaviour of a method is stated as CArray's behaviour — not as "the same as" or "following" NumPy, pandas, or Numo. CArray grew as its own system; framing it as a port of another library subordinates it and, because the vocabularies differ in subtle ways, misleads. Concretely:
-  - Do **not** write that CArray "follows" or "conforms to" pandas/numpy for ordinary behaviour. Describe the rule directly (e.g. the time algebra of "instant ± duration", not "the rules follow pandas").
-  - A neutral *equivalence pointer* for readers who happen to know another library ("equivalent to `np.concatenate`") is fine as wayfinding and need not be purged — but it is a signpost, not the definition.
-  - Deliberate conformance to an external *standard* is different and should be stated plainly: the MemoryView format follows PEP 3118 because that is an intentional interop contract.
-  - A dedicated NumPy/Numo → CArray migration table, if wanted, belongs in its own separate document — not woven through the teaching chapters.
-
 ## Reading order
 
 [Introduction](introduction.md) comes first: what CArray is, and how the guide is arranged. It carries no number, because it is front matter rather than chapter zero — the `rake pdf:*` task names it explicitly and places it ahead of the numbered chapters, which sort into reading order on their own.

@@ -50,8 +50,3 @@ Read the Introduction first. It describes what a frame is, lists what you can do
 19. [Finding the method for a task](19_task_index.md)
 
 Chapters 2 to 9 are the everyday tools; read them in order the first time. Chapters 10 to 17 can be read in any order once those are familiar. Chapter 18 collects complete worked tasks, and chapter 19 is an index from tasks to methods.
-
-## How this guide is written
-
-- **From the reader's side.** A section starts from a situation in your data — a column read as text, a code standing for missing values, two series recorded at different times — and shows what to do about it. How the library works inside is mentioned only where a behaviour would otherwise be puzzling.
-- **Examples that run.** Each example was run against the library, and the output shown is what it printed. Examples later in a chapter build on the earlier ones.
