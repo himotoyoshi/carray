@@ -562,7 +562,8 @@ report["end after start"].count(false)            # how many break it
 ```
 
 - A rule is a name and anything that responds to `call`. It receives the frame, as a `filter` block does, and returns a boolean `CArray` with one entry per row on its first axis. `true` means the rule holds.
-- The result's columns are named after the rules, and it has this frame's index and row axis name.
+- The result's columns are named after the rules, and it has this frame's index and row axis name. A rule may not take the name of the row axis when the frame has an index.
+- A verdict column is the array the rule returned. A rule that returns a column of the frame itself (`->(f) { f["ok"] }`) shares it with the frame, so writing the verdict writes the column; return `f["ok"].copy` to keep them apart.
 - A row whose rule read a masked value is `UNDEF` in the verdict, not `false`: `count(false)` counts the rows that break the rule, `count_masked` the rows it could not judge.
 - A rule over an N-D column may answer per cell, in the column's shape. The failing cells can then be masked directly, and `.all(axis: 1)` gives one verdict per row for `filter`:
 
@@ -1130,6 +1131,7 @@ df["total"] = grp.cumsum("rain")                  # running total per station
 - They are called as the reductions are: given names, one name gives the `CArray` and several an `Array` of them; without names they give a frame of every column whose type has the operation (the keys left out), on the frame's rows and index.
 - **"Back" means earlier rows of the frame.** Rows that are not in time order give the previous row, not the previous time: sort first, with `sort_by_key("time")`.
 - `lag` takes its step as `n:`, since the positional arguments are column names.
+- `lag` gives the column's values moved, so its result shows the column's attributes (units, say), as `CArray#lag` does. `order` and the running values are new quantities and show none, as `CArray#order` and `CArray#cumsum` do. `fill` writes into the column, which keeps its attributes.
 - **Filling gaps per group.** `grp.fill("temp", :ffill)` fills the masked cells of a column in place from the earlier rows of the same group (`:bfill` from the later ones), as [`fill`](#masking-and-filling-cells) does for the whole column. A fill never reaches across into another group, so a station's first rows stay masked when it has nothing to carry, and a row whose key is masked is left as it is. A constant fills every masked cell, as `fill` does; `:linear` within groups is not provided.
 - An N-D column runs along the rows, keeping its trailing shape. A row whose key is masked belongs to no group, so its cells are `UNDEF`. They work for `resample` as well, within each time bin.
 
@@ -1289,7 +1291,7 @@ Each row appears at most once, in this frame's order, however many rows of the o
 - text held in different ways: fixed-width strings of different widths (`CArray.fixlen_string`), a `CAConstString` or a categorical column against a plain text column — each is read by its strings;
 - NaN matches NaN; a masked key matches nothing.
 
-The key column of an `:outer` join holds keys of both sides. It keeps a type both sides share: a categorical key stays categorical, with the left's labels followed by the right's new ones, and a `CAConstString` or `CAString` key stays one. Keys of two different kinds, or of a Face and a plain array, come out as an object column, whichever frame is the receiver.
+The key column of an `:outer` join holds keys of both sides, and shows the attributes the two key columns have alike (a `:left` or `:inner` join's key shows the left key's, a `:right` join's the right key's). It keeps a type both sides share: a categorical key stays categorical, with the left's labels followed by the right's new ones, and a `CAConstString` or `CAString` key stays one. Keys of two different kinds, or of a Face and a plain array, come out as an object column, whichever frame is the receiver.
 
 Two exceptions: an object column compares Ruby objects with `eql?`, as a Ruby `Hash` does, so `1` and `1.0` there are different keys (cast the column to a number first; `at` compares with `==` and does find `1` for `1.0`), and a time key refuses plain integers, which have no unit to be read in — turn them into times first with [`to_time`](#counts-since-an-epoch--to_time).
 
