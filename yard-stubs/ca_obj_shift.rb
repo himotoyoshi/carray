@@ -25,8 +25,8 @@ class CArray
   # reach the parent.  A write to an out-of-range cell has no cell to land
   # in and is discarded; under `fill_value: UNDEF` such a cell stays masked
   # through `unmask` too.  The default `0` is the storage value, so for a time
-  # array it is 1970-01-01; `ts - ts.shift(1, fill_value: UNDEF)` leaves the
-  # first difference missing.
+  # array it is 1970-01-01, for a CAString `""`; `ts - ts.shift(1,
+  # fill_value: UNDEF)` leaves the first difference missing.
   #
   # The in-place idiom is `ca[] = ca.shift(...)`; there is no `shift!`.
   # For a cyclic (wrap-around) shift use {#roll}, which returns a `CARoll`

@@ -124,6 +124,44 @@ class CAString
   # @return [CAString]
   def fmin (other) ; as_text(super) ; end
 
+  # The String a blank cell holds: the cell a fresh {#template} gives and
+  # the one {#shift} fills by default.  Frozen, because every blank cell
+  # shares it.
+  BLANK = "".freeze
+
+  # A same-shape CAString.  With no block every cell is {BLANK}; a block
+  # fills the cells as for any array, and its values must be Strings or
+  # UNDEF.  Given a data type, the result is a plain array of that type.
+  # @overload template(type = nil, **opts)
+  #   @return [CAString, CArray]
+  def template (*args, **opts, &block)
+    return super if block || ! args.empty? || ! opts.empty?
+    out = super
+    out[] = BLANK
+    out
+  end
+
+  # Shifts the cells as {CArray#shift} does.  The cells shifted in hold
+  # {BLANK} unless `fill_value:` names a String or UNDEF.
+  # @return [CAString] a view over the shifted cells.
+  def shift (*shifts, fill_value: BLANK, **opts)
+    super(*shifts, fill_value: fill_value, **opts)
+  end
+
+  # A window as {CArray#window} gives.  The cells outside the array hold
+  # {BLANK} unless `fill_value:` names a String or UNDEF.
+  # @return [CAString] a view over the window.
+  def window (*ranges, fill_value: BLANK, **opts)
+    super(*ranges, fill_value: fill_value, **opts)
+  end
+
+  # A resized copy as {CArray#resize} gives.  The new cells hold {BLANK}
+  # unless `fill_value:` names a String or UNDEF.
+  # @return [CAString]
+  def resize (*newdim, fill_value: BLANK)
+    super(*newdim, fill_value: fill_value)
+  end
+
   private def as_text (result)
     result = result.copy if result.lazy_view?
     CAString.wrap(result)

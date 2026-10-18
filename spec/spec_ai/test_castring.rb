@@ -184,4 +184,40 @@ class TestCAString < Test::Unit::TestCase
     assert_equal ["a", "b"], CArray.concatenate([s, CArray.string(o)]).to_a
   end
 
+
+  # A cell a verb makes without being given a value (a fresh template, the
+  # cells shift and window bring in, the cells resize adds) is the blank
+  # String, as a fixlen string's is "", and never the object storage's 0.
+  def test_cells_made_without_a_value_are_blank_strings
+    s = CArray.string(["a", "b", "c"])
+    t = s.template
+    assert_kind_of CAString, t
+    assert_equal ["", "", ""], t.to_a
+    assert t[0].frozen?
+    assert_equal ["", "a", "b"], s.shift(1).to_a
+    assert_equal ["b", "c", ""], s.shift(-1).to_a
+    assert_equal ["", "a", "b", "c", ""], s.window(-1..3).to_a
+    assert_equal ["a", "b", "c", "", ""], s.resize(5).to_a
+    assert_equal [UNDEF, "a", "b"], s.shift(1, fill_value: UNDEF).to_a
+    assert_equal [UNDEF, "a", "b", "c", UNDEF], s.window(-1..3, fill_value: UNDEF).to_a
+    assert_equal ["-", "a", "b", "c", "-"], s.window(-1..3, fill_value: "-").to_a
+    assert_equal [0, 0, 0], s.template(:int32).to_a
+  end
+
+  # The values a block or a progression gives go in as any stored value does.
+  def test_template_block_and_seq_store_strings_only
+    s = CArray.string(["a", "b", "c"])
+    assert_equal ["x0", "x1", "x2"], s.template { |i| "x#{i}" }.to_a
+    assert_equal ["y", "y", "y"], s.template { "y" }.to_a
+    assert_raise(TypeError) { s.template { 5 } }
+    assert_raise(TypeError) { s.template { |i| i } }
+    assert_raise(TypeError) { s.window(-1..1, fill_value: 5) }
+    assert_equal ["p", "q", "r"], s.copy.seq!("p", :succ).to_a
+    [-> (x) { x.seq! }, -> (x) { x.seq!(1.5) }, -> (x) { x.seq!(axis: 0) }].each do |seq|
+      x = s.copy
+      assert_raise(TypeError) { seq.(x) }
+      assert_equal ["a", "b", "c"], x.to_a
+    end
+  end
+
 end
