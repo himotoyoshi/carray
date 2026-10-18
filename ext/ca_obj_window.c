@@ -1658,9 +1658,13 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
     bounds = CA_BOUNDS_MASK;
   }
   else {
-    rcs = rb_cscalar_new_with_value(ca->data_type, ca->bytes, rfval);
+    /* The fill is a value of the array (a String for a CAString, an
+       instant for a time array): rb_ca_obj2ptr writes it as one cell of
+       the storage, through the Face. */
+    rcs = rb_cscalar_new(ca_strip_face(ca)->data_type, ca->bytes, NULL);
     TypedData_Get_Struct(rcs, CScalar, &cscalar_data_type, cs);
     fill = cs->ptr;
+    rb_ca_obj2ptr(self, rfval, fill);
   }
 
   if ( ! NIL_P(rbounds) ) {

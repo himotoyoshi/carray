@@ -36,8 +36,9 @@ class CArray
   # @overload window(*ranges, fill_value: 0, bounds: "fill")
   #   @param ranges [Array<Range, Integer>] one range per axis; the count
   #     must equal `self.ndim`.
-  #   @param fill_value [Object] value given to out-of-range cells; `UNDEF`
-  #     masks them instead.
+  #   @param fill_value [Object] value given to out-of-range cells, written
+  #     as a store writes it (a Time for a time array; a CAString's default
+  #     is `""`); `UNDEF` masks them instead.
   #   @param bounds [String, Symbol] what an out-of-range index means; a
   #     Symbol says the same as the String, matching {#windows}: `"fill"`
   #     (default) uses `fill_value`, `"nearest"` clamps to the edge cell,
