@@ -1,5 +1,6 @@
 require "test/unit"
 require "carray"
+require_relative "../../utils/measure_leak"
 require "rbconfig"
 
 # A CAObject hook (copy_addrs, copy_block, ...) receives the caller's buffer
@@ -104,6 +105,54 @@ class TestCAObjectTransientWrap < Test::Unit::TestCase
                    [RbConfig.ruby, *$LOAD_PATH.grep(/carray/).flat_map { |d| ["-I", d] },
                     "-e", SCRIPT], err: [:child, :out], &:read)
     assert_equal("24,48,24", out.strip.lines.last.to_s.strip, out[0, 400])
+  end
+
+  # The data keeps its mask whatever the hook does with the wrap's: a mask
+  # the hook kept has no cells once the object is gone, and is still a mask.
+  class MaskKeeper < CAObject
+    attr_reader :kept
+    def initialize (back)
+      @back = back
+      super(back.data_type, back.shape)
+      self.mask = 0
+    end
+    private
+    def fetch_addr (a) = @back[a]
+    def copy_data (d) = (d[] = @back; d[0] = UNDEF; @kept = d.mask)
+    def create_mask; end
+  end
+
+  def test_a_mask_the_hook_kept_outlives_the_object
+    r = MaskKeeper.new(CArray.float64(1000).seq!)
+    assert_equal 1, r.copy.count_masked
+    kept = r.kept
+    r = nil
+    GC.start
+    filler = Array.new(50) { CArray.float64(1000).seq! }
+    assert_equal CA_BOOLEAN, kept.data_type
+    assert_equal 0, kept.elements
+    filler.clear
+  end
+
+  # A copy_data that copies the object again: each call's mask is its own.
+  def test_a_nested_copy_does_not_leak_the_inner_mask
+    setup = <<~RUBY
+      class Nest < CAObject
+        def initialize (back) = (@back = back; super(back.data_type, back.shape))
+        private
+        def fetch_addr (a) = @back[a]
+        def copy_data (d)
+          d[] = @back
+          if ! @in
+            @in = true; copy; @in = false
+          end
+          d[0] = UNDEF if @in
+        end
+      end
+    RUBY
+    bytes = LeakMeter.bytes_per_call("Nest.new(CArray.float64(100_000).seq!).copy", setup: setup)
+    omit "malloc zone statistics unavailable" if bytes.nil?
+    assert_operator bytes, :<, 20_000, "the inner mask (100 KB) leaks per call"
   end
 
 end

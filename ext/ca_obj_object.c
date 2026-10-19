@@ -172,17 +172,20 @@ ca_object_empty_wrap (CArray *w)
 }
 
 /* Calls copy_data / sync_data with a wrap of a caller's buffer, shaped as
-   the object, and takes the buffer back however the call leaves.  The wrap
-   shares the object's mask (the data's), and whatever mask it holds after
-   the call becomes the data's: a hook that writes masked values masks the
-   object's cells.  The data points at the buffer for the duration too, for
-   a hook that reads the object back while it runs. */
+   the object, and takes the buffer back however the call leaves.  When the
+   data has a mask, the wrap's mask is a wrap of its bits: a hook that writes
+   masked values masks the object's cells, and the data keeps its mask
+   whatever the hook does with the wrap's.  A mask the hook makes on a wrap
+   that had none is the wrap's own and goes with it.  The data points at the
+   buffer for the duration too, for a hook that reads the object back while
+   it runs. */
 
 typedef struct {
   CAObject *ca;
   char     *saved;
   ID        mid;
   VALUE     wrap;
+  CArray   *mask;      /* the wrap of the data's mask bits, or NULL */
 } ca_object_lend_t;
 
 static VALUE
@@ -197,8 +200,9 @@ ca_object_lend_restore (VALUE varg)
 {
   ca_object_lend_t *l = (ca_object_lend_t *) varg;
   CArray *w = (CArray *) DATA_PTR(l->wrap);
-  l->ca->data->mask = w->mask;
-  w->mask = NULL;
+  if ( l->mask != NULL && w->mask == l->mask ) {
+    ca_object_empty_wrap(w->mask);
+  }
   ca_object_empty_wrap(w);
   l->ca->data->ptr = l->saved;
   return Qnil;
@@ -213,7 +217,12 @@ ca_object_call_lending (CAObject *ca, void *ptr, const char *mid)
   w = ca_wrap_new(data->data_type, data->ndim, data->dim, data->bytes,
                   NULL, (char *) ptr);
   l.wrap  = ca_wrap_struct(w);
-  w->mask = data->mask;
+  l.mask  = NULL;
+  if ( data->mask != NULL ) {
+    l.mask = (CArray *) ca_wrap_new(CA_BOOLEAN, data->ndim, data->dim, 0,
+                                    NULL, data->mask->ptr);
+    w->mask = l.mask;
+  }
   l.ca    = ca;
   l.saved = data->ptr;
   l.mid   = rb_intern(mid);
