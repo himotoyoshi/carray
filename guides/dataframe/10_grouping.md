@@ -165,14 +165,17 @@ p sales.group_by("shop").aggregate(
 - A Symbol names a summary; its arguments follow it (`:percentile, 25`), with keywords last (`:mean, min_count: 7`).
 - A lambda receives the group's part of the column, as a CArray, and returns a value. Use it for anything the named summaries do not cover.
 
-## Computing across columns — `table`
+## Several columns at once — `aggregate` with a block
 
-When a result needs several columns of the group at once, `table` gives you each group as a frame. The block returns a Hash, and each key of the Hash becomes a column:
+When a result needs more than one column, give `aggregate` a block instead. The block receives the grouped frame once and returns a Hash; each value is an array with one value per group, made from the group summaries of `g["col"]` (see the next section) and arithmetic on them:
 
 ```ruby
-p sales.group_by("shop").table { |g|
-  best = g.sort_by_key("revenue", order: :desc)[0]
-  { "days" => g.nrow, "best_date" => best["date"], "per_visitor" => g["revenue"].sum / g["visitors"].sum }
+p sales.group_by("shop").aggregate { |g|
+  {
+    "days"        => g["date"].group_sizes,
+    "best_date"   => sales["date"][g["revenue"].max_addr],
+    "per_visitor" => g["revenue"].sum / g["visitors"].sum,
+  }
 }
 # #<CAFrame nrow=3 columns=[days:int64, best_date:CATime[D], per_visitor:float64] index="shop">
 # shop     days  best_date   per_visitor
@@ -182,9 +185,37 @@ p sales.group_by("shop").table { |g|
 # central     8  2024-03-09     8.266546
 ```
 
-Integers in the returned Hashes become an integer column and other numbers a float column, strings a text column, and times taken from a time column a time column; anything else — `true`/`false`, a mix of kinds — becomes an object column. `nil` and `UNDEF` are missing.
+- `group_sizes` is the number of rows in each group.
+- `max_addr` is, for each group, the row number of its largest value, so `sales["date"][...]` picks the date of each shop's best day.
+- `g[...]` also takes an array with one value per row, such as `sales["revenue"] * sales["visitors"]`, and splits it by the groups as it does a column.
 
-Note that `per_visitor` here sums each column over its own present days: the south shop's 6 March revenue counts but its visitors do not. If the two should cover the same days, choose the rows first (`g.filter { |f| f["visitors"].is_not_masked }`).
+Note that `per_visitor` here sums each column over its own present days: the south shop's 6 March revenue counts but its visitors do not. If the two should cover the same days, mask each column where the other is missing (`mask_where`) and pass the result to `g[...]`.
+
+## Any Ruby for each group — `table`
+
+When a result cannot be put together from the group summaries, `table` gives you each group as a frame and runs your block on it, one group at a time. The block returns a Hash, and each key of the Hash becomes a column. Here, the longest run of days on which revenue rose, and the days of the month on which it was over 3000:
+
+```ruby
+p sales.group_by("shop").table { |g|
+  rise = longest = 0
+  g["revenue"].to_a.each_cons(2) do |a, b|
+    rise = (a != UNDEF && b != UNDEF && b > a) ? rise + 1 : 0
+    longest = [longest, rise].max
+  end
+  { "longest_rise"   => longest,
+    "days_over_3000" => g.filter { |f| f["revenue"] > 3000 }["date"].day.to_a }
+}
+# #<CAFrame nrow=3 columns=[longest_rise:int64, days_over_3000:object] index="shop">
+# shop     longest_rise  days_over_3000
+# -------  ------------  --------------------
+# north               6  [8, 9, 10]
+# south               4  []
+# central             1  [4, 6, 7, 9, 10, 11]
+```
+
+Integers in the returned Hashes become an integer column and other numbers a float column, strings a text column, and times taken from a time column a time column; anything else — `true`/`false`, lists, a mix of kinds — becomes an object column. `nil` and `UNDEF` are missing.
+
+The block runs once per group, so with many groups `table` is much slower than `aggregate`. Use it for what the summaries cannot express.
 
 ## One column, every summary — `grouped["col"]`
 

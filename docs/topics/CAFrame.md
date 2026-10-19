@@ -1040,7 +1040,7 @@ A `GroupedFrame` offers five ways to reduce. Choose by what you need:
 | the same reduction for every column | [`sum` / `mean` / `median` / `first` / `count` / …](#the-same-reduction-for-every-column) |
 | a reduction, or an output name, of your own for each column | [`aggregate`](#a-reduction-per-column--aggregate) |
 | columns computed from several columns, a masked column, or reductions combined | [`aggregate` with a block](#columns-of-your-own--aggregate-with-a-block) |
-| any Ruby computation on each group's rows | [`table`](#computing-across-columns--table) |
+| a computation the reductions cannot express — one that depends on the order of the rows, or gives a list or a String | [`table`](#computing-across-columns--table) |
 | one column or array, with any reduction the categorical iterator offers | [`grp["col"]` / `grp[array]`](#one-column--the-group-iterator) |
 
 Each of the first four also takes [`keep_rows: true`](#keeping-the-rows--keep_rows) to give the result on every row instead of one row per group.
@@ -1120,13 +1120,21 @@ The result is indexed by the group labels, as for a spec, and `keep_rows: true` 
 
 ### Computing across columns — `table`
 
-When a computation does not fit the iterators' reductions, `table` yields **each group as a sub-frame** and collects the Hash the block returns, column by column, into a new frame. The full frame API works on `g`:
+When a result cannot be put together from the iterators' reductions — a value that depends on the order of the rows, or a list, or a String — `table` yields **each group as a sub-frame** and collects the Hash the block returns, column by column, into a new frame. The full frame API works on `g`. Here, the longest run of rows above 30 degrees and the stations' hot hours:
 
 ```ruby
 df.group_by("station").table do |g|
-  { "n" => g.nrow, "tmax" => g["temp"].max }
+  run = longest = 0
+  g["temp"].to_a.each do |t|
+    run = (t != UNDEF && t > 30.0) ? run + 1 : 0
+    longest = [longest, run].max
+  end
+  { "longest_hot_run" => longest,
+    "hot_times"       => g.filter { |f| f["temp"] > 30.0 }["time"].to_a }
 end
 ```
+
+The block runs once per group in Ruby, so with many groups `table` is far slower than [`aggregate` with a block](#columns-of-your-own--aggregate-with-a-block), which computes every group at once. A result that the reductions can express — `{ "n" => g.nrow, "tmax" => g["temp"].max }` — belongs there: `{ "n" => g["temp"].group_sizes, "tmax" => g["temp"].max }`.
 
 The values the block returns — and those a Proc reduction of `aggregate` returns — become columns typed as [`from_records`](#caframefrom_records) types a record's values: Integers an `int64` column, numbers a `float64` one, Strings a text column (`CAString`), time elements a `CATime` / `CATimedelta` column, arrays of one shape an N-D column, anything else (`true` / `false`, Ruby `Time`) an `object` column. `nil` and `UNDEF` are missing. Arrays become an N-D column only when every group gives one of the same shape, so a list whose length varies from group to group is an `object` column.
 
@@ -1207,7 +1215,7 @@ df.resample("time", "1 hour").filter { |g| g["temp"].count_not_masked == 6 }   #
 ```ruby
 df.resample("time", "1 hour").mean
 df.resample("time", "1 day").aggregate("rain" => ["rain", :sum], "tmax" => ["temp", :max])
-df.resample("time", "1 month").table { |g| { "n" => g.nrow } }
+df.resample("time", "1 month").aggregate { |g| { "n" => g["temp"].group_sizes } }
 ```
 
 The result's index is the bin labels as a `CATime`, **in time order**, in the time column's unit (a month bin of a day column is labelled `2024-01-01`), and its row axis is named after the time column. The time column itself becomes the index, not a reduced column.
