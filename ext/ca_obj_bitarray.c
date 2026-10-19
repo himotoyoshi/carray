@@ -106,6 +106,9 @@ ca_bitarray_setup (CABitarray *ca, CArray *parent)
              "use .value.bitarray to read the bits without it");
   }
 
+  /* The bits add an axis to the parent's. */
+  ca_check_rank_fits(parent->ndim + 1, "bitarray");
+
   /* ca == NULL asks for the checks above only, so that a constructor can
      run them before it allocates. */
   if ( ca == NULL ) {

@@ -149,6 +149,7 @@ rb_ca_field (int argc, VALUE *argv, VALUE self)
     TypedData_Get_Struct(rtype, CArray, &carray_data_type, ct);
     data_type = CA_FIXLEN;
     bytes     = ct->bytes * ct->elements;
+    ca_check_rank_fits((long) ca->ndim + ct->ndim, "field");
     obj = rb_ca_field_new(self, offset, data_type, bytes);
     ndim = ca->ndim + ct->ndim;
     for (i=0; i<ca->ndim; i++) {

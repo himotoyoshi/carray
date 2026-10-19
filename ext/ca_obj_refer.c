@@ -211,16 +211,20 @@ ca_refer_func_create_mask (void *ap)
   else if (ca->bytes < parent_bytes) {
     /* Divided reinterpret: one parent element splits into
        ratio = parent_bytes / bytes view elements.  Build a
-       CARepeat that broadcasts each parent mask bit across the
-       ratio sub-positions, then refer-reshape it to the view's
-       actual shape. */
+       repeat of two axes, (parent elements, ratio), that broadcasts
+       each parent mask bit across the ratio sub-positions, then
+       refer-reshape it to the view's actual shape.  Two axes whatever
+       the parent's rank, so a parent at CA_RANK_MAX needs no extra
+       one. */
     ca_size_t ratio = parent_bytes / ca->bytes;
-    ca_size_t count[CA_RANK_MAX];
-    int8_t i;
-    for (i = 0; i < ca->parent->ndim; i++) count[i] = 0;
-    count[ca->parent->ndim] = ratio;
+    ca_size_t mdim[2], mstrides[2];
+    mdim[0]     = ca->parent->elements;
+    mdim[1]     = ratio;
+    mstrides[0] = 1;
+    mstrides[1] = 0;
     ca->mask0 =
-      (CArray *) ca_repeat_new(ca->parent->mask, ca->parent->ndim + 1, count);
+      (CArray *) ca_stride_new(CA_OBJ_REPEAT, ca->parent->mask, CA_BOOLEAN, 1,
+                               2, mdim, mstrides, 0);
     ca_unset_flag(ca->mask0, CA_FLAG_READ_ONLY);
     /* mask0 has ratio cells per parent element, so the offset is counted
        in those. */
