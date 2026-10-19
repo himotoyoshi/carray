@@ -393,6 +393,7 @@ VALUE    rb_ary_flatten_for_elements (VALUE ary, ca_size_t elements, void *ap);
 const char *ca_calling_method_name (void);
 VALUE       ca_answer_as_caller (VALUE (*body)(VALUE), VALUE arg);
 long        ca_integer_arg (VALUE v, const char *arg, const char *name);
+void        ca_refuse_without_common_type (VALUE *self, VALUE *other);
 ca_size_t   ca_shape_elements (int8_t ndim, const ca_size_t *dim, ca_size_t bytes);
 void        ca_check_index_array (VALUE v);
 VALUE       ca_order_key (VALUE v, const char *name);

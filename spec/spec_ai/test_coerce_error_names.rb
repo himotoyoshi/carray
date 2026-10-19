@@ -38,4 +38,15 @@ class TestCoerceErrorNames < Test::Unit::TestCase
     assert_equal "can't coerce carray with data_types of 'int64' and 'fixlen'", error.message
   end
 
+  # A lazy operator refuses a pair with no common data_type as the eager
+  # operator does.
+  def test_a_lazy_operator_refuses_as_the_eager_one
+    i  = CArray.int32(2)
+    fl = CArray.fixlen(2, bytes: 2)
+    [-> { i.lazy + fl }, -> { i.lazy < fl }, -> { fl + i.lazy }, -> { i.lazy.clip(fl, fl) }].each do |call|
+      error = assert_raise(TypeError) { call.() }
+      assert_match(/\Acan't coerce carray with data_types of '(int32|fixlen)' and '(int32|fixlen)'\z/, error.message)
+    end
+  end
+
 end

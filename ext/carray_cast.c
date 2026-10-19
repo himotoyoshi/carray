@@ -2433,6 +2433,24 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
            ca_coerce_operand_name(*other, cb));
 }
 
+/* Refuses a pair of arrays with no common data_type in the words of
+   rb_ca_cast_self_or_other (the eager operators'), and returns otherwise
+   without casting either.  A lazy builder calls it before it works out
+   the kernel's data_types, so that a pair the eager operator refuses is
+   refused the same way. */
+void
+ca_refuse_without_common_type (VALUE *self, VALUE *other)
+{
+  CArray *ca, *cb;
+  TypedData_Get_Struct(*self,  CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(*other, CArray, &carray_data_type, cb);
+  if ( ca->data_type != cb->data_type
+       && ca_cast_table[cb->data_type][ca->data_type] < 0
+       && ca_cast_table[ca->data_type][cb->data_type] < 0 ) {
+    rb_ca_cast_self_or_other(self, other);   /* raises */
+  }
+}
+
 /* CArray.cast_self_or_other(self, other) — promote self and other
  * to a common data_type and return [self', other'].  Wraps the
  * void rb_ca_cast_self_or_other above into a class method.
