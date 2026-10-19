@@ -970,6 +970,7 @@ ca_stack_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
      correct (if non-folded) per-parent dispatch. */
   if ( ca->k_axis != 0 ) return 0;
   if ( ! ca_fast_paths_enabled() ) return 0;
+  if ( pbt == 0 ) return 0;                         /* empty parents: no parent holds the box */
 
   for ( i = 0; i < f->ndim; i++ ) {
     ca_size_t span = (f->counts[i] - 1) * f->strides[i];
