@@ -371,6 +371,10 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
     last  = NUM2SIZE(x.end);
     excl  = RTEST(x.exclude_end);
     step  = NUM2SIZE(x.step);
+    if ( step == 0 ) {
+      rb_raise(rb_eArgError, "%s: step should not be 0",
+               ca_calling_method_name());
+    }
     if ( excl ) {
       last += ( (last>=start) ? -1 : 1 );
     }
@@ -391,6 +395,10 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
       if ( NIL_P(arg0) ) {              /* [nil,k] */
         start = 0;
         step  = NUM2SIZE(arg1);
+        if ( step == 0 ) {
+          rb_raise(rb_eArgError, "%s: step should not be 0",
+                   ca_calling_method_name());
+        }
         count = (size-1)/llabs(step) + 1;
         *poffset = start;
         *pcount  = count;
@@ -401,6 +409,10 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
         last  = NUM2SIZE(RANGE_END(arg0));
         excl  = RTEST(RANGE_EXCL(arg0));
         step  = NUM2SIZE(arg1);
+        if ( step == 0 ) {
+          rb_raise(rb_eArgError, "%s: step should not be 0",
+                   ca_calling_method_name());
+        }
         if ( excl ) {
           last += ( (last>=start) ? -1 : 1 );
         }
@@ -418,6 +430,10 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
         last  = NUM2SIZE(x.end);
         excl  = RTEST(x.exclude_end);
         step  = NUM2SIZE(x.step);
+        if ( step == 0 ) {
+          rb_raise(rb_eArgError, "%s: step should not be 0",
+                   ca_calling_method_name());
+        }
         if ( excl ) {
           last += ( (last>=start) ? -1 : 1 );
         }
