@@ -186,4 +186,21 @@ class TestCAFixlenString < Test::Unit::TestCase
     assert_instance_of CArray, plain.unique
     assert_equal %w[ab cd], plain.unique.to_a
   end
+  # The order members the fixlen kernels do not cover answer as the strings'
+  # members do, at this width.
+  def test_minmax_and_running_extremes_of_a_fixlen_string
+    v = ["zz", "aa", nil, "mm"]
+    fx = CArray.fixlen_string(v)
+    s = CArray.string(v)
+    assert_equal [fx.min, fx.max], fx.minmax
+    assert_equal s.cummax.to_a, fx.cummax.to_a
+    assert_equal s.cummin.to_a, fx.cummin.to_a
+    assert_kind_of CAFixlenString, fx.cummax
+    assert_equal fx.bytes, fx.cummax.bytes
+    f2 = CArray.fixlen_string(%w[zz aa mm bb]).reshape(2, 2)
+    assert_equal [%w[mm aa], %w[zz bb]], f2.minmax(axis: 0).map(&:to_a)
+    e = assert_raise(CArray::DataTypeError) { fx.search_nearest("ab") }
+    assert_match(/\Asearch_nearest: nearest needs a distance/, e.message)
+  end
+
 end

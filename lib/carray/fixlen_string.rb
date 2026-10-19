@@ -98,4 +98,38 @@ class CAFixlenString
 
   include CArray::StringOperationMixin
   include CArray::StringOperationMixin::Mutable
+
+  # ---- order family beyond the fixlen kernels --------------------------
+  #
+  # min / max / sort run on the cells' bytes.  The members those kernels do
+  # not cover answer here: minmax as the pair of them, and the running
+  # extremes through the strings ({#to_string}), as CAString answers them,
+  # written back at this width.
+
+  # @return [Array(String, String), Array(CAFixlenString, CAFixlenString)]
+  #   `[min, max]`, with the keywords of {CArray#min} / {CArray#max}.
+  def minmax (*args, **kw)
+    [min(*args, **kw), max(*args, **kw)]
+  end
+
+  # @return [CAFixlenString] the running maximum, as {CArray#cummax}.
+  def cummax (*args, **kw)
+    to_string.cummax(*args, **kw).to_fixlen_string(bytes: bytes)
+  end
+
+  # @return [CAFixlenString] the running minimum, as {CArray#cummin}.
+  def cummin (*args, **kw)
+    to_string.cummin(*args, **kw).to_fixlen_string(bytes: bytes)
+  end
+
+  # A String has no distance, so there is no nearest one; refused in the
+  # words CAString uses.
+  def search_nearest (*args, **kw)
+    to_string.search_nearest(*args, **kw)
+  end
+
+  # @see #search_nearest
+  def search_nearest_addr (*args, **kw)
+    to_string.search_nearest_addr(*args, **kw)
+  end
 end
