@@ -118,4 +118,20 @@ class TestCAWindow < Test::Unit::TestCase
     assert_equal [99, 2, 3, 4], row.to_a
   end
 
+  # bounds: is a policy named by a Symbol or a String, matched whole; a fill
+  # value goes with :fill (UNDEF with :mask too), not with another policy.
+  def test_bounds_is_a_named_policy_and_fill_value_goes_with_fill
+    a = CArray.int32(5).seq
+    assert_raise(TypeError) { a.window(-1..1, bounds: 4) }
+    assert_raise(ArgumentError) { a.window(-1..1, bounds: :fillx) }
+    assert_equal [9, 0, 1], a.window(-1..1, bounds: :fill, fill_value: 9).to_a
+    assert_equal [UNDEF, 0, 1], a.window(-1..1, bounds: :fill, fill_value: UNDEF).to_a
+    assert_raise(ArgumentError) { a.window(-1..1, bounds: :nearest, fill_value: 9) }
+    assert_raise(ArgumentError) { a.window(-1..1, bounds: :strict, fill_value: UNDEF) }
+    verbose, $VERBOSE = $VERBOSE, nil   # bounds: :mask warns that it will go
+    assert_raise(ArgumentError) { a.window(-1..1, bounds: :mask, fill_value: 9) }
+  ensure
+    $VERBOSE = verbose
+  end
+
 end
