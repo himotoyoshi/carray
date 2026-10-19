@@ -276,4 +276,12 @@ class TestCAString < Test::Unit::TestCase
     assert_equal ["a", "b"], s.to_a
   end
 
+  # The builder says what it takes, rather than failing inside on to_a.
+  def test_the_builder_refuses_what_it_does_not_take
+    assert_raise(ArgumentError) { CArray.string(2) }
+    assert_raise(TypeError) { CArray.string("ab") }
+    assert_raise(TypeError) { CArray.string(:x) }
+    assert_equal %w[x x], CArray.string(2) { "x" }.to_a
+  end
+
 end
