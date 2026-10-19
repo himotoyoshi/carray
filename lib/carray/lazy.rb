@@ -330,9 +330,28 @@ class CArray
     # branch uses C99 `remainder`, round-half-to-even).
   }.freeze
 
+  # A Face answers an operator by its own values (a label, an instant, a
+  # String) and refuses what it can't answer; the lazy kernels read the
+  # storage and see neither.  With a Face among the operands the operator is
+  # the eager one, on the lazy operands computed.
+  module LazyDispatch
+    private
+
+    def face_among_operands? (*operands)
+      operands.any? { |o| o.is_a?(CArray) && o.face? }
+    end
+
+    def computed_operand (operand)
+      ( operand.is_a?(CArray) && operand.lazy_view? ) ? operand.copy : operand
+    end
+  end
+
   CArray.send(:define_named_methods, LazyDispatch, LAZY_BINOP_OP_IDS, template: <<~'RUBY')
     def __NAME__(other)
       if lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
+        if face_among_operands?(self, other)
+          return computed_operand(self).__send__(__method__, computed_operand(other))
+        end
         CABinOp.__build__(self, other, __VALUE__)
       else
         super(other)
@@ -403,6 +422,10 @@ class CArray
                       (op2.is_a?(CArray) && op2.lazy_view?) ||
                       (op3.is_a?(CArray) && op3.lazy_view?)
       if lazy_receiver
+        if face_among_operands?(self, op2, op3)
+          return computed_operand(self).__send__(__method__, computed_operand(op2),
+                                                 computed_operand(op3))
+        end
         CATriOp.__build__(self, op2, op3, __VALUE__)
       else
         super(op2, op3)
@@ -435,6 +458,10 @@ class CArray
   # is already fast.  The lazy-substrate gap was Float/Complex only.
   module LazyDispatch
     def **(other)
+      if ( lazy_view? || (other.is_a?(CArray) && other.lazy_view?) ) &&
+         face_among_operands?(self, other)
+        return computed_operand(self) ** computed_operand(other)
+      end
       if other.is_a?(Integer) && (float? || complex?) &&
          (lazy_view? || (other.is_a?(CArray) && other.lazy_view?))
         CABinOp.__build__(self, CScalar.int64.tap { |s| s[0] = other },
@@ -492,6 +519,9 @@ class CArray
   CArray.send(:define_named_methods, LazyDispatch, LAZY_BINCMP_OP_IDS, template: <<~'RUBY')
     def __NAME__(other)
       if lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
+        if face_among_operands?(self, other)
+          return computed_operand(self).__send__(__method__, computed_operand(other))
+        end
         CABinCmp.__build__(self, other, __VALUE__)
       else
         super(other)
@@ -511,6 +541,9 @@ class CArray
   CArray.send(:define_named_methods, LazyDispatch, LAZY_BINCMP_TOL_OP_IDS, template: <<~'RUBY')
     def __NAME__(other, tol)
       if lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
+        if face_among_operands?(self, other)
+          return computed_operand(self).__send__(__method__, computed_operand(other), tol)
+        end
         CABinCmp.__build__(self, other, __VALUE__, tol.to_f.abs)
       else
         super(other, tol)

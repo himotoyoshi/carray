@@ -837,6 +837,12 @@ rb_ca_const_string_eq (VALUE self, VALUE other)
     ca_const_string_scan_end(&b);
     return vout;
   }
+  /* Another array is compared cell by cell as Strings, where a CAString
+     reconciles it (an object array of Strings, a fixlen or a CAString). */
+  if ( rb_obj_is_carray(other) ) {
+    return rb_funcall(rb_ca_const_string_to_string(self), rb_intern("eq"), 1,
+                      other);
+  }
   return ca_const_string_predicate(self, other, CA_TEXT_EQ);
 }
 
