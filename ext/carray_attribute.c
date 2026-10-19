@@ -520,10 +520,34 @@ rb_ca_inherit_attr (VALUE dst, VALUE src)
    it up after this (an ivar, a lift that moves it onto another parent), and
    writes through it are refused by ca_is_readonly, which walks to the
    frozen root and finds CA_FLAG_READ_ONLY there. */
+static void
+ca_note_view_of_lent (CArray *p)
+{
+  if ( ca_test_flag(p, CA_FLAG_LENT) ) {
+    ca_set_flag(p, CA_FLAG_LENT_VIEWED);
+  }
+}
+
 VALUE
 rb_ca_set_parent (VALUE self, VALUE obj)
 {
   rb_ivar_set(self, id_parent, obj);
+  /* A view of an array lent to a CAObject hook outlives the hook: tell the
+     array, so that it keeps its cells when the hook returns.  A view of
+     several arrays names one here and holds the rest in parents[]. */
+  if ( rb_obj_is_carray(obj) ) {
+    ca_note_view_of_lent((CArray *) DATA_PTR(obj));
+  }
+  if ( rb_obj_is_carray(self) ) {
+    CArray *ca = (CArray *) DATA_PTR(self);
+    if ( ca_test_flag(ca, CA_FLAG_MULTI_PARENTS) ) {
+      CAMultiParent *mp = (CAMultiParent *) ca;
+      int32_t k;
+      for ( k = 0; k < mp->n_parents; k++ ) {
+        ca_note_view_of_lent(mp->parents[k]);
+      }
+    }
+  }
   return obj;
 }
 

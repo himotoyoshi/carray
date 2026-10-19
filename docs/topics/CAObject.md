@@ -127,6 +127,9 @@ The `data` a bulk hook receives (`copy_data`, `sync_data`, and the
 `copy_block` / `copy_addrs` family below) is the caller's buffer, lent for
 the call only. Once the hook returns it has no cells: an array a hook kept
 reads as empty and raises `IndexError` on `[]`. Copy what you need to keep.
+A view the hook took of it (a slice, a reshape, `data.mask`, a stack or a
+lazy expression with it as an operand) is the exception: the array then
+keeps the cells it held as the hook returned, for the view to read.
 
 ### Optional: partial-region fast paths (`copy_block` / `copy_addrs`)
 

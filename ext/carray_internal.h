@@ -414,6 +414,13 @@ NORETURN(void ca_op_refuse_unimplemented (VALUE operand, int8_t data_type,
 void        ca_check_rank_fits (long ndim, const char *name);
 /* The checks of carray.h inside the library, each naming the method the
    user called; the public ones stay as they are for extensions. */
+/* A wrap of a caller's buffer lent to a CAObject hook (CA_FLAG_LENT), and
+   the mark that a view was taken of it while it was lent
+   (CA_FLAG_LENT_VIEWED).  rb_ca_set_parent sets the second; the hook's
+   caller reads both when it takes the buffer back (ca_obj_object.c). */
+#define CA_FLAG_LENT        2048
+#define CA_FLAG_LENT_VIEWED 4096
+
 #define CA_CHECK_DATA_TYPE_GIVEN(data_type) \
   do { \
     int ca_dt_ = (data_type); \

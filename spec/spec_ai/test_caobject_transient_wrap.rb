@@ -155,4 +155,62 @@ class TestCAObjectTransientWrap < Test::Unit::TestCase
     assert_operator bytes, :<, 20_000, "the inner mask (100 KB) leaks per call"
   end
 
+  # A view a hook takes of the array it is lent outlives the call: when one
+  # was taken, the array keeps the cells it held as the hook returned, for
+  # the view to read.  Run in a child, since reading the caller's freed
+  # buffer would crash.
+  VIEW_SCRIPT = <<~'RUBY'
+    require "carray"
+    class Viewer < CAObject
+      attr_reader :kept
+      def initialize (back) = (@back = back; super(back.data_type, back.shape); self.mask = 0)
+      private
+      def fetch_addr (a) = @back[a]
+      def store_addr (a, v) = (@back[a] = v)
+      def copy_data (d)
+        d[] = @back
+        d[0, 0] = UNDEF
+        @kept = [d[0..1, nil], d.reshape(12), d[nil, 1], d.transpose,
+                 CArray.stack([@back, d]), @back.lazy + d, d.mask[0..1, nil]]
+      end
+      def copy_addrs (a, d) = (@kept = [d[nil]]; d[] = @back[a])
+      def create_mask; end
+    end
+    out = []
+    [CArray.float64(3, 4).seq!, CArray.object(3, 4) { |i, j| "s#{i}#{j}" }].each do |back|
+      r = Viewer.new(back)
+      r.copy
+      GC.stress = true
+      out << r.kept.map { |v| v.to_a.flatten.map(&:to_s).join(" ") }.join("|")
+      GC.stress = false
+      r.kept[1][] = back[0, 1]          # writes land in the kept cells only
+      out << r.kept[1].to_a.uniq.size.to_s
+      out << back.to_a.flatten.map(&:to_s).join(" ")
+      r[CArray.int64(4) { [11, 0, 5, 6] }].to_a
+      out << r.kept[0].to_a.flatten.map(&:to_s).join(" ")
+    end
+    puts out.join("\n")
+  RUBY
+
+  def test_a_view_the_hook_kept_reads_the_cells_it_was_given
+    out = IO.popen({ "MallocScribble" => "1" },
+                   [RbConfig.ruby, *$LOAD_PATH.grep(/carray/).flat_map { |d| ["-I", d] },
+                    "-e", VIEW_SCRIPT], err: [:child, :out], &:read)
+    lines = out.lines.map(&:chomp)
+    assert $?.success?, out[0, 600]
+    f = ->(a) { a.flatten.map(&:to_s).join(" ") }
+    n = CArray.float64(3, 4).seq!
+    m = n.to_a.flatten.map(&:to_s); m[0] = "UNDEF"
+    v = m.join(" ")
+    expect_views = [f.(m.each_slice(4).first(2)), v, f.(m.each_slice(4).map { |r| r[1] }),
+                    f.(m.each_slice(4).to_a.transpose), "#{n.to_a.flatten.map(&:to_s).join(' ')} #{v}",
+                    "UNDEF " + n.to_a.flatten.drop(1).map { |x| (2 * x).to_s }.join(" "),
+                    f.([[true] + [false] * 7])].join("|")
+    assert_equal expect_views, lines[0]
+    assert_equal "1", lines[1]
+    assert_equal n.to_a.flatten.map(&:to_s).join(" "), lines[2]
+    assert_equal [11, 0, 5, 6].map { |i| n[i].to_s }.join(" "), lines[3]
+    assert_equal 8, lines.size, out[0, 600]
+  end
+
 end
