@@ -55,6 +55,12 @@ ctype = {
   CA_OBJECT   => "VALUE"
 }
 
+# The type a cast reads and writes a cell through.  A view's cells need not
+# be aligned to their size (a struct member at offset 1, a refer with a
+# byte offset), so a pointer to a multi-byte cell is the unaligned typedef
+# from carray.h; ctype stays the plain name the functions are called by.
+utype = Hash.new { |h, c| h[c] = %w[fixlen boolean8_t int8_t uint8_t].include?(c) ? c : "ca_u_#{c}" }
+
 obj2cval = {
   CA_FIXLEN   => nil,
   CA_BOOLEAN  => "OBJ2BOOL",
@@ -269,7 +275,7 @@ FIXLEN.each do |type1|
       {
          char  *p1 = ptr1;
          ca_size_t bytes;
-         VALUE *p2 = ptr2;
+         ca_u_VALUE *p2 = ptr2;
          if ( a1 == NULL ) {
            rb_raise(rb_eRuntimeError, "[BUG] failed to cast fixlen -> object");
          }
@@ -304,8 +310,8 @@ puts
       static void
       ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
       {
-         #{ctype1} *p1 = ptr1;
-         #{ctype2} *p2 = ptr2;
+         #{utype[ctype1]} *p1 = ptr1;
+         #{utype[ctype2]} *p2 = ptr2;
          #{ctype1} q;
          if ( m ) {
            while ( n-- ) { 
@@ -391,10 +397,10 @@ puts
       static void
       ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
       {
-         #{ctype1} *q1 = ptr1;
-         #{ctype1} *p1 = q1;
-         #{ctype2} *q2 = ptr2;
-         #{ctype2} *p2 = q2;
+         #{utype[ctype1]} *q1 = ptr1;
+         #{utype[ctype1]} *p1 = q1;
+         #{utype[ctype2]} *q2 = ptr2;
+         #{utype[ctype2]} *p2 = q2;
          ca_size_t k;
       @@NAN_CHECK@@
          if ( m ) {
@@ -436,8 +442,8 @@ puts
       static void
       ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
       {
-         #{ctype1} *p1 = ptr1;
-         VALUE *p2 = ptr2;
+         #{utype[ctype1]} *p1 = ptr1;
+         ca_u_VALUE *p2 = ptr2;
          if ( m ) {
            while ( n-- ) { 
              if ( !*m ) { *p2 = (VALUE) #{conv}(*p1); } 
@@ -465,7 +471,7 @@ OBJECT.each do |type1|
       static void
       ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
       {
-         VALUE *p1 = ptr1;
+         ca_u_VALUE *p1 = ptr1;
          char *p2 = ptr2;
          ca_size_t bytes;
          if ( a2 == NULL ) {
@@ -553,8 +559,8 @@ OBJECT.each do |type1|
         static void
         ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
         {
-           VALUE *p1 = ptr1;
-           #{ctype2} *p2 = ptr2;
+           ca_u_VALUE *p1 = ptr1;
+           #{utype[ctype2]} *p2 = ptr2;
            #{oktype2} tmp;
            if ( m ) {
              while ( n-- ) {
@@ -581,8 +587,8 @@ OBJECT.each do |type1|
       static void
       ca_cast_#{ctype1}_#{ctype2}(ca_size_t n, CArray *a1, void *ptr1, CArray *a2, void *ptr2, boolean8_t *m)
       {
-         VALUE *p1 = ptr1;
-         #{ctype2} *p2 = ptr2;
+         ca_u_VALUE *p1 = ptr1;
+         #{utype[ctype2]} *p2 = ptr2;
          if ( m ) {
            while ( n-- ) {
              if ( !*m ) { *p2 = (#{ctype2}) #{conv}(*p1); }

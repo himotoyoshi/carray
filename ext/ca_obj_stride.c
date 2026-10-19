@@ -1690,19 +1690,19 @@ ca_stride_func_fill_data (void *ap, void *ptr)
       }
       case 2: {
         int16_t v; memcpy(&v, ptr, 2);
-        int16_t *d = (int16_t *) dst;
+        ca_u_int16_t *d = (ca_u_int16_t *) dst;
         for (i = 0; i < inner_count; i++) d[i] = v;
         break;
       }
       case 4: {
         int32_t v; memcpy(&v, ptr, 4);
-        int32_t *d = (int32_t *) dst;
+        ca_u_int32_t *d = (ca_u_int32_t *) dst;
         for (i = 0; i < inner_count; i++) d[i] = v;
         break;
       }
       case 8: {
         int64_t v; memcpy(&v, ptr, 8);
-        int64_t *d = (int64_t *) dst;
+        ca_u_int64_t *d = (ca_u_int64_t *) dst;
         for (i = 0; i < inner_count; i++) d[i] = v;
         break;
       }

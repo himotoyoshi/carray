@@ -117,7 +117,7 @@ ca_seq_is_real (VALUE v)
 /* Fill the whole array in row-major order with `step*i + offset`. */
 #define proc_seq_bang(type, from, to)       \
   {                                         \
-    type *p = (type *)ca->ptr;              \
+    CA_U(type) *p = (CA_U(type) *)ca->ptr;              \
     ca_size_t i;                              \
     if ( NIL_P(roffset) && NIL_P(rstep) ) { \
       for (i=0; i<ca->elements; i++) {    \
@@ -149,7 +149,7 @@ ca_seq_is_real (VALUE v)
    `outer_size` come from the enclosing scope (ca_seq_geometry). */
 #define proc_seq_bang_axis(type, from, to)                              \
   {                                                                     \
-    type *p = (type *)ca->ptr;                                          \
+    CA_U(type) *p = (CA_U(type) *)ca->ptr;                                          \
     ca_size_t o, k, in;                                                 \
     if ( ca_seq_is_real(rstep) || ca_seq_is_real(roffset) ) {           \
       double offset = (NIL_P(roffset)) ? 0 : NUM2DBL(roffset);          \

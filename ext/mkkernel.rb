@@ -44,26 +44,29 @@ module MkKernel
   # value_arg: dispatchers (CF.1) to cast a positional Ruby argument to
   # the kernel's T_IN type.  Signed integers use NUM2LL, unsigned
   # NUM2ULL, floats NUM2DBL, with the dispatcher adding the per-type cast.
+  # `c` of a multi-byte type is its unaligned typedef from carray.h
+  # (ca_u_float64_t): a view's cells may sit at any byte, and a kernel
+  # reads them through `c *`.
   DTYPES = {
     i8:  { c: "int8_t",   ca: "CA_INT8",    ruby: "LL2NUM",  num2c: "NUM2LL",
            limit_hi: "INT8_MAX",   limit_lo: "INT8_MIN" },
     u8:  { c: "uint8_t",  ca: "CA_UINT8",   ruby: "ULL2NUM", num2c: "NUM2ULL",
            limit_hi: "UINT8_MAX",  limit_lo: "0" },
-    i16: { c: "int16_t",  ca: "CA_INT16",   ruby: "LL2NUM",  num2c: "NUM2LL",
+    i16: { c: "ca_u_int16_t",  ca: "CA_INT16",   ruby: "LL2NUM",  num2c: "NUM2LL",
            limit_hi: "INT16_MAX",  limit_lo: "INT16_MIN" },
-    u16: { c: "uint16_t", ca: "CA_UINT16",  ruby: "ULL2NUM", num2c: "NUM2ULL",
+    u16: { c: "ca_u_uint16_t", ca: "CA_UINT16",  ruby: "ULL2NUM", num2c: "NUM2ULL",
            limit_hi: "UINT16_MAX", limit_lo: "0" },
-    i32: { c: "int32_t",  ca: "CA_INT32",   ruby: "LL2NUM",  num2c: "NUM2LL",
+    i32: { c: "ca_u_int32_t",  ca: "CA_INT32",   ruby: "LL2NUM",  num2c: "NUM2LL",
            limit_hi: "INT32_MAX",  limit_lo: "INT32_MIN" },
-    u32: { c: "uint32_t", ca: "CA_UINT32",  ruby: "ULL2NUM", num2c: "NUM2ULL",
+    u32: { c: "ca_u_uint32_t", ca: "CA_UINT32",  ruby: "ULL2NUM", num2c: "NUM2ULL",
            limit_hi: "UINT32_MAX", limit_lo: "0" },
-    i64: { c: "int64_t",  ca: "CA_INT64",   ruby: "LL2NUM",  num2c: "NUM2LL",
+    i64: { c: "ca_u_int64_t",  ca: "CA_INT64",   ruby: "LL2NUM",  num2c: "NUM2LL",
            limit_hi: "INT64_MAX",  limit_lo: "INT64_MIN" },
-    u64: { c: "uint64_t", ca: "CA_UINT64",  ruby: "ULL2NUM", num2c: "NUM2ULL",
+    u64: { c: "ca_u_uint64_t", ca: "CA_UINT64",  ruby: "ULL2NUM", num2c: "NUM2ULL",
            limit_hi: "UINT64_MAX", limit_lo: "0" },
-    f32: { c: "float",    ca: "CA_FLOAT32", ruby: "rb_float_new", num2c: "NUM2DBL",
+    f32: { c: "ca_u_float32_t",    ca: "CA_FLOAT32", ruby: "rb_float_new", num2c: "NUM2DBL",
            limit_hi: "INFINITY",   limit_lo: "-INFINITY" },
-    f64: { c: "double",   ca: "CA_FLOAT64", ruby: "rb_float_new", num2c: "NUM2DBL",
+    f64: { c: "ca_u_float64_t",   ca: "CA_FLOAT64", ruby: "rb_float_new", num2c: "NUM2DBL",
            limit_hi: "INFINITY",   limit_lo: "-INFINITY" },
     # E.6a (2026-06-03): boolean as a first-class source DTYPE.
     # Intentionally NOT included in ALL_NUMERIC -- kernels opt boolean in
@@ -90,11 +93,11 @@ module MkKernel
     # CA_NTYPE coverage parity with mkmath, mkkernel needs to know the
     # complex and object data_types too.  These entries are NOT included in
     # ALL_NUMERIC; pick up via MATH_TYPES / MATH_NUMERIC aliases.
-    cmplx64:  { c: "cmplx64_t",  ca: "CA_CMPLX64",  ruby: "CC2NUM",
+    cmplx64:  { c: "ca_u_cmplx64_t",  ca: "CA_CMPLX64",  ruby: "CC2NUM",
                 num2c: "NUM2CC",  limit_hi: "0", limit_lo: "0" },
-    cmplx128: { c: "cmplx128_t", ca: "CA_CMPLX128", ruby: "CC2NUM",
+    cmplx128: { c: "ca_u_cmplx128_t", ca: "CA_CMPLX128", ruby: "CC2NUM",
                 num2c: "NUM2CC",  limit_hi: "0", limit_lo: "0" },
-    object:   { c: "VALUE",      ca: "CA_OBJECT",   ruby: "(VALUE)",
+    object:   { c: "VALUE",           ca: "CA_OBJECT",   ruby: "(VALUE)",
                 num2c: "(VALUE)", limit_hi: "0", limit_lo: "0" },
     # P.5b.4: fixlen for bincmp (= match, eq/ne/gt/lt/ge/le against
     # fixed-byte strings).  The c: type is `char` because fixlen kernels
@@ -5687,13 +5690,14 @@ module MkKernel
   # (`ca_monop_<name>_<suffix>`).  mkmath uses typedef names
   # `float32_t` / `float64_t` here, not the raw C types `float` / `double`,
   # so that `ca_monop_dispatch.c`'s extern references stay ABI-stable.
-  # For all other data_types, the suffix matches `DTYPES[src][:c]`.
+  # For all other data_types, the suffix is `DTYPES[src][:c]` without the
+  # `ca_u_` of its unaligned cell typedef (ca_u_int32_t -> int32_t).
   def self.math_suffix(src)
     case src
     when :f32 then "float32_t"
     when :f64 then "float64_t"
     when :fixlen then "fixlen"   # symbol suffix differs from c-type "char"
-    else DTYPES[src][:c]
+    else DTYPES[src][:c].sub(/\Aca_u_/, "")
     end
   end
 
@@ -6500,13 +6504,21 @@ module MkKernel
                     cmplx64 cmplx128].freeze
   CAST_INEXACT = %i[f32 f64 cmplx64 cmplx128].freeze
 
+  # The plain C type of a data type, for a body that leaves this file
+  # (CArray.__kernel_body__, a fusion plan): the unaligned typedef in :c is
+  # about how a kernel reaches a cell, not about the value.
+  def self.value_c(src)
+    { "ca_u_float32_t" => "float", "ca_u_float64_t" => "double" }
+      .fetch(DTYPES[src][:c]) { |c| c.sub(/\Aca_u_/, "") }
+  end
+
   def self.cast_body_rows
     CAST_SOURCES.product(CAST_TARGETS).filter_map { |src, dst|
       next if CAST_INEXACT.include?(src) && !CAST_INEXACT.include?(dst)
       name = DTYPES[dst][:ca].sub(/\ACA_/, "").downcase
       via  = ( %i[i64 u64].include?(src) && %i[f32 cmplx64].include?(dst) ) ? "(double)" : ""
       ["monop", "cast_#{name}", DTYPES[src][:ca].sub(/\ACA_/, "").downcase,
-       "(#2) = (#{DTYPES[dst][:c]})#{via}(#1);"]
+       "(#2) = (#{value_c(dst)})#{via}(#1);"]
     }
   end
 
@@ -8152,13 +8164,13 @@ MkKernel.search :linear_section_binary,
     if ( slab_n <= 1 ) {
       /* A one-point axis has no segment: only the point itself is in
        * range, at 0.  An empty one has nothing in range. */
-      if ( slab_n == 1 && query_val == *(double *)slab_ptr ) {
+      if ( slab_n == 1 && query_val == *(ca_u_float64_t *)slab_ptr ) {
         result = 0.0;
       }
     }
     else {
-      double y0 = *(double *)(slab_ptr + 0 * slab_stride);
-      double yn = *(double *)(slab_ptr + (slab_n - 1) * slab_stride);
+      double y0 = *(ca_u_float64_t *)(slab_ptr + 0 * slab_stride);
+      double yn = *(ca_u_float64_t *)(slab_ptr + (slab_n - 1) * slab_stride);
       int ascending = ( yn >= y0 );   /* grid direction (monotonic assumed) */
       ca_size_t x1 = 0;
       int       found = 0;
@@ -8181,8 +8193,8 @@ MkKernel.search :linear_section_binary,
           double  gd = (query_val - y0) / (yn - y0) * (double)(slab_n - 1);
           if ( gd >= 0.0 && gd < (double)(slab_n - 1) ) {
             ca_size_t ag = (ca_size_t) gd;
-            double yga  = *(double *)(slab_ptr + ag * slab_stride);
-            double ygb  = *(double *)(slab_ptr + (ag + 1) * slab_stride);
+            double yga  = *(ca_u_float64_t *)(slab_ptr + ag * slab_stride);
+            double ygb  = *(ca_u_float64_t *)(slab_ptr + (ag + 1) * slab_stride);
             if ( (yga - query_val) * (ygb - query_val) <= 0 ) {
               x1 = ag; found = 1;
             }
@@ -8197,7 +8209,7 @@ MkKernel.search :linear_section_binary,
           double    ya = y0;
           while ( (b - a) > 1 ) {
             ca_size_t c  = (a + b) / 2;
-            double    yc = *(double *)(slab_ptr + c * slab_stride);
+            double    yc = *(ca_u_float64_t *)(slab_ptr + c * slab_stride);
             if ( (ya - query_val) * (yc - query_val) <= 0 ) { b = c; }
             else { a = c; ya = yc; }
           }
@@ -8206,8 +8218,8 @@ MkKernel.search :linear_section_binary,
       }
 
       if ( found ) {
-        double y1 = *(double *)(slab_ptr + x1 * slab_stride);
-        double y2 = *(double *)(slab_ptr + (x1 + 1) * slab_stride);
+        double y1 = *(ca_u_float64_t *)(slab_ptr + x1 * slab_stride);
+        double y2 = *(ca_u_float64_t *)(slab_ptr + (x1 + 1) * slab_stride);
         double rest = (query_val - y1) / (y2 - y1);
         if ( y2 != 0.0 && fabs(y2 - query_val) / fabs(y2) < DBL_EPSILON * 100 ) {
           result = (double)(x1 + 1);
@@ -8243,7 +8255,7 @@ MkKernel.search :linear_section_linear,
     if ( slab_n <= 1 ) {
       /* A one-point axis has no segment: only the point itself is in
        * range, at 0.  An empty one has nothing in range. */
-      if ( slab_n == 1 && query_val == *(double *)slab_ptr ) {
+      if ( slab_n == 1 && query_val == *(ca_u_float64_t *)slab_ptr ) {
         result = 0.0;
       }
     }
@@ -8251,15 +8263,15 @@ MkKernel.search :linear_section_linear,
       ca_size_t x1 = 0;
       int       found = 0;
       for ( ca_size_t k = 0; k < slab_n - 1; k++ ) {
-        double yk  = *(double *)(slab_ptr + k * slab_stride);
-        double yk1 = *(double *)(slab_ptr + (k + 1) * slab_stride);
+        double yk  = *(ca_u_float64_t *)(slab_ptr + k * slab_stride);
+        double yk1 = *(ca_u_float64_t *)(slab_ptr + (k + 1) * slab_stride);
         if ( (query_val - yk) * (query_val - yk1) <= 0 ) {
           x1 = k; found = 1; break;
         }
       }
       if ( found ) {
-        double y1 = *(double *)(slab_ptr + x1 * slab_stride);
-        double y2 = *(double *)(slab_ptr + (x1 + 1) * slab_stride);
+        double y1 = *(ca_u_float64_t *)(slab_ptr + x1 * slab_stride);
+        double y2 = *(ca_u_float64_t *)(slab_ptr + (x1 + 1) * slab_stride);
         result = (query_val - y1) / (y2 - y1) + (double) x1;
       }
 
@@ -8286,8 +8298,8 @@ MkKernel.search :linear_fetch,
       ca_size_t il = (ca_size_t) floor(query_val);
       ca_size_t iu = (ca_size_t) ceil(query_val);
       double    w  = query_val - floor(query_val);
-      double    yl = *(double *)(slab_ptr + il * slab_stride);
-      double    yu = *(double *)(slab_ptr + iu * slab_stride);
+      double    yl = *(ca_u_float64_t *)(slab_ptr + il * slab_stride);
+      double    yu = *(ca_u_float64_t *)(slab_ptr + iu * slab_stride);
       result = yu * w + yl * (1.0 - w);
     }
   C

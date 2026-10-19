@@ -1243,18 +1243,18 @@ ca_mark_unconvertible (CArray *ca, boolean8_t *m, int8_t dt)
 {
   ca_size_t i, n = ca->elements;
   switch ( ca->data_type ) {
-  case CA_FLOAT32: { float32_t *p = (float32_t *) ca->ptr;
+  case CA_FLOAT32: { ca_u_float32_t *p = (ca_u_float32_t *) ca->ptr;
     for (i=0; i<n; i++) if ( ! ca_double_fits_integer(p[i], dt) ) m[i] = 1;
     break; }
-  case CA_FLOAT64: { float64_t *p = (float64_t *) ca->ptr;
+  case CA_FLOAT64: { ca_u_float64_t *p = (ca_u_float64_t *) ca->ptr;
     for (i=0; i<n; i++) if ( ! ca_double_fits_integer(p[i], dt) ) m[i] = 1;
     break; }
 #ifdef HAVE_COMPLEX_H
-  case CA_CMPLX64: { cmplx64_t *p = (cmplx64_t *) ca->ptr;
+  case CA_CMPLX64: { ca_u_cmplx64_t *p = (ca_u_cmplx64_t *) ca->ptr;
     for (i=0; i<n; i++)
       if ( ! ca_double_fits_integer(crealf(p[i]), dt) || isnan(cimagf(p[i])) ) m[i] = 1;
     break; }
-  case CA_CMPLX128: { cmplx128_t *p = (cmplx128_t *) ca->ptr;
+  case CA_CMPLX128: { ca_u_cmplx128_t *p = (ca_u_cmplx128_t *) ca->ptr;
     for (i=0; i<n; i++)
       if ( ! ca_double_fits_integer(creal(p[i]), dt) || isnan(cimag(p[i])) ) m[i] = 1;
     break; }
