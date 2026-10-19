@@ -2017,7 +2017,9 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
     else {
       CArray *ca_tmp;
       volatile VALUE ref = obj;
-      ca_size_t dim = RSTRING_LEN(ref)/ca_sizeof[data_type];
+      ca_size_t bytes;
+      CA_CHECK_BYTES_GIVEN(data_type, bytes);
+      ca_size_t dim = RSTRING_LEN(ref)/bytes;
       obj = rb_carray_new(data_type, 1, &dim, 0, NULL);
       TypedData_Get_Struct(obj, CArray, &carray_data_type, ca_tmp);
       memcpy(ca_tmp->ptr, RSTRING_PTR(ref), dim * ca_sizeof[data_type]);
