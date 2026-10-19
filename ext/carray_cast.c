@@ -2017,7 +2017,7 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
     else {
       CArray *ca_tmp;
       volatile VALUE ref = obj;
-      ca_size_t bytes;
+      ca_size_t bytes = ca_sizeof[data_type];
       CA_CHECK_BYTES_GIVEN(data_type, bytes);
       ca_size_t dim = RSTRING_LEN(ref)/bytes;
       obj = rb_carray_new(data_type, 1, &dim, 0, NULL);
