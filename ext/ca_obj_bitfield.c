@@ -160,14 +160,16 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
   }
 
   if ( offset < 0 || offset + bitlen -1 >= bitsize ) {
-    rb_raise(rb_eIndexError, "invalid offset for bit field");
+    rb_raise(rb_eIndexError, "%s: bits out of range for a cell of %d bits",
+             ca_calling_method_name(), (int) bitsize);
   }
 
   /* The bits of an object cell are a reference: writing them would leave
      the cell pointing nowhere.  A complex cell is refused as bitarray
      refuses it. */
   if ( ca_is_object_type(parent) || ca_is_complex_type(parent) ) {
-    rb_raise(rb_eCADataTypeError, "invalid data_type for bitfield");
+    rb_raise(rb_eCADataTypeError, "%s: can't view the bits of a cell of %s",
+             ca_calling_method_name(), ca_type_name[parent->data_type]);
   }
 
   /* A field is read with one 8-byte load from the byte it starts in. */
@@ -666,8 +668,10 @@ rb_ca_bitfield (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
-  if ( TYPE(rrange) == T_FIXNUM ) {
-    offset = NUM2INT(rrange);
+  if ( RB_INTEGER_TYPE_P(rrange) ) {
+    /* A bit of a cell: negative from the last.  One beyond any cell is
+       refused by the setup's range check, as an offset past the cell is. */
+    offset = RB_FIXNUM_P(rrange) ? FIX2LONG(rrange) : CA_LENGTH_MAX;
     if ( offset < 0 ) {
       offset += ca->bytes * 8;
     }

@@ -68,4 +68,18 @@ class TestBitfieldEdges < Test::Unit::TestCase
     assert_raise(CArray::DataTypeError) { c.bitfield(0..7) }
     assert_raise(CArray::DataTypeError) { CA_CMPLX64([1]).bitfield(0) }
   end
+  # The refusals name the method; a bit past the cell is out of range
+  # whatever size the Integer is.
+  def test_refusals_name_the_method
+    { -> { CArray.object(2).bitfield(0) }       => /\Abitfield: /,
+      -> { CArray.cmplx128(2).bitarray }        => /\Abitarray: /,
+      -> { CArray.object(2).swap_bytes }        => /\Aswap_bytes: /,
+      -> { CArray.object(2).field(0, :int8) }   => /\Afield: /,
+      -> { CArray.int64(2).bitfield(2**32 + 1) } => /\Abitfield: bits out of range for a cell of 64 bits\z/,
+      -> { CArray.int64(2).bitfield(2**70) }    => /\Abitfield: bits out of range/ }.each do |call, message|
+      e = assert_raise_kind_of(StandardError) { call.() }
+      assert_match message, e.message
+    end
+  end
+
 end

@@ -93,7 +93,8 @@ ca_bitarray_setup (CABitarray *ca, CArray *parent)
   ca_size_t bitlen, elements;
 
   if ( ca_is_complex_type(parent) || ( ca_is_object_type(parent) ) ) {
-    rb_raise(rb_eCADataTypeError, "invalid data_type for bitarray");
+    rb_raise(rb_eCADataTypeError, "%s: can't view the bits of a cell of %s",
+             ca_calling_method_name(), ca_type_name[parent->data_type]);
   }
 
   /* The bits of one byte would share that byte's one mask cell, so a bit

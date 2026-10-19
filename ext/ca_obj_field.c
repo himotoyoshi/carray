@@ -40,11 +40,12 @@ ca_field_setup (CAStride *ca, CArray *parent,
   }
   if ( data_type == CA_OBJECT ) {
     rb_raise(rb_eCADataTypeError,
-             "CA_OBJECT can not to be a data_type for CAField");
+             "%s: a field can't be read as object", ca_calling_method_name());
   }
   if ( ca_is_object_type(parent) ) {
     rb_raise(rb_eCADataTypeError,
-             "a field can not be taken from an object array");
+             "%s: a field can't be taken from an object array",
+             ca_calling_method_name());
   }
   /* A boolean cell holds 0 or 1, and a field of a numeric array is
      written as that number.  A record's boolean member is a field of a
