@@ -8859,7 +8859,7 @@ MkKernel.monfunc :rad_pi,
 # Pair-wise max / min — three flavours:
 #
 #   pmax / pmin      CArray legacy names (kept for backwards compat),
-#                    NaN-skip semantics via C99 fmax / fmin.
+#                    NaN-skip semantics, as C99 fmax / fmin.
 #   fmax / fmin      Ruby-level aliases of pmax / pmin (= same kernel,
 #                    same NaN-skip behaviour).  Matches the C99 library
 #                    function of the same name.
@@ -8869,12 +8869,15 @@ MkKernel.monfunc :rad_pi,
 #
 # Integer branches are identical across all three (no NaN).  The float
 # and object branches differ: pmax / pmin let a NaN lose (an object cell's
-# Float NaN included), maximum / minimum let it win.
+# Float NaN included), maximum / minimum let it win.  In both flavours, of
+# two zeros the max is +0 and the min is -0 in either order.  C's fmax /
+# fmin leave that choice to the library (glibc and macOS answer
+# differently), so the float branch does not call them.
 MkKernel.binop :pmax,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) > (#2) ? (#1) : (#2);",
-    float:  "(#3) = fmax(#1, #2);",
+    float:  "(#3) = isnan(#1) ? (#2) : isnan(#2) ? (#1) : ((#1) > (#2) || ((#1) == (#2) && !signbit(#1))) ? (#1) : (#2);",
     object: '(#3) = ca_obj_extremum_replaces((#2), (#1), rb_intern(">")) ? (#2) : (#1);',
   }
 
@@ -8882,7 +8885,7 @@ MkKernel.binop :pmin,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) < (#2) ? (#1) : (#2);",
-    float:  "(#3) = fmin(#1, #2);",
+    float:  "(#3) = isnan(#1) ? (#2) : isnan(#2) ? (#1) : ((#1) < (#2) || ((#1) == (#2) && signbit(#1))) ? (#1) : (#2);",
     object: '(#3) = ca_obj_extremum_replaces((#2), (#1), rb_intern("<")) ? (#2) : (#1);',
   }
 

@@ -33,7 +33,7 @@ class TestKernelBodyTable < Test::Unit::TestCase
     int   = CArray.__kernel_body__(:binop, :pmax, :int32)
     float = CArray.__kernel_body__(:binop, :pmax, :float64)
     assert_not_equal int, float
-    assert_match(/fmax/, float)
+    assert_match(/isnan/, float)
   end
 
   def test_multi_line_bodies_keep_their_lines

@@ -11,6 +11,11 @@
 # builds a node in the expression tree instead of evaluating, and the
 # eager and lazy paths are required to agree element for element.
 #
+# The transcendental functions call the platform's C math library, so
+# their last bits, and the complex functions' answers at special values
+# (signed zeros, infinities, NaN), follow that library and can differ
+# between operating systems.
+#
 # See yard-stubs/README.md and yard-stubs/STYLE.md.
 
 class CArray
@@ -685,8 +690,8 @@ class CArray
   # @overload pmax(other)
   #   Returns the element-wise larger of `self` and `other`, ignoring
   #   `NaN`: where one element is `NaN` the other is returned, and only
-  #   two `NaN`s give `NaN`. This is C's `fmax`. For the form that lets
-  #   a `NaN` win see {#maximum}.
+  #   two `NaN`s give `NaN`. Of `-0.0` and `0.0` the result is `0.0`,
+  #   in either order. For the form that lets a `NaN` win see {#maximum}.
   #   @param other [CArray, Numeric] the other operand, broadcast to
   #     `self.shape`.
   #   @return [CArray] result of the promoted `data_type` of the two
@@ -699,7 +704,8 @@ class CArray
 
   # @overload pmin(other)
   #   Returns the element-wise smaller of `self` and `other`, ignoring
-  #   `NaN`. The counterpart of {#pmax}.
+  #   `NaN`. Of `-0.0` and `0.0` the result is `-0.0`, in either order.
+  #   The counterpart of {#pmax}.
   #   @param other [CArray, Numeric] the other operand.
   #   @return [CArray]
   #   @raise [CArray::DataTypeError] for a complex array.
