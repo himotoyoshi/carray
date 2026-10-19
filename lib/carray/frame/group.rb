@@ -239,10 +239,11 @@ end
 # GroupedFrame — the result of +CAFrame#group_by+ (memo §11.6, §16).
 #
 # Holds the grouping categorical once (grouping is per-key, computed once
-# and shared across every column). Three surfaces:
-#   grp["col"]   -> the CArray group iterator (raw exposure)
-#   aggregate    -> declarative per-column reductions into a new frame
-#   table { |g| }-> cross-column Ruby escape, g is a per-group view-frame
+# and shared across every column). The surfaces:
+#   grp["col"], grp[array] -> the CArray group iterator of a column or array
+#   aggregate(spec)        -> declarative per-column reductions into a new frame
+#   aggregate { |grp| }    -> columns built from iterators, run once
+#   table { |g| }          -> Ruby escape, g is a per-group view-frame
 class GroupedFrame
   include CAFrame::ColumnVerbs
   # +key_names+ are the frame columns the grouping was keyed on. They become
@@ -285,10 +286,40 @@ class GroupedFrame
     @labels.dup
   end
 
-  # Raw exposure: the CArray group iterator for one column (memo §11.6).
-  def [](name)
+  # The CArray group iterator of a column, or of any CArray with one entry
+  # per row of the frame: a value computed from columns, or a column with
+  # some cells masked to leave them out. Its reductions answer one value
+  # per group, and take the arguments a CArray's reductions take.
+  #
+  #   grp["temp"].percentile(90)
+  #   grp[df["temp"] * df["w"]].sum / grp["w"].sum
+  #   grp[df["temp"].mask_where(df["qc"].ne(0))].mean   # without the flagged rows
+  #
+  # The array is matched to the rows by position, as a CArray key of
+  # +group_by+ is. An N-D one is grouped along its first axis; pass
+  # +axis: 0+ to its reductions to keep the trailing shape.
+  #
+  # @param source [String, CArray] a column name, or a CArray whose first
+  #   axis has one entry per row.
+  # @return [CACategoricalIterator]
+  # @raise [KeyError] for a name that is no column.
+  # @raise [ArgumentError] when the CArray's first axis is not the rows.
+  def [](source)
     refuse_changed_rows("[]")
-    @frame[name].group_by_category(@cat)
+    values =
+      case source
+      when CArray
+        rows = source.ndim == 0 ? 0 : source.shape[0]
+        unless source.ndim >= 1 && rows == @cat.elements
+          raise ArgumentError,
+                "[]: the array has #{source.ndim == 0 ? "no axis" : "#{rows} rows"} " \
+                "for the frame's #{@cat.elements}"
+        end
+        source
+      else
+        @frame[@frame.__send__(:column_key, source, "[]")]
+      end
+    values.group_by_category(@cat)
   end
 
   # Declarative aggregation (memo §11.6). Spec maps an output column name to
@@ -304,8 +335,34 @@ class GroupedFrame
   # keyword works for +table+ and the reductions below.
   #
   #   df.group_by("station").aggregate("temp_mean" => ["temp", :mean], keep_rows: true)
-  def aggregate(spec = nil, keep_rows: false, **named)
+  #
+  # Given a block instead of a spec, aggregate yields the grouped frame once
+  # and the block returns a Hash of output name => a CArray with one entry
+  # per group. The block computes the columns with the grouped frame's
+  # reductions, +grp[...]+ iterators and CArray arithmetic, so nothing runs
+  # per group in Ruby:
+  #
+  #   df.group_by("station").aggregate do |g|
+  #     {
+  #       "temp"  => g["temp"].mean,
+  #       "range" => g["temp"].max - g["temp"].min,
+  #       "wmean" => g[df["temp"] * df["w"]].sum / g["w"].sum,
+  #       "n"     => g["temp"].group_sizes,
+  #     }
+  #   end
+  #
+  # +keep_rows: true+ lays each column over the rows as for a spec.
+  #
+  # @raise [ArgumentError] when both a spec and a block are given, or the
+  #   block returns something other than a Hash of per-group CArrays.
+  def aggregate(spec = nil, keep_rows: false, **named, &block)
     refuse_changed_rows("aggregate")
+    if block
+      unless spec.nil? && named.empty?
+        raise ArgumentError, "aggregate: give a spec or a block, not both"
+      end
+      return result_frame(block_columns(yield(self)), keep_rows)
+    end
     spec = (spec || {}).merge(named)
     cols = {}
     spec.each do |out_name, (in_name, reduction, *args)|
@@ -687,6 +744,24 @@ class GroupedFrame
       it.public_send(reduction, *args, axis: 0, **keywords)
     else
       it.public_send(reduction, *args, **keywords)
+    end
+  end
+
+  # The columns an aggregate block returned: a Hash of names to CArrays
+  # with one entry per group along their first axis.
+  private def block_columns(out)
+    unless out.is_a?(Hash)
+      raise ArgumentError, "aggregate block must return a Hash (got #{out.class})"
+    end
+    out.each_with_object({}) do |(name, col), cols|
+      name = @frame.__send__(:column_name_arg, name, "aggregate")
+      unless col.is_a?(CArray) && col.ndim >= 1 && col.shape[0] == ngroup
+        got = col.is_a?(CArray) ? "shape #{col.shape.inspect}" : col.class.to_s
+        raise ArgumentError,
+              "aggregate: #{name.inspect} must be a CArray with one value per group " \
+              "(#{ngroup}), got #{got}"
+      end
+      cols[name] = col
     end
   end
 

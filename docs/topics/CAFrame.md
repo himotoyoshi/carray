@@ -1033,16 +1033,17 @@ grp.labels                 # => group key values, in code order
 
 ### Choosing a reduction
 
-A `GroupedFrame` offers four ways to reduce. Choose by what you need:
+A `GroupedFrame` offers five ways to reduce. Choose by what you need:
 
 | you need… | use |
 |---|---|
 | the same reduction for every column | [`sum` / `mean` / `median` / `first` / `count` / …](#the-same-reduction-for-every-column) |
 | a reduction, or an output name, of your own for each column | [`aggregate`](#a-reduction-per-column--aggregate) |
-| a computation that combines several columns | [`table`](#computing-across-columns--table) |
-| one column, with any reduction the categorical iterator offers | [`grp["col"]`](#one-column--the-group-iterator) |
+| columns computed from several columns, a masked column, or reductions combined | [`aggregate` with a block](#columns-of-your-own--aggregate-with-a-block) |
+| any Ruby computation on each group's rows | [`table`](#computing-across-columns--table) |
+| one column or array, with any reduction the categorical iterator offers | [`grp["col"]` / `grp[array]`](#one-column--the-group-iterator) |
 
-Each of the first three also takes [`keep_rows: true`](#keeping-the-rows--keep_rows) to give the result on every row instead of one row per group.
+Each of the first four also takes [`keep_rows: true`](#keeping-the-rows--keep_rows) to give the result on every row instead of one row per group.
 
 ### The same reduction for every column
 
@@ -1090,9 +1091,36 @@ df.group_by("station").aggregate(
 
 A Symbol reduction takes its arguments after it, as in a call, with keywords last: `"temp_p90" => ["temp", :percentile, 90.0]`, `"temp_mean" => ["temp", :mean, min_count: 20]`.
 
+### Columns of your own — `aggregate` with a block
+
+Given a block instead of a spec, `aggregate` yields the grouped frame **once**, and the block returns a Hash of output name => a `CArray` with one value per group. The block builds each column from [`g[...]`](#one-column--the-group-iterator) iterators and CArray arithmetic, so nothing runs per group in Ruby:
+
+```ruby
+df.group_by("station").aggregate do |g|
+  {
+    "temp"    => g["temp"].mean,
+    "range"   => g["temp"].max - g["temp"].min,
+    "p90"     => g["temp"].percentile(90),
+    "wmean"   => g[df["temp"] * df["w"]].sum / g["w"].sum,
+    "temp_qc" => g[df["temp"].mask_where(df["qc"].ne(0))].mean,
+    "n"       => g["temp"].group_sizes,
+  }
+end
+```
+
+A column can be computed in three places:
+
+- **before grouping**, on the frame's columns: `df["temp"] * df["w"]` is one value per row, and `g[...]` groups it.
+- **while grouping**, by the iterator's reductions, which take the arguments a CArray's reductions take (`percentile(90)`, `wmean(w)`, `min_count:`).
+- **after grouping**, on the per-group results: `g["temp"].max - g["temp"].min` is CArray arithmetic on two arrays of one value per group.
+
+A masked cell is left out of a reduction, so masking cells of a column (`mask_where`) leaves those rows out of that one column of the result, while the other columns still see every row.
+
+The result is indexed by the group labels, as for a spec, and `keep_rows: true` lays each column over the rows. A value that is not a `CArray` with one value per group along its first axis raises `ArgumentError`; so does giving both a spec and a block.
+
 ### Computing across columns — `table`
 
-When a reduction of one column at a time is not enough, `table` yields **each group as a sub-frame** and collects the Hash the block returns, column by column, into a new frame. The full frame API works on `g`:
+When a computation does not fit the iterators' reductions, `table` yields **each group as a sub-frame** and collects the Hash the block returns, column by column, into a new frame. The full frame API works on `g`:
 
 ```ruby
 df.group_by("station").table do |g|
@@ -1110,6 +1138,13 @@ The columns are the names any group's Hash has, in the order they first appear. 
 
 ```ruby
 df.group_by("station")["temp"].mean    # => per-group means as a CArray
+```
+
+`grp[array]` does the same for any `CArray` with one entry per row: a value computed from columns, or a column with some cells masked. It is matched to the rows by position, as a `CArray` key of `group_by` is, and an array whose first axis is not the rows raises `ArgumentError`. An N-D array is grouped along its first axis; pass `axis: 0` to its reductions to keep the trailing shape.
+
+```ruby
+grp = df.group_by("station")
+grp[df["temp"] * df["w"]].sum / grp["w"].sum      # weighted mean, one value per group
 ```
 
 ### Keeping the rows — `keep_rows:`
