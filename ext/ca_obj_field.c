@@ -105,6 +105,14 @@ rb_ca_field_new (VALUE cary, ca_size_t offset, int8_t data_type, ca_size_t bytes
   CAStride *ca;
   rb_check_carray_object(cary);
   TypedData_Get_Struct(cary, CArray, &carray_data_type, parent);
+  /* A record's boolean member is a byte of a fixlen array that other
+     fields (a uint8 one, a String store of the record) can write as any
+     byte.  It is read through a cast to boolean, which refuses a byte
+     that is not 0 or 1, as fake(:boolean) does. */
+  if ( data_type == CA_BOOLEAN && parent->data_type == CA_FIXLEN ) {
+    obj = rb_ca_field_new(cary, offset, CA_UINT8, 1);
+    return rb_ca_fake_new(obj, CA_BOOLEAN, 1);
+  }
   ca  = ca_field_new(parent, offset, data_type, bytes);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, cary);
