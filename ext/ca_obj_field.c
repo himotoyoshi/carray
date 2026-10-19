@@ -148,7 +148,7 @@ rb_ca_field (int argc, VALUE *argv, VALUE self)
   rb_scan_args(argc, argv, "21", (VALUE *) &voffset, (VALUE *) &rtype, (VALUE *) &ropt);
   rb_scan_options(ropt, "bytes", &rbytes);
 
-  offset = NUM2SIZE(voffset);
+  offset = ca_integer_arg(voffset, "offset", NULL);
 
   if ( rb_obj_is_carray(rtype) ) {
     CArray *ct;

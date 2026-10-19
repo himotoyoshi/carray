@@ -629,7 +629,7 @@ rb_ca_roll (int argc, VALUE *argv, VALUE self)
   }
   for ( i = 0; i < ca->ndim; i++ ) {
     if ( i < argc ) {
-      shift[i] = NUM2SIZE(argv[i]);
+      shift[i] = ca_integer_arg(argv[i], "a shift", NULL);
     } else {
       shift[i] = 0;
     }

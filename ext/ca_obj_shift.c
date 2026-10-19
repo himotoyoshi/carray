@@ -216,7 +216,7 @@ rb_ca_shift (int argc, VALUE *argv, VALUE self)
   }
 
   for (i=0; i<ca->ndim; i++) {
-    shift[i] = NUM2SIZE(argv[i]);
+    shift[i] = ca_integer_arg(argv[i], "a shift", NULL);
   }
 
   if ( rb_block_given_p() ) {
@@ -264,7 +264,7 @@ rb_ca_shift (int argc, VALUE *argv, VALUE self)
     }
 
     for (i=0; i<ca->ndim; i++) {
-      roll[i] = NUM2INT(rb_ary_entry(rroll, i));
+      roll[i] = ca_integer_arg(rb_ary_entry(rroll, i), "a shift", NULL);
     }
   }
 

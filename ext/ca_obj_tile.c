@@ -548,7 +548,7 @@ rb_ca_tile (int argc, VALUE *argv, VALUE self)
                len, ca->ndim);
     }
     for ( i = 0; i < ca->ndim; i++ ) {
-      reps[i] = NUM2SIZE(rb_ary_entry(ary, i));
+      reps[i] = ca_integer_arg(rb_ary_entry(ary, i), "a repeat count", NULL);
     }
   }
   else {
@@ -559,7 +559,7 @@ rb_ca_tile (int argc, VALUE *argv, VALUE self)
                ca->ndim, argc);
     }
     for ( i = 0; i < ca->ndim; i++ ) {
-      reps[i] = NUM2SIZE(argv[i]);
+      reps[i] = ca_integer_arg(argv[i], "a repeat count", NULL);
     }
   }
 
