@@ -256,4 +256,24 @@ class TestCAString < Test::Unit::TestCase
     assert_equal %w[a b], CArray.string(CArray.string(%w[a b]).to_const_string).to_a
   end
 
+  # A masked cell of a CAString is still a String underneath: unmasking it
+  # gives an empty String, not the 0 an object array starts with.
+  def test_a_masked_cell_is_a_string_once_unmasked
+    [CArray.string(["a", nil]), CArray.string(2) { |i| i == 0 ? "a" : nil },
+     CArray.string(CArray.const_string(["a", nil])),
+     CArray.string(CArray.fixlen_string(["a", nil]))].each do |s|
+      s.unmask
+      assert_equal ["a", ""], s.to_a
+      assert_equal [String, String], s.to_a.map(&:class)
+    end
+    o = CA_OBJECT(["a", 42]); o[1] = UNDEF
+    s = CAString.wrap(o)
+    s.unmask
+    assert_equal ["a", ""], s.to_a
+    o = CA_OBJECT(["a", "b"]); o[1] = UNDEF   # a String under the mask stays
+    s = CAString.wrap(o)
+    s.unmask
+    assert_equal ["a", "b"], s.to_a
+  end
+
 end
