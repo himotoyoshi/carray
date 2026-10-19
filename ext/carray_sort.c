@@ -103,16 +103,207 @@ sort_addr_merge (struct sort_addr_key *a, struct sort_addr_key *aux,
                  ca_size_t n, int (*cmp)(const void *, const void *))
 CA_SORT_MERGE_BY_CMP(struct sort_addr_key)
 
+/* -------------------------------------------------------------------
+
+  Multi-key sort by refinement (MSD), for keys of the numeric data types.
+
+  The first key is sorted whole by the typed pair kernel
+  (ca_sort_quick_pair_*); then only the runs of rows that tie on it are
+  sorted by the second key, and so on, until no run is left or the keys
+  run out.  The answer is the one sort_addr_cmp gives:
+
+  - a pair sorts by (value, row), so rows that tie on every key stay in
+    row order (the stable tie-break of sort_addr_cmp);
+  - each run is split into numbers, NaN and masked cells, in the order
+    sort_addr_cmp puts them (numbers, NaN, masked for masked_last;
+    masked, numbers, NaN otherwise).  The NaN and the masked cells of a
+    run tie among themselves (CA_FLOAT_ORDER_CMP / sort_addr_cmp), so
+    each is a run for the next key.  The split is a stable one done in
+    the load, not ca_partition_nan_pair_*, which allocates on every call
+    and is called here once per run;
+  - -0.0 and 0.0 tie, by == as by CA_FLOAT_ORDER_CMP.
+
+  A run is (lo, n): the rows perm[lo..lo+n).  Within a run the rows are
+  in row order, since they tie on every key before it, so the stable
+  split keeps them so.
+
+------------------------------------------------------------------- */
+
+typedef struct {
+  ca_size_t lo;
+  ca_size_t n;
+} msd_run_t;
+
+typedef struct {
+  msd_run_t *runs;
+  ca_size_t  count;
+} msd_runs_t;
+
+static void
+msd_add_run (msd_runs_t *out, ca_size_t lo, ca_size_t n)
+{
+  if ( out && n > 1 ) {
+    out->runs[out->count].lo = lo;
+    out->runs[out->count].n  = n;
+    out->count++;
+  }
+}
+
+/* Sort each run of +in+ by +key+, writing the new order into perm, and
+   add the runs that still tie to +out+ (NULL for the last key). */
+#define DEFINE_MSD_REFINE(TYPE, SUFFIX, IS_FLOAT)                             \
+static void                                                                   \
+msd_refine_##SUFFIX (CArray *key, ca_size_t *perm, void *vbuf,                \
+                     msd_runs_t *in, msd_runs_t *out, int masked_last)        \
+{                                                                             \
+  const TYPE *ptr = (const TYPE *) key->ptr;                                  \
+  const boolean8_t *m = ( key->mask ) ? (boolean8_t *) key->mask->ptr : NULL; \
+  ca_pair_##SUFFIX *buf = (ca_pair_##SUFFIX *) vbuf;                          \
+  ca_size_t r;                                                                \
+                                                                              \
+  for (r=0; r<in->count; r++) {                                               \
+    ca_size_t lo = in->runs[r].lo;                                            \
+    ca_size_t n  = in->runs[r].n;                                             \
+    ca_size_t *p = perm + lo;                                                 \
+    ca_size_t n_num = 0, n_nan = 0, n_mask = 0;                               \
+    ca_size_t o_num, o_nan, o_mask;                                           \
+    ca_size_t k, s;                                                           \
+                                                                              \
+    for (k=0; k<n; k++) {                                                     \
+      ca_size_t row = p[k];                                                   \
+      if ( m && m[row] )                 n_mask++;                            \
+      else if ( IS_FLOAT && isnan(ptr[row]) ) n_nan++;                        \
+      else                               n_num++;                             \
+    }                                                                         \
+    o_mask = masked_last ? n_num + n_nan : 0;                                 \
+    o_num  = masked_last ? 0 : n_mask;                                        \
+    o_nan  = o_num + n_num;                                                   \
+    {                                                                         \
+      ca_size_t i_num = o_num, i_nan = o_nan, i_mask = o_mask;                \
+      for (k=0; k<n; k++) {                                                   \
+        ca_size_t row = p[k];                                                 \
+        TYPE v = ptr[row];                                                    \
+        ca_size_t at;                                                         \
+        if ( m && m[row] )             at = i_mask++;                         \
+        else if ( IS_FLOAT && isnan(v) ) at = i_nan++;                        \
+        else                           at = i_num++;                          \
+        buf[at].v = v;                                                        \
+        buf[at].i = row;                                                      \
+      }                                                                       \
+    }                                                                         \
+    ca_sort_quick_pair_##SUFFIX(buf + o_num, n_num);                          \
+    for (k=0; k<n; k++) {                                                     \
+      p[k] = buf[k].i;                                                        \
+    }                                                                         \
+    if ( ! out ) continue;                                                    \
+    for (s=0, k=1; k<=n_num; k++) {                                           \
+      if ( k == n_num || buf[o_num + k].v != buf[o_num + s].v ) {             \
+        msd_add_run(out, lo + o_num + s, k - s);                              \
+        s = k;                                                                \
+      }                                                                       \
+    }                                                                         \
+    msd_add_run(out, lo + o_nan,  n_nan);                                     \
+    msd_add_run(out, lo + o_mask, n_mask);                                    \
+  }                                                                           \
+}
+
+DEFINE_MSD_REFINE(int8_t,    i8,  0)
+DEFINE_MSD_REFINE(uint8_t,   u8,  0)
+DEFINE_MSD_REFINE(int16_t,   i16, 0)
+DEFINE_MSD_REFINE(uint16_t,  u16, 0)
+DEFINE_MSD_REFINE(int32_t,   i32, 0)
+DEFINE_MSD_REFINE(uint32_t,  u32, 0)
+DEFINE_MSD_REFINE(int64_t,   i64, 0)
+DEFINE_MSD_REFINE(uint64_t,  u64, 0)
+DEFINE_MSD_REFINE(float32_t, f32, 1)
+DEFINE_MSD_REFINE(double,    f64, 1)
+
+/* Whether every key has a typed pair kernel, so that MSD can sort them. */
+static int
+msd_is_sortable (struct cmp_base *base)
+{
+  int j;
+  for (j=0; j<base->n; j++) {
+    switch ( base->ca[j]->data_type ) {
+    case CA_BOOLEAN: case CA_INT8:  case CA_UINT8:
+    case CA_INT16:   case CA_UINT16:
+    case CA_INT32:   case CA_UINT32:
+    case CA_INT64:   case CA_UINT64:
+    case CA_FLOAT32: case CA_FLOAT64:
+      break;
+    default:
+      return 0;
+    }
+  }
+  return 1;
+}
+
+typedef struct {
+  struct cmp_base *base;
+  ca_size_t       *perm;      /* elements rows, the answer */
+  void            *buf;       /* elements pairs of 16 bytes */
+  msd_run_t       *runs[2];   /* elements / 2 + 1 runs each */
+  ca_size_t        elements;
+} msd_sort_t;
+
+static void
+msd_sort (msd_sort_t *s)
+{
+  struct cmp_base *base = s->base;
+  msd_runs_t a, b, *in = &a, *out = &b;
+  ca_size_t i;
+  int j;
+
+  for (i=0; i<s->elements; i++) {
+    s->perm[i] = i;
+  }
+  a.runs = s->runs[0];  a.count = 0;
+  b.runs = s->runs[1];  b.count = 0;
+  msd_add_run(in, 0, s->elements);
+
+  for (j=0; j<base->n && in->count > 0; j++) {
+    CArray *key = base->ca[j];
+    msd_runs_t *next = ( j < base->n - 1 ) ? out : NULL;
+    msd_runs_t *t;
+    if ( next ) next->count = 0;
+    switch ( key->data_type ) {
+    case CA_BOOLEAN:
+    case CA_INT8:    msd_refine_i8 (key, s->perm, s->buf, in, next, base->masked_last); break;
+    case CA_UINT8:   msd_refine_u8 (key, s->perm, s->buf, in, next, base->masked_last); break;
+    case CA_INT16:   msd_refine_i16(key, s->perm, s->buf, in, next, base->masked_last); break;
+    case CA_UINT16:  msd_refine_u16(key, s->perm, s->buf, in, next, base->masked_last); break;
+    case CA_INT32:   msd_refine_i32(key, s->perm, s->buf, in, next, base->masked_last); break;
+    case CA_UINT32:  msd_refine_u32(key, s->perm, s->buf, in, next, base->masked_last); break;
+    case CA_INT64:   msd_refine_i64(key, s->perm, s->buf, in, next, base->masked_last); break;
+    case CA_UINT64:  msd_refine_u64(key, s->perm, s->buf, in, next, base->masked_last); break;
+    case CA_FLOAT32: msd_refine_f32(key, s->perm, s->buf, in, next, base->masked_last); break;
+    case CA_FLOAT64: msd_refine_f64(key, s->perm, s->buf, in, next, base->masked_last); break;
+    default:
+      rb_raise(rb_eRuntimeError, "%s: [BUG] data type %d has no pair kernel",
+               ca_calling_method_name(), (int) key->data_type);
+    }
+    if ( ! next ) break;
+    t = in; in = out; out = t;
+  }
+}
+
+/* ----------------------------------------------------------------- */
+
 typedef struct {
   struct sort_addr_key *data;
   struct sort_addr_key *aux;     /* NULL: no object key, libc sorts */
   ca_size_t             elements;
+  msd_sort_t           *msd;     /* non-NULL: every key is numeric, sort by MSD */
 } sort_addr_run_t;
 
 static VALUE
 sort_addr_run (VALUE arg)
 {
   sort_addr_run_t *r = (sort_addr_run_t *) arg;
+  if ( r->msd ) {
+    msd_sort(r->msd);
+    return Qnil;
+  }
   if ( r->aux ) {
     sort_addr_merge(r->data, r->aux, r->elements,
                     (int (*)(const void*,const void*)) sort_addr_cmp);
@@ -145,8 +336,9 @@ rb_ca_s_sort_addr_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
   CArray *co;
   struct cmp_base base_s, *base = &base_s;
   struct sort_addr_key *data;
-  volatile VALUE hlist = 0, hdata = 0, haux = 0, hmodes = 0;
+  volatile VALUE hlist = 0, hdata = 0, haux = 0, hmodes = 0, hruns0 = 0, hruns1 = 0;
   sort_addr_run_t run;
+  msd_sort_t msd;
   char *modes;
   int has_object = 0;
   ca_size_t elements;
@@ -203,26 +395,42 @@ rb_ca_s_sort_addr_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
   }
   modes[argc] = '\0';
 
-  data = ALLOCV_N(struct sort_addr_key, hdata, elements);
-  for (i=0; i<elements; i++) {
-    data[i].i = i;
-    data[i].base = base;
-  }
-
-  run.data     = data;
-  run.aux      = has_object ? ALLOCV_N(struct sort_addr_key, haux, elements) : NULL;
-  run.elements = elements;
-  ca_attach_window(argc, base->ca, modes, sort_addr_run, (VALUE) &run);
-
   out = rb_ca_template_with_type(argv[0], INT2NUM(CA_SIZE), INT2NUM(0));
   TypedData_Get_Struct(out, CArray, &carray_data_type, co);
   q = (ca_size_t *) co->ptr;
-  
-  for (i=0; i<elements; i++) {
-    *q = data[i].i;
-    q++;
+
+  run.data     = NULL;
+  run.aux      = NULL;
+  run.elements = elements;
+  run.msd      = NULL;
+
+  if ( msd_is_sortable(base) ) {
+    ca_size_t nruns = elements / 2 + 1;
+    msd.base     = base;
+    msd.perm     = q;
+    msd.buf      = ALLOCV(hdata, (size_t) elements * sizeof(ca_pair_f64));
+    msd.runs[0]  = ALLOCV_N(msd_run_t, hruns0, nruns);
+    msd.runs[1]  = ( argc > 1 ) ? ALLOCV_N(msd_run_t, hruns1, nruns) : NULL;
+    msd.elements = elements;
+    run.msd      = &msd;
+    ca_attach_window(argc, base->ca, modes, sort_addr_run, (VALUE) &run);
+  }
+  else {
+    data = ALLOCV_N(struct sort_addr_key, hdata, elements);
+    for (i=0; i<elements; i++) {
+      data[i].i = i;
+      data[i].base = base;
+    }
+    run.data = data;
+    run.aux  = has_object ? ALLOCV_N(struct sort_addr_key, haux, elements) : NULL;
+    ca_attach_window(argc, base->ca, modes, sort_addr_run, (VALUE) &run);
+    for (i=0; i<elements; i++) {
+      q[i] = data[i].i;
+    }
   }
 
+  ALLOCV_END(hruns1);
+  ALLOCV_END(hruns0);
   ALLOCV_END(haux);
   ALLOCV_END(hdata);
   ALLOCV_END(hmodes);

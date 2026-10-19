@@ -46,6 +46,7 @@ COUNTS = {
   "carray_memory_view.c" => 2,
   "carray_operator.c" => 5,
   "carray_slab.c" => 4,
+  "carray_sort.c" => 1,
   "carray_struct.c" => 8,
   "carray_test.c" => 1,
   "mkkernel.rb" => 11,
