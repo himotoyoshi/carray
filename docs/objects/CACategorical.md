@@ -644,6 +644,7 @@ cat.codes + 1         # OK — you asked for the raw integers
 | `cat.count(label)`                       | `Integer` — count of one category (unknown label → 0) |
 | `cat.category_sizes`                           | length-`k` `CArray` — counts per label, aligned to `labels` |
 | `cat.contrast(base: nil, full: false)`  | int8 `CArray` (n, k − 1) — one column per category, the base left out |
+| `cat.group_addr`                         | int64 `CArray` — flat addresses of the cells in category order (excluded cells last); `value.reshape(n)[cat.group_addr]` lays a column out category by category |
 
 ## Notes
 
@@ -660,7 +661,7 @@ cat.codes + 1         # OK — you asked for the raw integers
   pre-computed codes and using `from_codes` is faster.
 - **Grouping keeps a plan on the categorical.** The first
   `group_by_category` over a categorical computes the order of its cells by
-  category (`sort_addr`, an int64 per cell) and the per-category counts and
+  category (`group_addr`, an int64 per cell) and the per-category counts and
   offsets (one entry per label), and keeps them on the categorical, so every
   later grouping by it — for any payload column — reuses them. They live as
   long as the categorical does; drop the categorical to free them.

@@ -158,7 +158,7 @@ class CAFrame
     g_of = nb > 0 ? occupied / nb : occupied
     b_of = nb > 0 ? occupied % nb : occupied
     # Each group's by values, from its first row.
-    order = gcat.sort_addr
+    order = gcat.group_addr
     first = order[CArray.segment_offsets(lengths: gcat.category_sizes)[0...ng]]
     columns = {}
     by_names.zip(by_cols).each do |n, col|
@@ -751,7 +751,7 @@ class GroupedFrame
   end
 
   private def group_perm
-    @group_perm ||= @cat.sort_addr
+    @group_perm ||= @cat.group_addr
   end
 
   private def group_bounds

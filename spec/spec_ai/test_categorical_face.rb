@@ -454,21 +454,21 @@ class TestCACategoricalFace < Test::Unit::TestCase
     assert_equal([0, 3, 5], cat.reduceat_index.to_a)        # block starts
   end
 
-  def test_sort_addr_groups_codes_contiguously
+  def test_group_addr_groups_codes_contiguously
     cat  = CA_INT([2, 0, 1, 2, 0, 0, 1, 2]).categorize(labels: [0, 1, 2])
     flat = cat.codes.value.reshape(8).to_a
-    sorted = cat.sort_addr.to_a.map { |a| flat[a] }
+    sorted = cat.group_addr.to_a.map { |a| flat[a] }
     assert_equal([0, 0, 0, 1, 1, 2, 2, 2], sorted)          # non-decreasing
   end
 
   # Within a category the cells keep their source order, and the cells in no
   # category -- a masked key, a label not in the vocabulary -- follow every
   # category, also in source order.
-  def test_sort_addr_is_stable_and_puts_the_excluded_cells_last
+  def test_group_addr_is_stable_and_puts_the_excluded_cells_last
     keys = CA_INT([2, 9, 0, 1, 2, 0, 9, 0, 1, 2])
     keys[3] = UNDEF
     cat = keys.categorize(labels: [0, 1, 2])
-    assert_equal([2, 5, 7, 8, 0, 4, 9, 1, 3, 6], cat.sort_addr.to_a)
+    assert_equal([2, 5, 7, 8, 0, 4, 9, 1, 3, 6], cat.group_addr.to_a)
   end
 
   def test_reduceat_roundtrip_per_block_sum
@@ -476,7 +476,7 @@ class TestCACategoricalFace < Test::Unit::TestCase
     cat  = keys.categorize(labels: [0, 1, 2])
     val  = CA_DOUBLE([10, 20, 30, 40, 50, 60, 70, 80])
 
-    grouped = val[cat.sort_addr]
+    grouped = val[cat.group_addr]
     idx = cat.reduceat_index
     cnt = cat.category_sizes
     got = (0...cat.labels.size).map { |c| grouped[idx[c]...(idx[c] + cnt[c])].sum }
@@ -491,7 +491,7 @@ class TestCACategoricalFace < Test::Unit::TestCase
     cat  = keys.categorize(labels: [0, 1, 2])
     val  = CA_DOUBLE([10, 20, 30, 999, 50])
 
-    grouped = val[cat.sort_addr]
+    grouped = val[cat.group_addr]
     total_valid = cat.category_sizes.to_a.sum                     # excluded not counted
     assert_equal(4, total_valid)
     assert_equal([999.0], grouped[total_valid..-1].to_a)    # excluded pushed past the blocks
@@ -502,14 +502,14 @@ class TestCACategoricalFace < Test::Unit::TestCase
     cat  = keys.categorize(labels: [0, 1, 2])
     val  = CArray.double(2, 4) { |i, j| (i * 4 + j) * 1.0 }
 
-    grouped = val.reshape(8)[cat.sort_addr]                 # flat addrs into raveled storage
+    grouped = val.reshape(8)[cat.group_addr]                 # flat addrs into raveled storage
     idx = cat.reduceat_index
     cnt = cat.category_sizes
     got = (0...cat.labels.size).map { |c| grouped[idx[c]...(idx[c] + cnt[c])].sum }
 
     flat = val.reshape(8)
     want = [0, 1, 2].map { |lab| keys.reshape(8).to_a.each_index.select { |i| keys.reshape(8)[i] == lab }.sum { |i| flat[i] } }
-    assert_equal(8, cat.sort_addr.elements)
+    assert_equal(8, cat.group_addr.elements)
     assert_equal(want, got)
   end
 
@@ -519,7 +519,7 @@ class TestCACategoricalFace < Test::Unit::TestCase
     cat  = keys.categorize(labels: [0, 1])
     val  = CA_DOUBLE([5, 100, 9, 10, 1, 40, 30, 7])
 
-    grouped = val[cat.sort_addr]
+    grouped = val[cat.group_addr]
     idx = cat.reduceat_index
     cnt = cat.category_sizes
     med = (0...cat.labels.size).map { |c| grouped[idx[c]...(idx[c] + cnt[c])].median }
@@ -581,4 +581,15 @@ class TestCACategoricalFace < Test::Unit::TestCase
     assert_equal 2, cat.count("b")
     assert_equal [2, 1, 1], cat.category_sizes.to_a
   end
+
+  # A categorical is not ordered by its codes: sort_addr, the order of its
+  # values, is refused as the other order members are; the order of its cells
+  # by category is group_addr.
+  def test_sort_addr_is_refused_and_group_addr_groups
+    cat = CA_OBJECT(%w[zz aa mm aa]).categorize
+    assert_raise(ArgumentError) { cat.sort_addr }
+    assert_raise(ArgumentError) { cat.sort_index }
+    assert_equal [0, 1, 3, 2], cat.group_addr.to_a
+  end
+
 end
