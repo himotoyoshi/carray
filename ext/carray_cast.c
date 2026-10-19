@@ -1215,26 +1215,48 @@ typedef struct {
   boolean8_t *scratch;
 } ca_to_type_ctx_t;
 
-/* Marks in `m` the cells of a float or complex array that hold NaN (in
-   either part).  A NaN has no integer, and C leaves its conversion
-   undefined. */
+/* Whether a double truncates into integer type `dt`: not NaN, not an
+   infinity, and inside the open interval of values whose integer part `dt`
+   holds (closed below for int64: -2**63-1 rounds to -2**63 in double).
+   The same bounds as the generated casts in carray_cast_func.rb. */
+static int
+ca_double_fits_integer (double v, int8_t dt)
+{
+  switch ( dt ) {
+  case CA_INT8:   return v > -129.0                 && v < 128.0;
+  case CA_UINT8:  return v > -1.0                   && v < 256.0;
+  case CA_INT16:  return v > -32769.0               && v < 32768.0;
+  case CA_UINT16: return v > -1.0                   && v < 65536.0;
+  case CA_INT32:  return v > -2147483649.0          && v < 2147483648.0;
+  case CA_UINT32: return v > -1.0                   && v < 4294967296.0;
+  case CA_INT64:  return v >= -9223372036854775808.0 && v < 9223372036854775808.0;
+  case CA_UINT64: return v > -1.0                   && v < 18446744073709551616.0;
+  default:        return 1;
+  }
+}
+
+/* Marks in `m` the cells of a float or complex array that have no integer
+   of type `dt`: NaN (in either part), an infinity, or a value out of
+   range.  C leaves their conversion undefined, and machines differ. */
 static void
-ca_mark_nan (CArray *ca, boolean8_t *m)
+ca_mark_unconvertible (CArray *ca, boolean8_t *m, int8_t dt)
 {
   ca_size_t i, n = ca->elements;
   switch ( ca->data_type ) {
   case CA_FLOAT32: { float32_t *p = (float32_t *) ca->ptr;
-    for (i=0; i<n; i++) if ( isnan(p[i]) ) m[i] = 1;
+    for (i=0; i<n; i++) if ( ! ca_double_fits_integer(p[i], dt) ) m[i] = 1;
     break; }
   case CA_FLOAT64: { float64_t *p = (float64_t *) ca->ptr;
-    for (i=0; i<n; i++) if ( isnan(p[i]) ) m[i] = 1;
+    for (i=0; i<n; i++) if ( ! ca_double_fits_integer(p[i], dt) ) m[i] = 1;
     break; }
 #ifdef HAVE_COMPLEX_H
   case CA_CMPLX64: { cmplx64_t *p = (cmplx64_t *) ca->ptr;
-    for (i=0; i<n; i++) if ( isnan(crealf(p[i])) || isnan(cimagf(p[i])) ) m[i] = 1;
+    for (i=0; i<n; i++)
+      if ( ! ca_double_fits_integer(crealf(p[i]), dt) || isnan(cimagf(p[i])) ) m[i] = 1;
     break; }
   case CA_CMPLX128: { cmplx128_t *p = (cmplx128_t *) ca->ptr;
-    for (i=0; i<n; i++) if ( isnan(creal(p[i])) || isnan(cimag(p[i])) ) m[i] = 1;
+    for (i=0; i<n; i++)
+      if ( ! ca_double_fits_integer(creal(p[i]), dt) || isnan(cimag(p[i])) ) m[i] = 1;
     break; }
 #endif
   default:
@@ -1274,11 +1296,11 @@ ca_to_type_cast (VALUE arg)
     else {
       memset(scratch, 0, ne);
     }
-    /* float -> integer: a NaN cell becomes UNDEF, as an unparseable object
-       cell does.  A finite value outside the integer type is converted the
-       way the machine's C converts it, which differs between machines. */
+    /* float -> integer: a cell with no integer of the type (NaN, an
+       infinity, a value out of range) becomes UNDEF, as an unparseable
+       object cell does. */
     if ( from_float ) {
-      ca_mark_nan(ca, scratch);
+      ca_mark_unconvertible(ca, scratch, cb->data_type);
       memset(cb->ptr, 0, ne * cb->bytes);
     }
     ca_cast_block_with_mask(ne, ca, ca->ptr, cb, cb->ptr, scratch);
@@ -2940,77 +2962,88 @@ rb_ca_cast_with (VALUE self, VALUE other)
 /* -----------------------------------------------------------------------
    clip_<type> family — clip into the target data type's representable
    range, then cast.  Sugar for `clip(lo, hi).as_<type>`.
+
+   A float source takes a saturating path instead.  The type's maximum is
+   not always exact in the source float (INT64_MAX and UINT64_MAX round up
+   in float64, INT32_MAX and UINT32_MAX in float32), so clip-then-cast
+   would hand the cast a value just past the range.  Instead each cell is
+   compared in double against the range the cast truncates into
+   (ca_double_fits_integer) and saturates to the type's minimum or maximum
+   outside it.  A NaN that is not masked is refused.
 ----------------------------------------------------------------------- */
 
-#define CLIP_CAST_FUNC(name, lo_expr, hi_expr, cast_func) \
-static VALUE \
-rb_ca_##name (VALUE self) \
-{ \
-  return cast_func(rb_ca_clip(self, lo_expr, hi_expr)); \
-}
-
-CLIP_CAST_FUNC(clip_int8,   INT2NUM(-128),                    INT2NUM(127),                    rb_ca_as_int8)
-CLIP_CAST_FUNC(clip_int16,  INT2NUM(-32768),                  INT2NUM(32767),                  rb_ca_as_int16)
-CLIP_CAST_FUNC(clip_int32,  INT2NUM(-2147483648),             INT2NUM(2147483647),             rb_ca_as_int32)
-CLIP_CAST_FUNC(clip_int64,  LL2NUM(-9223372036854775807-1),   LL2NUM(9223372036854775807),     rb_ca_as_int64)
-CLIP_CAST_FUNC(clip_uint8,  INT2NUM(0),                       INT2NUM(255),                    rb_ca_as_uint8)
-CLIP_CAST_FUNC(clip_uint16, INT2NUM(0),                       INT2NUM(65535),                  rb_ca_as_uint16)
-CLIP_CAST_FUNC(clip_uint32, INT2NUM(0),                       UINT2NUM(4294967295U),           rb_ca_as_uint32)
-
-#undef CLIP_CAST_FUNC
-
-/* CArray#clip_uint64 -- dedicated implementation.
-
-   UINT64_MAX (= 2^64-1) is not exactly representable in float64; the nearest
-   double rounds up to 2^64.  A generic clip-then-cast path therefore clamps
-   an overflowing float source (e.g. 1e20) to 2^64 and the subsequent cast to
-   uint64 wraps around to 0.  For floating-point sources we take a saturating
-   path: compare in float space against 2^64 (which IS representable) and
-   saturate to UINT64_MAX above it and 0 below zero.  Other source data types use
-   the plain clip-then-cast path. */
 static VALUE
-rb_ca_clip_uint64 (VALUE self)
+ca_clip_float_to_integer (VALUE self, int8_t to_dt)
 {
   CArray *ca;
   GetCArray(self, ca);
-  int dt = ca->data_type;
-  if ( dt == CA_FLOAT32 || dt == CA_FLOAT64 ) {
-    volatile VALUE vsrc = ( dt == CA_FLOAT64 ) ? self : rb_ca_as_float64(self);
-    CArray *src;
-    GetCArray(vsrc, src);
-    volatile VALUE vout = rb_carray_new(CA_UINT64, ca->ndim, ca->dim, 0, NULL);
-    CArray *out;
-    GetCArray(vout, out);
-    ca_attach(src);   /* window: nothing raises inside */
-    double  *sp = (double  *) src->ptr;
-    uint64_t *op = (uint64_t *) out->ptr;
-    ca_size_t n = ca->elements;
-    const double LIMIT = 18446744073709551616.0; /* 2^64, exact in f64 */
-    boolean8_t *m = ca_has_mask(src) ? (boolean8_t *) src->mask->ptr : NULL;  /* attached with src */
-    int found_nan = 0;
-    for ( ca_size_t i = 0; i < n; i++ ) {
-      double v = sp[i];
-      if ( v != v ) {                 /* NaN has no integer: refused below */
-        op[i] = 0;
-        if ( ! m || ! m[i] ) found_nan = 1;
-      }
-      else if ( v >= LIMIT ) op[i] = UINT64_MAX;
-      else if ( v <= 0.0 )   op[i] = 0;
-      else                   op[i] = (uint64_t) v;
+  volatile VALUE vsrc = ( ca->data_type == CA_FLOAT64 ) ? self : rb_ca_as_float64(self);
+  CArray *src;
+  GetCArray(vsrc, src);
+  volatile VALUE vout = rb_carray_new(to_dt, ca->ndim, ca->dim, 0, NULL);
+  CArray *out;
+  GetCArray(vout, out);
+  ca_attach(src);   /* window: nothing raises inside */
+  double *sp = (double *) src->ptr;
+  char   *op = out->ptr;
+  ca_size_t n = ca->elements;
+  boolean8_t *m = ca_has_mask(src) ? (boolean8_t *) src->mask->ptr : NULL;  /* attached with src */
+  int found_nan = 0;
+  for ( ca_size_t i = 0; i < n; i++ ) {
+    double v = sp[i];
+    int fits = ca_double_fits_integer(v, to_dt);
+    if ( v != v ) {                 /* NaN has no integer: refused below */
+      v = 0.0;
+      fits = 1;
+      if ( ! m || ! m[i] ) found_nan = 1;
     }
-    ca_detach(src);
-    if ( found_nan ) {
-      rb_raise(rb_eFloatDomainError, "%s: NaN cannot be converted to uint64",
-               ca_calling_method_name());
+#define CLIP_STORE(type, lo, hi) \
+    ((type *) op)[i] = fits ? (type) v : ( v > 0 ? (hi) : (lo) )
+    switch ( to_dt ) {
+    case CA_INT8:   CLIP_STORE(int8_t,   INT8_MIN,  INT8_MAX);   break;
+    case CA_UINT8:  CLIP_STORE(uint8_t,  0,         UINT8_MAX);  break;
+    case CA_INT16:  CLIP_STORE(int16_t,  INT16_MIN, INT16_MAX);  break;
+    case CA_UINT16: CLIP_STORE(uint16_t, 0,         UINT16_MAX); break;
+    case CA_INT32:  CLIP_STORE(int32_t,  INT32_MIN, INT32_MAX);  break;
+    case CA_UINT32: CLIP_STORE(uint32_t, 0,         UINT32_MAX); break;
+    case CA_INT64:  CLIP_STORE(int64_t,  INT64_MIN, INT64_MAX);  break;
+    case CA_UINT64: CLIP_STORE(uint64_t, 0,         UINT64_MAX); break;
     }
-    if ( ca_has_mask(ca) ) {
-      ca_copy_mask(out, ca);
-    }
-    return vout;
+#undef CLIP_STORE
   }
-  return rb_ca_as_uint64(rb_ca_clip(self, INT2NUM(0),
-                                    ULL2NUM(18446744073709551615ULL)));
+  ca_detach(src);
+  if ( found_nan ) {
+    rb_raise(rb_eFloatDomainError, "%s: NaN cannot be converted to %s",
+             ca_calling_method_name(), ca_type_name[to_dt]);
+  }
+  if ( ca_has_mask(ca) ) {
+    ca_copy_mask(out, ca);
+  }
+  return vout;
 }
+
+#define CLIP_CAST_FUNC(name, to_dt, lo_expr, hi_expr, cast_func) \
+static VALUE \
+rb_ca_##name (VALUE self) \
+{ \
+  CArray *ca; \
+  GetCArray(self, ca); \
+  if ( ca->data_type == CA_FLOAT32 || ca->data_type == CA_FLOAT64 ) { \
+    return ca_clip_float_to_integer(self, to_dt); \
+  } \
+  return cast_func(rb_ca_clip(self, lo_expr, hi_expr)); \
+}
+
+CLIP_CAST_FUNC(clip_int8,   CA_INT8,   INT2NUM(-128),                  INT2NUM(127),                  rb_ca_as_int8)
+CLIP_CAST_FUNC(clip_int16,  CA_INT16,  INT2NUM(-32768),                INT2NUM(32767),                rb_ca_as_int16)
+CLIP_CAST_FUNC(clip_int32,  CA_INT32,  INT2NUM(-2147483648),           INT2NUM(2147483647),           rb_ca_as_int32)
+CLIP_CAST_FUNC(clip_int64,  CA_INT64,  LL2NUM(-9223372036854775807-1), LL2NUM(9223372036854775807),   rb_ca_as_int64)
+CLIP_CAST_FUNC(clip_uint8,  CA_UINT8,  INT2NUM(0),                     INT2NUM(255),                  rb_ca_as_uint8)
+CLIP_CAST_FUNC(clip_uint16, CA_UINT16, INT2NUM(0),                     INT2NUM(65535),                rb_ca_as_uint16)
+CLIP_CAST_FUNC(clip_uint32, CA_UINT32, INT2NUM(0),                     UINT2NUM(4294967295U),         rb_ca_as_uint32)
+CLIP_CAST_FUNC(clip_uint64, CA_UINT64, INT2NUM(0),                     ULL2NUM(18446744073709551615ULL), rb_ca_as_uint64)
+
+#undef CLIP_CAST_FUNC
 
 /* ------------------------------------------------------------------------
    Global cast functions CA_INT32(data) ... CA_OBJECT(data) etc.

@@ -24,6 +24,19 @@ type_const = {}
   type_const[i] = name
 end
 
+# The open interval (lo, hi) of doubles whose integer part a type holds:
+# a cast truncates toward zero, so -128.5 still fits int8.
+INTEGER_TRUNC_RANGE = {
+  CA_INT8   => ["-129.0",                  "128.0"],
+  CA_UINT8  => ["-1.0",                    "256.0"],
+  CA_INT16  => ["-32769.0",                "32768.0"],
+  CA_UINT16 => ["-1.0",                    "65536.0"],
+  CA_INT32  => ["-2147483649.0",           "2147483648.0"],
+  CA_UINT32 => ["-1.0",                    "4294967296.0"],
+  CA_INT64  => ["-9223372036854775808.0",  "9223372036854775808.0"],
+  CA_UINT64 => ["-1.0",                    "18446744073709551616.0"],
+}
+
 ctype = {
   CA_FIXLEN   => "fixlen",
   CA_BOOLEAN  => "boolean8_t",
@@ -336,22 +349,33 @@ puts
     ctype1 = ctype[type1]
     ctype2 = ctype[type2]
     CA_CAST_TABLE[type1][type2] = "ca_cast_#{ctype1}_#{ctype2}"
-    # float / complex -> integer: a NaN has no integer and C leaves its
-    # conversion undefined.  A cell that is not masked refuses it before
-    # anything is written.  #to_type masks NaN cells first (UNDEF), so
-    # only a store, a view and a single cell reach the raise.
+    # float / complex -> integer: a NaN, an infinity, or a value whose
+    # integer part the type cannot hold has no integer, and C leaves its
+    # conversion undefined (x86 gives the type's minimum, ARM saturates).  A
+    # cell that is not masked refuses it before anything is written.
+    # #to_type masks such cells first (UNDEF), so only a store, a view and a
+    # single cell reach the raise.  The range is the open interval of values
+    # that truncate into the type, in double; for int64 the lower end is
+    # taken as closed, since -2**63-1 rounds to -2**63 in double.
     nan_check = ""
     if (FLOAT+[CA_CMPLX64, CA_CMPLX128]).include?(type1) && INTEGER.include?(type2)
-      isnan = if [CA_CMPLX64, CA_CMPLX128].include?(type1)
-                "( isnan(creal(q1[k])) || isnan(cimag(q1[k])) )"
-              else
-                "isnan(q1[k])"
-              end
+      complex = [CA_CMPLX64, CA_CMPLX128].include?(type1)
+      real = complex ? "creal(q1[k])" : "q1[k]"
+      lo, hi = INTEGER_TRUNC_RANGE[type2]
+      lo_cmp = ( type2 == CA_INT64 ) ? ">=" : ">"
+      fits = "( v #{lo_cmp} #{lo} && v < #{hi} )"
+      fits = "( #{fits} && ! isnan(cimag(q1[k])) )" if complex
       nan_check = <<-END_CHECK.gsub(/^ {6}/, '')
          for (k=0; k<n; k++) {
-           if ( ( ! m || ! m[k] ) && #{isnan} ) {
-             rb_raise(rb_eFloatDomainError, "%s: NaN cannot be converted to %s",
-                      ca_calling_method_name(), ca_type_name[#{type_const[type2]}]);
+           double v = (double) #{real};
+           if ( ( ! m || ! m[k] ) && ! #{fits} ) {
+             if ( isfinite(v)#{complex ? " && ! isnan(cimag(q1[k]))" : ""} ) {
+               rb_raise(rb_eRangeError, "%s: %.17g is out of range for %s",
+                        ca_calling_method_name(), v, ca_type_name[#{type_const[type2]}]);
+             }
+             rb_raise(rb_eFloatDomainError, "%s: %s cannot be converted to %s",
+                      ca_calling_method_name(), isinf(v) ? "an infinity" : "NaN",
+                      ca_type_name[#{type_const[type2]}]);
            }
          }
       END_CHECK

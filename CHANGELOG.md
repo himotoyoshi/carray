@@ -36,6 +36,16 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.5 (unreleased)
 
+- Change: a float cell with no integer of the target type -- an infinity,
+  or a value out of the type's range -- is now treated as NaN already
+  was. `to_type` (`int32`, `as_int64`, ...) masks it to `UNDEF`; storing
+  it into an integer array raises `RangeError` (`FloatDomainError` for an
+  infinity). Before, it became whatever the machine's C conversion gave,
+  which differed between x86 and ARM. `clip_int64` and the other
+  `clip_<type>` methods saturate a float source to the type's limits on
+  every machine; integer `linspace` raises `RangeError` for a span the
+  type cannot hold.
+
 ## 3.0.4
 
 - New: `CAFrame#verify(rules)` judges every row against named rules (each
