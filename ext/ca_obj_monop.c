@@ -562,6 +562,30 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
     chain_apply_count = chain_len - 1;
   }
 
+  /* The chain runs in place, so the buffer must hold slab_n cells of the
+     widest type along it: the leaf, or a step that widens before a later
+     one narrows (cmplx128.lazy.abs pulls 16-byte cells and answers 8-byte
+     ones).  When that is wider than the output, run in a scratch and copy
+     the answer into `data` at the end. */
+  void   *out  = data;
+  void   *work = NULL;
+  {
+    ca_size_t max_bytes = leaf->bytes;
+    int8_t    dt        = leaf->data_type;
+    for ( i = chain_len - 1; i >= 0; i-- ) {
+      dt = ca_monop_is_cast(op_chain[i])
+             ? (int8_t)(op_chain[i] - CA_MONOP_CAST_BASE)
+             : ca_lazy_promote_monop(op_chain[i], dt);
+      if ( ca_sizeof[dt] > max_bytes ) max_bytes = ca_sizeof[dt];
+    }
+    if ( max_bytes > mo->bytes ) {
+      work = ( leaf->data_type == CA_OBJECT )
+               ? ca_lazy_arena_acquire_object((slab_n * max_bytes + sizeof(VALUE) - 1) / sizeof(VALUE))
+               : ca_lazy_arena_acquire(slab_n * max_bytes);
+      data = work;
+    }
+  }
+
   /* === 2. pull leaf into output buffer (with optional cast) === */
   cur_dt = pull_leaf_with_optional_cast(
     leaf,
@@ -610,6 +634,10 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
   }
   if ( slab_mask ) {
     ca_lazy_arena_release(slab_mask);
+  }
+  if ( work ) {
+    memcpy(out, work, slab_n * mo->bytes);
+    ca_lazy_arena_release(work);
   }
 }
 
