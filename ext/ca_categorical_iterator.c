@@ -457,20 +457,23 @@ rb_ca_reduceat_percentile (VALUE self, VALUE roffsets, VALUE rp, VALUE rout)
 
 /* ---------------------------------------------------------------------------
 
-  __reduceat_variance__ — centred two-pass SAMPLE variance (ddof=1) reduceat.
-  The means (from the cached moments: sum/count) drive a second walk that
-  accumulates the per-segment centred sum of squares; variance = SS / (n-1).
-  Centred (not the one-pass sum-of-squares) so the ε-close contract holds — a
-  one-pass formula cancels catastrophically.  Matches CArray#variance per group:
-  count 0 or 1 -> masked (the sample variance is undefined), count >= 2 ->
-  SS / (count-1).
+  __reduceat_variance__ — centred two-pass variance reduceat, sample (ddof=1)
+  or population (ddof=0).  The means (from the cached moments: sum/count)
+  drive a second walk that accumulates the per-segment centred sum of
+  squares; variance = SS / (n - ddof).  Centred (not the one-pass
+  sum-of-squares) so the ε-close contract holds — a one-pass formula cancels
+  catastrophically.  Matches CArray#variance / #variancep per group: count
+  <= ddof (or 0) -> masked, otherwise SS / (count - ddof), divided once as
+  the core does.
 
-  Surface (private): grouped.__reduceat_variance__(offsets, means, counts, out)
+  Surface (private):
+    grouped.__reduceat_variance__(offsets, means, counts, out, ddof)
     self    = grouped  (numeric value data type, may carry a mask)
     offsets = int64[k] segment STARTS
     means   = float64[k] per-segment mean (ignored where count < 2)
     counts  = int64[k]   per-segment present count
-    out     = float64[k] output: variance; count 0 or 1 masked
+    out     = float64[k] output: variance; count <= ddof masked
+    ddof    = 1 (sample) or 0 (population)
 
 --------------------------------------------------------------------------- */
 
@@ -479,7 +482,7 @@ rb_ca_reduceat_percentile (VALUE self, VALUE roffsets, VALUE rp, VALUE rout)
     const T *gp = (const T *) grouped->ptr;                                     \
     for ( c = 0; c < k; c++ ) {                                                 \
       int64_t cnt = countp[c];                                                  \
-      if ( cnt < 2 ) { outp[c] = 0.0; outm[c] = 1; continue; }  /* undefined */ \
+      if ( cnt <= ddof || cnt < 1 ) { outp[c] = 0.0; outm[c] = 1; continue; }   \
       { double mean = meanp[c], ss = 0.0;                                       \
         ca_size_t lo = (ca_size_t) offs[c];                                     \
         ca_size_t hi = (c + 1 < k) ? (ca_size_t) offs[c+1] : n, j;              \
@@ -494,14 +497,15 @@ rb_ca_reduceat_percentile (VALUE self, VALUE roffsets, VALUE rp, VALUE rout)
             double d = (double) gp[j] - mean; ss += d * d;                      \
           }                                                                     \
         }                                                                       \
-        outp[c] = ss / (double) (cnt - 1); }                                    \
+        outp[c] = ss / (double) (cnt - ddof); }                                 \
     }                                                                           \
   } while (0)
 
 static VALUE
 rb_ca_reduceat_variance (VALUE self, VALUE roffsets, VALUE rmeans,
-                         VALUE rcounts, VALUE rout)
+                         VALUE rcounts, VALUE rout, VALUE rddof)
 {
+  int64_t     ddof = NUM2LL(rddof);
   CArray     *grouped, *offsets, *means, *counts, *out;
   int64_t     k, *offs, *countp;
   ca_size_t   n, c;
@@ -518,8 +522,9 @@ rb_ca_reduceat_variance (VALUE self, VALUE roffsets, VALUE rmeans,
   n = grouped->elements;
   if ( offsets->data_type != CA_INT64 || counts->data_type != CA_INT64 ||
        means->data_type != CA_FLOAT64 || out->data_type != CA_FLOAT64 ||
-       means->elements != k || counts->elements != k || out->elements != k ) {
-    rb_raise(rb_eArgError, "__reduceat_variance__: offsets/counts int64, means/out float64[k]");
+       means->elements != k || counts->elements != k || out->elements != k ||
+       ( ddof != 0 && ddof != 1 ) ) {
+    rb_raise(rb_eArgError, "__reduceat_variance__: offsets/counts int64, means/out float64[k], ddof 0 or 1");
   }
 
   offs   = (int64_t *) offsets->ptr;
@@ -1481,7 +1486,7 @@ Init_ca_categorical_iterator (void)
   rb_define_private_method(rb_cCArray, "__reduceat_percentile__",
                            rb_ca_reduceat_percentile, 3);
   rb_define_private_method(rb_cCArray, "__reduceat_variance__",
-                           rb_ca_reduceat_variance, 4);
+                           rb_ca_reduceat_variance, 5);
   rb_define_private_method(rb_cCArray, "__reduceat_prod__",
                            rb_ca_reduceat_prod, 2);
   rb_define_private_method(rb_cCArray, "__reduceat_argminmax__",
