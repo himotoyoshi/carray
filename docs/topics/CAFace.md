@@ -885,6 +885,13 @@ then the Ruby fallback. The contract of the hook:
 - an unconvertible value (e.g. a cross-unit-group instant) → raise,
   never a silent mis-store.
 
+A read-only Face needs the hook too: its cells are never stored into, but a
+fill value (`shift` / `window` / `project`) is written into the storage of
+the new array through `rb_ca_obj2ptr`. Without a hook the value would reach
+the storage cast as it is. A categorical's hook turns a label into its code
+and refuses anything else; a CAConstString, whose cells are byte ranges of
+one shared buffer, refuses every value but UNDEF.
+
 A Face **array** stored into an array that is not the same Face goes the
 other way: its cells are surface values, and its storage means nothing to
 the destination. An object destination receives the values, as

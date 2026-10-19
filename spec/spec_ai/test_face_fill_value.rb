@@ -138,4 +138,21 @@ class TestFaceInterpolates < Test::Unit::TestCase
     df = CAFrame.new({ "c" => c }, index: CA_FLOAT64([0, 1]))
     assert_raise(ArgumentError) { df.fill("c", :linear) }
   end
+  # Faces with no store of their own: a categorical's fill value is a label,
+  # a CAConstString takes only UNDEF.
+  def test_a_categorical_and_a_const_string_take_a_fill_value_as_a_value
+    c = CA_OBJECT(%w[a b a]).categorize
+    assert_equal %w[b a b], c.shift(1, fill_value: "b").to_a
+    assert_equal %w[b a b], c.window(-1..1, fill_value: "b").to_a
+    assert_raise(ArgumentError) { c.shift(1, fill_value: 1) }
+    assert_raise(ArgumentError) { c.shift(1, fill_value: "zz") }
+    assert_equal [UNDEF, "a", "b"], c.shift(1, fill_value: UNDEF).to_a
+    n = CA_OBJECT([1.0, Float::NAN]).categorize
+    assert n.shift(1, fill_value: Float::NAN)[0].nan?
+    cs = CArray.const_string(%w[hello world xyz])
+    assert_raise(ArgumentError) { cs.shift(1, fill_value: "zz") }
+    assert_raise(ArgumentError) { cs.window(-1..1, fill_value: [0, 3].pack("q<q<")) }
+    assert_equal [UNDEF, "hello", "world"], cs.shift(1, fill_value: UNDEF).to_a
+  end
+
 end

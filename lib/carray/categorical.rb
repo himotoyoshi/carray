@@ -332,6 +332,13 @@ class CACategorical < CAObject
     label_at(code)
   end
 
+  # Face hook: a value written into a cell (a fill_value of shift and
+  # window) is a label, and the cell holds its code.
+  # @raise [ArgumentError] if the value is not one of the labels.
+  def element_to_storage (value)
+    code_for_fill(value)
+  end
+
   # ---- category-space operations (by label, not code) -------------------
   #
   # The element value of a categorical IS its category, so these specialise
@@ -543,7 +550,7 @@ class CACategorical < CAObject
   # The code a fill value stands for: UNDEF stays UNDEF, a label is its code.
   def code_for_fill (value)
     return UNDEF if UNDEF.equal?(value)
-    code = labels.index(value)
+    code = label_position(value)
     raise ArgumentError, "#{value.inspect} is not one of the labels #{labels.inspect}" unless code
     code
   end
