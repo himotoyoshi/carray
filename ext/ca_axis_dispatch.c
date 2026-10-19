@@ -647,15 +647,15 @@ ca_axis_dispatch_percell_gather (CArray          *parent,
             break;
           case 2:
             for (j = 0; j < inner_count; j++)
-              *(uint16_t *)(row_dst + j*2)   = *(uint16_t *)(src + j*inner_step);
+              __builtin_memcpy(row_dst + j*2, src + j*inner_step, 2);
             break;
           case 4:
             for (j = 0; j < inner_count; j++)
-              *(uint32_t *)(row_dst + j*4)   = *(uint32_t *)(src + j*inner_step);
+              __builtin_memcpy(row_dst + j*4, src + j*inner_step, 4);
             break;
           case 8:
             for (j = 0; j < inner_count; j++)
-              *(uint64_t *)(row_dst + j*8)   = *(uint64_t *)(src + j*inner_step);
+              __builtin_memcpy(row_dst + j*8, src + j*inner_step, 8);
             break;
           default:
             for (j = 0; j < inner_count; j++)
@@ -672,18 +672,15 @@ ca_axis_dispatch_percell_gather (CArray          *parent,
             break;
           case 2:
             for (j = 0; j < inner_count; j++)
-              *(uint16_t *)(row_dst + j*2) =
-                *(uint16_t *)(row_src_base + inner_indices[j]*inner_pstride);
+              __builtin_memcpy(row_dst + j*2, row_src_base + inner_indices[j]*inner_pstride, 2);
             break;
           case 4:
             for (j = 0; j < inner_count; j++)
-              *(uint32_t *)(row_dst + j*4) =
-                *(uint32_t *)(row_src_base + inner_indices[j]*inner_pstride);
+              __builtin_memcpy(row_dst + j*4, row_src_base + inner_indices[j]*inner_pstride, 4);
             break;
           case 8:
             for (j = 0; j < inner_count; j++)
-              *(uint64_t *)(row_dst + j*8) =
-                *(uint64_t *)(row_src_base + inner_indices[j]*inner_pstride);
+              __builtin_memcpy(row_dst + j*8, row_src_base + inner_indices[j]*inner_pstride, 8);
             break;
           default:
             for (j = 0; j < inner_count; j++)
@@ -761,8 +758,7 @@ ca_axis_dispatch_gather (CArray          *parent,
        so clang lowers to NEON ldp/stp directly (no libc memcpy call). */
     if ( sbytes == 8 ) {
       for ( i = 0; i < n; i++ ) {
-        *(uint64_t *)(out_buf + i*8) =
-          *(uint64_t *)(base + indices[i] * pstride);
+        __builtin_memcpy(out_buf + i*8, base + indices[i] * pstride, 8);
       }
     } else if ( sbytes == 16 ) {
       for ( i = 0; i < n; i++ ) {
@@ -887,15 +883,15 @@ ca_axis_dispatch_percell_scatter (CArray          *parent,
             break;
           case 2:
             for (j = 0; j < inner_count; j++)
-              *(uint16_t *)(dst + j*inner_step) = *(uint16_t *)(row_src + j*2);
+              __builtin_memcpy(dst + j*inner_step, row_src + j*2, 2);
             break;
           case 4:
             for (j = 0; j < inner_count; j++)
-              *(uint32_t *)(dst + j*inner_step) = *(uint32_t *)(row_src + j*4);
+              __builtin_memcpy(dst + j*inner_step, row_src + j*4, 4);
             break;
           case 8:
             for (j = 0; j < inner_count; j++)
-              *(uint64_t *)(dst + j*inner_step) = *(uint64_t *)(row_src + j*8);
+              __builtin_memcpy(dst + j*inner_step, row_src + j*8, 8);
             break;
           default:
             for (j = 0; j < inner_count; j++)
@@ -912,18 +908,15 @@ ca_axis_dispatch_percell_scatter (CArray          *parent,
             break;
           case 2:
             for (j = 0; j < inner_count; j++)
-              *(uint16_t *)(row_dst_base + inner_indices[j]*inner_pstride) =
-                *(uint16_t *)(row_src + j*2);
+              __builtin_memcpy(row_dst_base + inner_indices[j]*inner_pstride, row_src + j*2, 2);
             break;
           case 4:
             for (j = 0; j < inner_count; j++)
-              *(uint32_t *)(row_dst_base + inner_indices[j]*inner_pstride) =
-                *(uint32_t *)(row_src + j*4);
+              __builtin_memcpy(row_dst_base + inner_indices[j]*inner_pstride, row_src + j*4, 4);
             break;
           case 8:
             for (j = 0; j < inner_count; j++)
-              *(uint64_t *)(row_dst_base + inner_indices[j]*inner_pstride) =
-                *(uint64_t *)(row_src + j*8);
+              __builtin_memcpy(row_dst_base + inner_indices[j]*inner_pstride, row_src + j*8, 8);
             break;
           default:
             for (j = 0; j < inner_count; j++)
