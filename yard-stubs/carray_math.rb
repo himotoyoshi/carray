@@ -598,6 +598,8 @@ class CArray
   #   Returns each element of `self` with the magnitude it already has
   #   and the sign of the matching element of `other`. The sign of a
   #   zero is respected, so `copysign` distinguishes `-0.0` from `0.0`.
+  #   The sign of a NaN that a computation produced (`sqrt(-1)`,
+  #   `Inf * 0`) depends on the CPU: x86 sets it, ARM does not.
   #   Accepts float and `:object` arrays only, as {#atan2}.
   #   @param other [CArray, Numeric] sign source, broadcast to
   #     `self.shape`.
@@ -929,7 +931,9 @@ class CArray
   # @overload signbit
   #   Returns a boolean array that is true where an element carries a
   #   negative sign bit. A negative zero is true, which distinguishes
-  #   `-0.0` from `0.0` where a `< 0` comparison cannot.
+  #   `-0.0` from `0.0` where a `< 0` comparison cannot. On a NaN that a
+  #   computation produced (`sqrt(-1)`, `Inf * 0`) the answer depends on
+  #   the CPU: x86 sets the sign bit, ARM does not.
   #   @return [CArray] `:boolean`.
   #   @raise [CArray::DataTypeError] for a complex array.
   #   @example
