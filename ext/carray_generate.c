@@ -289,6 +289,9 @@ ca_seq_bang_object_body (VALUE arg)
     }
     else if ( ! NIL_P(rmethod) ) {                /* a.seq(obj, :method) */
       ID id_method = SYM2ID(rmethod);
+      if ( ca->elements == 0 ) {                  /* no first cell to write */
+        return Qnil;
+      }
       *p++ = ca_seq_cell(c, rval = roffset);
       for (i=1; i<ca->elements; i++) {
         *p++ = ca_seq_cell(c, rval = rb_funcall(rval, id_method, 0));
@@ -297,6 +300,9 @@ ca_seq_bang_object_body (VALUE arg)
     else {                                        /* a.seq(obj, step) */
       ID id_plus = rb_intern("+");
       rstep   = ( NIL_P(rstep) ) ? INT2NUM(1) : rstep;
+      if ( ca->elements == 0 ) {                  /* no first cell to write */
+        return Qnil;
+      }
       *p++ = ca_seq_cell(c, rval = roffset);
       for (i=1; i<ca->elements; i++) {
         *p++ = ca_seq_cell(c, rval = rb_funcall(rval, id_plus, 1, rstep));
