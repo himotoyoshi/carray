@@ -37,16 +37,32 @@
 #define CA_MASK_WORD_BYTES 8
 #define CA_MASK_WORD_LSB   0x0101010101010101ULL
 
+/* A mask may start at any byte (a window or a block view offsets it), so a
+   word is read and written through memcpy, never through a uint64_t
+   pointer; the compiler still lowers each to a single load or store.  */
+static inline uint64_t
+ca_mask_word_load (const boolean8_t *p)
+{
+  uint64_t w;
+  memcpy(&w, p, sizeof(w));
+  return w;
+}
+
+static inline void
+ca_mask_word_store (boolean8_t *p, uint64_t w)
+{
+  memcpy(p, &w, sizeof(w));
+}
+
 /* ma[i] |= ms[i] for i in [0, n)  -- used by ca_copy_mask_overlay_n */
 static inline void
 ca_mask_word_or (boolean8_t *ma, const boolean8_t *ms, ca_size_t n)
 {
   ca_size_t       nw = n / CA_MASK_WORD_BYTES;
   ca_size_t       i;
-  uint64_t       *wa = (uint64_t *)       ma;
-  const uint64_t *ws = (const uint64_t *) ms;
   for (i = 0; i < nw; i++) {
-    wa[i] |= ws[i];
+    ca_mask_word_store(ma + i*CA_MASK_WORD_BYTES,
+                       ca_mask_word_load(ma + i*CA_MASK_WORD_BYTES) | ca_mask_word_load(ms + i*CA_MASK_WORD_BYTES));
   }
   for (i = nw * CA_MASK_WORD_BYTES; i < n; i++) {
     ma[i] |= ms[i];
@@ -62,11 +78,9 @@ ca_mask_word_and (boolean8_t       *md,
 {
   ca_size_t       nw = n / CA_MASK_WORD_BYTES;
   ca_size_t       i;
-  uint64_t       *wd = (uint64_t *)       md;
-  const uint64_t *wa = (const uint64_t *) ma;
-  const uint64_t *wb = (const uint64_t *) mb;
   for (i = 0; i < nw; i++) {
-    wd[i] = wa[i] & wb[i];
+    ca_mask_word_store(md + i*CA_MASK_WORD_BYTES,
+                       ca_mask_word_load(ma + i*CA_MASK_WORD_BYTES) & ca_mask_word_load(mb + i*CA_MASK_WORD_BYTES));
   }
   for (i = nw * CA_MASK_WORD_BYTES; i < n; i++) {
     md[i] = ma[i] & mb[i];
@@ -82,11 +96,9 @@ ca_mask_word_xor (boolean8_t       *md,
 {
   ca_size_t       nw = n / CA_MASK_WORD_BYTES;
   ca_size_t       i;
-  uint64_t       *wd = (uint64_t *)       md;
-  const uint64_t *wa = (const uint64_t *) ma;
-  const uint64_t *wb = (const uint64_t *) mb;
   for (i = 0; i < nw; i++) {
-    wd[i] = wa[i] ^ wb[i];
+    ca_mask_word_store(md + i*CA_MASK_WORD_BYTES,
+                       ca_mask_word_load(ma + i*CA_MASK_WORD_BYTES) ^ ca_mask_word_load(mb + i*CA_MASK_WORD_BYTES));
   }
   for (i = nw * CA_MASK_WORD_BYTES; i < n; i++) {
     md[i] = ma[i] ^ mb[i];
@@ -99,10 +111,8 @@ ca_mask_word_not (boolean8_t *md, const boolean8_t *ms, ca_size_t n)
 {
   ca_size_t       nw = n / CA_MASK_WORD_BYTES;
   ca_size_t       i;
-  uint64_t       *wd = (uint64_t *)       md;
-  const uint64_t *ws = (const uint64_t *) ms;
   for (i = 0; i < nw; i++) {
-    wd[i] = ws[i] ^ CA_MASK_WORD_LSB;
+    ca_mask_word_store(md + i*CA_MASK_WORD_BYTES, ca_mask_word_load(ms + i*CA_MASK_WORD_BYTES) ^ CA_MASK_WORD_LSB);
   }
   for (i = nw * CA_MASK_WORD_BYTES; i < n; i++) {
     md[i] = ms[i] ^ (boolean8_t) 1;
@@ -116,9 +126,8 @@ ca_mask_word_any (const boolean8_t *m, ca_size_t n)
 {
   ca_size_t       nw = n / CA_MASK_WORD_BYTES;
   ca_size_t       i;
-  const uint64_t *w  = (const uint64_t *) m;
   for (i = 0; i < nw; i++) {
-    if ( w[i] != 0 ) return 1;
+    if ( ca_mask_word_load(m + i*CA_MASK_WORD_BYTES) != 0 ) return 1;
   }
   for (i = nw * CA_MASK_WORD_BYTES; i < n; i++) {
     if ( m[i] ) return 1;
@@ -134,9 +143,8 @@ ca_mask_word_all_set (const boolean8_t *m, ca_size_t n)
 {
   ca_size_t       nw = n / CA_MASK_WORD_BYTES;
   ca_size_t       i;
-  const uint64_t *w  = (const uint64_t *) m;
   for (i = 0; i < nw; i++) {
-    if ( w[i] != CA_MASK_WORD_LSB ) return 0;
+    if ( ca_mask_word_load(m + i*CA_MASK_WORD_BYTES) != CA_MASK_WORD_LSB ) return 0;
   }
   for (i = nw * CA_MASK_WORD_BYTES; i < n; i++) {
     if ( ! m[i] ) return 0;
@@ -2266,11 +2274,9 @@ ca_binop_bit_or_i_boolean8_fast (ca_size_t n, boolean8_t *m,
        accumulating; here we need 3-arg). */
     ca_size_t       nw = n / CA_MASK_WORD_BYTES;
     ca_size_t       j;
-    uint64_t       *wd = (uint64_t *)       q3;
-    const uint64_t *wa = (const uint64_t *) q1;
-    const uint64_t *wb = (const uint64_t *) q2;
     for (j = 0; j < nw; j++) {
-      wd[j] = wa[j] | wb[j];
+      ca_mask_word_store(q3 + j*CA_MASK_WORD_BYTES,
+                         ca_mask_word_load(q1 + j*CA_MASK_WORD_BYTES) | ca_mask_word_load(q2 + j*CA_MASK_WORD_BYTES));
     }
     for (j = nw * CA_MASK_WORD_BYTES; j < n; j++) {
       q3[j] = q1[j] | q2[j];
