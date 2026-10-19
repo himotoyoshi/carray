@@ -4,7 +4,7 @@
 # was asked -- a new array's buffers, a grid's index copy, a MemoryView
 # holder and the data side's export.
 #
-# Measured with utils/measure_leak.rb (macOS only).
+# Measured with utils/measure_leak.rb.
 
 require "test/unit"
 require "carray"
@@ -37,14 +37,14 @@ class TestMaskQueryRaiseCleanup < Test::Unit::TestCase
 
   def bytes_per_call (expr, setup, calls: 200)
     bytes = LeakMeter.bytes_per_call(expr, setup: setup, calls: calls)
-    omit "malloc zone statistics unavailable" if bytes.nil?
+    omit "measurement unavailable" if bytes.nil?
     bytes
   end
 
   def assert_frees (expr, setup, limit: 4096, calls: 200)
     grown = bytes_per_call(expr, setup, calls: calls)
     assert_operator grown, :<, limit,
-                    "#{expr}: the malloc zone grew #{grown.round} bytes per call"
+                    "#{expr}: the C heap grew #{grown.round} bytes per call"
   end
 
   def test_raises

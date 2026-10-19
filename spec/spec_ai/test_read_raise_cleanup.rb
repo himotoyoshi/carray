@@ -12,7 +12,7 @@
 #                                 the caller sees is the hook's own
 #
 # Each buffer is made large (128 KB or more), so a leak shows far above
-# the threshold, measured by utils/measure_leak.rb (macOS only).  Buffers
+# the threshold, measured by utils/measure_leak.rb.  Buffers
 # of 1.5 to 8 MB are avoided: macOS keeps a few freed blocks of that size
 # in use, which reads as several kilobytes per call even when nothing
 # leaks.
@@ -49,9 +49,9 @@ class TestReadRaiseCleanup < Test::Unit::TestCase
 
   def assert_leaves_nothing (expr, setup, calls: 300)
     bytes = LeakMeter.bytes_per_call(expr, setup: FIXTURE + setup, calls: calls)
-    omit "malloc zone statistics unavailable" if bytes.nil?
+    omit "measurement unavailable" if bytes.nil?
     assert_operator bytes, :<, 16384,
-                    "#{expr}: the malloc zone grew #{bytes.round} bytes per call"
+                    "#{expr}: the C heap grew #{bytes.round} bytes per call"
   end
 
   def test_sort_copy_stable
@@ -117,9 +117,9 @@ class TestReadRaiseCleanup < Test::Unit::TestCase
 
   def test_paired_walk_closes_both
     bytes = LeakMeter.bytes_per_call("v.sort_copy(axis: 12)", setup: PAIRED, calls: 20000)
-    omit "malloc zone statistics unavailable" if bytes.nil?
+    omit "measurement unavailable" if bytes.nil?
     assert_operator bytes, :<, 50,
-                    "sort_copy(axis:): the malloc zone grew #{bytes.round(1)} bytes per call"
+                    "sort_copy(axis:): the C heap grew #{bytes.round(1)} bytes per call"
   end
 
   def test_paired_walk_raises_the_read_failure
@@ -169,7 +169,7 @@ class TestReadRaiseCleanup < Test::Unit::TestCase
       st = CArray.stack(ps)
     RUBY
     bytes = LeakMeter.bytes_per_call("st.sum(axis: 0)", setup: FIXTURE + setup, calls: 300)
-    omit "malloc zone statistics unavailable" if bytes.nil?
+    omit "measurement unavailable" if bytes.nil?
     assert_operator bytes, :<, 4096
   end
 

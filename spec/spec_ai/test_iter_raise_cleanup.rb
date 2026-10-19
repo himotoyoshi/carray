@@ -8,7 +8,7 @@
 # increment that the raise jumps over, so the walk has to finish itself.
 #
 # The scratch is plain malloc, invisible from Ruby.  Two ways to see it:
-# the malloc zone's bytes-in-use, which is exact but macOS only, and the
+# the C heap's bytes in use, which is exact (macOS and glibc), and the
 # resident size, which is portable but only reads as a leak once the heap
 # has stopped growing on its own (a few thousand calls here).
 
@@ -43,7 +43,7 @@ class TestIterRaiseCleanup < Test::Unit::TestCase
     Float(out)
   end
 
-  # Bytes added to the malloc zone per call (utils/measure_leak.rb).
+  # Bytes added to the C heap per call (utils/measure_leak.rb).
   def bytes_per_call (expr, setup = "")
     prelude = <<~SETUP
       o = CArray.object(#{N}) { 1.0 }
@@ -51,14 +51,14 @@ class TestIterRaiseCleanup < Test::Unit::TestCase
       input = CArray.wrap_readonly(o, CA_FLOAT64)
     SETUP
     bytes = LeakMeter.bytes_per_call(expr, setup: prelude + setup)
-    omit "malloc zone statistics unavailable" if bytes.nil?
+    omit "measurement unavailable" if bytes.nil?
     bytes
   end
 
   def assert_frees_scratch (expr, setup = "")
     grown = bytes_per_call(expr, setup)
     assert_operator grown, :<, 4096,
-                    "#{expr}: the malloc zone grew #{grown.round} bytes per call"
+                    "#{expr}: the C heap grew #{grown.round} bytes per call"
   end
 
   def test_raises

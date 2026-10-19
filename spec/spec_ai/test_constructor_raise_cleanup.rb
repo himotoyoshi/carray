@@ -3,8 +3,8 @@
 # A constructor that rejects its arguments raises before it allocates the
 # array's struct, so the raise leaves nothing behind.  What used to leak
 # was the struct and its shape arrays: 80 to 900 bytes.  The threshold is
-# 40 bytes per call over 10000 calls, measured by utils/measure_leak.rb
-# (macOS only); a bare `raise` measures under 1.
+# 40 bytes per call over 10000 calls, measured by utils/measure_leak.rb;
+# a bare `raise` measures under 1.
 #
 # A shape with more entries than the rank limit is also rejected before it
 # is copied into the fixed-size work array.
@@ -42,9 +42,9 @@ class TestConstructorRaiseCleanup < Test::Unit::TestCase
     define_method("test_#{name}") do
       assert_raise_kind_of(StandardError) { eval("#{setup}; #{expr}") }
       bytes = LeakMeter.bytes_per_call(expr, setup: setup, calls: 10000)
-      omit "malloc zone statistics unavailable" if bytes.nil?
+      omit "measurement unavailable" if bytes.nil?
       assert_operator bytes, :<, 40,
-                      "#{expr}: the malloc zone grew #{bytes.round(1)} bytes per call"
+                      "#{expr}: the C heap grew #{bytes.round(1)} bytes per call"
     end
   end
 

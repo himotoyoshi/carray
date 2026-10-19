@@ -101,8 +101,8 @@ class TestIterDeliveryDetectors < Test::Unit::TestCase
       assert_operator eval(sweep), :>, 0, "#{pn}: the sweep walked nothing"
       bytes = LeakMeter.bytes_per_call(sweep, setup: setup, calls: 8, warmup: 3,
                                        load_path: [ext, lib] + $LOAD_PATH)
-      omit "malloc zone statistics unavailable" if bytes.nil?
-      assert_operator bytes, :<, 16384, "#{pn}: the malloc zone grew #{bytes.round} bytes per sweep"
+      omit "measurement unavailable" if bytes.nil?
+      assert_operator bytes, :<, 16384, "#{pn}: the C heap grew #{bytes.round} bytes per sweep"
     end
   end
 
