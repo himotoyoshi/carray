@@ -247,6 +247,10 @@ ca_stride_compose_through (CAStride *leaf, CAStride *parent,
   for (k = parent->ndim - 1; k >= 0; k--)
     prod[k] = prod[k + 1] * parent->dim[k];
 
+  /* A parent with a zero-length axis has no cell for the leaf to start at
+     (and prod[] below would divide by zero). */
+  if (prod[0] == 0) return 0;
+
   /* Compose base offset first.  We need the per-dim base position
      to validate stride composition against parent dim bounds (a small
      forward stride starting near the end of a parent dim wraps into
