@@ -4167,7 +4167,7 @@ module MkKernel
     if is_fixlen
       io.puts "          buf[#{dst}].vp = pi + #{kexpr} * istride; buf[#{dst}].nb = (ca_size_t) ca->bytes;"
     else
-      io.puts "          buf[#{dst}].v = *(#{si[:c]} *) (pi + #{kexpr} * istride);"
+      io.puts "          memcpy(&buf[#{dst}].v, pi + #{kexpr} * istride, sizeof(buf[#{dst}].v));"
     end
   end
 
@@ -4358,7 +4358,7 @@ module MkKernel
         if is_fixlen
           io.puts "      buf[k].vp = pi + k * istride; buf[k].nb = (ca_size_t) ca->bytes;"
         else
-          io.puts "      buf[k].v = *(#{si[:c]} *) (pi + k * istride);"
+          io.puts "      memcpy(&buf[k].v, pi + k * istride, sizeof(buf[k].v));"
         end
         io.puts "      buf[k].i = #{payload.call("k")};"
         io.puts "    }"
@@ -4373,7 +4373,7 @@ module MkKernel
       if is_fixlen
         io.puts "      buf[k_unmasked].vp = pi + k * istride; buf[k_unmasked].nb = (ca_size_t) ca->bytes;"
       else
-        io.puts "      buf[k_unmasked].v = *(#{si[:c]} *) (pi + k * istride);"
+        io.puts "      memcpy(&buf[k_unmasked].v, pi + k * istride, sizeof(buf[k_unmasked].v));"
       end
       io.puts "      buf[k_unmasked].i = k;"
       io.puts "      k_unmasked++;"
@@ -4389,7 +4389,7 @@ module MkKernel
       if is_fixlen
         io.puts "      buf[k].vp = pi + k * istride; buf[k].nb = (ca_size_t) ca->bytes;"
       else
-        io.puts "      buf[k].v = *(#{si[:c]} *) (pi + k * istride);"
+        io.puts "      memcpy(&buf[k].v, pi + k * istride, sizeof(buf[k].v));"
       end
       io.puts "      buf[k].i = k;"
       io.puts "    }"
