@@ -144,7 +144,6 @@ carray_setup_i (CArray *ca,
                 CArray *mask, int allocate, int use_calloc, char *adopt_ptr)
 {
   ca_size_t elements;
-  int8_t i;
   ca_size_t k;
 
   /* check arguments */

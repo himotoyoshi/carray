@@ -542,9 +542,9 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
     r3 = ca_lazy_settle_scalar(r3, r3_scalar);
   }
 
-  ca_refuse_without_common_type(&r1, &r2);
-  ca_refuse_without_common_type(&r1, &r3);
-  ca_refuse_without_common_type(&r2, &r3);
+  ca_refuse_without_common_type(r1, r2);
+  ca_refuse_without_common_type(r1, r3);
+  ca_refuse_without_common_type(r2, r3);
   TypedData_Get_Struct(r1, CArray, &carray_data_type, op1);
   TypedData_Get_Struct(r2, CArray, &carray_data_type, op2);
   TypedData_Get_Struct(r3, CArray, &carray_data_type, op3);

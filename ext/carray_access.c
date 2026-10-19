@@ -884,9 +884,9 @@ rb_ca_index_restruct_block (int16_t *ndimp, ca_size_t *shrink, ca_size_t *dim,
 
   offset = 0;
 
-  if ( idx[0] == -1 ) {
-    j = 0;
-    while ( idx[++j] ) {
+  if ( ndim0 > 0 && idx[0] == -1 ) {
+    /* j = the number of leading axes collapsed by a scalar index */
+    for (j=1; j<ndim0 && idx[j] == -1; j++) {
       ;
     }
 

@@ -794,7 +794,6 @@ ca_object_setup (CAObject *ca,
                int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes)
 {
   ca_size_t elements;
-  int8_t i;
 
   /* check arguments */
 

@@ -2463,15 +2463,15 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
    the kernel's data_types, so that a pair the eager operator refuses is
    refused the same way. */
 void
-ca_refuse_without_common_type (VALUE *self, VALUE *other)
+ca_refuse_without_common_type (VALUE self, VALUE other)
 {
   CArray *ca, *cb;
-  TypedData_Get_Struct(*self,  CArray, &carray_data_type, ca);
-  TypedData_Get_Struct(*other, CArray, &carray_data_type, cb);
+  TypedData_Get_Struct(self,  CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(other, CArray, &carray_data_type, cb);
   if ( ca->data_type != cb->data_type
        && ca_cast_table[cb->data_type][ca->data_type] < 0
        && ca_cast_table[ca->data_type][cb->data_type] < 0 ) {
-    rb_ca_cast_self_or_other(self, other);   /* raises */
+    rb_ca_cast_self_or_other(&self, &other);   /* raises */
   }
 }
 

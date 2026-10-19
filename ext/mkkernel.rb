@@ -3584,7 +3584,7 @@ module MkKernel
       wio.puts "        ca_size_t inner_stride = 1;"
       wio.puts "        for ( int8_t ii = baxis + 1; ii < src->ndim; ii++ ) inner_stride *= src->dim[ii];"
       wio.puts "        ca_size_t axis_n = src->dim[baxis];"
-      wio.puts "        ca_size_t outer  = (axis_n * inner_stride) ? src->elements / (axis_n * inner_stride) : 0;   /* a zero-length axis leaves nothing to fill */"
+      wio.puts "        ca_size_t outer  = ( axis_n && inner_stride ) ? src->elements / (axis_n * inner_stride) : 0;   /* a zero-length axis leaves nothing to fill */"
       wio.puts "        for ( ca_size_t o = 0; o < outer; o++ ) {"
       wio.puts "          for ( ca_size_t a = 0; a < axis_n; a++ ) {"
       wio.puts "            for ( ca_size_t in = 0; in < inner_stride; in++ ) {"
@@ -3604,7 +3604,7 @@ module MkKernel
       wio.puts "        ca_size_t inner_stride = 1;"
       wio.puts "        for ( int8_t ii = baxis + 1; ii < src->ndim; ii++ ) inner_stride *= src->dim[ii];"
       wio.puts "        ca_size_t axis_n = src->dim[baxis];"
-      wio.puts "        ca_size_t outer  = (axis_n * inner_stride) ? src->elements / (axis_n * inner_stride) : 0;   /* a zero-length axis leaves nothing to fill */"
+      wio.puts "        ca_size_t outer  = ( axis_n && inner_stride ) ? src->elements / (axis_n * inner_stride) : 0;   /* a zero-length axis leaves nothing to fill */"
       wio.puts "        for ( ca_size_t o = 0; o < outer; o++ ) {"
       wio.puts "          for ( ca_size_t a = 0; a < axis_n; a++ ) {"
       wio.puts "            for ( ca_size_t in = 0; in < inner_stride; in++ ) {"
@@ -4299,9 +4299,10 @@ module MkKernel
       io.puts "  volatile VALUE hbuf = 0, haux = 0;"
       io.puts "  #{name}_pair_#{src} *buf = ALLOCV_N(#{name}_pair_#{src}, hbuf, fiber_n);"
     end
-    if has_kind && src != :object
+    if has_kind && src != :object && src != :fixlen
       # The aux pair buffer for ca_sort_merge_pair_<src> (a ping-pong
-      # bottom-up mergesort), taken once outside the fiber loop.
+      # bottom-up mergesort), taken once outside the fiber loop.  The fixlen
+      # lane sorts with qsort and needs none.
       io.puts "  #{name}_pair_#{src} *aux = NULL;"
       io.puts "  if ( do_stable ) {"
       io.puts "    aux = ALLOCV_N(#{name}_pair_#{src}, haux, fiber_n);"
@@ -5267,7 +5268,7 @@ module MkKernel
           CArray *co;
           GetCArray(vout, co);
           #{oi[:c]} *op = (#{oi[:c]} *) co->ptr;
-          #{op_mask_decl}
+          #{undef_nm ? op_mask_decl : ""}
 
           ca_iter_state st;
           int rc = ca_iter_state_init_l2(&st, ca, CA_SLAB_AXES,
