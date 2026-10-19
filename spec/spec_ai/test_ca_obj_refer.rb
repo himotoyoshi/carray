@@ -58,4 +58,18 @@ class TestCARefer < Test::Unit::TestCase
     assert_operator ObjectSpace.memsize_of(@r), :>, 0
   end
 
+  # A scalar read as narrower elements is an array of several: no scalar
+  # flag, so every method sees all of its cells.
+  def test_refer_of_a_scalar_into_several_cells_is_not_a_scalar
+    s = CScalar.int32
+    s[] = 0x04030201
+    v = s.refer(:int8, [4])
+    assert_equal false, v.scalar?
+    assert_equal [1, 2, 3, 4], v.to_a
+    assert_equal [1, 2, 3, 4], v.copy.to_a
+    assert_equal [1, 2, 3, 4], v.to_type(:int16).to_a
+    assert_equal [1, 2, 3, 4], (v + 0).to_a
+    assert_equal true, s.refer(:int32, [1]).scalar?
+  end
+
 end
