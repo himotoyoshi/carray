@@ -20,7 +20,7 @@ require "carray"
 class TestRankLimit < Test::Unit::TestCase
 
   MAX = CA_RANK_MAX
-  MESSAGE = /\A(?<name>[\w.!?#]+): ndim (?<n>\d+) exceeds CA_RANK_MAX #{MAX}\z/
+  MESSAGE = /\A(?<name>[\w.!?#\[\]]+): ndim (?<n>\d+) exceeds CA_RANK_MAX #{MAX}\z/
 
   # Run `code` in a child; return its last line of output, or the signal.
   def child (code)
@@ -96,6 +96,15 @@ class TestRankLimit < Test::Unit::TestCase
       raise v.is_masked.to_a.flatten.inspect unless v.is_masked.to_a.flatten == [true] * 4 + [false] * 4
     RUBY
     assert_equal "ok", child(code)
+  end
+
+  # The result of :_ has the base's axes and one for each :_; the rank is
+  # checked before any of them is written.
+  def test_newaxis_past_the_limit
+    assert_refused "[]", MAX + 1, child("CArray.int32(*[1] * #{MAX})[:_, *[nil] * #{MAX}]")
+    assert_refused "[]", 201, child("CArray.int32(1)[*[:_] * 200, nil]")
+    assert_refused "[]", 40, child("CArray.int32(1)[*[:_] * 40, 0]")
+    assert_equal "ok", child("raise unless CArray.int32(1)[*[:_] * #{MAX - 1}, nil].ndim == #{MAX}")
   end
 
 end

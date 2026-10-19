@@ -1365,6 +1365,7 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
      element, which is what the shape rules then hold it to. */
   if ( nscalar == nclean ) {
     VALUE blocks[CA_RANK_MAX];
+    ca_check_rank_fits(nunder, NULL);   /* the result has the :_ axes only */
     for (i = 0; i < nclean; i++) {
       blocks[i] = rb_assoc_new(clean[i], INT2FIX(1));
     }
@@ -1378,6 +1379,10 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
   base = rb_ca_fetch_method(nclean, clean, self);
 
   TypedData_Get_Struct(base, CArray, &carray_data_type, cb);
+
+  /* The result has the base's axes and one for each :_, before any is
+     written into final_dims. */
+  ca_check_rank_fits((long) nunder + cb->ndim, NULL);
 
   /* Reconstruct final shape: walk original argv.  :_ -> size-1, scalar
      (Integer) -> dropped (skip), else -> base.dim[cursor].  A key gives one
