@@ -113,6 +113,13 @@ module CATimeUnitAlgebra
     end
   end
 
+  # How a refusal names an operand: a Face by its class, any other array as
+  # a CArray (a lazy expression's node classes are not the user's), anything
+  # else by its class.
+  def operand_name(x)
+    ( x.is_a?(CArray) && !x.face? ) ? "CArray" : x.class.to_s
+  end
+
   # A single value an operator meets an array with, as a one-cell array
   # marked scalar (a CScalar) of its kind, or nil when it is not one: a
   # duration -- a CATimedelta::Element, or a String that reads as one
@@ -1136,7 +1143,7 @@ class CATime
     when CATime
       raise TypeError, "CATime + CATime is ill-defined"
     else
-      raise TypeError, "CATime + #{given.class} is not allowed: add a duration " \
+      raise TypeError, "CATime + #{CATimeUnitAlgebra.operand_name(given)} is not allowed: add a duration " \
                        "(a CATimedelta, a CATimedelta::Element or a String such as \"3 days\")"
     end
   end
@@ -1169,7 +1176,7 @@ class CATime
       b = b[0] if other.scalar?
       CATimeUnitAlgebra.checked_sub(a, b).timedelta(unit: u)
     else
-      raise TypeError, "CATime - #{given.class} is not allowed: subtract a duration " \
+      raise TypeError, "CATime - #{CATimeUnitAlgebra.operand_name(given)} is not allowed: subtract a duration " \
                        "(a CATimedelta, a CATimedelta::Element or a String such as \"3 days\") " \
                        "or a time (a CATime, a CATime::Element, a Time, a Date or a String)"
     end
@@ -1830,7 +1837,7 @@ class CATimedelta
       d = CATimeUnitAlgebra.duration_on_grid(parent, unit, other.unit)
       CATimeUnitAlgebra.checked_add(d, other.parent[0]).time(unit: other.unit)
     else
-      raise TypeError, "CATimedelta + #{given.class} is not allowed"
+      raise TypeError, "CATimedelta + #{CATimeUnitAlgebra.operand_name(given)} is not allowed"
     end
   end
 
@@ -1853,7 +1860,7 @@ class CATimedelta
       b = b[0] if other.scalar?
       CATimeUnitAlgebra.checked_sub(a, b).timedelta(unit: u)
     else
-      raise TypeError, "CATimedelta - #{given.class} is not allowed"
+      raise TypeError, "CATimedelta - #{CATimeUnitAlgebra.operand_name(given)} is not allowed"
     end
   end
 
@@ -1880,7 +1887,7 @@ class CATimedelta
   def *(other)
     case other
     when Integer then CATimeUnitAlgebra.checked_mul(parent, other).timedelta(unit: unit)
-    else raise TypeError, "CATimedelta * #{other.class} is not allowed (Integer only)"
+    else raise TypeError, "CATimedelta * #{CATimeUnitAlgebra.operand_name(other)} is not allowed (Integer only)"
     end
   end
 
