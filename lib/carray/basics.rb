@@ -189,7 +189,13 @@ class CArray
   #   @param src [CArray] source array.
   #   @return [self]
   #   @raise [ArgumentError] when `offset.length != self.ndim`.
+  #   @raise [FrozenError] when `self` is frozen.
   def paste (offset, src)
+    # The write goes through a window view, which is not frozen itself:
+    # refuse a frozen self here, as a write into it directly is refused.
+    if frozen?
+      raise FrozenError.new("can't modify frozen #{self.class}: #{inspect}", receiver: self)
+    end
     raise ArgumentError, "offset length must equal ndim" if offset.length != ndim
     # A zero-length source covers no cell, so there is nothing to write --
     # and the empty range it would ask for is not a window CAWindow can
