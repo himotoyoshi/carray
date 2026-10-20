@@ -31,7 +31,7 @@ Indexing and building arrays — the everyday operations.
 | Doc | Tag | What it is |
 |---|---|---|
 | [Indexer decision tree](topics/Indexer_decision_tree.md) | Reference | Every kind of `[]` index key and how it is classified |
-| [Element access (`elem_*`)](topics/ElementAccess.md) | Guide | Per-cell fast path for tight scalar loops — a lighter `ca[i, j]` |
+| [Element access (`elem_*`)](topics/ElementAccess.md) | Guide | The fastest access to one cell when you hold its per-axis index |
 | [Conditional selection](topics/ConditionalSelection.md) | Guide | `then_else` / `replace_where` / `conditional` / `CArray.select` — pick per cell |
 | [Composition](topics/Composition.md) | Guide | Assembling arrays into one (`bind` / `merge` / `join` / stack) |
 | [gather_nd / put_nd](topics/GatherNd.md) | Guide | N-D positional gather/scatter (stacked or per-axis coordinates) |

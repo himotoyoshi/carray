@@ -5,12 +5,12 @@
 class CArray
   # @!group Element access
   #
-  # `elem_*` methods are low-level single-cell operations. They
-  # accept `idx` as either an Integer (flat address into the
-  # row-major element sequence) or an `Array<Integer>` (one index
-  # per axis). They bypass the broadcasting and view-construction
-  # paths used by `[]` / `[]=`, and are the right tool for
-  # tight per-cell loops where allocation matters.
+  # `elem_*` methods are the fastest way to reach one cell when you
+  # hold its per-axis index. They accept `idx` as an `Array<Integer>`
+  # (one index per axis) or an Integer (flat address into the
+  # row-major element sequence). The result is the same as `[]` /
+  # `[]=` for that cell; the key parsing and view construction of
+  # the general indexer are skipped.
 
   # @overload elem_swap(idx1, idx2)
   #   Exchanges the values (and mask states, if any) at positions

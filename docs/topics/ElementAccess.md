@@ -1,18 +1,17 @@
 # Per-cell access: the `elem_*` family
 
-CArray's `[]` / `[]=` indexer is a general dispatcher — it recognises
-Ranges, `nil`, boolean masks, Address-key `:%`, integer arrays, symbols,
-and mixed multi-key forms, then routes to the appropriate view class or
-store path. That flexibility has a small per-call cost: parsing the key,
-building a view, and folding it back into the target.
+When you hold **the coordinates of one cell** — `(y, x)` of a pixel,
+`(i, j, k)` of a grid point — the `elem_*` family is the fastest way to
+read or write that cell. You pass the per-axis index as it is; there is
+no need to turn it into a flat address first.
 
-When you are writing a **tight scalar loop** (a histogram bump, a
-pair-wise swap, a per-cell increment, a scatter fixup), you don't need
-any of that — you already have integer coordinates and one value. The
-`elem_*` family is the specialised, always-scalar entry point for that
-case. It lands at the same backend as `ca[i, j]` but skips the
-front-end dispatcher and inlines the mask probe. Semantics match the
-indexer; only the overhead differs.
+`ca[i, j]` reaches the same cell with the same result, but `[]` / `[]=`
+is a general dispatcher: it has to recognise Ranges, `nil`, boolean
+masks, integer arrays, symbols and mixed keys before it can find out
+that the key names one cell. `elem_*` knows that from the start, and
+on a 2-D int32 array a call costs roughly half of `ca[i, j]` (a third
+for `elem_incr` against `ca[i, j] += 1`, and much less than that for
+`elem_masked?` against `ca.mask[i, j]`).
 
 | method | equivalent to | mutates |
 |---|---|---|
@@ -32,29 +31,29 @@ Everything below works after `require "carray"`.
 
 ---
 
-## 1. Index form: flat or per-axis
+## 1. Index form: per-axis or flat
 
 Every `elem_*` method accepts `idx` in two shapes:
 
+- **`Array<Integer>`** — one index per axis, length `self.ndim`. This is
+  the form the family is built around: the coordinates you already have.
 - **Integer** — a flat row-major address into `self`, in
   `0 ... self.elements`.
-- **`Array<Integer>`** — one index per axis, length `self.ndim`.
 
 ```ruby
 a = CArray.int32(3, 4).seq            # 0..11 row-major
-a.elem_fetch(5)                       # => 5   (flat)
 a.elem_fetch([1, 1])                  # => 5   (per-axis)
+a.elem_fetch(5)                       # => 5   (flat)
 ```
 
 A negative index counts from the end, as it does for `[]`. Out-of-range
 values raise `IndexError`, and so do an index that is not an Integer
 (`1.5`) and a per-axis Array whose length is not `self.ndim`.
 
-Prefer the flat form when you already have a flat address (`bincount`
-output positions, `sort_index` outputs). Prefer the per-axis form when
-your coordinates naturally live in axis-space (image `(y, x)`, a grid
-`(i, j, k)`) — the parser inlines the `FIXNUM_P` fast path so an
-`Array<Integer>` of small integers is nearly free.
+The flat form is there for the case where an address is what you hold
+(a position out of `sort_addr`, say). When you hold per-axis
+coordinates, pass them as they are rather than converting them with
+`index2addr` first.
 
 ---
 
@@ -81,40 +80,26 @@ about **cost per call**.
 
 ---
 
-## 3. When it pays off
+## 3. When to use it
 
-The overhead the `elem_*` family removes is per-call, not per-element:
+The deciding question is **what you hold**:
 
-- one `TypedData_Get_Struct` instead of two,
-- direct `RARRAY_CONST_PTR` + `FIXNUM_P` instead of `rb_ary_entry`
-  + `NUM2SIZE`,
-- inline mask probe (`ca->mask` NULL-check + entity fast path)
-  instead of an `ca_update_mask` function call,
-- for entity arrays, a direct pointer read/write instead of
-  `ca_func[ARRAY].xfer_index` through the function-pointer table.
-
-So the win shows up when **the same cell operation happens millions of
-times in Ruby**, not when the operation itself is heavy. Two rough
-guidelines:
-
-1. If you are calling `ca[i, j]` (or `ca[i, j] = v`) inside a Ruby
-   `while` / `each` / `times` loop with a large trip count, and each
-   iteration touches one cell, `elem_*` is the right substitute.
-2. If you can express the same computation as a vector operation
-   (`self[addrs] = vals`, `scatter_add!(addrs, vals)`, `windows`,
-   `blocks`, an axis-reduction), *that* is a bigger win than the
-   `elem_*` swap. Reach for `elem_*` when the loop is genuinely scalar.
-
-Both `scatter_*!` and `elem_*` bypass the general indexer, but they
-solve different shapes:
-
-| you have | reach for |
+| you hold | reach for |
 |---|---|
-| **many** addresses and values at once, want vector dispatch | `self[addrs] = vals` or `scatter_*!(addrs, vals)` |
-| **one** cell per iteration, in a Ruby loop | `elem_*` |
+| the per-axis index (or the address) of **one** cell | `elem_*` |
+| **many** addresses and values at once, as CArrays | `self[addrs] = vals` or `scatter_*!(addrs, vals)` |
+| a computation over a whole axis or region | an axis reduction, `windows`, `blocks`, a vector operation |
 
-If you already have `addrs` and `vals` as CArrays, don't decompose them
-into a Ruby loop over `elem_*` — that always loses to the vector form.
+`elem_*` saves cost per call, not per element, so the saving matters
+when one cell operation is repeated many times from Ruby — typically
+because the loop has to stay in Ruby (input arrives one sample at a
+time, each step depends on the last, the loop branches or breaks).
+
+If you can express the same computation as a vector operation, that is
+a larger win than switching `[]` for `elem_*`. And if you already have
+the addresses and values as CArrays, don't take them apart into a Ruby
+loop over `elem_*` — the vector form always wins. Per-axis index
+arrays become addresses through `index2addr` (§7).
 
 ---
 
@@ -270,11 +255,8 @@ differs slightly from the indexer path:
   elem_unmask                                  ✓  (clear)
 ```
 
-The whole family exists for one reason: when a scalar cell operation
-sits inside a Ruby loop with a large trip count, cutting the per-call
-Ruby → C overhead by a couple of hundred nanoseconds is what makes the
-loop finish in seconds instead of minutes. When you can batch, batch;
-when you can't, reach for `elem_*` instead of `[]`.
+Use `elem_*` when you hold the coordinates of one cell and the loop
+stays in Ruby. When you can batch, batch.
 
 ## 7. Coordinate ↔ address primitives
 
