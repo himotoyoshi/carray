@@ -164,8 +164,8 @@ ca_classifier_key_too_large (VALUE v, const char *where)
    Returns 1 with the position in *out, 2 for an Integer past int64 (past
    every axis, which is no longer than int64), and 0 for anything else (a
    Float with a fraction or past 2**53, NaN, Inf, a Rational, a String). */
-static int
-ca_classifier_key_position (VALUE v, ca_size_t *out)
+int
+ca_index_key_position (VALUE v, ca_size_t *out)
 {
   if ( FIXNUM_P(v) ) {
     *out = (ca_size_t) FIX2LONG(v);
@@ -201,7 +201,7 @@ static ca_size_t
 ca_classifier_key_int_where (VALUE v, int axis, const char *where)
 {
   ca_size_t k;
-  switch ( ca_classifier_key_position(v, &k) ) {
+  switch ( ca_index_key_position(v, &k) ) {
   case 1:
     return k;
   case 2:
@@ -232,7 +232,7 @@ static ca_size_t
 ca_classifier_key_step (VALUE v, int axis)
 {
   ca_size_t k;
-  if ( ca_classifier_key_position(v, &k) == 2 ) {
+  if ( ca_index_key_position(v, &k) == 2 ) {
     return rb_big_sign(v) ? (ca_size_t) INT64_MAX : (ca_size_t) INT64_MIN;
   }
   return ca_classifier_key_int(v, axis);

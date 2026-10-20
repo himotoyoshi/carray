@@ -20,17 +20,22 @@
 #include "ca_obj_face.h"
 #include "carray_internal.h"   /* ca_obj_extremum_replaces */
 
-/* An element index is an Integer, as it is for `[]`; a Float would be cut
-   to an integer by NUM2SIZE. */
+/* An element index is read as `[]` reads a key: an Integer, or a Float
+   with no fraction. */
 static inline ca_size_t
 elem_index_value (VALUE v)
 {
+  ca_size_t k;
   if ( FIXNUM_P(v) ) return (ca_size_t) FIX2LONG(v);
-  if ( ! RB_INTEGER_TYPE_P(v) ) {
+  switch ( ca_index_key_position(v, &k) ) {
+  case 1:
+    return k;
+  case 2:
+    rb_raise(rb_eIndexError, "index %"PRIsVALUE" is out of range", rb_inspect(v));
+  default:
     rb_raise(rb_eIndexError, "object '%"PRIsVALUE"' is invalid for an index",
              rb_inspect(v));
   }
-  return NUM2SIZE(v);
 }
 
 /* T_ARRAY index parser.  ridx is assumed already known to be T_ARRAY.

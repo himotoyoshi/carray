@@ -8,7 +8,8 @@ class CArray
   # `elem_*` methods are the fastest way to reach one cell when you
   # hold its per-axis index. They accept `idx` as an `Array<Integer>`
   # (one index per axis) or an Integer (flat address into the
-  # row-major element sequence). The result is the same as `[]` /
+  # row-major element sequence). An index is read as `[]` reads one:
+  # an Integer, or a Float with no fraction. The result is the same as `[]` /
   # `[]=` for that cell; the key parsing and view construction of
   # the general indexer are skipped.
 
