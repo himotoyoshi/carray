@@ -193,6 +193,14 @@ rb_ca_fill (VALUE self, VALUE rval)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_empty(ca) ) {
+    /* No cell to fill, but a value no cell could hold is refused, as an
+       assignment to the empty array refuses it. */
+    if ( rval != CA_UNDEF && ca->bytes > 0 ) {
+      volatile VALUE holder;
+      char *fval = ALLOCV_N(char, holder, ca->bytes);
+      rb_ca_obj2ptr(self, rval, fval);
+      ALLOCV_END(holder);
+    }
     return self;                /* empty = no-op fill; return self for chaining */
   }
 
