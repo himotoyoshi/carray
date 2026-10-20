@@ -270,7 +270,9 @@ class CArray
   #   `self` is coerced to `:float64` if it is not already. When
   #   `axis: nil`, `self` is flattened to 1-D first.
   #
-  #   Out-of-range `addr` returns NaN.
+  #   A position with no answer -- out of range, or between samples one
+  #   of which is NaN -- gives `nil` for a scalar `addr` and NaN in the
+  #   cell of an array result.
   #
   #   Because this half of the pair returns a *value* rather than a
   #   position, a Face axis gets its Face back: `CATime#linear_fetch` /
