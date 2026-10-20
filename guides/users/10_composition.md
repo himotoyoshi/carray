@@ -15,7 +15,7 @@ Two questions decide which one:
 - Do the pieces line up along an axis the inputs already have, am I making a brand-new axis, or am I tiling into a grid?
 - Do I want a view over the original pieces, or a fresh, independent entity?
 
-**The view-default methods do not copy.** `meld`, `stack`, and `montage` return a view onto the original arrays — reads gather from the pieces on demand, and writes flow back to them. They require the pieces to share a data type (a mismatch raises; cast the pieces yourself first). Materialise with `.copy` when you want a fresh independent buffer.
+**The view-default methods do not copy.** `meld`, `stack`, and `montage` return a view onto the original arrays — reads gather from the pieces on demand, and writes flow back to them. Pieces of different data types are promoted through cast views, so the result is still a view. Materialise with `.copy` when you want a fresh independent buffer.
 
 **The eager methods materialise.** `concatenate` and `mosaic` allocate a destination, auto-cast mixed data types to a common one, and paste each piece in, so they always return a fresh owned CArray.
 
@@ -60,7 +60,7 @@ a.meld(b, axis: 1)             #  ditto
 
 ### Ragged pieces are fine
 
-The pieces must agree on `ndim`, on the data type, and on every axis length *except* the meld axis. Along the meld axis itself they may contribute different lengths — the result is still a view:
+The pieces must agree on `ndim` and on every axis length *except* the meld axis. Along the meld axis itself they may contribute different lengths — the result is still a view:
 
 ```ruby
 x = CArray.int32(2, 3).seq            # [[0, 1, 2], [3, 4, 5]]
@@ -72,19 +72,16 @@ CArray.meld([x, y], axis: 0)
 #       [ 100, 101, 102 ] ]           shape [3, 3], a CAMeld view
 ```
 
-### The data type must match
+### Mixed data types are promoted
 
-`meld` is strict about data types: mixing `int32` pieces with `float64` pieces raises. Cast the pieces yourself when you mean it —
+Pieces of different data types are lifted to one that holds all of them, as `stack` lifts them ("Mixing data types" below):
 
 ```ruby
 i = CArray.int32(3).seq
 f = CArray.float64(3).seq(0.5)
 
-CArray.meld([i, f])                       #  ArgumentError (data_type mismatch)
-CArray.meld([i.float64, f])               #  fine — both float64 now
+CArray.meld([i, f]).data_type             #  => :float64, still a view
 ```
-
-— or reach for `concatenate` (below), the eager sibling that auto-casts.
 
 A common mistake — melding twelve monthly `[lat, lon]` grids into a yearly array:
 
@@ -345,8 +342,7 @@ m.entity?                             #  => true
 
 The methods differ in how they treat mixed data types:
 
-- **`meld` is strict.** The pieces must already share a data type; a mismatch raises. Cast the pieces yourself (`i.float64`) or use `concatenate`.
-- **`stack` and `montage` promote.** The pieces are lifted to the type that can hold all of them, by the same rule the element-wise operations use; `data_type:` forces a target type. The promotion wraps each piece in a cast view, so the result is still a view and writes still reach the original pieces (converted back on the way in).
+- **`meld`, `stack` and `montage` promote.** The pieces are lifted to the type that can hold all of them, by the same rule the element-wise operations use; `data_type:` forces a target type. The promotion wraps each piece in a cast view, so the result is still a view and writes still reach the original pieces (converted back on the way in).
 - **`concatenate`, `mosaic`, and `tabulate` promote too** — they are eager, so the promotion simply happens while pasting. All three accept `data_type:`.
 
 ```ruby
@@ -354,12 +350,10 @@ i = CArray.int32(3).seq               # [0, 1, 2]
 f = CArray.float64(3).seq(0.5)        # [0.5, 1.5, 2.5]
 
 CArray.stack([i, f]).data_type        #  => :float64   (promoted, still a view)
+CArray.meld([i, f]).data_type         #  => :float64   (promoted, still a view)
 CArray.concatenate([i, f])
 #  => [ 0.0, 1.0, 2.0, 0.5, 1.5, 2.5 ]                 (promoted, eager)
 CArray.concatenate([i, f], data_type: :float32)        #  forced float32
-
-CArray.meld([i, f])                   #  ArgumentError — cast first, or
-                                      #  use concatenate
 ```
 
 ## Summary

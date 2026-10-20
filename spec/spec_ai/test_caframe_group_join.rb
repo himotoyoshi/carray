@@ -994,9 +994,11 @@ class TestCAFrameJoinEmptyFrame < Test::Unit::TestCase
     assert_equal [1, 9], @full["a"].to_a
   end
 
-  def test_meld_names_the_data_types_it_refuses
-    err = assert_raise(ArgumentError) { CArray.meld([CA_INT32([1]), CA_OBJECT([2])]) }
-    assert_match(/array 0 is int32, array 1 is object/, err.message)
+  def test_meld_names_the_column_types_it_refuses
+    a = CAFrame.new("t" => CA_INT32([1]))
+    b = CAFrame.new("t" => CA_OBJECT([2]))
+    err = assert_raise(ArgumentError) { CAFrame.meld(a, b) }
+    assert_match(/column "t" is object in piece 1, int32 in piece 0/, err.message)
   end
 end
 

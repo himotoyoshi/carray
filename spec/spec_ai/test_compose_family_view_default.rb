@@ -169,15 +169,16 @@ class TestComposeFamilyViewDefault < Test::Unit::TestCase
     assert_equal "float64", v.data_type_name
   end
 
-  # ------------ dtype semantics: strict view, cast is caller responsibility ------------
+  # ------------ dtype semantics: pieces promoted as stack promotes ------------
 
-  def test_dtype_mismatch_raises
+  def test_dtype_mismatch_promotes
     a_int = CArray.int32(3, 4) { |i, j| i * 10 + j }
     a_f   = CArray.float64(3, 4) { |i, j| 100.0 + i * 10 + j }
-    # CArray.meld is a view constructor: mismatched dtype raises.  For
-    # auto-cast use CArray.concatenate (eager) or pre-cast pieces yourself
-    # via .to_type.
-    assert_raise(ArgumentError) { CArray.meld([a_int, a_f], axis: 0) }
+    v = CArray.meld([a_int, a_f], axis: 0)
+    assert_equal "float64", v.data_type_name
+    assert_equal CArray.concatenate([a_int, a_f], axis: 0).to_a, v.to_a
+    # The raw constructor takes one data type.
+    assert_raise(ArgumentError) { CAMeld.new([a_int, a_f], axis: 0) }
   end
 
   def test_precast_then_meld_promotes

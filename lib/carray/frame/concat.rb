@@ -20,9 +20,9 @@ class CAFrame
   # preserved: writes to the result flow back to whichever input frame owns
   # the target segment, and vice versa).
   #
-  # Per-column +data_type+ must match across frames (CArray.meld is a view
-  # constructor that refuses to auto-cast — silent promotion here would
-  # hide schema drift).  For an eager, auto-casting alternative use
+  # Per-column +data_type+ must match across frames: CArray.meld would bring
+  # the pieces to a common type, and in a frame that promotion would hide
+  # schema drift.  For an eager, auto-casting alternative use
   # {CAFrame.concatenate}.
   #
   # Column matching is by name (output order follows the first frame);
@@ -54,6 +54,7 @@ class CAFrame
     frames = frames_with_rows(frames)
     cols = {}
     names.each do |name|
+      check_same_column_type(frames.map { |f| f[name] }, name, verb: "meld")
       cols[name] = CArray.meld(frames.map { |f| f[name] }, axis: 0)
     end
     new(cols, axis_name: first.axis_name, index: meld_index(frames))
@@ -228,6 +229,23 @@ class CAFrame
     end
   end
   private_class_method :check_trailing_shapes
+
+  # The pieces of one column have one data type (and one class, for a
+  # Face): a frame does not promote a column to make its pieces agree.
+  def self.check_same_column_type(pieces, name, verb:)
+    first = pieces.first
+    pieces.each_with_index do |c, i|
+      next if column_type_name(c) == column_type_name(first)
+      raise ArgumentError,
+            "#{verb}: column #{name.inspect} is #{column_type_name(c)} in piece #{i}, " \
+            "#{column_type_name(first)} in piece 0 (cast it first, or use concatenate)"
+    end
+  end
+
+  def self.column_type_name(c)
+    c.face? ? c.class.name : c.data_type_name
+  end
+  private_class_method :check_same_column_type, :column_type_name
 
   # Two indexes hold the same rows when their values agree cell by cell; a
   # NaN label matches a NaN label, and a masked cell a masked cell.
