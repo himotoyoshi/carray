@@ -421,7 +421,9 @@ class GroupedFrame
   # its trailing shape: a (N, L) column gives (groups, L). Each
   # takes +min_count:+ and +fill_value:+ as a core reduction does: a group
   # with fewer than min_count present values is UNDEF, and fill_value fills
-  # the UNDEF cells. +keep_rows: true+ gives each row its group's value
+  # the UNDEF cells. One fill_value goes to every column and has to suit each
+  # (a number into a string column raises); a Hash of column name => value
+  # fills those columns only. +keep_rows: true+ gives each row its group's value
   # instead of one row per group, as for +aggregate+.
   #
   # Given column names, they reduce those columns only and return them as
@@ -701,8 +703,18 @@ class GroupedFrame
   # +keep_rows+.
   private def reduce_columns(reduction, names, keep_rows, **keywords)
     keywords = keywords.compact
-    out = over_named_columns(reduction, names, @key_names) do |col|
-      col = group_reduce(col, reduction, **keywords)
+    fills = keywords.delete(:fill_value)
+    if fills.is_a?(Hash)
+      unknown = fills.keys - @frame.column_names
+      unless unknown.empty?
+        raise ArgumentError,
+              "#{reduction}: fill_value names no column #{unknown.map(&:inspect).join(', ')}"
+      end
+    end
+    out = over_named_columns(reduction, names, @key_names) do |col, name|
+      fill = fills.is_a?(Hash) ? fills[name] : fills
+      kw = fill.nil? ? keywords : keywords.merge(fill_value: fill)
+      col = group_reduce(col, reduction, **kw)
       keep_rows && !names.empty? ? spread_to_rows(col) : col
     end
     return out unless names.empty?

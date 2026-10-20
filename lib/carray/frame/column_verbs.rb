@@ -30,18 +30,19 @@ class CAFrame
           next if key_names.include?(name)
           col = @frame[name]
           next unless column_has?(col, verb, args, keywords)
-          cols[name] = yield(col)
+          cols[name] = yield(col, name)
         end
         return cols
       end
       results = names.map do |name|
-        col = @frame[@frame.__send__(:column_key, name, verb)]
+        key = @frame.__send__(:column_key, name, verb)
+        col = @frame[key]
         unless column_has?(col, verb, args, keywords)
           raise CArray::DataTypeError,
                 "#{verb}: column #{name.inspect} " \
                 "(#{CArray::Inspector.type_label(col)}) has no #{verb}"
         end
-        yield(col)
+        yield(col, key)
       end
       results.size == 1 ? results.first : results
     end
