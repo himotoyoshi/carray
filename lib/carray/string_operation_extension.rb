@@ -31,11 +31,14 @@ class CArray
     # (integer / boolean results).  Shape and mask are carried.
     def string_map (data_type = nil) # :nodoc:
       out = data_type ? template(data_type) : CArray.object(*shape)
+      # A typed result has no nil: a cell the String method answers nil for
+      # (index finds nothing) is UNDEF.
+      cell = data_type ? ->(s) { v = yield(s); v.nil? ? UNDEF : v } : ->(s) { yield(s) }
       if has_mask?
         m = is_masked
-        elements.times { |i| out[i] = (m[i] ? UNDEF : yield(self[i])) }
+        elements.times { |i| out[i] = (m[i] ? UNDEF : cell.(self[i])) }
       else
-        elements.times { |i| out[i] = yield(self[i]) }
+        elements.times { |i| out[i] = cell.(self[i]) }
       end
       data_type ? out : CAString.wrap(out)
     end
@@ -124,10 +127,12 @@ class CArray
     # @return [CArray] `:int`, shape and mask of `self` preserved.
     def bytesize ()    ; string_map(:int) { |s| s.bytesize } ; end
     # Per-cell `String#index`.
-    # @return [CArray] `:int`, shape and mask of `self` preserved.
+    # @return [CArray] `:int`, shape and mask of `self` preserved; UNDEF
+    #   where the cell does not hold the substring.
     def str_index (*a) ; string_map(:int) { |s| s.index(*a) } ; end
     # Per-cell `String#rindex`.
-    # @return [CArray] `:int`, shape and mask of `self` preserved.
+    # @return [CArray] `:int`, shape and mask of `self` preserved; UNDEF
+    #   where the cell does not hold the substring.
     def rindex (*a)    ; string_map(:int) { |s| s.rindex(*a) } ; end
 
     # ---- numeric parse (Integer / Float result) --------------------------
