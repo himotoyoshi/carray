@@ -63,8 +63,12 @@ CArray.const_string(labels, encoding: Encoding::UTF_8)
 
 Shared conventions (all three):
 
-- **`nil` is a masked element; `""` is a valid empty string** — distinct.
-  `nil` fetches as `UNDEF`; `""` is a real zero-length string.
+- **`nil` is a masked element when the array is built; `""` is a valid
+  empty string** — distinct. `nil` fetches as `UNDEF`; `""` is a real
+  zero-length string. An assignment does not read `nil` that way: storing
+  `nil` into a cell raises `TypeError`, and `UNDEF` is what masks a cell.
+  A constructor reads a list that may have holes; an assignment puts one
+  value, and says which with `UNDEF`.
 - A block of **arity 0** is evaluated once and broadcast (the same quirk as
   `CArray.float64(n){ ... }`); use `{ |i| ... }` for per-element values.
 
