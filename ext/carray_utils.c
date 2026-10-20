@@ -1269,11 +1269,36 @@ rb_hash_has_key(VALUE hash, VALUE key)
   return Qfalse;
 }
 
+/* The next comma-separated key of a spec, its length in *len, or NULL
+   past the last key.  The spec is read in place: a copy to cut up would
+   be a C allocation, and its failure has nowhere to go but to drop every
+   keyword. */
+static const char *
+option_key (const char **sp, long *len)
+{
+  const char *p = *sp, *end;
+
+  if ( p == NULL ) {
+    return NULL;
+  }
+  end = strchr(p, ',');
+  if ( end ) {
+    *len = end - p;
+    *sp  = end + 1;
+  }
+  else {
+    *len = (long) strlen(p);
+    *sp  = NULL;
+  }
+  return p;
+}
+
 void
 rb_scan_options (VALUE ropt, const char *spec_in, ...)
 {
   VALUE *vp;
-  char *sp, *tok, *spec;
+  const char *sp, *tok;
+  long len;
   int has_option = 0;
   va_list vals;
 
@@ -1288,22 +1313,19 @@ rb_scan_options (VALUE ropt, const char *spec_in, ...)
   }
 
   va_start(vals, spec_in);
-  sp = spec = strdup(spec_in);
-  tok = strsep1(&sp, ',');
-  while ( tok != NULL ) {
+  sp = spec_in;
+  while ( ( tok = option_key(&sp, &len) ) != NULL ) {
     vp = va_arg(vals, VALUE*);
     if ( has_option ) {
-      VALUE key = ID2SYM(rb_intern(tok));
+      VALUE key = ID2SYM(rb_intern2(tok, len));
       if ( rb_hash_has_key(ropt, key) ) {
         *vp = rb_hash_aref(ropt, key);
       }
       /* key absent: leave *vp unchanged (caller's pre-initialized default) */
     }
     /* opts == Qnil: leave all *vp unchanged */
-    tok = strsep1(&sp, ',');
   }
   va_end(vals);
-  free(spec);
 
   /* Strict: reject any key not named in spec, matching Ruby's native
      keyword-argument behaviour ("unknown keyword: :foo").  Every call
@@ -1316,15 +1338,12 @@ rb_scan_options (VALUE ropt, const char *spec_in, ...)
       VALUE key = rb_ary_entry(keys, i);
       VALUE kname = SYMBOL_P(key) ? rb_sym2str(key) : rb_obj_as_string(key);
       const char *kn = StringValueCStr(kname);
-      char *sp2, *tok2, *spec2;
+      long kn_len = RSTRING_LEN(kname);
       int found = 0;
-      sp2 = spec2 = strdup(spec_in);
-      tok2 = strsep1(&sp2, ',');
-      while ( tok2 != NULL ) {
-        if ( strcmp(tok2, kn) == 0 ) { found = 1; break; }
-        tok2 = strsep1(&sp2, ',');
+      sp = spec_in;
+      while ( ( tok = option_key(&sp, &len) ) != NULL ) {
+        if ( len == kn_len && memcmp(tok, kn, len) == 0 ) { found = 1; break; }
       }
-      free(spec2);
       if ( ! found ) {
         rb_raise(rb_eArgError, "unknown keyword: %"PRIsVALUE, rb_inspect(key));
       }
@@ -1357,7 +1376,8 @@ void
 rb_set_options (VALUE ropt, const char *spec_in, ...)
 {
   VALUE rval;
-  char *sp, *tok, *spec;
+  const char *sp, *tok;
+  long len;
   int has_option = 0;
   va_list vals;
 
@@ -1372,17 +1392,14 @@ rb_set_options (VALUE ropt, const char *spec_in, ...)
   }
 
   va_start(vals, spec_in);
-  sp = spec = strdup(spec_in);
-  tok = strsep1(&sp, ',');
-  while ( tok != NULL ) {
+  sp = spec_in;
+  while ( ( tok = option_key(&sp, &len) ) != NULL ) {
     rval = va_arg(vals, VALUE);
     if ( has_option ) {
-      rb_hash_aset(ropt, ID2SYM(rb_intern(tok)), rval);
+      rb_hash_aset(ropt, ID2SYM(rb_intern2(tok, len)), rval);
     }
-    tok = strsep1(&sp, ',');
   }
   va_end(vals);
-  free(spec);
 
   return;
 }
