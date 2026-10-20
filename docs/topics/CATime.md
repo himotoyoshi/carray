@@ -388,7 +388,10 @@ A duration is a `CATimedelta::Element` or a String that reads as one
 (`"3 days"`, `"30 minutes"`); a time is a `CATime::Element`, a `Time`, a
 `Date` or any other String (`"2024-01-02"`). The same rules apply as between
 arrays: the time is the anchor, a finer duration is truncated, and a coarser
-one has to land on the time's grid.
+one has to land on the time's grid. A duration String added to a time is one
+step of its own resolution: `"15 minutes"` is one 15-minute step, so on a
+`"10 minutes"` grid it raises, as a one-cell duration array with unit
+`"15 minutes"` does.
 
 ```ruby
 dt + "3 days"              # three days later

@@ -145,6 +145,20 @@ module CATimeUnitAlgebra
     end
   end
 
+  # A duration String added to or subtracted from a time, as one step of its
+  # own resolution: "15 minutes" is one 15-minute step, the duration
+  # CArray.int64(1).timedelta(unit: "15 minutes") is, so it lands on a
+  # "10 minutes" grid or is refused in the same way.  nil for anything else.
+  def step_operand(x)
+    return nil unless x.is_a?(String)
+    res = begin
+            CATime::Resolution.parse(x)
+          rescue ArgumentError
+            return nil
+          end
+    CATimedelta.wrap(CScalar.int64 { 1 }, unit: res)
+  end
+
   def scalar_instant(t, unit)
     v = begin
           convert_instant!(t.parent, t.unit, unit)[0]
@@ -1123,7 +1137,9 @@ class CATime
   #   into whole ticks; on any other (`:W`, `"3 days"`) a month raises, as a
   #   fixed duration on a month or year grid does.  Adding two datetimes is
   #   ill-defined.  A single duration -- a {CATimedelta::Element} or a String
-  #   such as `"3 days"` -- is added to every cell.
+  #   such as `"3 days"` -- is added to every cell; a String is one step of
+  #   its own resolution, so `"15 minutes"` on a `"10 minutes"` grid raises
+  #   as `CArray.int64(1).timedelta(unit: "15 minutes")` does.
   #   @param other [CATimedelta, CATimedelta::Element, String]
   #     (or a MemoryView producer whose +to_ca+ gives one, such as an Arrow
   #     duration array)
@@ -1133,7 +1149,8 @@ class CATime
   #   @raise [RangeError] when a result leaves the range of int64 ticks.
   def +(other)
     given, other = other, CATimeUnitAlgebra.operand(other)
-    other = CATimeUnitAlgebra.scalar_operand(other, unit) || other
+    other = CATimeUnitAlgebra.step_operand(other) ||
+            CATimeUnitAlgebra.scalar_operand(other, unit) || other
     case other
     when CATimedelta
       return shifted_by_months(other, 1) if moved_by_months?(other)
@@ -1162,7 +1179,8 @@ class CATime
   #   @raise [TypeError] on an unsupported operand.
   def -(other)
     given, other = other, CATimeUnitAlgebra.operand(other)
-    other = CATimeUnitAlgebra.scalar_operand(other, unit) || other
+    other = CATimeUnitAlgebra.step_operand(other) ||
+            CATimeUnitAlgebra.scalar_operand(other, unit) || other
     case other
     when CATimedelta
       return shifted_by_months(other, -1) if moved_by_months?(other)

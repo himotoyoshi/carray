@@ -24,6 +24,21 @@ class TestTimeArithmeticGuards < Test::Unit::TestCase
     assert_equal ["2024-01-02T00:40:00Z"], (t10 + td(2, "15 minutes")).to_a.map(&:to_s)
   end
 
+  # A duration String is one step of its own resolution, the duration
+  # td(1, x) is.  "15 minutes" was read as fifteen one-minute steps, finer
+  # than a "10 minutes" grid, and cut to 10 minutes.
+  def test_a_duration_string_is_one_step_of_its_resolution
+    t10 = CArray.time(["2024-01-02T00:10"], unit: "10 minutes")
+    assert_raise(ArgumentError) { t10 + "15 minutes" }
+    assert_raise(ArgumentError) { t10 - "15 minutes" }
+    assert_equal ["2024-01-02T00:30:00Z"], (t10 + "20 minutes").to_a.map(&:to_s)
+    assert_equal ["2024-01-02T00:10:00Z"], (t10 + "1 minute").to_a.map(&:to_s)
+    d = CArray.time(["2024-01-02"], unit: :D)
+    assert_raise(ArgumentError) { d + "30 hours" }
+    assert_equal ["2024-01-02"], (d + "5 hours").to_a.map(&:to_s)
+    assert_equal (d + td(1, "3 days")).to_a, (d + "3 days").to_a
+  end
+
   def test_a_finer_duration_is_still_truncated
     d = CArray.time(["2024-01-02"], unit: :D)
     assert_equal ["2024-01-03"], (d + td(30, :h)).to_a.map(&:to_s)
