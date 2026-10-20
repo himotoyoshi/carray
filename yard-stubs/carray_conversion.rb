@@ -63,7 +63,11 @@ class CArray
 
   # @overload to_s
   #   Equivalent to `dump_binary` with no arguments. Returns the raw
-  #   element bytes of `self` as a binary String.
+  #   element bytes of `self` as a binary String. Ruby uses `to_s` where
+  #   it puts an object into text, so such text holds the bytes: a
+  #   `Ractor.make_shareable` refusal of a view, for one, raises
+  #   `ArgumentError: string contains null byte` in place of its own
+  #   message. Use `inspect` for a readable form.
   #   @return [String]
   def to_s; end
 
