@@ -61,7 +61,9 @@
 #  `categorize`, a CAFrame `cast` / `parse_to_time` / `to_time`) carries
 #  them.  Arithmetic and reductions do not -- the result is a different
 #  quantity -- including those that pick a value (`first`, `last`, `min`,
-#  `max`, `unique`).  A CAFrame index built from a key column's values
+#  `max`, `unique`) and the element-wise ones that keep the unit (`abs`,
+#  `round`, `clip`): an attribute does not say which operations leave it
+#  true, so none carries it.  Set it on the result again.  A CAFrame index built from a key column's values
 #  (group and pivot) shows the key column's attributes.
 
 class CArray
