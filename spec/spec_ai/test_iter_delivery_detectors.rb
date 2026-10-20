@@ -99,7 +99,12 @@ class TestIterDeliveryDetectors < Test::Unit::TestCase
       # The meter rescues whatever the expression raises, so a sweep that
       # failed would measure nothing; run it here first.
       assert_operator eval(sweep), :>, 0, "#{pn}: the sweep walked nothing"
-      bytes = LeakMeter.bytes_per_call(sweep, setup: setup, calls: 8, warmup: 3,
+      # A sweep is 738 rounds of three walks, so 16384 bytes is about 22 bytes
+      # a round: a scratch left behind by any walk is far above it.  The heap
+      # is still growing for the first sweeps, though; with 3 warm-up sweeps
+      # and 8 measured, a sweep that leaks nothing read up to 24 KB.  With
+      # 10 and 40 it reads at most 8 KB, and 64 bytes leaked a round read 48 KB.
+      bytes = LeakMeter.bytes_per_call(sweep, setup: setup, calls: 40, warmup: 10,
                                        load_path: [ext, lib] + $LOAD_PATH)
       omit "measurement unavailable" if bytes.nil?
       assert_operator bytes, :<, 16384, "#{pn}: the C heap grew #{bytes.round} bytes per sweep"
