@@ -228,12 +228,12 @@ class CArray
       # cell's width.
       # A String longer than the cell keeps its length: self is read at its
       # width instead (NUL-padded), so "abX" is in no two-byte cell.
-      # coerce: a fixlen or object set holds values of self's kind (see above)
       w = elems.map { |v| v.is_a?(String) ? v.bytesize : 0 }.max.to_i
       me = self
       if w > bytes
         me = is_a?(CAFixlenString) ? to_fixlen_string(bytes: w) : to_type(CA_FIXLEN, bytes: w)
       end
+      # coerce: a fixlen or object set holds values of self's kind (see above)
       [me, elems.to_ca.to_type(data_type, bytes: me.bytes)]
     elsif data_type == CA_OBJECT
       # coerce: an object set holds values of self's kind
