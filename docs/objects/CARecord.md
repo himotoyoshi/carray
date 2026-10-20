@@ -193,6 +193,11 @@ a.count(Site.new(1.0, 5.0)) # records equal to this one
 a.is_in(b)                  # b: a record array of the same struct
 ```
 
+`eq` / `ne` also take a plain fixlen array of the record's width, and compare
+it with the records byte for byte: it is the bytes of records of no struct
+in particular, so `a.eq(bytes)` is how records are matched against data read
+as raw bytes.
+
 They take records of the same `data_class` (whatever the record array's class)
 or a plain fixlen array of the same width, and refuse records of another
 struct.  A variant that sorts (`unique(sort: true)`, `value_counts(sort:
