@@ -234,7 +234,9 @@ ca_time_text_read (VALUE str, ca_time_text_t *t, int wide)
         }
       }
     }
-    if ( hour > 24 || min > 59 || sec > 59 ) {
+    /* Second 60 is the leap second; it carries into the next minute below,
+       as CArray.time reads it. */
+    if ( hour > 24 || min > 59 || sec > 60 ) {
       return CA_TIME_TEXT_UNREADABLE;
     }
     /* Hour 24 is the end of the day, 24:00:00, and nothing past it, as in
