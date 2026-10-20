@@ -7761,8 +7761,8 @@ MkKernel.search :find_value_index,
   mask_self: :raise,
   fallback:  :raise
 
-# bsearch_ki: per-slice binary search returning the matching position
-# (assumes a sorted slab).  NaN handling: NaN sorts to end; query == NaN
+# bsearch_ki: per-slice binary search returning the first matching position
+# (assumes a sorted slab; of equal cells, the first).  NaN handling: NaN sorts to end; query == NaN
 # never matches.  Hand-rolled strided binary search (= libc bsearch()
 # requires contig memory; slab_stride may be > sizeof(T_LOAD) for a
 # non-innermost search axis).  NaN guards are dead code for integer
@@ -7788,7 +7788,7 @@ MkKernel.search :bsearch,
           T_LOAD v = *(T_LOAD *)(slab_ptr + mid * slab_stride);
           if ( v < query_val ) lo = mid + 1;
           else if ( v > query_val ) hi = mid;
-          else { result = mid; break; }
+          else { result = mid; hi = mid; }   /* keep looking left: the first equal cell */
         }
       }
     C
@@ -7803,7 +7803,7 @@ MkKernel.search :bsearch,
           int c = CA_FLOAT_ORDER_CMP(v, query_val);
           if ( c < 0 ) lo = mid + 1;
           else if ( c > 0 ) hi = mid;
-          else { result = mid; break; }
+          else { result = mid; hi = mid; }   /* keep looking left: the first equal cell */
         }
       }
     C
@@ -7820,7 +7820,7 @@ MkKernel.search :bsearch,
         int c = ca_obj_order_cmp(v, query_val);
         if ( c < 0 ) lo = mid + 1;
         else if ( c > 0 ) hi = mid;
-        else { result = mid; break; }
+        else { result = mid; hi = mid; }   /* keep looking left: the first equal cell */
       }
     C
     fixlen: <<~C,
@@ -7836,7 +7836,7 @@ MkKernel.search :bsearch,
         int c = memcmp(v, query_val, (size_t) ca->bytes);
         if ( c < 0 ) lo = mid + 1;
         else if ( c > 0 ) hi = mid;
-        else { result = mid; break; }
+        else { result = mid; hi = mid; }   /* keep looking left: the first equal cell */
       }
     C
   },
@@ -8021,7 +8021,7 @@ MkKernel.search :bsearch_addr,
           T_LOAD v = *(T_LOAD *)(slab_ptr + mid * slab_stride);
           if ( v < query_val ) lo = mid + 1;
           else if ( v > query_val ) hi = mid;
-          else { result = mid; break; }
+          else { result = mid; hi = mid; }   /* keep looking left: the first equal cell */
         }
       }
     C
@@ -8036,7 +8036,7 @@ MkKernel.search :bsearch_addr,
           int c = CA_FLOAT_ORDER_CMP(v, query_val);
           if ( c < 0 ) lo = mid + 1;
           else if ( c > 0 ) hi = mid;
-          else { result = mid; break; }
+          else { result = mid; hi = mid; }   /* keep looking left: the first equal cell */
         }
       }
     C
@@ -8050,7 +8050,7 @@ MkKernel.search :bsearch_addr,
         int c = ca_obj_order_cmp(v, query_val);
         if ( c < 0 ) lo = mid + 1;
         else if ( c > 0 ) hi = mid;
-        else { result = mid; break; }
+        else { result = mid; hi = mid; }   /* keep looking left: the first equal cell */
       }
     C
     fixlen: <<~C,
@@ -8064,7 +8064,7 @@ MkKernel.search :bsearch_addr,
         int c = memcmp(v, query_val, (size_t) ca->bytes);
         if ( c < 0 ) lo = mid + 1;
         else if ( c > 0 ) hi = mid;
-        else { result = mid; break; }
+        else { result = mid; hi = mid; }   /* keep looking left: the first equal cell */
       }
     C
   },

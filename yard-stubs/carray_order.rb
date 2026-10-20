@@ -128,7 +128,8 @@ class CArray
 
   # @overload bsearch(val)
   #   Returns the flat address of `val` in `self` via binary search.
-  #   `self` must be sorted along its single (flat) axis. Returns
+  #   `self` must be sorted along its single (flat) axis. Of several
+  #   equal cells, the first one's address is returned. Returns
   #   `nil` if `val` is not present. When `val` is a CArray, returns
   #   a CArray of `:int64` addresses (one per element of `val`),
   #   with `UNDEF` at positions where the value is not present.
