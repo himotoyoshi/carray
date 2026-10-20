@@ -294,26 +294,54 @@ carray_new_with_mask (CArray *ca, CArray *mask)
   return ca;
 }
 
+typedef struct {
+  CArray    *ca;
+  int8_t     data_type;
+  int8_t     ndim;
+  ca_size_t *dim;
+  ca_size_t  bytes;
+  int        use_calloc;
+} carray_new_arg;
+
+static VALUE
+carray_new_setup (VALUE varg)
+{
+  carray_new_arg *a = (carray_new_arg *) varg;
+  carray_setup_i(a->ca, a->data_type, a->ndim, a->dim, a->bytes, NULL,
+                 1, a->use_calloc, NULL);
+  return Qnil;
+}
+
+/* The setup allocates the cells, after the struct: when that fails, the
+   struct goes too. */
+static CArray *
+carray_new_i (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
+              CArray *mask, int use_calloc)
+{
+  carray_new_arg a;
+  carray_setup_i(NULL, data_type, ndim, dim, bytes, NULL, 1, use_calloc, NULL);
+  a.ca = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
+  a.data_type = data_type;
+  a.ndim = ndim;
+  a.dim = dim;
+  a.bytes = bytes;
+  a.use_calloc = use_calloc;
+  ca_fill_or_free(a.ca, carray_new_setup, (VALUE) &a);
+  return carray_new_with_mask(a.ca, mask);
+}
+
 CArray *
 carray_new (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask)
 {
-  CArray *ca;
-  carray_setup(NULL, data_type, ndim, dim, bytes, NULL);
-  ca = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
-  carray_setup(ca, data_type, ndim, dim, bytes, NULL);
-  return carray_new_with_mask(ca, mask);
+  return carray_new_i(data_type, ndim, dim, bytes, mask, 0);
 }
 
 CArray *
 carray_new_safe (int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes,
             CArray *mask)
 {
-  CArray *ca;
-  carray_safe_setup(NULL, data_type, ndim, dim, bytes, NULL);
-  ca = (CArray *) ca_array_alloc(CA_OBJ_ARRAY, ndim);
-  carray_safe_setup(ca, data_type, ndim, dim, bytes, NULL);
-  return carray_new_with_mask(ca, mask);
+  return carray_new_i(data_type, ndim, dim, bytes, mask, 1);
 }
 
 /* Create an entity that adopts a caller-provided data buffer instead of

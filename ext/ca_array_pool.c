@@ -43,18 +43,38 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 #include <string.h>
 
 /* Allocate struct + pool in one shot, then run pool_init.
  *
  * Called by per-class C `*_new` constructors. */
+typedef struct {
+  CArray *ca;
+  int8_t  obj_type;
+  int8_t  ndim;
+} ca_array_alloc_arg;
+
+static VALUE
+ca_array_alloc_pool (VALUE varg)
+{
+  ca_array_alloc_arg *a = (ca_array_alloc_arg *) varg;
+  ca_array_pool_alloc(a->ca, a->obj_type, a->ndim);
+  return Qnil;
+}
+
 void *
 ca_array_alloc (int8_t obj_type, int8_t ndim)
 {
   ca_operation_function_t *func = &ca_func[obj_type];
   CArray *ca = xmalloc(func->struct_size);
+  ca_array_alloc_arg a;
   memset(ca, 0, func->struct_size);
-  ca_array_pool_alloc(ca, obj_type, ndim);
+  /* The pool is a second allocation; when it fails, the struct goes too. */
+  a.ca = ca;
+  a.obj_type = obj_type;
+  a.ndim = ndim;
+  ca_fill_or_xfree(ca, ca_array_alloc_pool, (VALUE) &a);
   return ca;
 }
 
