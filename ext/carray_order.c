@@ -242,7 +242,13 @@ rb_ca_project (int argc, VALUE *argv, VALUE self)
   char *lfval, *ufval;
   int self_is_face;
 
-  rb_scan_args(argc, argv, "12", (VALUE *)&ridx, (VALUE *) &vlfval, (VALUE *) &vufval);
+  {
+    VALUE ropt = Qnil;
+    /* project takes no keyword: one given was read as a fill value. */
+    rb_scan_args(argc, argv, "12:", (VALUE *)&ridx, (VALUE *) &vlfval,
+                 (VALUE *) &vufval, &ropt);
+    rb_scan_options(ropt, "");
+  }
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   self_is_face = ca_is_face(ca);
