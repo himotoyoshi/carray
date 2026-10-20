@@ -40,7 +40,7 @@ class TestY3CAFakeXferAddrs < Test::Unit::TestCase
     fake = @entity.fake(:int64)
     addrs = (100...500).to_a
     got = CArray.bench_xfer_addrs_get_addrs(fake, addrs, 1)
-    expected = addrs.map { |a| fake[a / 25, a % 25] }.pack("q<*")
+    expected = addrs.map { |a| fake[a / 25, a % 25] }.pack("q*")
     assert_equal expected, got
   end
 
@@ -50,7 +50,7 @@ class TestY3CAFakeXferAddrs < Test::Unit::TestCase
     fake = @entity.fake(:int64)
     addrs = [37, 5, 199, 2, 700, 11, 0, 999]
     got = CArray.bench_xfer_addrs_get_addrs(fake, addrs, 1)
-    expected = addrs.map { |a| fake[a / 25, a % 25] }.pack("q<*")
+    expected = addrs.map { |a| fake[a / 25, a % 25] }.pack("q*")
     assert_equal expected, got
   end
 

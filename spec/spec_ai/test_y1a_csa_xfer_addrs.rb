@@ -51,7 +51,7 @@ class TestY1aCASelectAxisXferAddrs < Test::Unit::TestCase
     addrs = (3...10).to_a   # sub-region of view, < elements
     got = CArray.bench_xfer_addrs_get_addrs(csa, addrs, 1)
     # Compute expected via per-cell ca[addr] lookups
-    expected = addrs.map { |a| csa[a / 8, a % 8] }.pack("q<*")
+    expected = addrs.map { |a| csa[a / 8, a % 8] }.pack("q*")
     assert_equal expected, got
   end
 
@@ -59,7 +59,7 @@ class TestY1aCASelectAxisXferAddrs < Test::Unit::TestCase
     csa = @parent[@mask, nil]
     addrs = [37, 5, 19, 2, 28, 11]   # random within elements
     got = CArray.bench_xfer_addrs_get_addrs(csa, addrs, 1)
-    expected = addrs.map { |a| csa[a / 8, a % 8] }.pack("q<*")
+    expected = addrs.map { |a| csa[a / 8, a % 8] }.pack("q*")
     assert_equal expected, got
   end
 

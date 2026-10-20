@@ -86,7 +86,7 @@ class TestY1dCAStrideXferAddrsIdentity < Test::Unit::TestCase
     flat = @entity.flatten
     addrs = [13, 99, 4000, 7, 19999, 333]
     got = CArray.bench_xfer_addrs_get_addrs(flat, addrs, 1)
-    expected = addrs.map { |a| flat[a] }.pack("q<*")
+    expected = addrs.map { |a| flat[a] }.pack("q*")
     assert_equal expected, got
   end
 
@@ -107,7 +107,7 @@ class TestY1dCAStrideXferAddrsIdentity < Test::Unit::TestCase
     flat = @entity.flatten
     addrs = (100...500).to_a
     got = CArray.bench_xfer_addrs_get_addrs(flat, addrs, 1)
-    expected = addrs.map { |a| flat[a] }.pack("q<*")
+    expected = addrs.map { |a| flat[a] }.pack("q*")
     assert_equal expected, got
   end
 end

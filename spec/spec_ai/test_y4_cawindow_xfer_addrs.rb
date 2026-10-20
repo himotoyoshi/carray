@@ -37,7 +37,7 @@ class TestY4CAWindowXferAddrs < Test::Unit::TestCase
     win = @entity.window(2..45, 1..38)
     addrs = (0...win.elements).to_a
     got_bytes = CArray.bench_xfer_addrs_get_addrs(win, addrs, 1)
-    expected = (0...win.elements).map { |a| win[a / win.dim[1], a % win.dim[1]] }.pack("q<*")
+    expected = (0...win.elements).map { |a| win[a / win.dim[1], a % win.dim[1]] }.pack("q*")
     assert_equal expected, got_bytes
   end
 
@@ -99,7 +99,7 @@ class TestY4CAWindowXferAddrs < Test::Unit::TestCase
     win = @entity.window(5..40, 4..30)
     addrs = [37, 5, 199, 2, 700, 11, 0, 555]
     got = CArray.bench_xfer_addrs_get_addrs(win, addrs, 1)
-    expected = addrs.map { |a| win[a / win.dim[1], a % win.dim[1]] }.pack("q<*")
+    expected = addrs.map { |a| win[a / win.dim[1], a % win.dim[1]] }.pack("q*")
     assert_equal expected, got
   end
 

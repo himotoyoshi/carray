@@ -18,7 +18,7 @@ class TestConstStringCategorizeRaise < Test::Unit::TestCase
     class FailingOffsets < CAObject
       def initialize (n)
         @src = CArray.fixlen(n, bytes: 16)
-        @src[] = [0, 1].pack("q<q<")
+        @src[] = [0, 1].pack("qq")
         super(CA_FIXLEN, [n], bytes: 16)
       end
       private

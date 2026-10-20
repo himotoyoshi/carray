@@ -151,7 +151,7 @@ class TestFaceInterpolates < Test::Unit::TestCase
     assert n.shift(1, fill_value: Float::NAN)[0].nan?
     cs = CArray.const_string(%w[hello world xyz])
     assert_raise(ArgumentError) { cs.shift(1, fill_value: "zz") }
-    assert_raise(ArgumentError) { cs.window(-1..1, fill_value: [0, 3].pack("q<q<")) }
+    assert_raise(ArgumentError) { cs.window(-1..1, fill_value: [0, 3].pack("qq")) }
     assert_equal [UNDEF, "hello", "world"], cs.shift(1, fill_value: UNDEF).to_a
   end
 

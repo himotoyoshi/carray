@@ -30,14 +30,14 @@ class TestY2XferAddrsSequentialRun < Test::Unit::TestCase
     # [k..k+m-1] form: sequential run, should hit Y.2 fast path
     addrs = (10...40).to_a
     got = CArray.bench_xfer_addrs_get_addrs(@ca, addrs, 1)
-    expected = (10...40).map { |i| [@ca[i]].pack("q<") }.join
+    expected = (10...40).map { |i| [@ca[i]].pack("q") }.join
     assert_equal expected, got
   end
 
   def test_single_element_sequential_get
     addrs = [42]
     got = CArray.bench_xfer_addrs_get_addrs(@ca, addrs, 1)
-    assert_equal [@ca[42]].pack("q<"), got
+    assert_equal [@ca[42]].pack("q"), got
   end
 
   def test_empty_addrs_get
@@ -50,14 +50,14 @@ class TestY2XferAddrsSequentialRun < Test::Unit::TestCase
     # Reverse [N-1, N-2, ..., 0] is NOT sequential ascending, falls to per-cell
     addrs = (0...N).to_a.reverse
     got = CArray.bench_xfer_addrs_get_addrs(@ca, addrs, 1)
-    expected = addrs.map { |i| [@ca[i]].pack("q<") }.join
+    expected = addrs.map { |i| [@ca[i]].pack("q") }.join
     assert_equal expected, got
   end
 
   def test_random_addrs_get_uses_per_cell_loop
     addrs = [5, 17, 3, 42, 1, 60, 11, 8]
     got = CArray.bench_xfer_addrs_get_addrs(@ca, addrs, 1)
-    expected = addrs.map { |i| [@ca[i]].pack("q<") }.join
+    expected = addrs.map { |i| [@ca[i]].pack("q") }.join
     assert_equal expected, got
   end
 
@@ -65,7 +65,7 @@ class TestY2XferAddrsSequentialRun < Test::Unit::TestCase
     # First 10 elements sequential, last differs by 2 (pathological mid-detect)
     addrs = (0..9).to_a + [11]
     got = CArray.bench_xfer_addrs_get_addrs(@ca, addrs, 1)
-    expected = addrs.map { |i| [@ca[i]].pack("q<") }.join
+    expected = addrs.map { |i| [@ca[i]].pack("q") }.join
     assert_equal expected, got
   end
 
@@ -73,7 +73,7 @@ class TestY2XferAddrsSequentialRun < Test::Unit::TestCase
     # [5, 5, 5] is NOT sequential (deltas != 1), falls to per-cell
     addrs = [5, 5, 5]
     got = CArray.bench_xfer_addrs_get_addrs(@ca, addrs, 1)
-    expected = [@ca[5], @ca[5], @ca[5]].pack("q<*")
+    expected = [@ca[5], @ca[5], @ca[5]].pack("q*")
     assert_equal expected, got
   end
 
@@ -90,7 +90,7 @@ class TestY2XferAddrsSequentialRun < Test::Unit::TestCase
   def test_subregion_sequential_put_round_trip
     target = CArray.int64(N) { -1 }
     addrs = (10...40).to_a
-    payload = addrs.map { |i| i * 100 }.pack("q<*")
+    payload = addrs.map { |i| i * 100 }.pack("q*")
     CArray.bench_xfer_addrs_put_addrs(target, addrs, payload)
     # Sub-region overwritten, outside untouched
     (0...N).each do |i|
@@ -105,14 +105,14 @@ class TestY2XferAddrsSequentialRun < Test::Unit::TestCase
   def test_random_addrs_put_round_trip
     target = CArray.int64(N) { 0 }
     addrs = [5, 17, 3, 42, 1, 60, 11, 8]
-    payload = addrs.map { |a| a + 7000 }.pack("q<*")
+    payload = addrs.map { |a| a + 7000 }.pack("q*")
     CArray.bench_xfer_addrs_put_addrs(target, addrs, payload)
     addrs.each { |a| assert_equal(a + 7000, target[a]) }
   end
 
   def test_put_then_get_round_trip_sequential
     addrs = (5...25).to_a
-    payload = addrs.map { |a| a * 999 }.pack("q<*")
+    payload = addrs.map { |a| a * 999 }.pack("q*")
     CArray.bench_xfer_addrs_put_addrs(@ca, addrs, payload)
     got = CArray.bench_xfer_addrs_get_addrs(@ca, addrs, 1)
     assert_equal payload, got

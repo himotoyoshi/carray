@@ -13,7 +13,7 @@ require "objspace"
 class TestCARefer < Test::Unit::TestCase
 
   def setup
-    # 8 bytes interpreted as 4 uint16 values (little-endian)
+    # 8 bytes interpreted as 4 uint16 values in the host's byte order
     @a = CArray.uint8(8).tap { |__a| __a[] = [0, 1, 2, 3, 4, 5, 6, 7] }
     @r = @a.refer(CA_UINT16, [4])
   end
@@ -26,11 +26,9 @@ class TestCARefer < Test::Unit::TestCase
     assert_equal 4, @r.elements
   end
 
-  def test_read_little_endian
-    # bytes [0,1] = 0x0100 = 256
-    assert_equal 0x0100, @r[0]
-    # bytes [2,3] = 0x0302 = 770
-    assert_equal 0x0302, @r[1]
+  def test_read_in_host_byte_order
+    assert_equal [0, 1].pack("C*").unpack1("S"), @r[0]   # 0x0100 on a little-endian host
+    assert_equal [2, 3].pack("C*").unpack1("S"), @r[1]   # 0x0302
   end
 
   def test_reshape
@@ -63,12 +61,13 @@ class TestCARefer < Test::Unit::TestCase
   def test_refer_of_a_scalar_into_several_cells_is_not_a_scalar
     s = CScalar.int32
     s[] = 0x04030201
+    bytes = [0x04030201].pack("l").unpack("c*")   # [1, 2, 3, 4] on a little-endian host
     v = s.refer(:int8, [4])
     assert_equal false, v.scalar?
-    assert_equal [1, 2, 3, 4], v.to_a
-    assert_equal [1, 2, 3, 4], v.copy.to_a
-    assert_equal [1, 2, 3, 4], v.to_type(:int16).to_a
-    assert_equal [1, 2, 3, 4], (v + 0).to_a
+    assert_equal bytes, v.to_a
+    assert_equal bytes, v.copy.to_a
+    assert_equal bytes, v.to_type(:int16).to_a
+    assert_equal bytes, (v + 0).to_a
     assert_equal true, s.refer(:int32, [1]).scalar?
   end
 

@@ -30,7 +30,7 @@ class TestY1eComposeRootGate < Test::Unit::TestCase
     chain = @entity[idx2d]
     addrs = (0...chain.elements).to_a
     got_bytes = CArray.bench_xfer_addrs_get_addrs(chain, addrs, 1)
-    expected = (0...chain.elements).map { |a| chain[a / 6, a % 6] }.pack("q<*")
+    expected = (0...chain.elements).map { |a| chain[a / 6, a % 6] }.pack("q*")
     assert_equal expected, got_bytes
   end
 
