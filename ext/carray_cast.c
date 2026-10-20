@@ -2580,6 +2580,15 @@ ca_arg_to_data_type (VALUE obj)
     /* MemoryView producer -> its format's data_type (T_STRING excluded above,
        so a String never reaches here).  data_type already assigned. */
   }
+  else if ( rb_memory_view_available_p(obj) ) {
+    /* A MemoryView producer whose format says nothing usable (typeless, the
+       other byte order) is read as the operators read it, and refused in
+       the same words. */
+    VALUE ca_obj = ca_operand_from_memory_view(obj);
+    CArray *ca;
+    TypedData_Get_Struct(ca_obj, CArray, &carray_data_type, ca);
+    data_type = ca->data_type;
+  }
   else {
     data_type = ca_value_to_data_type(obj);
   }
@@ -2750,7 +2759,7 @@ ca_arg_is_scalar (VALUE obj)
   if ( TYPE(obj) == T_SYMBOL || TYPE(obj) == T_STRING || TYPE(obj) == T_CLASS ) {
     return 0;
   }
-  return ca_mv_probe_data_type(obj) < 0;
+  return ! rb_memory_view_available_p(obj);
 }
 
 /* The type a scalar `obj` (of type `st`) and an array of type `at` share,

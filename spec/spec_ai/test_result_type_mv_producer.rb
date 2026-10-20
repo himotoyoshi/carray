@@ -51,18 +51,22 @@ class TestResultTypeMVProducer < Test::Unit::TestCase
     assert_equal(:int64,   CArray.result_type(CA_INT64([1]), prod([1],   "C*", "C", 1)))
   end
 
-  # Formats carray can't represent host-endian fall back to value inference
-  # (CA_OBJECT), rather than raising: the probe returns -1.
-  def test_opposite_endian_format_falls_back_to_object
+  # A producer whose format carray cannot read (the other byte order, or no
+  # format at all) is refused as the operators refuse it, not read as an
+  # object operand.
+  def test_opposite_endian_format_is_refused
     host_le = ([1].pack("l").unpack1("l") == 1)
     opp = host_le ? ">d" : "<d"
-    assert_equal(:object, CArray.result_type(MVBorrower::Producer.new([1.0].pack("d"), opp, 8)))
+    prod = MVBorrower::Producer.new([1.0].pack("d"), opp, 8)
+    assert_raise(ArgumentError) { CArray.result_type(prod) }
+    assert_raise(ArgumentError) { CArray.result_type(CA_INT32([1]), prod) }
+    assert_raise(ArgumentError) { CA_FLOAT64([1.0]) + prod }
   end
 
-  # A typeless producer (format == NULL) has no intrinsic dtype; probe returns
-  # -1 and result_type falls back to value inference (CA_OBJECT).
-  def test_typeless_producer_falls_back_to_object
-    assert_equal(:object, CArray.result_type(MVBorrower::Producer.new("\x00\x00\x00\x00", nil, 4)))
+  def test_typeless_producer_is_refused
+    prod = MVBorrower::Producer.new("\x00\x00\x00\x00", nil, 4)
+    assert_raise(ArgumentError) { CArray.result_type(prod) }
+    assert_raise(ArgumentError) { CA_INT32([1]) + prod }
   end
 
   # End-to-end: is_in / intersection accept an MV producer as the set argument.
