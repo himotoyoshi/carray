@@ -194,20 +194,40 @@ ca_struct_write_primitive_fast (char *p, int type_code, VALUE val)
    to keep neighbouring bits untouched.
    --------------------------------------------------------------------- */
 
+/* The word's bytes are read and written least significant first on
+   every host: the layout numbers the bits byte by byte from the record's
+   start, so a field read through a wider word than its neighbour still
+   sees the same bits. */
+static uint64_t
+ca_struct_load_le (const char *p, int n)
+{
+  uint64_t word = 0;
+  int i;
+  for (i = 0; i < n; i++) {
+    word |= (uint64_t) (uint8_t) p[i] << (8 * i);
+  }
+  return word;
+}
+
+static void
+ca_struct_store_le (char *p, int n, uint64_t word)
+{
+  int i;
+  for (i = 0; i < n; i++) {
+    p[i] = (char) (word >> (8 * i));
+  }
+}
+
 static VALUE
 ca_struct_read_bitfield_fast (const char *p, int view_bytes,
                               int bit_in_word, int bits)
 {
-  uint64_t word = 0;
-  switch (view_bytes) {
-  case 1: { uint8_t  v; memcpy(&v, p, 1); word = v; break; }
-  case 2: { uint16_t v; memcpy(&v, p, 2); word = v; break; }
-  case 4: { uint32_t v; memcpy(&v, p, 4); word = v; break; }
-  case 8: { uint64_t v; memcpy(&v, p, 8); word = v; break; }
-  default:
+  uint64_t word;
+  if ( view_bytes != 1 && view_bytes != 2 && view_bytes != 4 && view_bytes != 8 ) {
     rb_raise(rb_eRuntimeError,
              "[BUG] bitfield view_bytes %d not in {1,2,4,8}", view_bytes);
   }
+  word = ca_struct_load_le(p, view_bytes);
   uint64_t mask = (bits >= 64) ? ~(uint64_t)0
                                : ((uint64_t)1 << bits) - 1;
   uint64_t val  = (word >> bit_in_word) & mask;
@@ -224,7 +244,11 @@ static void
 ca_struct_write_bitfield_fast (char *p, int view_bytes,
                                int bit_in_word, int bits, VALUE val)
 {
-  uint64_t v;
+  uint64_t v, word;
+  if ( view_bytes != 1 && view_bytes != 2 && view_bytes != 4 && view_bytes != 8 ) {
+    rb_raise(rb_eRuntimeError,
+             "[BUG] bitfield view_bytes %d not in {1,2,4,8}", view_bytes);
+  }
   if ( bits == 1 ) {
     if      ( val == Qtrue  || val == INT2FIX(1) ) v = 1;
     else if ( val == Qfalse || val == INT2FIX(0) ) v = 0;
@@ -240,41 +264,9 @@ ca_struct_write_bitfield_fast (char *p, int view_bytes,
   uint64_t mask = (bits >= 64) ? ~(uint64_t)0
                                : ((uint64_t)1 << bits) - 1;
   v &= mask;
-  uint64_t shifted_mask = mask << bit_in_word;
-  uint64_t shifted_val  = v    << bit_in_word;
-  switch (view_bytes) {
-  case 1: {
-    uint8_t word;
-    memcpy(&word, p, 1);
-    word = (uint8_t)((word & ~(uint8_t)shifted_mask) | (uint8_t)shifted_val);
-    memcpy(p, &word, 1);
-    return;
-  }
-  case 2: {
-    uint16_t word;
-    memcpy(&word, p, 2);
-    word = (uint16_t)((word & ~(uint16_t)shifted_mask) | (uint16_t)shifted_val);
-    memcpy(p, &word, 2);
-    return;
-  }
-  case 4: {
-    uint32_t word;
-    memcpy(&word, p, 4);
-    word = (uint32_t)((word & ~(uint32_t)shifted_mask) | (uint32_t)shifted_val);
-    memcpy(p, &word, 4);
-    return;
-  }
-  case 8: {
-    uint64_t word;
-    memcpy(&word, p, 8);
-    word = (word & ~shifted_mask) | shifted_val;
-    memcpy(p, &word, 8);
-    return;
-  }
-  default:
-    rb_raise(rb_eRuntimeError,
-             "[BUG] bitfield view_bytes %d not in {1,2,4,8}", view_bytes);
-  }
+  word = ca_struct_load_le(p, view_bytes);
+  word = (word & ~(mask << bit_in_word)) | (v << bit_in_word);
+  ca_struct_store_le(p, view_bytes, word);
 }
 
 /* ---------------------------------------------------------------------
