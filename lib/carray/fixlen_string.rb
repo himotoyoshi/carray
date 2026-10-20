@@ -32,9 +32,11 @@ class CArray
   # zero-copy, other string-bearing arrays materialise, numeric is rejected.
   # @overload fixlen_string(values, bytes: nil, truncate: :error)
   #   @param values [Array<String, nil>] source values.
-  #   @param bytes [Integer, nil] slot width; defaults to the max bytesize.
+  #   @param bytes [Integer, nil] slot width, 1 or more; defaults to the
+  #     max bytesize (1 when every string is empty).
   #   @param truncate [Symbol] `:error` or `:silent`.
   #   @return [CAFixlenString]
+  #   @raise [ArgumentError] when `bytes` is given below 1.
   # @overload fixlen_string(ca, bytes: nil, truncate: :error)
   #   @param ca [CArray] a String Face, CA_OBJECT, or raw CA_FIXLEN array.
   #   @return [CAFixlenString]
@@ -63,8 +65,11 @@ class CArray
       values = arg.to_a
     end
 
+    unless bytes.nil? || (bytes.is_a?(Integer) && bytes >= 1)
+      raise ArgumentError, "CArray.fixlen_string: invalid bytes: #{bytes.inspect} (a cell needs bytes: of 1 or more)"
+    end
     width = bytes || values.compact.map { |s| s.to_s.bytesize }.max || 1
-    width = 1 if width < 1
+    width = 1 if width < 1   # every string empty: the narrowest cell
 
     if truncate == :error
       values.each_with_index do |s, i|

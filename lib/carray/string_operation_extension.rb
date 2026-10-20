@@ -191,6 +191,9 @@ class CArray
       unless [:error, :silent].include?(truncate)
         raise ArgumentError, "truncate: must be :error or :silent (got #{truncate.inspect})"
       end
+      unless bytes.nil? || (bytes.is_a?(Integer) && bytes >= 1)
+        raise ArgumentError, "to_fixlen_string: invalid bytes: #{bytes.inspect} (a cell needs bytes: of 1 or more)"
+      end
       return self if is_a?(CAFixlenString) && (bytes.nil? || bytes == self.bytes)
 
       if has_mask?
@@ -200,7 +203,7 @@ class CArray
         values = Array.new(elements) { |i| self[i].to_s }
       end
       width = bytes || values.compact.map(&:bytesize).max || 1
-      width = 1 if width < 1
+      width = 1 if width < 1   # every string empty: the narrowest cell
       if truncate == :error
         values.each_with_index do |s, i|
           next if s.nil?
