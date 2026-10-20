@@ -1280,8 +1280,9 @@ class CATime
   # they run on the storage ticks and round the result back to the nearest
   # tick of `unit`.  A caller who needs a finer answer declares the grid
   # first (`t.to_unit(:ms).mean`) -- the same rule linear_fetch follows.
-  # Rounding is to nearest, not toward zero: a truncating round would flip
-  # the direction of the error at the epoch.
+  # Rounding is to nearest, and a tie goes to the later tick: rounding half
+  # away from zero would send a tie later after 1970 and earlier before it,
+  # so moving the data by whole days would change the answer.
 
   # @overload mean(axis: nil, **opts)
   #   Returns the centroid time on `self`'s unit (§8), rounded to the
@@ -1739,14 +1740,15 @@ class CATime
   def round_and_relift(r, kind)
     case r
     when Numeric
-      v = r.round
+      v = kind == :timedelta ? r.round : (r + 0.5).floor
       kind == :timedelta ? CATimedelta::Element.new(v, unit) : Element.new(v, unit)
     when CArray
       # A cell with no answer arrives masked and the mask survives the cast.
       # NaN does not: it has no int64 image, so a `fill_value: Float::NAN`
       # cell would cast to garbage bits.  mask_invalid turns it into UNDEF,
       # which is what "no answer" means here.
-      iv = r.round.mask_invalid.int64
+      near = kind == :timedelta ? r.round : (r + 0.5).floor
+      iv = near.mask_invalid.int64
       kind == :timedelta ? iv.timedelta(unit: unit) : iv.time(unit: unit)
     when Array
       r.map {|x| round_and_relift(x, kind)}

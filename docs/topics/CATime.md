@@ -612,8 +612,9 @@ dt.to_datetime  # => CArray(:object) of Ruby DateTime (UTC)
 
 **A reduction reports on the array's own unit.** Whatever the answer is —
 a centroid, a median, a spread — it comes back on the grid the array is
-stored on, rounded to the nearest tick. Precision is something the caller
-declares, before the reduction, with `to_unit`:
+stored on, rounded to the nearest tick; a tie goes to the later tick, before
+1970 as after it. Precision is something the caller declares, before the
+reduction, with `to_unit`:
 
 ```ruby
 t = CArray.time(%w[2024-06-15 2024-06-16], unit: :D)
