@@ -938,6 +938,15 @@ ca_reduce_fill (VALUE result, VALUE fill, int whole)
     if ( ca_has_mask(cr) ) {
       result = rb_ca_mask_fill_copy(result, fill);
     }
+    else if ( cr->elements > 0 ) {
+      /* No cell needed the fill, but a fill the result cannot hold is
+         refused all the same, not only when some cell happens to be
+         undefined: it goes into a one-cell array of the result's kind. */
+      volatile VALUE one = rb_funcall(rb_funcall(result, rb_intern("flatten"), 0),
+                                      rb_intern("[]"), 1,
+                                      rb_range_new(INT2FIX(0), INT2FIX(0), 0));
+      rb_ca_store_addr(rb_ca_template(one), 0, fill);
+    }
     return whole ? rb_ca_fetch_addr(result, 0) : result;
   }
   return ( result == CA_UNDEF ) ? fill : result;
