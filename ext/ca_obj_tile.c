@@ -108,6 +108,8 @@ ca_tile_setup (CATile *ca, CArray *parent, ca_size_t *reps)
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
+  ca->reps      = NULL;               /* set before either allocation can raise */
+  ca->dim       = NULL;
   ca->reps      = ALLOC_N(ca_size_t, ndim);
   ca->dim       = ALLOC_N(ca_size_t, ndim);
 
@@ -120,15 +122,33 @@ ca_tile_setup (CATile *ca, CArray *parent, ca_size_t *reps)
   return 0;
 }
 
+typedef struct {
+  CATile    *ca;
+  CArray    *parent;
+  ca_size_t *reps;
+} ca_tile_new_arg;
+
+static VALUE
+ca_tile_new_setup (VALUE varg)
+{
+  ca_tile_new_arg *a = (ca_tile_new_arg *) varg;
+  ca_tile_setup(a->ca, a->parent, a->reps);
+  return Qnil;
+}
+
+/* The setup allocates reps and dim after the struct: when either fails,
+   the struct goes too. */
 CATile *
 ca_tile_new (CArray *parent, ca_size_t *reps)
 {
-  CATile *ca;
+  ca_tile_new_arg a;
   ca_tile_setup(NULL, parent, reps);
-  ca = ALLOC(CATile);
-  ca_tile_setup(ca, parent, reps);
-  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
-  return ca;
+  a.ca     = ALLOC(CATile);
+  a.parent = parent;
+  a.reps = reps;
+  ca_fill_or_free((CArray *) a.ca, ca_tile_new_setup, (VALUE) &a);
+  ca_fill_or_free((CArray *) a.ca, ca_view_inherit_mask, (VALUE) a.ca);
+  return a.ca;
 }
 
 static void

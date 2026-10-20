@@ -70,6 +70,10 @@ ca_array_alloc (int8_t obj_type, int8_t ndim)
   CArray *ca = xmalloc(func->struct_size);
   ca_array_alloc_arg a;
   memset(ca, 0, func->struct_size);
+  /* The type is set now so that a constructor whose setup raises can hand
+     the struct to ca_free, which dispatches on it.  The setup sets it
+     again. */
+  ca->obj_type = obj_type;
   /* The pool is a second allocation; when it fails, the struct goes too. */
   a.ca = ca;
   a.obj_type = obj_type;

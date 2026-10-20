@@ -120,16 +120,40 @@ ca_shift_setup (CAShift *ca, CArray *parent,
   return 0;
 }
 
+typedef struct {
+  CAShift   *ca;
+  CArray    *parent;
+  ca_size_t *shift;
+  char      *fill;
+  int8_t    *roll;
+  int        fill_mask;
+} ca_shift_new_arg;
+
+static VALUE
+ca_shift_new_setup (VALUE varg)
+{
+  ca_shift_new_arg *a = (ca_shift_new_arg *) varg;
+  ca_shift_setup(a->ca, a->parent, a->shift, a->fill, a->roll, a->fill_mask);
+  return Qnil;
+}
+
+/* The setup allocates the fill value after the struct and its pool: when
+   that fails, the struct goes too. */
 CAShift *
 ca_shift_new (CArray *parent, ca_size_t *shift, char *fill, int8_t *roll,
               int fill_mask)
 {
-  CAShift *ca;
+  ca_shift_new_arg a;
   ca_shift_setup(NULL, parent, shift, fill, roll, fill_mask);
-  ca = (CAShift *) ca_array_alloc(CA_OBJ_SHIFT, parent->ndim);
-  ca_shift_setup(ca, parent, shift, fill, roll, fill_mask);
-  ca_fill_or_free((CArray *) ca, ca_window_create_bounds_mask, (VALUE) ca);
-  return ca;
+  a.ca        = (CAShift *) ca_array_alloc(CA_OBJ_SHIFT, parent->ndim);
+  a.parent    = parent;
+  a.shift     = shift;
+  a.fill      = fill;
+  a.roll      = roll;
+  a.fill_mask = fill_mask;
+  ca_fill_or_free((CArray *) a.ca, ca_shift_new_setup, (VALUE) &a);
+  ca_fill_or_free((CArray *) a.ca, ca_window_create_bounds_mask, (VALUE) a.ca);
+  return a.ca;
 }
 
 /* Clone: produce a CAShift (not CAWindow) by rebuilding via setup.

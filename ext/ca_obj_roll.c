@@ -112,6 +112,8 @@ ca_roll_setup (CARoll *ca, CArray *parent, ca_size_t *shift)
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
+  ca->reps      = NULL;               /* set before either allocation can raise */
+  ca->dim       = NULL;
   ca->reps      = ALLOC_N(ca_size_t, ndim);  /* repurposed as shift[] */
   ca->dim       = ALLOC_N(ca_size_t, ndim);
 
@@ -130,15 +132,33 @@ ca_roll_setup (CARoll *ca, CArray *parent, ca_size_t *shift)
   return 0;
 }
 
+typedef struct {
+  CARoll    *ca;
+  CArray    *parent;
+  ca_size_t *shift;
+} ca_roll_new_arg;
+
+static VALUE
+ca_roll_new_setup (VALUE varg)
+{
+  ca_roll_new_arg *a = (ca_roll_new_arg *) varg;
+  ca_roll_setup(a->ca, a->parent, a->shift);
+  return Qnil;
+}
+
+/* The setup allocates reps and dim after the struct: when either fails,
+   the struct goes too. */
 CARoll *
 ca_roll_new (CArray *parent, ca_size_t *shift)
 {
-  CARoll *ca;
+  ca_roll_new_arg a;
   ca_roll_setup(NULL, parent, shift);
-  ca = ALLOC(CARoll);
-  ca_roll_setup(ca, parent, shift);
-  ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
-  return ca;
+  a.ca     = ALLOC(CARoll);
+  a.parent = parent;
+  a.shift = shift;
+  ca_fill_or_free((CArray *) a.ca, ca_roll_new_setup, (VALUE) &a);
+  ca_fill_or_free((CArray *) a.ca, ca_view_inherit_mask, (VALUE) a.ca);
+  return a.ca;
 }
 
 static void

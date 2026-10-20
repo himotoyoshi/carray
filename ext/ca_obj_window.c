@@ -801,16 +801,40 @@ ca_window_create_bounds_mask (VALUE view)
   return Qnil;
 }
 
+typedef struct {
+  CAWindow  *ca;
+  CArray    *parent;
+  ca_size_t *start;
+  ca_size_t *count;
+  uint8_t   *bounds;
+  char      *fill;
+} ca_window_new_arg;
+
+static VALUE
+ca_window_new_setup (VALUE varg)
+{
+  ca_window_new_arg *a = (ca_window_new_arg *) varg;
+  ca_window_setup(a->ca, a->parent, a->start, a->count, a->bounds, a->fill);
+  return Qnil;
+}
+
+/* The setup allocates the fill value after the struct and its pool: when
+   that fails, the struct goes too. */
 CAWindow *
 ca_window_new (CArray *parent,
                ca_size_t *start, ca_size_t *count, uint8_t *bounds, char *fill)
 {
-  CAWindow *ca;
+  ca_window_new_arg a;
   ca_window_setup(NULL, parent, start, count, bounds, fill);
-  ca = (CAWindow *) ca_array_alloc(CA_OBJ_WINDOW, parent->ndim);
-  ca_window_setup(ca, parent, start, count, bounds, fill);
-  ca_fill_or_free((CArray *) ca, ca_window_create_bounds_mask, (VALUE) ca);
-  return ca;
+  a.ca     = (CAWindow *) ca_array_alloc(CA_OBJ_WINDOW, parent->ndim);
+  a.parent = parent;
+  a.start  = start;
+  a.count  = count;
+  a.bounds = bounds;
+  a.fill   = fill;
+  ca_fill_or_free((CArray *) a.ca, ca_window_new_setup, (VALUE) &a);
+  ca_fill_or_free((CArray *) a.ca, ca_window_create_bounds_mask, (VALUE) a.ca);
+  return a.ca;
 }
 
 static void

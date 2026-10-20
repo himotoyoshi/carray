@@ -242,7 +242,9 @@ ca_grid_setup (CAGrid *ca, CArray *parent, int8_t ndim,
     ca_set_flag(ca, CA_FLAG_SHARE_INDEX);
     ca->axes = protos;
   } else {
-    ca->axes = ALLOC_N(cag_axis_t, ndim);
+    /* Zeroed: an axis's indices or holes that cannot be allocated raises
+       with the later axes not yet copied, and free_ca_grid reads them. */
+    ca->axes = ZALLOC_N(cag_axis_t, ndim);
     for (k = 0; k < ndim; k++) {
       ca->axes[k].kind  = protos[k].kind;
       ca->axes[k].count = protos[k].count;
@@ -319,16 +321,38 @@ ca_grid_inherit_mask (VALUE view)
   return ca_view_inherit_mask(view);
 }
 
-/* holes_read_masked is the copied grid's: a copy of a mask grid is one. */
+typedef struct {
+  CAGrid     *ca;
+  CArray     *parent;
+  int8_t      ndim;
+  cag_axis_t *protos;
+} ca_grid_new_arg;
+
+static VALUE
+ca_grid_new_setup (VALUE varg)
+{
+  ca_grid_new_arg *a = (ca_grid_new_arg *) varg;
+  ca_grid_setup(a->ca, a->parent, a->ndim, a->protos, 0);
+  return Qnil;
+}
+
+/* holes_read_masked is the copied grid's: a copy of a mask grid is one.
+   The setup allocates the axes after the struct and its pool: when that
+   fails, the struct goes too. */
 static CAGrid *
 ca_grid_new_as (CArray *parent, int8_t ndim, cag_axis_t *protos,
                 int8_t holes_read_masked, CAGrid *mask_owner)
 {
   CAGrid *ca;
+  ca_grid_new_arg a;
   ca_grid_check_protos(parent, ndim, protos);
   /* check: ca_grid_check_protos above */
   ca = (CAGrid *) ca_array_alloc(CA_OBJ_GRID, ndim);
-  ca_grid_setup(ca, parent, ndim, protos, 0);
+  a.ca     = ca;
+  a.parent = parent;
+  a.ndim   = ndim;
+  a.protos = protos;
+  ca_fill_or_free((CArray *) ca, ca_grid_new_setup, (VALUE) &a);
   ca->holes_read_masked = holes_read_masked;
   ca->mask_owner        = mask_owner;
   ca_fill_or_free((CArray *) ca, ca_grid_inherit_mask, (VALUE) ca);
@@ -358,7 +382,7 @@ free_ca_grid (void *ap)
   if ( ca != NULL ) {
     ca_free(ca->mask);
     ca_free(ca->mask_standin);
-    if ( ! (ca->flags & CA_FLAG_SHARE_INDEX) ) {
+    if ( ! (ca->flags & CA_FLAG_SHARE_INDEX) && ca->axes ) {
       int8_t k;
       for (k = 0; k < ca->ndim; k++) {
         if ( ca->axes[k].kind == CAG_AXIS_INDEX && ca->axes[k].indices ) {
