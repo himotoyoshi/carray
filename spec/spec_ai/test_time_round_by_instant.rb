@@ -14,7 +14,7 @@ class TestTimeRoundByInstant < Test::Unit::TestCase
     months = %w[1889-07 1889-08 2024-07 2023-06 2023-07]
     m = CArray.time(months, unit: :M).round(unit: :Y)
     d = CArray.time(months.map { |s| s + "-01" }, unit: :D).round(unit: :Y)
-    assert_equal %w[1889-01 1890-01 2024-01 2023-01 2024-01], as_strings(m)
+    assert_equal %w[1889-01 1890-01 2024-01 2023-01 2023-01], as_strings(m)
     assert_equal as_strings(d).map { |s| s[0, 7] }, as_strings(m)
   end
 
