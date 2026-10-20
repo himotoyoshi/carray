@@ -1226,7 +1226,15 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
       rb_raise(rb_eArgError, "invalid total ndim of args");
     }
     ref = rb_ca_refer_new(self, ca->data_type, rndim, rdim, ca->bytes, 0);
-    return rb_ca_grid(argc, argv, ref);
+    /* An index array that spans several axes picks along the one axis
+       they are joined into, so it is read flat there. */
+    {
+      VALUE flat[CA_RANK_MAX];
+      for (i=0; i<rndim; i++) {
+        flat[i] = rb_obj_is_carray(argv[i]) ? rb_ca_flatten(argv[i]) : argv[i];
+      }
+      return rb_ca_grid(argc, flat, ref);
+    }
   }
 
   /* Dispatch hook: route a boolean on axis 0 with plain keys elsewhere to
@@ -1255,6 +1263,20 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
       protos[i].indices = NULL;
       protos[i].holes   = NULL;
       continue;
+    }
+    {
+      /* An index array picks cells along its one axis.  One of more axes
+         states a shape the axis does not have. */
+      CArray *cs;
+      TypedData_Get_Struct(rval, CArray, &carray_data_type, cs);
+      if ( cs->ndim > 1 ) {
+        volatile VALUE sshape = rb_ary_new();
+        int k;
+        for (k = 0; k < cs->ndim; k++) rb_ary_push(sshape, SIZE2NUM(cs->dim[k]));
+        rb_raise(rb_eArgError,
+                 "index array of shape %"PRIsVALUE" on axis %d (an index array "
+                 "picks along one axis; use .flatten)", sshape, (int) i);
+      }
     }
     if ( rb_ca_is_boolean_type(rval) ) {
       CArray *cb;
