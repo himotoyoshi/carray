@@ -367,7 +367,7 @@ def build_spec_ai_smoke (dirname, basename)
   end
 end
 
-desc "Build spec_ai author-surface smoke fixtures (cfunc_r / with_buffer / source / iter_source_kind / header_contract / address_basis_c)"
+desc "Build spec_ai author-surface smoke fixtures (cfunc_r / with_buffer / source / iter_source_kind / header_contract / address_basis_c / iter_write / iter_pair)"
 task :build_author_surface_smoke do
   build_spec_ai_smoke("ext_cfunc_r_smoke",     "cfunc_r")
   build_spec_ai_smoke("ext_cslab_smoke",       "cslab")
@@ -377,6 +377,8 @@ task :build_author_surface_smoke do
   build_spec_ai_smoke("ext_iter_source_kind",  "iter_source_kind")
   build_spec_ai_smoke("ext_header_contract",   "header_contract")
   build_spec_ai_smoke("ext_address_basis",     "address_basis_c")
+  build_spec_ai_smoke("ext_iter_write",        "iter_write")
+  build_spec_ai_smoke("ext_iter_pair",         "iter_pair")
 end
 
 # NOTE: the tasks below build the user-facing examples under examples/.  They

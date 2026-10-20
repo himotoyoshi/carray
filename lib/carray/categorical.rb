@@ -299,7 +299,7 @@ class CACategorical < CAObject
   #   `codes[i] = x` raises; use `codes.copy` for a mutable copy.
   #   @return [CArray]
   def codes
-    parent
+    face_storage
   end
 
   # Face hook: carry the vocabulary across lifted views (slice / reshape / …).
@@ -328,8 +328,15 @@ class CACategorical < CAObject
   # Face hook: decode a per-cell code into its category label, through the one
   # decode every code-to-label path shares (see #label_at).
   def storage_to_element(raw)
-    code = raw.is_a?(String) ? raw.unpack1(UNPACK_FORMAT.fetch(parent.data_type)) : raw
+    code = raw.is_a?(String) ? raw.unpack1(UNPACK_FORMAT.fetch(face_storage.data_type)) : raw
     label_at(code)
+  end
+
+  # Face hook: a value written into a cell (a fill_value of shift and
+  # window) is a label, and the cell holds its code.
+  # @raise [ArgumentError] if the value is not one of the labels.
+  def element_to_storage (value)
+    code_for_fill(value)
   end
 
   # ---- category-space operations (by label, not code) -------------------
@@ -389,7 +396,14 @@ class CACategorical < CAObject
   #   (0 for an unknown label).
   #   @param label [Object] category to count.
   #   @return [Integer]
-  def count(label)
+  # @overload count
+  #   Returns the number of cells in some category (not masked), as
+  #   {CArray#count} with no value does.
+  #   @return [Integer]
+  def count(*args)
+    return count_not_masked if args.empty?
+    raise ArgumentError, "count: wrong number of arguments (given #{args.size}, expected 0..1)" if args.size > 1
+    label = args[0]
     code = @labels.index(label)
     code ? codes.count(code) : 0
   end
@@ -400,7 +414,7 @@ class CACategorical < CAObject
   #
   # Memoised: the codes are read-only (immutable storage), so the counts are a
   # pure function of the categorical and stay valid for its lifetime. The same
-  # cached array backs {#reduceat_index} and {#sort_addr}, so a wide aggregate
+  # cached array backs {#reduceat_index} and {#group_addr}, so a wide aggregate
   # over the same categorical pays the count once. (Do not mutate the returned
   # array — it is shared; take `.copy` for a scratch buffer.) A derived-view /
   # composite categorical caches too: read-only rides from the codes as a flag,
@@ -543,7 +557,7 @@ class CACategorical < CAObject
   # The code a fill value stands for: UNDEF stays UNDEF, a label is its code.
   def code_for_fill (value)
     return UNDEF if UNDEF.equal?(value)
-    code = labels.index(value)
+    code = label_position(value)
     raise ArgumentError, "#{value.inspect} is not one of the labels #{labels.inspect}" unless code
     code
   end
@@ -583,27 +597,27 @@ class CACategorical < CAObject
   # two accessors are the building blocks for that other engine — lay the data
   # out as category-contiguous blocks, then select per block.
   #
-  # The grouping plan — sort_addr (the counting sort, the dominant cost) plus
+  # The grouping plan — group_addr (the counting sort, the dominant cost) plus
   # reduceat_index and category_sizes — depends only on the codes, which are
   # read-only. It is therefore memoised (a pure function of the categorical): the
   # first grouping access builds it and every later one reuses it. This is what
   # lets a wide aggregate (many payload columns over one classifier) or a
   # CACategoricalIterator run the counting sort once, not once per column /
   # iterator. Only the plan is cached; the payload-dependent grouped copy
-  # (value.reshape(n)[sort_addr]) is rebuilt per column (it varies with value).
+  # (value.reshape(n)[group_addr]) is rebuilt per column (it varies with value).
 
-  # Force-build (and cache) the whole grouping plan up front — sort_addr,
+  # Force-build (and cache) the whole grouping plan up front — group_addr,
   # reduceat_index, category_sizes — for prepare-ahead use before a batch of
   # groupings. Lazy building already covers correctness; this is the explicit
   # "pay the counting sort now" handle (e.g. right after `df.group_by(col)`).
   # Returns self so it chains.
   # @overload build_grouping
-  #   Eagerly builds and caches the grouping plan (sort_addr / reduceat_index
+  #   Eagerly builds and caches the grouping plan (group_addr / reduceat_index
   #   / category_sizes). Optional — the plan is built lazily on first grouping
   #   access — but useful to pay the counting sort once ahead of a batch.
   #   @return [self]
   def build_grouping
-    sort_addr        # pulls category_sizes; reduceat_index shares category_sizes
+    group_addr       # pulls category_sizes; reduceat_index shares category_sizes
     reduceat_index
     self
   end
@@ -617,26 +631,26 @@ class CACategorical < CAObject
   # order. The first {#category_sizes}.sum addresses are exactly the classified
   # cells in category order — CACategoricalIterator's permutation. For an N-D
   # categorical the addresses are into the raveled storage, so
-  # `value.reshape(elements)[cat.sort_addr]` produces the contiguous blocks.
+  # `value.reshape(elements)[cat.group_addr]` produces the contiguous blocks.
   # Memoised (see the grouping-plan note above): the counting sort is the
   # dominant grouping cost, so it is computed once and shared by every payload
   # column and by CACategoricalIterator, and kept for the categorical's
   # lifetime (an int64 per cell). Do not mutate the returned array.
-  # @overload sort_addr
+  # @overload group_addr
   #   Returns a length-{#elements} integer CArray of flat storage
   #   addresses that order the cells by category (excluded cells last).
   #   @return [CArray]
-  def sort_addr
-    return @sort_addr if @sort_addr
+  def group_addr
+    return @group_addr if @group_addr
     out = codes.reshape(elements).__send__(:addresses_by_category,
                                            reduceat_index.copy, @labels.size,
                                            category_sizes.sum)
-    @sort_addr = out
+    @group_addr = out
     out
   end
 
   # Segment start offsets into the category-contiguous layout produced by
-  # {#sort_addr}: reduceat_index[c] is where category c's block begins, so
+  # {#group_addr}: reduceat_index[c] is where category c's block begins, so
   # block c spans `reduceat_index[c] ... reduceat_index[c] + category_sizes[c]`.
   # Empty categories repeat the following start (a zero-width block). Length k,
   # aligned to #labels; pair with {#category_sizes} for the block lengths. On

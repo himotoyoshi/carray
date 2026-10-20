@@ -68,6 +68,13 @@ See §3 for the worked example.
 
 ---
 
+
+`parent` hands the storage out as a **read-only view**: a write through it
+would change a Face's values without the Face's conversion (a tick count
+into a time, bytes into a record). A Face that lets its storage be written
+names a method for it (`CATime#ticks`); inside a Face class the storage is
+`face_storage`.
+
 ## 2. The flag is the gate, the class hierarchy is organisation
 
 The single source of truth for "is this a Face?" is the
@@ -884,6 +891,13 @@ then the Ruby fallback. The contract of the hook:
   hook never sees its own output a second time;
 - an unconvertible value (e.g. a cross-unit-group instant) → raise,
   never a silent mis-store.
+
+A read-only Face needs the hook too: its cells are never stored into, but a
+fill value (`shift` / `window` / `project`) is written into the storage of
+the new array through `rb_ca_obj2ptr`. Without a hook the value would reach
+the storage cast as it is. A categorical's hook turns a label into its code
+and refuses anything else; a CAConstString, whose cells are byte ranges of
+one shared buffer, refuses every value but UNDEF.
 
 A Face **array** stored into an array that is not the same Face goes the
 other way: its cells are surface values, and its storage means nothing to

@@ -69,7 +69,7 @@ class TestY1bCAGridXferAddrs < Test::Unit::TestCase
     g = @parent[nil, mask]   # 10 x 4
     addrs = [37, 5, 19, 2, 28, 11, 0, 39]
     got = CArray.bench_xfer_addrs_get_addrs(g, addrs, 1)
-    expected = addrs.map { |a| g[a / 4, a % 4] }.pack("q<*")
+    expected = addrs.map { |a| g[a / 4, a % 4] }.pack("q*")
     assert_equal expected, got
   end
 

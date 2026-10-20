@@ -56,7 +56,7 @@ class TestY1cCASelectXferAddrs < Test::Unit::TestCase
     sel = @parent[mask]   # all 80 elements
     addrs = [37, 5, 19, 2, 70, 11, 0, 79]
     got = CArray.bench_xfer_addrs_get_addrs(sel, addrs, 1)
-    expected = addrs.map { |a| sel[a] }.pack("q<*")
+    expected = addrs.map { |a| sel[a] }.pack("q*")
     assert_equal expected, got
   end
 

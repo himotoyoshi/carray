@@ -46,6 +46,19 @@ class TestSerializeByteOrderAndMarshal < Test::Unit::TestCase
     end
   end
 
+  # The byte order is written as asked, whichever spelling asks for it;
+  # the endian marker sits at offset 8.
+  def test_the_byte_order_is_the_one_asked_for
+    a = CA_INT32([0x01020304])
+    { :big => [1, 2, 3, 4], CA_BIG_ENDIAN => [1, 2, 3, 4],
+      :little => [4, 3, 2, 1], CA_LITTLE_ENDIAN => [4, 3, 2, 1] }.each do |endian, marker|
+      s = CArray.dump(a, endian: endian)
+      assert_equal marker, s.byteslice(8, 4).bytes, endian.inspect
+      assert_equal [0x01020304], CArray.load(s).to_a, endian.inspect
+    end
+    assert_raise(ArgumentError) { CArray.dump(a, endian: :middle) }
+  end
+
   # ---- Marshal ------------------------------------------------------------
 
   def round_trip (obj)

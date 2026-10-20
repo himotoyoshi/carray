@@ -93,7 +93,8 @@ ca_bitarray_setup (CABitarray *ca, CArray *parent)
   ca_size_t bitlen, elements;
 
   if ( ca_is_complex_type(parent) || ( ca_is_object_type(parent) ) ) {
-    rb_raise(rb_eCADataTypeError, "invalid data_type for bitarray");
+    rb_raise(rb_eCADataTypeError, "%s: can't view the bits of a cell of %s",
+             ca_calling_method_name(), ca_type_name[parent->data_type]);
   }
 
   /* The bits of one byte would share that byte's one mask cell, so a bit
@@ -105,6 +106,9 @@ ca_bitarray_setup (CABitarray *ca, CArray *parent)
              "carry (its bits would share one mask per byte); "
              "use .value.bitarray to read the bits without it");
   }
+
+  /* The bits add an axis to the parent's. */
+  ca_check_rank_fits(parent->ndim + 1, "bitarray");
 
   /* ca == NULL asks for the checks above only, so that a constructor can
      run them before it allocates. */

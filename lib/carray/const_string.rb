@@ -92,6 +92,16 @@ class CAConstString
   # override the L1 generics where present.
   include CArray::StringOperationMixin
 
+  # Face hook: a value written into a cell (a fill_value of shift and
+  # window).  A cell is a byte range of the shared buffer, which has no room
+  # for a String it does not hold, so only UNDEF can be written.
+  # @raise [ArgumentError] for any value but UNDEF.
+  def element_to_storage (value)
+    raise ArgumentError,
+          "a CAConstString can't hold a new String (its strings share one " \
+          "buffer); use UNDEF, or to_string first"
+  end
+
   # ---- ordering family ---------------------------------------------------
   #
   # A storage cell is a `(start, end)` byte range into the shared buffer, so

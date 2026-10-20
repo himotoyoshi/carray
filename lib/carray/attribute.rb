@@ -33,14 +33,17 @@
 #    parent's cells, so the parent's attributes do not describe them.
 #    `a.lazy` itself (CALazyMarker) is a view of `a` and walks through,
 #    and so does a lazy type conversion (the cast lane `promote_list`
-#    and `wrap_readonly` build), for the reason `to_type` carries them.
+#    and `wrap_readonly` build), for the reason `to_type` carries them,
+#    and `swap_bytes`: like `refer`, `bitarray` and `bitfield`, a view
+#    that reads the same cells another way carries them.
 #    A view of a Face shows the attributes of the Face it was taken
 #    from (the walk goes to that Face, which the view's own parent
 #    chain skips).
 #    A view of several arrays (CAStack / CAMeld, so `stack`, `meld` and
 #    `montage`) shows, below its own @attr, the keys every one of its
 #    arrays shows with the same value; a key they disagree on, or one
-#    some of them lack, is not shown.
+#    some of them lack, is not shown.  An array with no cells is left out
+#    of that count, unless all of them are empty.
 #
 #  Stored values are frozen copies, nested Arrays and Hashes included, so
 #  an attribute changes only through set_attr / set_attrs: a value read
@@ -58,7 +61,9 @@
 #  `categorize`, a CAFrame `cast` / `parse_to_time` / `to_time`) carries
 #  them.  Arithmetic and reductions do not -- the result is a different
 #  quantity -- including those that pick a value (`first`, `last`, `min`,
-#  `max`, `unique`).  A CAFrame index built from a key column's values
+#  `max`, `unique`) and the element-wise ones that keep the unit (`abs`,
+#  `round`, `clip`): an attribute does not say which operations leave it
+#  true, so none carries it.  Set it on the result again.  A CAFrame index built from a key column's values
 #  (group and pivot) shows the key column's attributes.
 
 class CArray
@@ -235,7 +240,12 @@ class CArray
   end
 
   # The attributes every array in `list` shows with the same value.
+  # An array with no cells holds no values for the attributes to describe,
+  # so it has no say (unless every one is empty), as CAFrame leaves a frame
+  # with no rows out of a meld.
   def self.attrs_shared_by (list)
+    with_cells = list.reject { |a| a.elements == 0 }
+    list = with_cells unless with_cells.empty?
     first, *rest = list.map(&:attrs)
     return {} if first.nil?
     first.select { |k, v| rest.all? { |h| h.key?(k) && h[k] == v } }
@@ -243,7 +253,10 @@ class CArray
   private_class_method :attrs_shared_by
 
   def attr_computing_view? (ca)
-    return ca.__op_id__ < CAMonOp::CAST_BASE if ca.is_a?(CAMonOp)
+    if ca.is_a?(CAMonOp)
+      op = ca.__op_id__
+      return op < CAMonOp::CAST_BASE && op != CAMonOp::OP_BYTE_SWAP
+    end
     ca.is_a?(CABinOp) || ca.is_a?(CATriOp) ||
       ca.is_a?(CAMonCmp) || ca.is_a?(CABinCmp)
   end

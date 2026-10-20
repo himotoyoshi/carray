@@ -32,9 +32,11 @@ class CArray
   # zero-copy, other string-bearing arrays materialise, numeric is rejected.
   # @overload fixlen_string(values, bytes: nil, truncate: :error)
   #   @param values [Array<String, nil>] source values.
-  #   @param bytes [Integer, nil] slot width; defaults to the max bytesize.
+  #   @param bytes [Integer, nil] slot width, 1 or more; defaults to the
+  #     max bytesize (1 when every string is empty).
   #   @param truncate [Symbol] `:error` or `:silent`.
   #   @return [CAFixlenString]
+  #   @raise [ArgumentError] when `bytes` is given below 1.
   # @overload fixlen_string(ca, bytes: nil, truncate: :error)
   #   @param ca [CArray] a String Face, CA_OBJECT, or raw CA_FIXLEN array.
   #   @return [CAFixlenString]
@@ -63,8 +65,11 @@ class CArray
       values = arg.to_a
     end
 
+    unless bytes.nil? || (bytes.is_a?(Integer) && bytes >= 1)
+      raise ArgumentError, "CArray.fixlen_string: invalid bytes: #{bytes.inspect} (a cell needs bytes: of 1 or more)"
+    end
     width = bytes || values.compact.map { |s| s.to_s.bytesize }.max || 1
-    width = 1 if width < 1
+    width = 1 if width < 1   # every string empty: the narrowest cell
 
     if truncate == :error
       values.each_with_index do |s, i|
@@ -98,4 +103,38 @@ class CAFixlenString
 
   include CArray::StringOperationMixin
   include CArray::StringOperationMixin::Mutable
+
+  # ---- order family beyond the fixlen kernels --------------------------
+  #
+  # min / max / sort run on the cells' bytes.  The members those kernels do
+  # not cover answer here: minmax as the pair of them, and the running
+  # extremes through the strings ({#to_string}), as CAString answers them,
+  # written back at this width.
+
+  # @return [Array(String, String), Array(CAFixlenString, CAFixlenString)]
+  #   `[min, max]`, with the keywords of {CArray#min} / {CArray#max}.
+  def minmax (*args, **kw)
+    [min(*args, **kw), max(*args, **kw)]
+  end
+
+  # @return [CAFixlenString] the running maximum, as {CArray#cummax}.
+  def cummax (*args, **kw)
+    to_string.cummax(*args, **kw).to_fixlen_string(bytes: bytes)
+  end
+
+  # @return [CAFixlenString] the running minimum, as {CArray#cummin}.
+  def cummin (*args, **kw)
+    to_string.cummin(*args, **kw).to_fixlen_string(bytes: bytes)
+  end
+
+  # A String has no distance, so there is no nearest one; refused in the
+  # words CAString uses.
+  def search_nearest (*args, **kw)
+    to_string.search_nearest(*args, **kw)
+  end
+
+  # @see #search_nearest
+  def search_nearest_addr (*args, **kw)
+    to_string.search_nearest_addr(*args, **kw)
+  end
 end

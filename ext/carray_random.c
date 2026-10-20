@@ -165,7 +165,7 @@ ca_random_bang_fill (VALUE arg)
   ca_rng_bind(&c->source);
   switch (ca->data_type) {
   case CA_FLOAT64: {
-    double *p = (double *)ca->ptr;
+    CA_U(double) *p = (CA_U(double) *)ca->ptr;
     if (is_default) {
       for (i = 0; i < n; i++)
         p[i] = ca_random_real(&c->source);
@@ -177,7 +177,7 @@ ca_random_bang_fill (VALUE arg)
     break;
   }
   case CA_FLOAT32: {
-    float *p = (float *)ca->ptr;
+    CA_U(float) *p = (CA_U(float) *)ca->ptr;
     if (is_default) {
       for (i = 0; i < n; i++)
         p[i] = (float)ca_random_real(&c->source);
@@ -189,7 +189,7 @@ ca_random_bang_fill (VALUE arg)
     break;
   }
   case CA_CMPLX128: {
-    double complex *p = (double complex *)ca->ptr;
+    ca_u_cmplx128_t *p = (ca_u_cmplx128_t *)ca->ptr;
     if (is_default) {
       for (i = 0; i < n; i++)
         p[i] = ca_random_real(&c->source) + ca_random_real(&c->source) * I;
@@ -202,7 +202,7 @@ ca_random_bang_fill (VALUE arg)
     break;
   }
   case CA_CMPLX64: {
-    float complex *p = (float complex *)ca->ptr;
+    ca_u_cmplx64_t *p = (ca_u_cmplx64_t *)ca->ptr;
     if (is_default) {
       for (i = 0; i < n; i++)
         p[i] = (float)ca_random_real(&c->source) + (float)ca_random_real(&c->source) * I;
@@ -242,37 +242,37 @@ ca_random_bang_fill (VALUE arg)
       break;
     }
     case CA_INT16: {
-      int16_t *p = (int16_t *)ca->ptr;
+      CA_U(int16_t) *p = (CA_U(int16_t) *)ca->ptr;
       for (i = 0; i < n; i++)
         p[i] = (int16_t)(low_long + ca_random_ulong_limited(&c->source, limit));
       break;
     }
     case CA_UINT16: {
-      uint16_t *p = (uint16_t *)ca->ptr;
+      CA_U(uint16_t) *p = (CA_U(uint16_t) *)ca->ptr;
       for (i = 0; i < n; i++)
         p[i] = (uint16_t)(low_long + ca_random_ulong_limited(&c->source, limit));
       break;
     }
     case CA_INT32: {
-      int32_t *p = (int32_t *)ca->ptr;
+      CA_U(int32_t) *p = (CA_U(int32_t) *)ca->ptr;
       for (i = 0; i < n; i++)
         p[i] = (int32_t)(low_long + ca_random_ulong_limited(&c->source, limit));
       break;
     }
     case CA_UINT32: {
-      uint32_t *p = (uint32_t *)ca->ptr;
+      CA_U(uint32_t) *p = (CA_U(uint32_t) *)ca->ptr;
       for (i = 0; i < n; i++)
         p[i] = (uint32_t)(low_long + ca_random_ulong_limited(&c->source, limit));
       break;
     }
     case CA_INT64: {
-      int64_t *p = (int64_t *)ca->ptr;
+      CA_U(int64_t) *p = (CA_U(int64_t) *)ca->ptr;
       for (i = 0; i < n; i++)
         p[i] = (int64_t)(low_long + ca_random_ulong_limited(&c->source, limit));
       break;
     }
     case CA_UINT64: {
-      uint64_t *p = (uint64_t *)ca->ptr;
+      CA_U(uint64_t) *p = (CA_U(uint64_t) *)ca->ptr;
       for (i = 0; i < n; i++)
         p[i] = (uint64_t)(low_long + ca_random_ulong_limited(&c->source, limit));
       break;
@@ -483,19 +483,19 @@ ca_randomn_bang_fill (VALUE arg)
   if (c->source.kind == CA_RNG_OWN) {
     switch (ca->data_type) {
     case CA_FLOAT64: {
-      double *p = (double *)ca->ptr;
+      CA_U(double) *p = (CA_U(double) *)ca->ptr;
       for (i = 0; i < n; i++)
         p[i] = ca_random_normal(&c->source);
       break;
     }
     case CA_FLOAT32: {
-      float *p = (float *)ca->ptr;
+      CA_U(float) *p = (CA_U(float) *)ca->ptr;
       for (i = 0; i < n; i++)
         p[i] = (float) ca_random_normal(&c->source);
       break;
     }
     case CA_CMPLX128: {
-      double complex *p = (double complex *)ca->ptr;
+      ca_u_cmplx128_t *p = (ca_u_cmplx128_t *)ca->ptr;
       for (i = 0; i < n; i++) {
         /* Into locals first: C does not say which order a call's
            arguments are evaluated in, and these two advance a state. */
@@ -506,7 +506,7 @@ ca_randomn_bang_fill (VALUE arg)
       break;
     }
     case CA_CMPLX64: {
-      float complex *p = (float complex *)ca->ptr;
+      ca_u_cmplx64_t *p = (ca_u_cmplx64_t *)ca->ptr;
       for (i = 0; i < n; i++) {
         double re = ca_random_normal(&c->source);
         double im = ca_random_normal(&c->source);
@@ -522,7 +522,7 @@ ca_randomn_bang_fill (VALUE arg)
 
   switch (ca->data_type) {
   case CA_FLOAT64: {
-    double *p = (double *)ca->ptr;
+    CA_U(double) *p = (CA_U(double) *)ca->ptr;
     ca_size_t pairs = n / 2;
     for (i = 0; i < pairs; i++) {
       box_muller_pair(&c->source, &p[2*i], &p[2*i+1]);
@@ -535,7 +535,7 @@ ca_randomn_bang_fill (VALUE arg)
     break;
   }
   case CA_FLOAT32: {
-    float *p = (float *)ca->ptr;
+    CA_U(float) *p = (CA_U(float) *)ca->ptr;
     ca_size_t pairs = n / 2;
     for (i = 0; i < pairs; i++) {
       double r1, r2;
@@ -551,7 +551,7 @@ ca_randomn_bang_fill (VALUE arg)
     break;
   }
   case CA_CMPLX128: {
-    double complex *p = (double complex *)ca->ptr;
+    ca_u_cmplx128_t *p = (ca_u_cmplx128_t *)ca->ptr;
     for (i = 0; i < n; i++) {
       double r1, r2;
       box_muller_pair(&c->source, &r1, &r2);
@@ -560,7 +560,7 @@ ca_randomn_bang_fill (VALUE arg)
     break;
   }
   case CA_CMPLX64: {
-    float complex *p = (float complex *)ca->ptr;
+    ca_u_cmplx64_t *p = (ca_u_cmplx64_t *)ca->ptr;
     for (i = 0; i < n; i++) {
       double r1, r2;
       box_muller_pair(&c->source, &r1, &r2);

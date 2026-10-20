@@ -122,20 +122,23 @@ class TestTimeReductionGrid < Test::Unit::TestCase
     assert_equal Time.utc(2024, 6, 16), t.mean.to_time
   end
 
-  def test_rounding_does_not_change_direction_across_the_epoch
-    # Mirror-image inputs give mirror-image answers.  A truncating round would
-    # pull both toward the epoch (-8 and 8) and so bias pre-epoch times later
-    # and post-epoch times earlier.
+  def test_a_tie_goes_to_the_later_tick_on_either_side_of_the_epoch
+    # Moving the data by whole days moves the answer by the same days.  Half
+    # away from zero sent a tie later after 1970 and earlier before it.
     before = CA_INT64([-10, -7]).time(unit: :D)
     after  = CA_INT64([7, 10]).time(unit: :D)
-    assert_equal(-9, before.mean.value)
+    assert_equal(-8, before.mean.value)
     assert_equal 9, after.mean.value
-    assert_equal before.mean.value, -after.mean.value
+    shift = 17
+    assert_equal after.mean.value + shift,
+                 CA_INT64([7 + shift, 10 + shift]).time(unit: :D).mean.value
+    assert_equal before.mean.value + 17,
+                 CA_INT64([7, 10]).time(unit: :D).mean.value
   end
 
   def test_per_axis_rounds_the_same_way_as_the_flat_form
     m = CA_INT64([[-10, -7], [7, 10]]).time(unit: :D)
-    assert_equal [-9, 9], m.mean(axis: 1).ticks.to_a
+    assert_equal [-8, 9], m.mean(axis: 1).ticks.to_a
   end
 
   # -- 4. a wide range is no longer a RangeError ---------------------------

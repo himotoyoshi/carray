@@ -117,13 +117,15 @@ class CArray
   end
 
   # @overload drop_axis
-  #   Returns a view of `self` with every size-1 axis dropped.
+  #   Returns a view of `self` with every size-1 axis dropped.  When every
+  #   axis has size 1, one axis of size 1 is kept.
   #   @return [CArray] view with reduced `ndim`.
   def drop_axis
     if ndim == 1
       return self[]
     else
       newdim = shape.reject{|x| x == 1 }
+      newdim = [1] if newdim.empty?     # every axis has size 1: keep one
       return ( ndim != newdim.size ) ? reshape(*newdim) : self[]
     end
   end
@@ -189,7 +191,13 @@ class CArray
   #   @param src [CArray] source array.
   #   @return [self]
   #   @raise [ArgumentError] when `offset.length != self.ndim`.
+  #   @raise [FrozenError] when `self` is frozen.
   def paste (offset, src)
+    # The write goes through a window view, which is not frozen itself:
+    # refuse a frozen self here, as a write into it directly is refused.
+    if frozen?
+      raise FrozenError.new("can't modify frozen #{self.class}: #{inspect}", receiver: self)
+    end
     raise ArgumentError, "offset length must equal ndim" if offset.length != ndim
     # A zero-length source covers no cell, so there is nothing to write --
     # and the empty range it would ask for is not a window CAWindow can
@@ -310,8 +318,7 @@ class CArray
   # @overload clip(min, max = nil, fill_value = nil, lfill: nil, ufill: nil)
   #   Returns `self` with every element clamped to `[min, max]`.
   #
-  #   Either bound may be `nil` for a one-sided clip; that side
-  #   dispatches to the `pmax` / `pmin` binop kernels. When
+  #   Either bound may be `nil` for a one-sided clip. When
   #   `fill_value` (or `lfill` / `ufill`) is given, out-of-range
   #   cells are replaced by the fill instead of clamped -- pass
   #   `UNDEF` to mask that end. `fill_value` is sugar for symmetric
@@ -320,6 +327,8 @@ class CArray
   #
   #   `min` may not exceed `max` (in any cell, when a bound is an
   #   array); equal bounds give every unmasked cell that value.
+  #   A NaN cell of `self` stays NaN, one-sided or two-sided (unlike
+  #   `pmax` / `pmin`, which answer the other operand for it).
   #   A NaN in a bound array leaves that cell unbounded on that side,
   #   as `nil` does for the whole side.  A bound is never UNDEF or
   #   masked: a missing bound is not read as either, so fill it first.
@@ -373,17 +382,28 @@ class CArray
 
     if lfill.nil? && ufill.nil?
       return clamp_between(min, max) if !min.nil? && !max.nil?
-      return pmax(min) if max.nil?
-      return pmin(max)
+      return clamp_below(min) if max.nil?
+      return clamp_above(max)
     end
 
     # A side without a fill still clamps.
     out = self.copy
-    out = out.pmax(min) if !min.nil? && lfill.nil?
-    out = out.pmin(max) if !max.nil? && ufill.nil?
+    out = out.clamp_below(min) if !min.nil? && lfill.nil?
+    out = out.clamp_above(max) if !max.nil? && ufill.nil?
     out[self.lt(min)] = lfill unless min.nil? || lfill.nil?
     out[self.gt(max)] = ufill unless max.nil? || ufill.nil?
     out
+  end
+
+  # A one-sided clip of a float array passes a NaN cell through, as the
+  # two-sided one does: the open side is a NaN bound, which leaves it
+  # unbounded.  pmax / pmin would answer the bound for a NaN cell.
+  protected def clamp_below (min)
+    float? ? clamp_between(min, Float::NAN) : pmax(min)
+  end
+
+  protected def clamp_above (max)
+    float? ? clamp_between(Float::NAN, max) : pmin(max)
   end
 
   # `contains` was retired in favour of {#is_in} (value-hash membership).

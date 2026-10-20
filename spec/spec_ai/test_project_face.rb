@@ -79,13 +79,14 @@ class TestProjectFace < Test::Unit::TestCase
     assert_equal [dt.parent[0], dt.parent[1], dt.parent[3]], r.parent.to_a
   end
 
-  def test_categorical_fill_raises_no_write_hook
-    # CACategorical is read-only and has no element_to_storage write hook
-    # (label -> code encoding is a separate design, out of scope), so a fill
-    # label has no storage conversion and raises loudly rather than
-    # mis-storing.  The default UNDEF-at-miss path stays available.
+  def test_categorical_fill_is_a_label
+    # A fill value of a categorical is a label, written as its code; a value
+    # that is not a label is refused.
     cat = CA_OBJECT(["x", "y", "z"]).categorize
-    assert_raise(ArgumentError) { cat.project(@addr, "x", "z") }
+    addr = CA_INT64([-1, 0, 2, 5])
+    assert_equal %w[x x z z], cat.project(addr, "x", "z").to_a
+    assert_equal [UNDEF, "x", "z", UNDEF], cat.project(addr).to_a
+    assert_raise(ArgumentError) { cat.project(addr, "q", "z") }
   end
 
   def test_datetime_length_preservation_no_miss

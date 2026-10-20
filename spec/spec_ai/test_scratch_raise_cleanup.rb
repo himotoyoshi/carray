@@ -8,7 +8,7 @@
 #
 # The cells here are 128 KB wide (fixlen), so a leak shows as 128 KB or more
 # per call against a threshold of 4 KB, measured by utils/measure_leak.rb
-# (macOS only).
+#.
 
 require "test/unit"
 require "carray"
@@ -20,14 +20,14 @@ class TestScratchRaiseCleanup < Test::Unit::TestCase
 
   def bytes_per_call (expr)
     bytes = LeakMeter.bytes_per_call(expr, setup: "a = CArray.fixlen(4, bytes: #{WIDTH})")
-    omit "malloc zone statistics unavailable" if bytes.nil?
+    omit "measurement unavailable" if bytes.nil?
     bytes
   end
 
   def assert_frees_scratch (expr)
     grown = bytes_per_call(expr)
     assert_operator grown, :<, 4096,
-                    "#{expr}: the malloc zone grew #{grown.round} bytes per call"
+                    "#{expr}: the C heap grew #{grown.round} bytes per call"
   end
 
   def test_raises

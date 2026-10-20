@@ -362,11 +362,14 @@ class TestCAMeld < Test::Unit::TestCase
     assert_raise(ArgumentError) { CArray.meld(x, y, axis: 0) }
   end
 
-  def test_meld_dtype_mismatch_raises
-    # View semantic requires same dtype; use CArray.concatenate for auto-cast.
-    x = CArray.int32(2, 3) { 0 }
-    y = CArray.float64(2, 3) { 0 }
-    assert_raise(ArgumentError) { CArray.meld(x, y, axis: 0) }
+  def test_meld_promotes_pieces_of_different_data_types
+    # As CArray.stack does (promote_list).
+    x = CArray.int32(2, 3) { 1 }
+    y = CArray.float64(2, 3) { 2.5 }
+    m = CArray.meld(x, y, axis: 0)
+    assert_equal "float64", m.data_type_name
+    assert_equal [1.0, 2.5], [m[0, 0], m[2, 0]]
+    assert_equal "float32", CArray.meld(x, y, axis: 0, data_type: :float32).data_type_name
   end
 
   # ---------- non-meld-axis reduce (per-parent decompose + concat) ----------
@@ -518,18 +521,15 @@ class TestCAMeld < Test::Unit::TestCase
     assert_kind_of CAMeld, outer.parents[0]
   end
 
-  # ---------- dtype-heterogeneous meld raises (view semantic) ----------
+  # ---------- dtype-heterogeneous meld promotes ----------
 
-  def test_dtype_heterogeneous_meld_raises
-    # View semantic requires same dtype at construction.  Caller either casts
-    # the pieces themselves, or uses CArray.concatenate (eager) for auto-cast.
+  def test_dtype_heterogeneous_meld_promotes
     a = CArray.int32(2, 2) { |i, j| i * 2 + j }
     b = CArray.float64(3, 2) { |i, j| 100.0 + i * 2 + j }
-    assert_raise(ArgumentError) { CArray.meld(a, b, axis: 0) }
-    # Pre-cast then meld works.
-    m = CArray.meld(a.to_type(:float64), b, axis: 0)
+    m = CArray.meld(a, b, axis: 0)
     assert_equal "float64", m.data_type_name
     assert_equal [5, 2], m.shape
+    assert_equal m.to_a, CArray.meld(a.to_type(:float64), b, axis: 0).to_a
   end
 
   # ---------- dup / clone semantics ----------

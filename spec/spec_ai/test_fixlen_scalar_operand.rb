@@ -73,13 +73,30 @@ class TestFixlenScalarOperand < Test::Unit::TestCase
     assert_equal 1, @a.eq("be").count(true)
   end
 
-  # A query wider than the cell truncates, which is what store does with
-  # the same String -- the two stay consistent either way.
-  def test_an_over_wide_query_truncates_as_store_does
+  # A query wider than the cell keeps its length and matches no cell.  A
+  # store cuts the same String to the cell, but a search asks whether a
+  # cell holds that String, and no five-byte cell holds a seven-byte one.
+  def test_an_over_wide_query_matches_no_cell
     b = CArray.new(CA_FIXLEN, [1], bytes: 5)
     b[0] = "toolong"
     assert_equal "toolo", b[0]
-    assert_equal [true], b.eq("toolong").to_a
+    assert_equal [false], b.eq("toolong").to_a
+    assert_equal [true],  b.ne("toolong").to_a
+    assert_equal [true],  b.lt("toolong").to_a
+    assert_equal [true],  b.eq("toolo").to_a
+  end
+
+  def test_the_search_and_set_families_agree
+    [CArray.new(CA_FIXLEN, [2], bytes: 2), CArray.fixlen_string(%w[ab cd])].each do |a|
+      a[0] = "ab"
+      a[1] = "cd"
+      assert_equal 0,              a.count("abX")
+      assert_nil                   a.search("abX")
+      assert_nil                   a.bsearch("abX")
+      assert_equal [false, false], a.is_in(["abX"]).to_a
+      assert_equal [true, false],  a.is_in(["ab", "abX"]).to_a
+      assert_equal 1,              a.count("ab")
+    end
   end
 
   # Two arrays are two byte strings, not a value and its type.

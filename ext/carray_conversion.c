@@ -30,14 +30,14 @@
 /* Leaf macro: data type-specialized inner loop.  Produces `n` VALUE objects
    from a contig ptr base + element width, storing into `dst` (Ruby Array). */
 #define TO_A_LEAF_LOOP(T, TO_VALUE) do { \
-  const T *src = (const T *) base; \
+  const CA_U(T) *src = (const CA_U(T) *) base; \
   for (li = 0; li < n; li++) { \
     rb_ary_store(dst, li, TO_VALUE(src[li])); \
   } \
 } while (0)
 
 #define TO_A_LEAF_LOOP_MASKED(T, TO_VALUE) do { \
-  const T *src = (const T *) base; \
+  const CA_U(T) *src = (const CA_U(T) *) base; \
   for (li = 0; li < n; li++) { \
     rb_ary_store(dst, li, mask[li] ? CA_UNDEF : TO_VALUE(src[li])); \
   } \

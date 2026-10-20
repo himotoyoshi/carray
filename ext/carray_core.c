@@ -2955,6 +2955,9 @@ ca_face_field_lookup (VALUE self, VALUE sym)
         vtype_sym = ID2SYM(rb_intern(vtype_name));
         word_view = rb_funcall(receiver, rb_intern("field"), 2,
                                SIZE2NUM(start_byte), vtype_sym);
+        /* little-endian on every host, as the layout numbers the bits */
+        word_view = rb_funcall(word_view, rb_intern("endian"), 1,
+                               ID2SYM(rb_intern("little")));
         range = rb_range_new(LONG2NUM(bit_in_word),
                              SIZE2NUM(bit_in_word + bits - 1), 0);
         obj = rb_funcall(word_view, rb_intern("bitfield"), 1, range);

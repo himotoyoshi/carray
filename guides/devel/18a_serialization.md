@@ -231,6 +231,8 @@ plus non-finite Floats).
 - **Layer 1 — portable** (`kind` / `record_bytes` / `members`): always
   present, and sufficient alone for a non-Ruby reader — each member is a
   flat `{name, type, offset, bytes}` with a bare PEP 3118 type character.
+  A struct that declares an order adds `order_by` (its member names), so
+  the struct rebuilt from the members sorts as the saved one did.
   v1.0 describes **flat, primitive-typed members only**; a `data_class`
   with a bitfield, nested record, or non-primitive member makes `save`
   raise rather than write a schema it cannot express (loud failure over a

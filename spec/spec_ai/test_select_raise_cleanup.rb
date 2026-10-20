@@ -6,8 +6,8 @@
 # behind.
 #
 # Neither is ever written before the raise, so its pages never become
-# resident and the resident size cannot see them.  The malloc zone's
-# bytes-in-use can: macOS only, read through Fiddle.
+# resident and the resident size cannot see them.  The C heap's
+# bytes in use can, read through Fiddle (utils/measure_leak.rb).
 
 require "test/unit"
 require "carray"
@@ -15,8 +15,8 @@ require_relative "../../utils/measure_leak"
 
 class TestSelectRaiseCleanup < Test::Unit::TestCase
 
-  # Growth of the malloc zone's bytes-in-use per call of a[sel]
-  # (utils/measure_leak.rb; macOS only).
+  # Growth of the C heap's bytes in use per call of a[sel]
+  # (utils/measure_leak.rb).
   def bytes_per_call (masked, n, calls)
     setup = <<~SETUP
       s = CArray.int32(#{n}) { 1 }
@@ -26,7 +26,7 @@ class TestSelectRaiseCleanup < Test::Unit::TestCase
       a = CArray.float64(#{n}) { 1.0 }
     SETUP
     bytes = LeakMeter.bytes_per_call("a[sel]", setup: setup, calls: calls, warmup: 100)
-    omit "malloc zone statistics unavailable" if bytes.nil?
+    omit "measurement unavailable" if bytes.nil?
     bytes
   end
 
@@ -40,14 +40,14 @@ class TestSelectRaiseCleanup < Test::Unit::TestCase
   # window is long enough to average the measurement's own noise out.
   def test_raising_selector_leaves_nothing
     grown = bytes_per_call(false, 64, 20_000)
-    assert_operator grown, :<, 64, "the malloc zone grew #{grown.round} bytes per call"
+    assert_operator grown, :<, 64, "the C heap grew #{grown.round} bytes per call"
   end
 
   # The snapshot of a masked selector as well: a quarter MB a call, so a
   # threshold far above the noise still catches it.
   def test_masked_raising_selector_leaves_nothing
     grown = bytes_per_call(true, 1 << 18, 500)
-    assert_operator grown, :<, 4096, "the malloc zone grew #{grown.round} bytes per call"
+    assert_operator grown, :<, 4096, "the C heap grew #{grown.round} bytes per call"
   end
 
   def test_masked_selector_snapshot

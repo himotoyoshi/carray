@@ -865,7 +865,7 @@ fz_factorize_appearance_body (VALUE arg)
      element to a 64-bit key; equality within one data type is preserved. */
   #define FZ_LOOP(T, WIDEN)                                                  \
     do {                                                                     \
-      const T  *ip = (const T *) p_in;                                       \
+      const CA_U(T)  *ip = (const CA_U(T) *) p_in;                                       \
       uint32_t *op = (uint32_t *) p_out;                                     \
       for ( ca_size_t i = 0; i < n; i++ ) {                                  \
         if ( m && m[i] ) { op[i] = 0xFFFFFFFFu; continue; }                  \
@@ -884,7 +884,7 @@ fz_factorize_appearance_body (VALUE arg)
      kept as-is), so masked source cells store the sentinel. */
   #define FZ_LOOP_FLOAT(T)                                     \
     do {                                                                     \
-      const T  *ip = (const T *) p_in;                                       \
+      const CA_U(T)  *ip = (const CA_U(T) *) p_in;                                       \
       uint32_t *op = (uint32_t *) p_out;                                     \
       for ( ca_size_t i = 0; i < n; i++ ) {                                  \
         if ( m && m[i] ) { op[i] = 0xFFFFFFFFu; continue; }                  \
@@ -1073,7 +1073,7 @@ fz_mask_duplicates_body (VALUE arg)
      interns first appearances, so is_new == 0 flags a duplicate. */
   #define MD_LOOP(T, WIDEN)                                                   \
     do {                                                                      \
-      const T    *ip = (const T *) p_in;                                      \
+      const CA_U(T)    *ip = (const CA_U(T) *) p_in;                                      \
       boolean8_t *op = (boolean8_t *) p_out;                                  \
       for ( ca_size_t i = 0; i < n; i++ ) {                                   \
         if ( m && m[i] ) { op[i] = 0; continue; }                            \
@@ -1091,7 +1091,7 @@ fz_mask_duplicates_body (VALUE arg)
      before the bitwise key. */
   #define MD_LOOP_FLOAT(T)                                      \
     do {                                                                      \
-      const T    *ip = (const T *) p_in;                                      \
+      const CA_U(T)    *ip = (const CA_U(T) *) p_in;                                      \
       boolean8_t *op = (boolean8_t *) p_out;                                  \
       for ( ca_size_t i = 0; i < n; i++ ) {                                   \
         if ( m && m[i] ) { op[i] = 0; continue; }                            \
@@ -1225,7 +1225,7 @@ fz_unique_flat_body (VALUE arg)
 
   #define UQ_LOOP(T, WIDEN)                                                   \
     do {                                                                      \
-      const T *ip = (const T *) p_in;                                         \
+      const CA_U(T) *ip = (const CA_U(T) *) p_in;                                         \
       for ( ca_size_t i = 0; i < n; i++ ) {                                   \
         if ( m && m[i] ) { continue; }                                        \
         uint64_t key = (uint64_t) (WIDEN ip[i]);                              \
@@ -1239,7 +1239,7 @@ fz_unique_flat_body (VALUE arg)
      pushed level is the raw first-seen element. */
   #define UQ_LOOP_FLOAT(T)                                      \
     do {                                                                      \
-      const T *ip = (const T *) p_in;                                         \
+      const CA_U(T) *ip = (const CA_U(T) *) p_in;                                         \
       for ( ca_size_t i = 0; i < n; i++ ) {                                   \
         if ( m && m[i] ) { continue; }                                        \
         T v = ip[i];                                                          \
@@ -1340,7 +1340,7 @@ fz_intern_all (ca_iter_state *st_v, fz_hash *h, CArray *cv, fz_levels *lv)
 
   #define FZ_IA(T, WIDEN)                                                      \
     do {                                                                       \
-      const T *ip = (const T *) p_v;                                           \
+      const CA_U(T) *ip = (const CA_U(T) *) p_v;                                           \
       for ( ca_size_t i = 0; i < nv; i++ ) {                                   \
         if ( mv && mv[i] ) { continue; }                                       \
         uint64_t key = (uint64_t) (WIDEN ip[i]);                             \
@@ -1352,7 +1352,7 @@ fz_intern_all (ca_iter_state *st_v, fz_hash *h, CArray *cv, fz_levels *lv)
 
   #define FZ_IA_FLOAT(T)                                         \
     do {                                                                       \
-      const T *ip = (const T *) p_v;                                           \
+      const CA_U(T) *ip = (const CA_U(T) *) p_v;                                           \
       for ( ca_size_t i = 0; i < nv; i++ ) {                                   \
         if ( mv && mv[i] ) { continue; }                                       \
         T v = ip[i];                                                           \
@@ -1493,7 +1493,7 @@ fz_is_in_body (VALUE arg)
 
     #define IN_PROBE(T, WIDEN)                                                  \
       do {                                                                      \
-        const T    *ip = (const T *) p_in;                                      \
+        const CA_U(T)    *ip = (const CA_U(T) *) p_in;                                      \
         boolean8_t *op = (boolean8_t *) p_out;                                  \
         for ( ca_size_t i = 0; i < n; i++ ) {                                   \
           if ( m && m[i] ) { op[i] = 0; continue; }                            \
@@ -1504,7 +1504,7 @@ fz_is_in_body (VALUE arg)
 
     #define IN_PROBE_FLOAT(T)                                     \
       do {                                                                      \
-        const T    *ip = (const T *) p_in;                                      \
+        const CA_U(T)    *ip = (const CA_U(T) *) p_in;                                      \
         boolean8_t *op = (boolean8_t *) p_out;                                  \
         for ( ca_size_t i = 0; i < n; i++ ) {                                   \
           if ( m && m[i] ) { op[i] = 0; continue; }                            \
@@ -1661,7 +1661,7 @@ fz_locate_addr_body (VALUE arg)
 
     #define LOC_BUILD(T, WIDEN)                                                 \
       do {                                                                      \
-        const T *ip = (const T *) p_r;                                          \
+        const CA_U(T) *ip = (const CA_U(T) *) p_r;                                          \
         for ( ca_size_t i = 0; i < nr; i++ ) {                                  \
           if ( mr && mr[i] ) { continue; }                                     \
           uint64_t key = (uint64_t) (WIDEN ip[i]);                            \
@@ -1674,7 +1674,7 @@ fz_locate_addr_body (VALUE arg)
 
     #define LOC_BUILD_FLOAT(T)                                    \
       do {                                                                      \
-        const T *ip = (const T *) p_r;                                          \
+        const CA_U(T) *ip = (const CA_U(T) *) p_r;                                          \
         for ( ca_size_t i = 0; i < nr; i++ ) {                                  \
           if ( mr && mr[i] ) { continue; }                                     \
           T v = ip[i];                                                          \
@@ -1751,7 +1751,7 @@ fz_locate_addr_body (VALUE arg)
 
     #define LOC_PROBE(T, WIDEN)                                                 \
       do {                                                                      \
-        const T *ip = (const T *) p_in;                                         \
+        const CA_U(T) *ip = (const CA_U(T) *) p_in;                                         \
         const int64_t *ab = (const int64_t *) addr.p;                           \
         for ( ca_size_t i = 0; i < n; i++ ) {                                   \
           ca_size_t o = base + i;                                               \
@@ -1765,7 +1765,7 @@ fz_locate_addr_body (VALUE arg)
 
     #define LOC_PROBE_FLOAT(T)                                    \
       do {                                                                      \
-        const T *ip = (const T *) p_in;                                         \
+        const CA_U(T) *ip = (const CA_U(T) *) p_in;                                         \
         const int64_t *ab = (const int64_t *) addr.p;                           \
         for ( ca_size_t i = 0; i < n; i++ ) {                                   \
           ca_size_t o = base + i;                                               \
@@ -1929,7 +1929,7 @@ fz_set_relation_body (VALUE arg)
 
   #define SR(T, WIDEN)                                                         \
     do {                                                                       \
-      const T *ip = (const T *) p;                                             \
+      const CA_U(T) *ip = (const CA_U(T) *) p;                                             \
       for ( ca_size_t i = 0; i < n; i++ ) {                                    \
         if ( m && m[i] ) { continue; }                                         \
         uint64_t key = (uint64_t) (WIDEN ip[i]);                             \
@@ -1943,7 +1943,7 @@ fz_set_relation_body (VALUE arg)
 
   #define SR_FLOAT(T)                                            \
     do {                                                                       \
-      const T *ip = (const T *) p;                                             \
+      const CA_U(T) *ip = (const CA_U(T) *) p;                                             \
       for ( ca_size_t i = 0; i < n; i++ ) {                                    \
         if ( m && m[i] ) { continue; }                                         \
         T v = ip[i];                                                           \
@@ -2188,7 +2188,7 @@ fz_value_counts_flat_body (VALUE arg)
 
   #define VC_LOOP(T, WIDEN)                                                   \
     do {                                                                      \
-      const T *ip = (const T *) p_in;                                         \
+      const CA_U(T) *ip = (const CA_U(T) *) p_in;                                         \
       for ( ca_size_t i = 0; i < n; i++ ) {                                   \
         if ( m && m[i] ) { continue; }                                        \
         uint64_t key = (uint64_t) (WIDEN ip[i]);                              \
@@ -2206,7 +2206,7 @@ fz_value_counts_flat_body (VALUE arg)
 
   #define VC_LOOP_FLOAT(T)                                      \
     do {                                                                      \
-      const T *ip = (const T *) p_in;                                         \
+      const CA_U(T) *ip = (const CA_U(T) *) p_in;                                         \
       for ( ca_size_t i = 0; i < n; i++ ) {                                   \
         if ( m && m[i] ) { continue; }                                        \
         T v = ip[i];                                                          \
@@ -2516,7 +2516,7 @@ fz_is_mode_body (VALUE arg)
   /* Integer: WIDEN gives the key directly.  Two passes over the fiber. */
   #define IM_BODY(T, WIDEN)                                                   \
     do {                                                                      \
-      const T    *ip = (const T *) p_in;                                      \
+      const CA_U(T)    *ip = (const CA_U(T) *) p_in;                                      \
       boolean8_t *op = (boolean8_t *) p_out;                                  \
       for ( ca_size_t i = 0; i < n; i++ ) {                                   \
         if ( m && m[i] ) { continue; }                                        \
@@ -2543,7 +2543,7 @@ fz_is_mode_body (VALUE arg)
   /* Float: NaN collapses to one canonical key; -0.0 / +0.0 share a key. */
   #define IM_BODY_FLOAT(T)                                      \
     do {                                                                      \
-      const T    *ip = (const T *) p_in;                                      \
+      const CA_U(T)    *ip = (const CA_U(T) *) p_in;                                      \
       boolean8_t *op = (boolean8_t *) p_out;                                  \
       for ( int pass = 0; pass < 2; pass++ ) {                                \
         int64_t mx = 0;                                                       \

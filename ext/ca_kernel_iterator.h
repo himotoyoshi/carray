@@ -88,7 +88,14 @@ typedef enum {
 
 /* ---- kernel flags ------------------------------------------------------ */
 #define CA_KERNEL_READ        0x0
-#define CA_KERNEL_WRITE       0x1    /* the kernel writes the slab back  */
+#define CA_KERNEL_WRITE       0x1    /* the kernel writes the slab back.
+                                        The slab is read first (so a
+                                        kernel may change only some cells),
+                                        and a view that cannot be read --
+                                        CAFake of an object array whose
+                                        cells do not convert -- raises
+                                        there, even for a kernel that
+                                        writes every cell                */
 #define CA_KERNEL_NO_MASK     0x2    /* the kernel cannot take a mask:
                                         a masked source is refused     */
 #define CA_KERNEL_CHUNK_HINT  0x4    /* reserved: init refuses it
@@ -803,18 +810,19 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    Plain C99 (a do/while block with for-loop declarations). */
 
 #define CA_L2_FOR_EACH(T, ptr, n, stride, p, body) do { \
+    typedef T __ca_u_T CA_UNALIGNED; \
     ca_size_t   _l2_n = (n); \
     ca_size_t   _l2_s = (stride); \
     char       *_l2_b = (char *)(ptr); \
     if (_l2_s == sizeof(T)) { \
-        T *p = (T *)_l2_b; \
+        __ca_u_T *p = (__ca_u_T *)_l2_b; \
         for (ca_size_t _l2_i = 0; _l2_i < _l2_n; _l2_i++) { \
             body \
             p++; \
         } \
     } else { \
         for (ca_size_t _l2_i = 0; _l2_i < _l2_n; _l2_i++) { \
-            T *p = (T *)(_l2_b + _l2_i * _l2_s); \
+            __ca_u_T *p = (__ca_u_T *)(_l2_b + _l2_i * _l2_s); \
             body \
         } \
     } \
@@ -1150,6 +1158,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    it dead-code-eliminated; the trailing `(void) idx;` silences any
    set-but-not-used warnings. */
 #define CA_SLAB_REDUCE_T_EX(T, st, p, m, acc, INIT, REDUCE, masked_cnt) do { \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
     (acc) = (INIT);                                                          \
     int8_t    __srK       = (st).slab_ndim;                                  \
     int8_t    __srOuterK  = __srK - 1;                                       \
@@ -1194,7 +1203,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       const char *__srQ = (const char *)(p) + __srDoff;                      \
       if ( (m) == NULL ) {                                                   \
         if ( __srContig ) {                                                  \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             T v = __srSrc[__sj];                                             \
             REDUCE;                                                          \
@@ -1202,7 +1211,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
           }                                                                  \
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
-            T v = *(const T *)(__srQ + __sj * __srInnerS);                   \
+            T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                   \
             REDUCE;                                                          \
             idx++;                                                           \
           }                                                                  \
@@ -1210,7 +1219,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       } else {                                                               \
         const boolean8_t *__srMM = (const boolean8_t *)(m) + __srMoff;       \
         if ( __srContig && __srMaskU ) {                                     \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj] ) {                                          \
               T v = __srSrc[__sj];                                           \
@@ -1223,7 +1232,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj * __srInnerMS] ) {                            \
-              T v = *(const T *)(__srQ + __sj * __srInnerS);                 \
+              T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                 \
               REDUCE;                                                        \
             } else {                                                         \
               (masked_cnt)++;                                                \
@@ -1289,6 +1298,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
  *   by the compiler when their update is a simple ++ pattern.
  */
 #define CA_SLAB_REDUCE_T_PLUS_EX(T, st, p, m, acc, INIT, REDUCE, masked_cnt) do { \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
     (acc) = (INIT);                                                          \
     int8_t    __srK       = (st).slab_ndim;                                  \
     int8_t    __srOuterK  = __srK - 1;                                       \
@@ -1333,7 +1343,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       const char *__srQ = (const char *)(p) + __srDoff;                      \
       if ( (m) == NULL ) {                                                   \
         if ( __srContig ) {                                                  \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           _CA_SIMD_PLUS(acc)                                                 \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             T v = __srSrc[__sj];                                             \
@@ -1342,7 +1352,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
           }                                                                  \
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
-            T v = *(const T *)(__srQ + __sj * __srInnerS);                   \
+            T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                   \
             REDUCE;                                                          \
             idx++;                                                           \
           }                                                                  \
@@ -1350,7 +1360,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       } else {                                                               \
         const boolean8_t *__srMM = (const boolean8_t *)(m) + __srMoff;       \
         if ( __srContig && __srMaskU ) {                                     \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj] ) {                                          \
               T v = __srSrc[__sj];                                           \
@@ -1363,7 +1373,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj * __srInnerMS] ) {                            \
-              T v = *(const T *)(__srQ + __sj * __srInnerS);                 \
+              T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                 \
               REDUCE;                                                        \
             } else {                                                         \
               (masked_cnt)++;                                                \
@@ -1409,6 +1419,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
  *   both passes of variance / stddev).
  */
 #define CA_SLAB_REDUCE_SUM8_EX(T, ACC_T, st, p, m, acc, INIT, EXPR, masked_cnt) do { \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
     (acc) = (INIT);                                                          \
     int8_t    __srK       = (st).slab_ndim;                                  \
     int8_t    __srOuterK  = __srK - 1;                                       \
@@ -1445,7 +1456,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       const char *__srQ = (const char *)(p) + __srDoff;                      \
       if ( (m) == NULL ) {                                                   \
         if ( __srContig ) {                                                  \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           ACC_T __a0=(ACC_T)0,__a1=(ACC_T)0,__a2=(ACC_T)0,__a3=(ACC_T)0;     \
           ACC_T __a4=(ACC_T)0,__a5=(ACC_T)0,__a6=(ACC_T)0,__a7=(ACC_T)0;     \
           ca_size_t __sj = 0, __sN = __srInnerN;                             \
@@ -1464,14 +1475,14 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
                  + ((__a4 + __a5) + (__a6 + __a7));                          \
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
-            T v = *(const T *)(__srQ + __sj * __srInnerS);                   \
+            T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                   \
             (acc) += EXPR(v);                                                \
           }                                                                  \
         }                                                                    \
       } else {                                                               \
         const boolean8_t *__srMM = (const boolean8_t *)(m) + __srMoff;       \
         if ( __srContig && __srMaskU ) {                                     \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj] ) { T v = __srSrc[__sj]; (acc) += EXPR(v); } \
             else { (masked_cnt)++; }                                         \
@@ -1479,7 +1490,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj * __srInnerMS] ) {                            \
-              T v = *(const T *)(__srQ + __sj * __srInnerS);                 \
+              T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                 \
               (acc) += EXPR(v);                                              \
             } else { (masked_cnt)++; }                                       \
           }                                                                  \
@@ -1515,6 +1526,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
  * single-accumulator case).
  */
 #define CA_SLAB_REDUCE_MIN8_EX(T, ACC_T, st, p, m, acc, INIT, EXPR, masked_cnt) do { \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
     (acc) = (INIT);                                                          \
     int8_t    __srK       = (st).slab_ndim;                                  \
     int8_t    __srOuterK  = __srK - 1;                                       \
@@ -1551,7 +1563,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       const char *__srQ = (const char *)(p) + __srDoff;                      \
       if ( (m) == NULL ) {                                                   \
         if ( __srContig ) {                                                  \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           ACC_T __a0=(acc),__a1=(acc),__a2=(acc),__a3=(acc);                 \
           ACC_T __a4=(acc),__a5=(acc),__a6=(acc),__a7=(acc);                 \
           ca_size_t __sj = 0, __sN = __srInnerN;                             \
@@ -1577,14 +1589,14 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
           (acc) = (__c0 < __c1) ? __c0 : __c1;                               \
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
-            ACC_T __v = EXPR(*(const T *)(__srQ + __sj * __srInnerS));       \
+            ACC_T __v = EXPR(*(const __ca_u_T *)(__srQ + __sj * __srInnerS));       \
             if (__v < (acc)) (acc) = __v;                                    \
           }                                                                  \
         }                                                                    \
       } else {                                                               \
         const boolean8_t *__srMM = (const boolean8_t *)(m) + __srMoff;       \
         if ( __srContig && __srMaskU ) {                                     \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj] ) {                                          \
               ACC_T __v = EXPR(__srSrc[__sj]);                               \
@@ -1594,7 +1606,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj * __srInnerMS] ) {                            \
-              ACC_T __v = EXPR(*(const T *)(__srQ + __sj * __srInnerS));     \
+              ACC_T __v = EXPR(*(const __ca_u_T *)(__srQ + __sj * __srInnerS));     \
               if (__v < (acc)) (acc) = __v;                                  \
             } else { (masked_cnt)++; }                                       \
           }                                                                  \
@@ -1608,6 +1620,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
   } while (0)
 
 #define CA_SLAB_REDUCE_MAX8_EX(T, ACC_T, st, p, m, acc, INIT, EXPR, masked_cnt) do { \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
     (acc) = (INIT);                                                          \
     int8_t    __srK       = (st).slab_ndim;                                  \
     int8_t    __srOuterK  = __srK - 1;                                       \
@@ -1644,7 +1657,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       const char *__srQ = (const char *)(p) + __srDoff;                      \
       if ( (m) == NULL ) {                                                   \
         if ( __srContig ) {                                                  \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           ACC_T __a0=(acc),__a1=(acc),__a2=(acc),__a3=(acc);                 \
           ACC_T __a4=(acc),__a5=(acc),__a6=(acc),__a7=(acc);                 \
           ca_size_t __sj = 0, __sN = __srInnerN;                             \
@@ -1670,14 +1683,14 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
           (acc) = (__c0 > __c1) ? __c0 : __c1;                               \
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
-            ACC_T __v = EXPR(*(const T *)(__srQ + __sj * __srInnerS));       \
+            ACC_T __v = EXPR(*(const __ca_u_T *)(__srQ + __sj * __srInnerS));       \
             if (__v > (acc)) (acc) = __v;                                    \
           }                                                                  \
         }                                                                    \
       } else {                                                               \
         const boolean8_t *__srMM = (const boolean8_t *)(m) + __srMoff;       \
         if ( __srContig && __srMaskU ) {                                     \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj] ) {                                          \
               ACC_T __v = EXPR(__srSrc[__sj]);                               \
@@ -1687,7 +1700,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj * __srInnerMS] ) {                            \
-              ACC_T __v = EXPR(*(const T *)(__srQ + __sj * __srInnerS));     \
+              ACC_T __v = EXPR(*(const __ca_u_T *)(__srQ + __sj * __srInnerS));     \
               if (__v > (acc)) (acc) = __v;                                  \
             } else { (masked_cnt)++; }                                       \
           }                                                                  \
@@ -1701,6 +1714,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
   } while (0)
 
 #define CA_SLAB_REDUCE_STAR8_EX(T, ACC_T, st, p, m, acc, INIT, EXPR, masked_cnt) do { \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
     (acc) = (INIT);                                                          \
     int8_t    __srK       = (st).slab_ndim;                                  \
     int8_t    __srOuterK  = __srK - 1;                                       \
@@ -1737,7 +1751,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       const char *__srQ = (const char *)(p) + __srDoff;                      \
       if ( (m) == NULL ) {                                                   \
         if ( __srContig ) {                                                  \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           ACC_T __a0=(ACC_T)1,__a1=(ACC_T)1,__a2=(ACC_T)1,__a3=(ACC_T)1;     \
           ACC_T __a4=(ACC_T)1,__a5=(ACC_T)1,__a6=(ACC_T)1,__a7=(ACC_T)1;     \
           ca_size_t __sj = 0, __sN = __srInnerN;                             \
@@ -1756,14 +1770,14 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
                  * ((__a4 * __a5) * (__a6 * __a7));                          \
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
-            T v = *(const T *)(__srQ + __sj * __srInnerS);                   \
+            T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                   \
             (acc) *= EXPR(v);                                                \
           }                                                                  \
         }                                                                    \
       } else {                                                               \
         const boolean8_t *__srMM = (const boolean8_t *)(m) + __srMoff;       \
         if ( __srContig && __srMaskU ) {                                     \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj] ) { T v = __srSrc[__sj]; (acc) *= EXPR(v); } \
             else { (masked_cnt)++; }                                         \
@@ -1771,7 +1785,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj * __srInnerMS] ) {                            \
-              T v = *(const T *)(__srQ + __sj * __srInnerS);                 \
+              T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                 \
               (acc) *= EXPR(v);                                              \
             } else { (masked_cnt)++; }                                       \
           }                                                                  \
@@ -1797,6 +1811,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
  *   (T_LIMIT_HI), matching the pre-SIMD path byte-identically.
  */
 #define CA_SLAB_REDUCE_T_MIN_EX(T, st, p, m, acc, INIT, REDUCE, masked_cnt) do { \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
     (acc) = (INIT);                                                          \
     int8_t    __srK       = (st).slab_ndim;                                  \
     int8_t    __srOuterK  = __srK - 1;                                       \
@@ -1841,7 +1856,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       const char *__srQ = (const char *)(p) + __srDoff;                      \
       if ( (m) == NULL ) {                                                   \
         if ( __srContig ) {                                                  \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           _CA_SIMD_MIN(acc)                                                  \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             T v = __srSrc[__sj];                                             \
@@ -1850,7 +1865,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
           }                                                                  \
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
-            T v = *(const T *)(__srQ + __sj * __srInnerS);                   \
+            T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                   \
             REDUCE;                                                          \
             idx++;                                                           \
           }                                                                  \
@@ -1858,7 +1873,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       } else {                                                               \
         const boolean8_t *__srMM = (const boolean8_t *)(m) + __srMoff;       \
         if ( __srContig && __srMaskU ) {                                     \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj] ) {                                          \
               T v = __srSrc[__sj];                                           \
@@ -1871,7 +1886,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj * __srInnerMS] ) {                            \
-              T v = *(const T *)(__srQ + __sj * __srInnerS);                 \
+              T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                 \
               REDUCE;                                                        \
             } else {                                                         \
               (masked_cnt)++;                                                \
@@ -1890,6 +1905,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
 
 /* CA_SLAB_REDUCE_T_MAX_EX (generator-only): same as MIN_EX with `_CA_SIMD_MAX`. */
 #define CA_SLAB_REDUCE_T_MAX_EX(T, st, p, m, acc, INIT, REDUCE, masked_cnt) do { \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
     (acc) = (INIT);                                                          \
     int8_t    __srK       = (st).slab_ndim;                                  \
     int8_t    __srOuterK  = __srK - 1;                                       \
@@ -1934,7 +1950,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       const char *__srQ = (const char *)(p) + __srDoff;                      \
       if ( (m) == NULL ) {                                                   \
         if ( __srContig ) {                                                  \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           _CA_SIMD_MAX(acc)                                                  \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             T v = __srSrc[__sj];                                             \
@@ -1943,7 +1959,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
           }                                                                  \
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
-            T v = *(const T *)(__srQ + __sj * __srInnerS);                   \
+            T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                   \
             REDUCE;                                                          \
             idx++;                                                           \
           }                                                                  \
@@ -1951,7 +1967,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       } else {                                                               \
         const boolean8_t *__srMM = (const boolean8_t *)(m) + __srMoff;       \
         if ( __srContig && __srMaskU ) {                                     \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj] ) {                                          \
               T v = __srSrc[__sj];                                           \
@@ -1964,7 +1980,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj * __srInnerMS] ) {                            \
-              T v = *(const T *)(__srQ + __sj * __srInnerS);                 \
+              T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                 \
               REDUCE;                                                        \
             } else {                                                         \
               (masked_cnt)++;                                                \
@@ -1990,6 +2006,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
  *   integers).
  */
 #define CA_SLAB_REDUCE_T_STAR_EX(T, st, p, m, acc, INIT, REDUCE, masked_cnt) do { \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
     (acc) = (INIT);                                                          \
     int8_t    __srK       = (st).slab_ndim;                                  \
     int8_t    __srOuterK  = __srK - 1;                                       \
@@ -2034,7 +2051,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       const char *__srQ = (const char *)(p) + __srDoff;                      \
       if ( (m) == NULL ) {                                                   \
         if ( __srContig ) {                                                  \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           _CA_SIMD_STAR(acc)                                                 \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             T v = __srSrc[__sj];                                             \
@@ -2043,7 +2060,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
           }                                                                  \
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
-            T v = *(const T *)(__srQ + __sj * __srInnerS);                   \
+            T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                   \
             REDUCE;                                                          \
             idx++;                                                           \
           }                                                                  \
@@ -2051,7 +2068,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       } else {                                                               \
         const boolean8_t *__srMM = (const boolean8_t *)(m) + __srMoff;       \
         if ( __srContig && __srMaskU ) {                                     \
-          const T *__srSrc = (const T *) __srQ;                              \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj] ) {                                          \
               T v = __srSrc[__sj];                                           \
@@ -2064,7 +2081,7 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             if ( ! __srMM[__sj * __srInnerMS] ) {                            \
-              T v = *(const T *)(__srQ + __sj * __srInnerS);                 \
+              T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                 \
               REDUCE;                                                        \
             } else {                                                         \
               (masked_cnt)++;                                                \
@@ -2129,6 +2146,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    The mask `m` applies to the SOURCE only (weights mask is overlaid onto
    source mask by the dispatcher). */
 #define CA_SLAB_REDUCE_ARRAY_T_EX(T, T_W, st, p, m, st_w, p_w, acc, INIT, REDUCE, masked_cnt) do { \
+    typedef T_W __ca_u_T_W CA_UNALIGNED;                                     \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
     (acc) = (INIT);                                                          \
     int8_t    __sraK       = (st).slab_ndim;                                 \
     int8_t    __sraOuterK  = __sraK - 1;                                     \
@@ -2182,8 +2201,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       const char *__sraWQ = (const char *)(p_w) + __sraWoff;                 \
       if ( (m) == NULL ) {                                                   \
         if ( __sraContig && __sraContigW ) {                                 \
-          const T   *__sraSrc = (const T   *) __sraQ;                        \
-          const T_W *__sraWgt = (const T_W *) __sraWQ;                       \
+          const __ca_u_T   *__sraSrc = (const __ca_u_T *) __sraQ;                        \
+          const __ca_u_T_W *__sraWgt = (const __ca_u_T_W *) __sraWQ;                       \
           for ( ca_size_t __saj = 0; __saj < __sraInnerN; __saj++ ) {        \
             T   v = __sraSrc[__saj];                                         \
             T_W w = __sraWgt[__saj];                                         \
@@ -2192,8 +2211,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
           }                                                                  \
         } else {                                                             \
           for ( ca_size_t __saj = 0; __saj < __sraInnerN; __saj++ ) {        \
-            T   v = *(const T   *)(__sraQ  + __saj * __sraInnerS);           \
-            T_W w = *(const T_W *)(__sraWQ + __saj * __sraInnerWS);          \
+            T   v = *(const __ca_u_T *)(__sraQ  + __saj * __sraInnerS);           \
+            T_W w = *(const __ca_u_T_W *)(__sraWQ + __saj * __sraInnerWS);          \
             REDUCE;                                                          \
             idx++;                                                           \
           }                                                                  \
@@ -2201,8 +2220,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       } else {                                                               \
         const boolean8_t *__sraMM = (const boolean8_t *)(m) + __sraMoff;     \
         if ( __sraContig && __sraContigW && __sraMaskU ) {                   \
-          const T   *__sraSrc = (const T   *) __sraQ;                        \
-          const T_W *__sraWgt = (const T_W *) __sraWQ;                       \
+          const __ca_u_T   *__sraSrc = (const __ca_u_T *) __sraQ;                        \
+          const __ca_u_T_W *__sraWgt = (const __ca_u_T_W *) __sraWQ;                       \
           for ( ca_size_t __saj = 0; __saj < __sraInnerN; __saj++ ) {        \
             if ( ! __sraMM[__saj] ) {                                        \
               T   v = __sraSrc[__saj];                                       \
@@ -2216,8 +2235,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
         } else {                                                             \
           for ( ca_size_t __saj = 0; __saj < __sraInnerN; __saj++ ) {        \
             if ( ! __sraMM[__saj * __sraInnerMS] ) {                         \
-              T   v = *(const T   *)(__sraQ  + __saj * __sraInnerS);         \
-              T_W w = *(const T_W *)(__sraWQ + __saj * __sraInnerWS);        \
+              T   v = *(const __ca_u_T *)(__sraQ  + __saj * __sraInnerS);         \
+              T_W w = *(const __ca_u_T_W *)(__sraWQ + __saj * __sraInnerWS);        \
               REDUCE;                                                        \
             } else {                                                         \
               (masked_cnt)++;                                                \
@@ -2249,6 +2268,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
  */
 #define CA_SLAB_REDUCE_ARRAY_T_PLUS_EX(T, T_W, st, p, m, st_w, p_w, acc,     \
                                        INIT, REDUCE, masked_cnt) do {        \
+    typedef T_W __ca_u_T_W CA_UNALIGNED;                                     \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
     (acc) = (INIT);                                                          \
     int8_t    __sraK       = (st).slab_ndim;                                 \
     int8_t    __sraOuterK  = __sraK - 1;                                     \
@@ -2302,8 +2323,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       const char *__sraWQ = (const char *)(p_w) + __sraWoff;                 \
       if ( (m) == NULL ) {                                                   \
         if ( __sraContig && __sraContigW ) {                                 \
-          const T   *__sraSrc = (const T   *) __sraQ;                        \
-          const T_W *__sraWgt = (const T_W *) __sraWQ;                       \
+          const __ca_u_T   *__sraSrc = (const __ca_u_T *) __sraQ;                        \
+          const __ca_u_T_W *__sraWgt = (const __ca_u_T_W *) __sraWQ;                       \
           _CA_SIMD_PLUS(acc)                                                 \
           for ( ca_size_t __saj = 0; __saj < __sraInnerN; __saj++ ) {        \
             T   v = __sraSrc[__saj];                                         \
@@ -2313,8 +2334,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
           }                                                                  \
         } else {                                                             \
           for ( ca_size_t __saj = 0; __saj < __sraInnerN; __saj++ ) {        \
-            T   v = *(const T   *)(__sraQ  + __saj * __sraInnerS);           \
-            T_W w = *(const T_W *)(__sraWQ + __saj * __sraInnerWS);          \
+            T   v = *(const __ca_u_T *)(__sraQ  + __saj * __sraInnerS);           \
+            T_W w = *(const __ca_u_T_W *)(__sraWQ + __saj * __sraInnerWS);          \
             REDUCE;                                                          \
             idx++;                                                           \
           }                                                                  \
@@ -2322,8 +2343,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       } else {                                                               \
         const boolean8_t *__sraMM = (const boolean8_t *)(m) + __sraMoff;     \
         if ( __sraContig && __sraContigW && __sraMaskU ) {                   \
-          const T   *__sraSrc = (const T   *) __sraQ;                        \
-          const T_W *__sraWgt = (const T_W *) __sraWQ;                       \
+          const __ca_u_T   *__sraSrc = (const __ca_u_T *) __sraQ;                        \
+          const __ca_u_T_W *__sraWgt = (const __ca_u_T_W *) __sraWQ;                       \
           for ( ca_size_t __saj = 0; __saj < __sraInnerN; __saj++ ) {        \
             if ( ! __sraMM[__saj] ) {                                        \
               T   v = __sraSrc[__saj];                                       \
@@ -2337,8 +2358,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
         } else {                                                             \
           for ( ca_size_t __saj = 0; __saj < __sraInnerN; __saj++ ) {        \
             if ( ! __sraMM[__saj * __sraInnerMS] ) {                         \
-              T   v = *(const T   *)(__sraQ  + __saj * __sraInnerS);         \
-              T_W w = *(const T_W *)(__sraWQ + __saj * __sraInnerWS);        \
+              T   v = *(const __ca_u_T *)(__sraQ  + __saj * __sraInnerS);         \
+              T_W w = *(const __ca_u_T_W *)(__sraWQ + __saj * __sraInnerWS);        \
               REDUCE;                                                        \
             } else {                                                         \
               (masked_cnt)++;                                                \
@@ -2378,6 +2399,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    docs/authoring/HOW_TO_WRITE_KERNEL.md.  Caller is responsible for invoking
    ca_iter_state_sync_slab on the output state after each slab. */
 #define CA_SLAB_MAP_T(T_IN, T_OUT, st_in, p_in, st_out, p_out, MAP_EXPR) do { \
+    typedef T_OUT __ca_u_T_OUT CA_UNALIGNED;                                 \
+    typedef T_IN __ca_u_T_IN CA_UNALIGNED;                                   \
     int8_t    __mK       = (st_in).slab_ndim;                                \
     int8_t    __mOuterK  = __mK - 1;                                         \
     ca_size_t __mInN     = (st_in).slab_dims[__mK - 1];                      \
@@ -2398,8 +2421,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       const char *__mQi = (const char *)(p_in)  + __mIOff;                   \
       char       *__mQo = (char *)      (p_out) + __mOOff;                   \
       if ( __mIContig && __mOContig ) {                                      \
-        const T_IN  *__mSi = (const T_IN  *) __mQi;                          \
-        T_OUT       *__mSo = (T_OUT *)       __mQo;                          \
+        const __ca_u_T_IN  *__mSi = (const __ca_u_T_IN *) __mQi;                          \
+        __ca_u_T_OUT       *__mSo = (__ca_u_T_OUT *)       __mQo;                          \
         for ( ca_size_t __mj = 0; __mj < __mInN; __mj++ ) {                  \
           T_IN  v = __mSi[__mj];                                             \
           T_OUT r;                                                           \
@@ -2408,10 +2431,10 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
         }                                                                    \
       } else {                                                               \
         for ( ca_size_t __mj = 0; __mj < __mInN; __mj++ ) {                  \
-          T_IN  v = *(const T_IN *)(__mQi + __mj * __mInS);                  \
+          T_IN  v = *(const __ca_u_T_IN *)(__mQi + __mj * __mInS);                  \
           T_OUT r;                                                           \
           MAP_EXPR;                                                          \
-          *(T_OUT *)(__mQo + __mj * __mOutS) = r;                            \
+          *(__ca_u_T_OUT *)(__mQo + __mj * __mOutS) = r;                            \
         }                                                                    \
       }                                                                      \
       for ( int8_t __mk = __mOuterK - 1; __mk >= 0; __mk-- ) {               \
@@ -2460,6 +2483,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    CA_SLAB_REDUCE_T / CA_SLAB_MAP_T. */
 #define CA_SLAB_SCAN_T(T_LOAD, T_OUT, st_in, p_in, m_in,                      \
                        st_out, p_out, INIT, STEP) do {                        \
+    typedef T_LOAD __ca_u_T_LOAD CA_UNALIGNED;                               \
+    typedef T_OUT __ca_u_T_OUT CA_UNALIGNED;                                 \
     T_OUT     acc          = (INIT);                                          \
     int8_t    __ssK        = (st_in).slab_ndim;                               \
     int8_t    __ssOuterK   = __ssK - 1;                                       \
@@ -2485,8 +2510,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       char       *__ssQo = (char *)      (p_out) + __ssOOff;                  \
       if ( (m_in) == NULL ) {                                                 \
         if ( __ssIContig && __ssOContig ) {                                   \
-          const T_LOAD *__ssSi = (const T_LOAD *) __ssQi;                     \
-          T_OUT *__ssSo = (T_OUT *) __ssQo;                                   \
+          const __ca_u_T_LOAD *__ssSi = (const __ca_u_T_LOAD *) __ssQi;                     \
+          __ca_u_T_OUT *__ssSo = (__ca_u_T_OUT *) __ssQo;                                   \
           for ( ca_size_t __sj = 0; __sj < __ssInnerN; __sj++ ) {              \
             T_LOAD v = __ssSi[__sj];                                          \
             T_OUT  r;                                                         \
@@ -2495,10 +2520,10 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
           }                                                                   \
         } else {                                                              \
           for ( ca_size_t __sj = 0; __sj < __ssInnerN; __sj++ ) {              \
-            T_LOAD v = *(const T_LOAD *)(__ssQi + __sj * __ssInS);            \
+            T_LOAD v = *(const __ca_u_T_LOAD *)(__ssQi + __sj * __ssInS);            \
             T_OUT  r;                                                         \
             STEP;                                                             \
-            *(T_OUT *)(__ssQo + __sj * __ssOutS) = r;                         \
+            *(__ca_u_T_OUT *)(__ssQo + __sj * __ssOutS) = r;                         \
           }                                                                   \
         }                                                                     \
       } else {                                                                \
@@ -2507,16 +2532,16 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
           T_OUT r;                                                            \
           if ( ! __ssMM[__ssMaskU ? __sj : __sj * __ssInMS] ) {               \
             T_LOAD v = __ssIContig                                            \
-              ? ((const T_LOAD *) __ssQi)[__sj]                               \
-              : *(const T_LOAD *)(__ssQi + __sj * __ssInS);                   \
+              ? ((const __ca_u_T_LOAD *) __ssQi)[__sj]                               \
+              : *(const __ca_u_T_LOAD *)(__ssQi + __sj * __ssInS);                   \
             STEP;                                                             \
           } else {                                                            \
             r = acc;   /* masked: write current running aggregate (legacy parity) */ \
           }                                                                   \
           if ( __ssOContig )                                                  \
-            ((T_OUT *) __ssQo)[__sj] = r;                                     \
+            ((__ca_u_T_OUT *) __ssQo)[__sj] = r;                                     \
           else                                                                \
-            *(T_OUT *)(__ssQo + __sj * __ssOutS) = r;                         \
+            *(__ca_u_T_OUT *)(__ssQo + __sj * __ssOutS) = r;                         \
         }                                                                     \
       }                                                                       \
       for ( int8_t __sk = __ssOuterK - 1; __sk >= 0; __sk-- ) {                \
@@ -2553,6 +2578,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    (defensive: falls back to holding the sentinel unmasked). */
 #define CA_SLAB_SCAN_T_GATED(T_LOAD, T_OUT, st_in, p_in, m_in,                \
                              st_out, p_out, m_out, INIT, STEP) do {           \
+    typedef T_LOAD __ca_u_T_LOAD CA_UNALIGNED;                               \
+    typedef T_OUT __ca_u_T_OUT CA_UNALIGNED;                                 \
     T_OUT     acc          = (INIT);                                          \
     int8_t    __ssK        = (st_in).slab_ndim;                               \
     int8_t    __ssOuterK   = __ssK - 1;                                       \
@@ -2581,8 +2608,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       int         __ssSeen   = 0;                                             \
       if ( (m_in) == NULL ) {                                                 \
         if ( __ssIContig && __ssOContig ) {                                   \
-          const T_LOAD *__ssSi = (const T_LOAD *) __ssQi;                     \
-          T_OUT *__ssSo = (T_OUT *) __ssQo;                                   \
+          const __ca_u_T_LOAD *__ssSi = (const __ca_u_T_LOAD *) __ssQi;                     \
+          __ca_u_T_OUT *__ssSo = (__ca_u_T_OUT *) __ssQo;                                   \
           for ( ca_size_t __sj = 0; __sj < __ssInnerN; __sj++ ) {             \
             T_LOAD v = __ssSi[__sj];                                          \
             T_OUT  r;                                                         \
@@ -2591,10 +2618,10 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
           }                                                                   \
         } else {                                                              \
           for ( ca_size_t __sj = 0; __sj < __ssInnerN; __sj++ ) {             \
-            T_LOAD v = *(const T_LOAD *)(__ssQi + __sj * __ssInS);            \
+            T_LOAD v = *(const __ca_u_T_LOAD *)(__ssQi + __sj * __ssInS);            \
             T_OUT  r;                                                         \
             STEP;                                                             \
-            *(T_OUT *)(__ssQo + __sj * __ssOutS) = r;                         \
+            *(__ca_u_T_OUT *)(__ssQo + __sj * __ssOutS) = r;                         \
           }                                                                   \
         }                                                                     \
       } else {                                                                \
@@ -2603,8 +2630,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
           T_OUT r;                                                            \
           if ( ! __ssMM[__ssMaskU ? __sj : __sj * __ssInMS] ) {               \
             T_LOAD v = __ssIContig                                            \
-              ? ((const T_LOAD *) __ssQi)[__sj]                               \
-              : *(const T_LOAD *)(__ssQi + __sj * __ssInS);                   \
+              ? ((const __ca_u_T_LOAD *) __ssQi)[__sj]                               \
+              : *(const __ca_u_T_LOAD *)(__ssQi + __sj * __ssInS);                   \
             STEP;                                                             \
             __ssSeen = 1;                                                     \
           } else if ( ! __ssSeen && (m_out) != NULL ) {                       \
@@ -2614,9 +2641,9 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
             r = acc;   /* masked after first present: hold running extremum */\
           }                                                                   \
           if ( __ssOContig )                                                  \
-            ((T_OUT *) __ssQo)[__sj] = r;                                     \
+            ((__ca_u_T_OUT *) __ssQo)[__sj] = r;                                     \
           else                                                                \
-            *(T_OUT *)(__ssQo + __sj * __ssOutS) = r;                         \
+            *(__ca_u_T_OUT *)(__ssQo + __sj * __ssOutS) = r;                         \
         }                                                                     \
       }                                                                       \
       for ( int8_t __sk = __ssOuterK - 1; __sk >= 0; __sk-- ) {               \
@@ -2646,6 +2673,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    "last live value" trail.  */
 #define CA_SLAB_SCAN_TA(T_LOAD, T_OUT, T_ACC, st_in, p_in, m_in,              \
                         st_out, p_out, INIT, STEP) do {                       \
+    typedef T_LOAD __ca_u_T_LOAD CA_UNALIGNED;                               \
+    typedef T_OUT __ca_u_T_OUT CA_UNALIGNED;                                 \
     T_ACC     acc          = (INIT);                                          \
     int8_t    __ssK        = (st_in).slab_ndim;                               \
     int8_t    __ssOuterK   = __ssK - 1;                                       \
@@ -2673,16 +2702,16 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
       if ( (m_in) == NULL ) {                                                 \
         for ( ca_size_t __sj = 0; __sj < __ssInnerN; __sj++ ) {               \
           T_LOAD v = __ssIContig                                              \
-            ? ((const T_LOAD *) __ssQi)[__sj]                                 \
-            : *(const T_LOAD *)(__ssQi + __sj * __ssInS);                     \
+            ? ((const __ca_u_T_LOAD *) __ssQi)[__sj]                                 \
+            : *(const __ca_u_T_LOAD *)(__ssQi + __sj * __ssInS);                     \
           T_OUT  r;                                                           \
           int first = __ssFirst;                                              \
           STEP;                                                               \
           __ssFirst = 0;                                                      \
           if ( __ssOContig )                                                  \
-            ((T_OUT *) __ssQo)[__sj] = r;                                     \
+            ((__ca_u_T_OUT *) __ssQo)[__sj] = r;                                     \
           else                                                                \
-            *(T_OUT *)(__ssQo + __sj * __ssOutS) = r;                         \
+            *(__ca_u_T_OUT *)(__ssQo + __sj * __ssOutS) = r;                         \
         }                                                                     \
       } else {                                                                \
         const boolean8_t *__ssMM = (const boolean8_t *)(m_in) + __ssMoff;     \
@@ -2690,8 +2719,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
           T_OUT r;                                                            \
           if ( ! __ssMM[__ssMaskU ? __sj : __sj * __ssInMS] ) {               \
             T_LOAD v = __ssIContig                                            \
-              ? ((const T_LOAD *) __ssQi)[__sj]                               \
-              : *(const T_LOAD *)(__ssQi + __sj * __ssInS);                   \
+              ? ((const __ca_u_T_LOAD *) __ssQi)[__sj]                               \
+              : *(const __ca_u_T_LOAD *)(__ssQi + __sj * __ssInS);                   \
             int first = __ssFirst;                                            \
             STEP;                                                             \
             __ssFirst = 0;                                                    \
@@ -2699,9 +2728,9 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
             r = (T_OUT) 0;   /* masked: neutral output for downstream OR */   \
           }                                                                   \
           if ( __ssOContig )                                                  \
-            ((T_OUT *) __ssQo)[__sj] = r;                                     \
+            ((__ca_u_T_OUT *) __ssQo)[__sj] = r;                                     \
           else                                                                \
-            *(T_OUT *)(__ssQo + __sj * __ssOutS) = r;                         \
+            *(__ca_u_T_OUT *)(__ssQo + __sj * __ssOutS) = r;                         \
         }                                                                     \
       }                                                                       \
       for ( int8_t __sk = __ssOuterK - 1; __sk >= 0; __sk-- ) {                \

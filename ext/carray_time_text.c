@@ -234,7 +234,9 @@ ca_time_text_read (VALUE str, ca_time_text_t *t, int wide)
         }
       }
     }
-    if ( hour > 24 || min > 59 || sec > 59 ) {
+    /* Second 60 is the leap second; it carries into the next minute below,
+       as CArray.time reads it. */
+    if ( hour > 24 || min > 59 || sec > 60 ) {
       return CA_TIME_TEXT_UNREADABLE;
     }
     /* Hour 24 is the end of the day, 24:00:00, and nothing past it, as in
@@ -359,7 +361,7 @@ rb_ca_parse_time_text (int argc, VALUE *argv, VALUE self)
   boolean8_t *m_in, *m_out;
   int64_t *days, *nsod, *months, *ticks;
   int64_t per_day = 1, ns_per_tick = 1;
-  ID unit;
+  ID unit = 0;
   int clock = 0, fraction = 0, coarse = 2, any = 0, wide;
   int calendar = 0;              /* 1 ticks of months, 2 of years */
   ca_size_t i;

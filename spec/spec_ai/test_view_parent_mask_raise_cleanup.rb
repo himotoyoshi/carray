@@ -5,7 +5,7 @@
 # under ca_fill_or_free (ca_view_inherit_mask).
 #
 # The struct is small, so the parent has 8 axes and each case runs 3000
-# times; measured with utils/measure_leak.rb (macOS only).
+# times; measured with utils/measure_leak.rb.
 
 require "test/unit"
 require "carray"
@@ -49,9 +49,9 @@ class TestViewParentMaskRaiseCleanup < Test::Unit::TestCase
   def test_views_free_what_they_took
     VIEWS.each do |expr|
       bytes = LeakMeter.bytes_per_call(expr, setup: SETUP, calls: 3000, warmup: 100)
-      omit "malloc zone statistics unavailable" if bytes.nil?
+      omit "measurement unavailable" if bytes.nil?
       assert_operator bytes, :<, 50,
-                      "#{expr}: the malloc zone grew #{bytes.round} bytes per call"
+                      "#{expr}: the C heap grew #{bytes.round} bytes per call"
     end
   end
 

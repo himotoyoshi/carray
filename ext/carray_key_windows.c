@@ -150,6 +150,10 @@ rb_ca_s_key_window_ranges (VALUE self, VALUE vkeys, VALUE vgroups,
        ( ck->data_type != CA_INT64 && ck->data_type != CA_FLOAT64 ) ) {
     rb_raise(rb_eArgError, "__find_key_window_row_ranges__: unexpected arguments");
   }
+  /* The completeness test takes the key difference modulo the interval. */
+  if ( !NIL_P(rinterval) && !(NUM2DBL(rinterval) > 0) ) {
+    rb_raise(rb_eArgError, "__find_key_window_row_ranges__: interval should be positive");
+  }
   n = ck->elements;
   grp = (const int64_t *) cg->ptr;
   nout = n;

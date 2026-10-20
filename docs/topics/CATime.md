@@ -388,7 +388,10 @@ A duration is a `CATimedelta::Element` or a String that reads as one
 (`"3 days"`, `"30 minutes"`); a time is a `CATime::Element`, a `Time`, a
 `Date` or any other String (`"2024-01-02"`). The same rules apply as between
 arrays: the time is the anchor, a finer duration is truncated, and a coarser
-one has to land on the time's grid.
+one has to land on the time's grid. A duration String added to a time is one
+step of its own resolution: `"15 minutes"` is one 15-minute step, so on a
+`"10 minutes"` grid it raises, as a one-cell duration array with unit
+`"15 minutes"` does.
 
 ```ruby
 dt + "3 days"              # three days later
@@ -609,8 +612,9 @@ dt.to_datetime  # => CArray(:object) of Ruby DateTime (UTC)
 
 **A reduction reports on the array's own unit.** Whatever the answer is —
 a centroid, a median, a spread — it comes back on the grid the array is
-stored on, rounded to the nearest tick. Precision is something the caller
-declares, before the reduction, with `to_unit`:
+stored on, rounded to the nearest tick; a tie goes to the later tick, before
+1970 as after it. Precision is something the caller declares, before the
+reduction, with `to_unit`:
 
 ```ruby
 t = CArray.time(%w[2024-06-15 2024-06-16], unit: :D)
@@ -1087,6 +1091,15 @@ nearest head with ties toward the future, and is exact even for odd step widths
 (no half-tick loss). These take an argument, so they do **not** collide with the
 argument-less numeric `CArray#floor` / `#round`.
 
+"Nearest" is measured by the instant. A `:M` or `:Y` value stands for the start
+of its month or year, so a month array rounds to the year the way the same
+dates do on `:D`:
+
+```ruby
+CArray.time(%w[1889-07 1889-08], unit: :M).round(unit: :Y)       # => 1889, 1890
+CArray.time(%w[1889-07-01 1889-08-01], unit: :D).round(unit: :Y) # => 1889, 1890
+```
+
 All three are `snap` with `direction:` fixed — the shape `CArray#snap`
 (`step`, `offset:`, `direction:`) already has for numbers, with a grid
 standing in for the step-and-offset pair:
@@ -1478,6 +1491,13 @@ fetched cell stores back unchanged:
 dt[0] = dt[2]
 dt[0] == dt[2]     # => true
 ```
+
+An `Integer` written into a time is a tick count on the array's grid, as
+`CArray.time` reads one: `dt[0] = 5` on a `:D` axis is 1970-01-06. The
+same holds wherever a value goes into the array's cells — the fill of a
+`fill_value:`, a branch of `then_else` — so `t.min(fill_value: 5)` and
+`cond.then_else(t, 5)` give 1970-01-06 too. Write a `Time`, a `Date`, a
+String or an `Element` to mean an instant.
 
 A bare `Integer` is *not* converted — it is written to storage raw, the
 deliberate storage-space escape (§16.2). A value the unit algebra

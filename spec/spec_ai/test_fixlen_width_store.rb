@@ -8,28 +8,28 @@ require "carray"
 class TestFixlenWidthStore < Test::Unit::TestCase
 
   def test_store_narrow_into_wide_pads_each_cell
-    o = CArray.fixlen_string(["abcdefgh"] * 2).parent
-    o[] = CArray.fixlen_string(%w[x y]).parent
+    o = CArray.fixlen_string(["abcdefgh"] * 2).send(:face_storage)
+    o[] = CArray.fixlen_string(%w[x y]).send(:face_storage)
     assert_equal ["x" + "\0" * 7, "y" + "\0" * 7], o.to_a
   end
 
   def test_store_wide_into_narrow_cuts_each_cell
-    o = CArray.fixlen_string(%w[ab c]).parent
-    o[] = CArray.fixlen_string(%w[xyzw q]).parent
+    o = CArray.fixlen_string(%w[ab c]).send(:face_storage)
+    o[] = CArray.fixlen_string(%w[xyzw q]).send(:face_storage)
     assert_equal ["xy", "q\0"], o.to_a
   end
 
   def test_store_matches_the_string_rule
-    a = CArray.fixlen_string(%w[ab c]).parent
+    a = CArray.fixlen_string(%w[ab c]).send(:face_storage)
     a[] = ["xyzw", "q"]
-    b = CArray.fixlen_string(%w[ab c]).parent
-    b[] = CArray.fixlen_string(%w[xyzw q]).parent
+    b = CArray.fixlen_string(%w[ab c]).send(:face_storage)
+    b[] = CArray.fixlen_string(%w[xyzw q]).send(:face_storage)
     assert_equal a.to_a, b.to_a
   end
 
   def test_store_into_a_view
-    m = CArray.fixlen_string(%w[ab c d]).parent
-    m[0..1] = CArray.fixlen_string(%w[xyzw q]).parent
+    m = CArray.fixlen_string(%w[ab c d]).send(:face_storage)
+    m[0..1] = CArray.fixlen_string(%w[xyzw q]).send(:face_storage)
     assert_equal ["xy", "q\0", "d\0"], m.to_a
   end
 

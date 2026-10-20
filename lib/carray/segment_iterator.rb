@@ -252,12 +252,20 @@ class CASegmentIterator < CAIterator
     return axis_by_masked_copy(axis, :variance) if axis
     m = moments
     return per_segment(core_reduce_kind(:variance)) { |s| s.variance } unless m
+    centred_variance(m, 1)
+  end
+
+  # The kernel divides the centred sum of squares by count - ddof once, as
+  # the core reduction does; scaling the sample variance by (n-1)/n instead
+  # rounds twice and lands an ulp away.
+  def centred_variance (m, ddof)
     cnt   = m[:count]
-    means = m[:sum] / cnt.float64    # per-segment mean (garbage where count 0/1,
-    out   = CArray.float64(@k)       #   ignored by the kernel's n<2 guards)
-    grouped.send(:__reduceat_variance__, @offsets, means, cnt, out)
+    means = m[:sum] / cnt.float64    # per-segment mean (garbage where the count
+    out   = CArray.float64(@k)       #   is too small; the kernel masks those)
+    grouped.send(:__reduceat_variance__, @offsets, means, cnt, out, ddof)
     out
   end
+  private :centred_variance
 
   # @overload stddev
   #   Returns per-segment SAMPLE standard deviation (ddof=1) as float64.
@@ -375,11 +383,7 @@ class CASegmentIterator < CAIterator
     return axis_by_masked_copy(axis, :variancep) if axis
     m = moments
     return per_segment(core_reduce_kind(:variancep)) { |s| s.variancep } unless m
-    cnt = m[:count]
-    vp  = variance * (cnt - 1).float64 / cnt.float64
-    one = cnt.eq(1)                       # one value: defined, unlike variance --
-    vp[one] = (m[:sum] - m[:sum])[one]    # 0.0, or NaN for a NaN or an infinity
-    vp
+    centred_variance(m, 0)               # one value: 0.0, or NaN for a NaN or an infinity
   end
 
   # @overload stddevp

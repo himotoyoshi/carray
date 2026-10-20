@@ -57,6 +57,14 @@ class CArray
       else
         values = Array.new(n) { |i| block.call(i) }
       end
+    elsif arg.is_a?(Integer)
+      raise ArgumentError,
+            "CArray.string: a count is given with a block that makes each " \
+            "String (CArray.string(n) { |i| ... })"
+    elsif arg.is_a?(String) || ! arg.respond_to?(:to_a)
+      raise TypeError,
+            "CArray.string: expected an Array of Strings, an object array or " \
+            "a String array (got #{arg.class})"
     else
       values = arg.to_a
     end

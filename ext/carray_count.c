@@ -252,8 +252,10 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     int8_t  slab_axes[CA_RANK_MAX];
     int8_t  naxes;
     VALUE   axis_val = Qnil;
+    int     keep_axis = 0;
     if ( ! NIL_P(opt_hash) ) {
       axis_val = rb_hash_lookup2(opt_hash, ID2SYM(rb_intern("axis")), Qnil);
+      keep_axis = RTEST(rb_hash_lookup2(opt_hash, ID2SYM(rb_intern("keep_axis")), Qfalse));
     }
     naxes = rb_ca_parse_reduce_axes_kw(axis_val, src, slab_axes);
     (void) inner_axes;  /* axes no longer parsed from inner_axes */
@@ -269,6 +271,9 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
         if ( ! is_slab[k] ) {
           out_dim[out_ndim++] = src->dim[k];
           base_elements *= src->dim[k];
+        }
+        else if ( keep_axis ) {
+          out_dim[out_ndim++] = 1;   /* the reduced axis kept at length 1 */
         }
       }
       /* Full reduction (naxes == ndim): base_elements = 1, no base axes. */
@@ -377,6 +382,7 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
         self = rb_ca_wrap_readonly(self, INT2NUM(qt));
       }
     }
+    self = ca_fixlen_widen_for_query(self, rval);
     /* Pass full argv; count_equal_ki pops argv[0] as value_arg. */
     return rb_ca_count_equal_ki(argc, argv, self);
   }

@@ -1473,7 +1473,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
       /* 1-shot ALLOCV path.  At most 1 operand needs ALLOCV; the other is
          alias-direct. */
       volatile VALUE h1 = Qnil, h2 = Qnil;
-      char *p1, *p2;
+      char *p1 = NULL, *p2 = NULL;
       int a1 = 0, a2 = 0;
       (void) h1; (void) h2;
 
@@ -1841,7 +1841,7 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
 
     if ( !use_chunked ) {
       volatile VALUE h1 = Qnil, h2 = Qnil, h3 = Qnil;
-      char *p1, *p2, *p3;
+      char *p1 = NULL, *p2 = NULL, *p3 = NULL;
       int attached1, attached2, attached3;
       (void) h1; (void) h2; (void) h3;
 
@@ -1984,7 +1984,7 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
 
     if ( !use_chunked ) {
       volatile VALUE h2 = Qnil, h3 = Qnil;
-      char *p2, *p3;
+      char *p2 = NULL, *p3 = NULL;
       int attached2, attached3;
       ca_triop_call_t k;
       CArray *held[3];
@@ -2129,7 +2129,7 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
 
   {
     volatile VALUE h1 = Qnil;
-    char *p1;
+    char *p1 = NULL;
     int attached1;
     (void) h1;
 
@@ -2452,7 +2452,7 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
 
       if ( !use_chunked ) {
         volatile VALUE h1 = Qnil, h2 = Qnil;
-        char *p1, *p2;
+        char *p1 = NULL, *p2 = NULL;
         int attached1, attached2;
         (void) h1; (void) h2;
 

@@ -171,18 +171,66 @@ ca_object_empty_wrap (CArray *w)
   }
 }
 
+/* Moves the cells of a wrap (or of its lent mask, `w`) into an array of
+   their own, held by `holder` under `name`, and points `w` at them.  The
+   cells are those the hook left in the caller's buffer. */
+static void
+ca_object_keep_cells (VALUE holder, const char *name, CArray *w)
+{
+  volatile VALUE cells;
+  CArray *c;
+  cells = rb_carray_new(w->data_type, w->ndim, w->dim, w->bytes, NULL);
+  c = (CArray *) DATA_PTR(cells);
+  memcpy(c->ptr, w->ptr, (size_t) w->elements * w->bytes);
+  rb_ivar_set(holder, rb_intern(name), cells);
+  w->ptr = c->ptr;
+}
+
+/* Takes the caller's buffer back from a wrap the hook was lent, together
+   with `lent_mask`, the wrap of the data's mask bits it was lent with (or
+   NULL).  When the hook took a view of either, the view outlives the call,
+   so both keep their cells; otherwise both are left with none.  A mask the
+   hook made on the wrap is the wrap's own, with cells of its own. */
+static void
+ca_object_take_back (VALUE wrap, CArray *lent_mask)
+{
+  CArray *w = (CArray *) DATA_PTR(wrap);
+  CArray *m = ( lent_mask != NULL && w->mask == lent_mask ) ? lent_mask : NULL;
+  int viewed = ca_test_flag(w, CA_FLAG_LENT_VIEWED) ||
+               ( m != NULL && ca_test_flag(m, CA_FLAG_LENT_VIEWED) );
+  ca_unset_flag(w, CA_FLAG_LENT | CA_FLAG_LENT_VIEWED);
+  if ( lent_mask != NULL ) {
+    ca_unset_flag(lent_mask, CA_FLAG_LENT | CA_FLAG_LENT_VIEWED);
+  }
+  if ( viewed ) {
+    ca_object_keep_cells(wrap, "kept_cells", w);
+    if ( m != NULL ) {
+      ca_object_keep_cells(wrap, "kept_mask_cells", m);
+    }
+  }
+  else {
+    if ( m != NULL ) {
+      ca_object_empty_wrap(m);
+    }
+    ca_object_empty_wrap(w);
+  }
+}
+
 /* Calls copy_data / sync_data with a wrap of a caller's buffer, shaped as
-   the object, and takes the buffer back however the call leaves.  The wrap
-   shares the object's mask (the data's), and whatever mask it holds after
-   the call becomes the data's: a hook that writes masked values masks the
-   object's cells.  The data points at the buffer for the duration too, for
-   a hook that reads the object back while it runs. */
+   the object, and takes the buffer back however the call leaves.  When the
+   data has a mask, the wrap's mask is a wrap of its bits: a hook that writes
+   masked values masks the object's cells, and the data keeps its mask
+   whatever the hook does with the wrap's.  A mask the hook makes on a wrap
+   that had none is the wrap's own and goes with it.  The data points at the
+   buffer for the duration too, for a hook that reads the object back while
+   it runs. */
 
 typedef struct {
   CAObject *ca;
   char     *saved;
   ID        mid;
   VALUE     wrap;
+  CArray   *mask;      /* the wrap of the data's mask bits, or NULL */
 } ca_object_lend_t;
 
 static VALUE
@@ -196,11 +244,8 @@ static VALUE
 ca_object_lend_restore (VALUE varg)
 {
   ca_object_lend_t *l = (ca_object_lend_t *) varg;
-  CArray *w = (CArray *) DATA_PTR(l->wrap);
-  l->ca->data->mask = w->mask;
-  w->mask = NULL;
-  ca_object_empty_wrap(w);
   l->ca->data->ptr = l->saved;
+  ca_object_take_back(l->wrap, l->mask);
   return Qnil;
 }
 
@@ -213,7 +258,14 @@ ca_object_call_lending (CAObject *ca, void *ptr, const char *mid)
   w = ca_wrap_new(data->data_type, data->ndim, data->dim, data->bytes,
                   NULL, (char *) ptr);
   l.wrap  = ca_wrap_struct(w);
-  w->mask = data->mask;
+  l.mask  = NULL;
+  if ( data->mask != NULL ) {
+    l.mask = (CArray *) ca_wrap_new(CA_BOOLEAN, data->ndim, data->dim, 0,
+                                    NULL, data->mask->ptr);
+    ca_set_flag(l.mask, CA_FLAG_LENT);
+    w->mask = l.mask;
+  }
+  ca_set_flag(w, CA_FLAG_LENT);
   l.ca    = ca;
   l.saved = data->ptr;
   l.mid   = rb_intern(mid);
@@ -253,7 +305,7 @@ ca_object_hook_release (VALUE varg)
   ca_object_hook_t *h = (ca_object_hook_t *) varg;
   int i;
   for ( i = 0; i < h->ntrans; i++ ) {
-    ca_object_empty_wrap((CArray *) DATA_PTR(h->trans[i]));
+    ca_object_take_back(h->trans[i], NULL);
   }
   return Qnil;
 }
@@ -742,7 +794,6 @@ ca_object_setup (CAObject *ca,
                int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes)
 {
   ca_size_t elements;
-  int8_t i;
 
   /* check arguments */
 
@@ -1194,6 +1245,7 @@ ca_object_wrap_transient (int8_t data_type, ca_size_t bytes,
   }
 
   wrap = ca_wrap_new(data_type, ndim, dim, bytes, NULL, (char *) data);
+  ca_set_flag(wrap, CA_FLAG_LENT);
   return ca_wrap_struct(wrap);
 }
 

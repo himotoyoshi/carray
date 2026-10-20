@@ -193,6 +193,14 @@ rb_ca_fill (VALUE self, VALUE rval)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
   if ( ca_is_empty(ca) ) {
+    /* No cell to fill, but a value no cell could hold is refused, as an
+       assignment to the empty array refuses it. */
+    if ( rval != CA_UNDEF && ca->bytes > 0 ) {
+      volatile VALUE holder;
+      char *fval = ALLOCV_N(char, holder, ca->bytes);
+      rb_ca_obj2ptr(self, rval, fval);
+      ALLOCV_END(holder);
+    }
     return self;                /* empty = no-op fill; return self for chaining */
   }
 
@@ -884,9 +892,9 @@ rb_ca_index_restruct_block (int16_t *ndimp, ca_size_t *shrink, ca_size_t *dim,
 
   offset = 0;
 
-  if ( idx[0] == -1 ) {
-    j = 0;
-    while ( idx[++j] ) {
+  if ( ndim0 > 0 && idx[0] == -1 ) {
+    /* j = the number of leading axes collapsed by a scalar index */
+    for (j=1; j<ndim0 && idx[j] == -1; j++) {
       ;
     }
 
@@ -1365,6 +1373,7 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
      element, which is what the shape rules then hold it to. */
   if ( nscalar == nclean ) {
     VALUE blocks[CA_RANK_MAX];
+    ca_check_rank_fits(nunder, NULL);   /* the result has the :_ axes only */
     for (i = 0; i < nclean; i++) {
       blocks[i] = rb_assoc_new(clean[i], INT2FIX(1));
     }
@@ -1378,6 +1387,10 @@ rb_ca_fetch_newaxis (int argc, VALUE *argv, VALUE self, CArray *ca)
   base = rb_ca_fetch_method(nclean, clean, self);
 
   TypedData_Get_Struct(base, CArray, &carray_data_type, cb);
+
+  /* The result has the base's axes and one for each :_, before any is
+     written into final_dims. */
+  ca_check_rank_fits((long) nunder + cb->ndim, NULL);
 
   /* Reconstruct final shape: walk original argv.  :_ -> size-1, scalar
      (Integer) -> dropped (skip), else -> base.dim[cursor].  A key gives one

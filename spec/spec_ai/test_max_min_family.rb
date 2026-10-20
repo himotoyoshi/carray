@@ -189,4 +189,18 @@ class TestMaxMinFamily < Test::Unit::TestCase
       assert_equal(-1, (1.0 / a.lazy.minimum(b).to_a[0]).infinite?)
     end
   end
+
+  # pmax / pmin follow the same rule rather than C's fmax / fmin, whose
+  # choice differs between C libraries.
+  def test_pmax_and_pmin_of_two_zeros_do_not_depend_on_order
+    [CArray::Float64, CArray::Float32].each do |t|
+      z = t.new(1).fill(-0.0)
+      o = t.new(1).fill(0.0)
+      [[z, o], [o, z]].each do |a, b|
+        assert_equal 1, (1.0 / a.pmax(b)[0]).infinite?
+        assert_equal(-1, (1.0 / a.pmin(b)[0]).infinite?)
+        assert_equal(-1, (1.0 / a.lazy.pmin(b).to_a[0]).infinite?)
+      end
+    end
+  end
 end

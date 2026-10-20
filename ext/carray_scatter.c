@@ -13,7 +13,8 @@
                min / max: real numeric only (complex has no order)
                (boolean / object / fixlen → CADataTypeError; the bang
                cannot widen self, same rationale as fma! / fms!)
-               replace: numeric or boolean (assignment, no widening)
+               replace: any type (assignment, no widening); an object or
+               fixlen array is written through the indexer
     scalar     any Numeric, true / false, or UNDEF; converted to self's
                type as the indexer's store converts it (a value that does
                not fit raises, as `self[i] = v` does)
@@ -63,7 +64,7 @@ typedef union {
 #define LOOP_SCALAR(T, APPLY) LOOP_SCALAR_V(T, APPLY, SCALAR_REAL(T))
 
 #define LOOP_SCALAR_V(T, APPLY, VS) do { \
-  T *q = (T *) qbase; \
+  CA_U(T) *q = (CA_U(T) *) qbase; \
   T  vs = VS; \
   if ( mself ) { \
     for (i = 0; i < n; i++) { \
@@ -85,8 +86,8 @@ typedef union {
 } while (0)
 
 #define LOOP_VEC(T, APPLY) do { \
-  T *q = (T *) qbase; \
-  T *r = (T *) cv->ptr; \
+  CA_U(T) *q = (CA_U(T) *) qbase; \
+  CA_U(T) *r = (CA_U(T) *) cv->ptr; \
   if ( mself ) { \
     for (i = 0; i < n; i++) { \
       if ( maddrs && maddrs[i] ) continue; \
@@ -120,7 +121,7 @@ typedef union {
 #define LOOP_SCALAR_REPLACE(T) LOOP_SCALAR_REPLACE_V(T, SCALAR_REAL(T))
 
 #define LOOP_SCALAR_REPLACE_V(T, VS) do { \
-  T *q = (T *) qbase; \
+  CA_U(T) *q = (CA_U(T) *) qbase; \
   T  vs = VS; \
   for (i = 0; i < n; i++) { \
     if ( maddrs && maddrs[i] ) continue; \
@@ -136,8 +137,8 @@ typedef union {
 } while (0)
 
 #define LOOP_VEC_REPLACE(T) do { \
-  T *q = (T *) qbase; \
-  T *r = (T *) cv->ptr; \
+  CA_U(T) *q = (CA_U(T) *) qbase; \
+  CA_U(T) *r = (CA_U(T) *) cv->ptr; \
   for (i = 0; i < n; i++) { \
     if ( maddrs && maddrs[i] ) continue; \
     addr = p[i]; \
@@ -592,6 +593,22 @@ AT_BODY(ca_scatter_replace_body, DISPATCH_NUMERIC_REPLACE())
 static VALUE
 rb_ca_scatter_replace_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
+  /* An object or fixlen array takes the assignment through the indexer,
+     which reads and writes its cells by their own rules (a VALUE kept
+     visible to the GC, a fixlen value fitted to the cell); the kernel
+     below is for the numeric and boolean cells. */
+  {
+    CArray *cs;
+    TypedData_Get_Struct(self, CArray, &carray_data_type, cs);
+    if ( cs->data_type == CA_OBJECT || cs->data_type == CA_FIXLEN ) {
+      rb_ca_modify(self);
+      if ( RB_TYPE_P(raddrs, T_ARRAY) ) {     /* a list of addresses */
+        raddrs = rb_ca_wrap_readonly(raddrs, INT2NUM(CA_SIZE));
+      }
+      rb_funcall(rb_ca_flatten(self), rb_intern("[]="), 2, raddrs, rvals);
+      return self;
+    }
+  }
   /* Pre-scan: if vals is a masked CArray and self isn't yet masked,
      promote self so the kernel can flip target cells to masked (indexer
      `self[addrs] = vals` establishes self.mask lazily the same way). */

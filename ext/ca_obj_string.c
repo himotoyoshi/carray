@@ -216,7 +216,10 @@ ca_string_refuse_cell (VALUE v, const char *where)
            "UNDEF masks a cell)", where, rb_obj_classname(v));
 }
 
-/* Every cell of `parent` that is not masked is a String. */
+/* Every cell of `parent` that is not masked is a String.  Under a masked
+   cell of an entity that can be written, a value that is not a String (the
+   0 an object array starts with) becomes an empty String, so that the cell
+   is still a String once it is unmasked. */
 static void
 ca_string_check_cells (VALUE parent_val, CArray *parent)
 {
@@ -226,8 +229,14 @@ ca_string_check_cells (VALUE parent_val, CArray *parent)
     VALUE *p = (VALUE *) parent->ptr;
     boolean8_t *m = ( parent->mask && parent->mask->ptr )
                     ? (boolean8_t *) parent->mask->ptr : NULL;
+    int writable = ! ca_is_readonly(parent);
     for (i = 0; i < parent->elements; i++) {
-      if ( m && m[i] ) continue;
+      if ( m && m[i] ) {
+        if ( writable && ! RB_TYPE_P(p[i], T_STRING) ) {
+          p[i] = rb_utf8_str_new("", 0);
+        }
+        continue;
+      }
       if ( ! RB_TYPE_P(p[i], T_STRING) ) {
         snprintf(where, sizeof(where), "cell %" PRId64, (int64_t) i);
         ca_string_refuse_cell(p[i], where);

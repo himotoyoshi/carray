@@ -68,19 +68,19 @@ CAMeld.new([a, b, c], axis: 0)       # low-level constructor
 ```
 
 `axis:` defaults to `0` (outer axis) and accepts negative values
-(normalised against the reference `ndim`).  There is no `data_type:`
-kwarg: `CArray.meld` requires every piece to already have the same
-`data_type` (see below).
+(normalised against the reference `ndim`).  `data_type:` sets the
+result's data type; without it pieces of different data types are
+promoted (see below).
 
 `CArray.meld` handles both uniform and ragged inputs through the same
 segment-major engine — the meld axis is allowed to differ per parent
 (that's the "ragged" case), and reductions land at eager parity
 regardless via the per-parent decompose fast path.
 
-Uniform check at construction time — parents must agree on:
+Uniform check at construction time (after the promotion) — parents must agree on:
 
 - `ndim`
-- `data_type` (mismatch raises — see below)
+- `data_type`
 - byte width
 - every axis length except `meld_axis`
 - Face: either none of the pieces is a Face, or all are of one Face class
@@ -88,20 +88,18 @@ Uniform check at construction time — parents must agree on:
 
 Any mismatch raises `ArgumentError`.
 
-### `data_type` strictness
+### Mixed `data_type`
 
-`CArray.meld` is a view constructor and refuses to auto-cast, since a
-cast produces a fresh entity and breaks the "identity preserved" view
-contract.  When you have pieces with mixed `data_type`:
+`CArray.meld` brings pieces of different data types to a common one as
+`CArray.stack` does (`promote_list`, or `data_type:`): each piece that
+needs it is wrapped in a cast view, so the result is still a view and
+writes reach the pieces, converted back on the way in.  `CAMeld.new`, the
+raw constructor, takes pieces of one data type.
 
-- pre-cast pieces yourself: `CArray.meld(a.to_type(:float64), b, ...)`;
-- use {CArray.concatenate} (eager, materialised copy — auto-casts to the
-  common type or an explicit `data_type:` kwarg).
-
-CAFrame mirrors this split: {CAFrame.meld} is the strict view frame
-(each column is a CAMeld view; same data type required per column) and
-{CAFrame.concatenate} is the eager auto-casting alternative (each
-column is a fresh entity from {CArray.concatenate}).
+{CAFrame.meld} does not promote: a column whose pieces differ in data type
+raises, since promotion would hide schema drift.  {CAFrame.concatenate} is
+the eager auto-casting alternative (each column is a fresh entity from
+{CArray.concatenate}).
 
 ### Nested `meld` flattens
 

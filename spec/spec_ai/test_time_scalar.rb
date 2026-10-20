@@ -287,4 +287,13 @@ class TestDatetimeScalar < Test::Unit::TestCase
     err = assert_raise(TypeError) { t + 3 }
     assert_match(/add a duration/, err.message)
   end
+  # A lazy operand is named as the CArray it is, not by its node class.
+  def test_a_lazy_operand_is_named_a_carray
+    t = CArray.time(["2024-01-01"], unit: :D)
+    e = assert_raise(TypeError) { t + CA_INT32([1]).lazy }
+    assert_match(/\ACATime \+ CArray is not allowed/, e.message)
+    e = assert_raise(TypeError) { t - CA_INT32([1]).lazy }
+    assert_match(/\ACATime - CArray is not allowed/, e.message)
+  end
+
 end

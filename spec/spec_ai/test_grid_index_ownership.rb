@@ -6,8 +6,7 @@
 #   is collected.
 # - An index out of range raises before the copy is taken, so a raise
 #   leaves nothing behind.  The index here is 64 K entries (512 KB copied),
-#   so a leak shows far above the 4 KB threshold (utils/measure_leak.rb,
-#   macOS only).
+#   so a leak shows far above the 4 KB threshold (utils/measure_leak.rb).
 
 require "test/unit"
 require "carray"
@@ -58,9 +57,9 @@ class TestGridIndexOwnership < Test::Unit::TestCase
     bytes = LeakMeter.bytes_per_call(
       "a[i]",
       setup: "a = CArray.int32(4); i = CArray.int64(1 << 16) { 0 }; i[-1] = 10")
-    omit "malloc zone statistics unavailable" if bytes.nil?
+    omit "measurement unavailable" if bytes.nil?
     assert_operator bytes, :<, 4096,
-                    "a[i] with a bad index grew the malloc zone #{bytes.round} bytes per call"
+                    "a[i] with a bad index grew the C heap #{bytes.round} bytes per call"
   end
 
 end

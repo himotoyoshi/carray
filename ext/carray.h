@@ -173,6 +173,39 @@ typedef int8_t boolean8_t;
 #define CA_ALIGN_CMPLX128 offsetof(struct { char c; cmplx128_t x; }, x)
 #define CA_ALIGN_OBJECT   offsetof(struct { char c; VALUE      x; }, x)
 
+/* Cell types that may sit at any byte.  A view's cells need not be aligned
+   to their size: a struct member at offset 1, a refer with a byte offset,
+   a wrapped external buffer.  Reading a cell through a plain `double *`
+   there is undefined (x86 vector code may assume the alignment), so a
+   kernel reads and writes cells through these.  Same size and value as the
+   plain type; only the alignment the compiler may assume is 1. */
+#if defined(__GNUC__) || defined(__clang__)
+#  define CA_UNALIGNED __attribute__((aligned(1)))
+#else
+#  define CA_UNALIGNED
+#endif
+typedef boolean8_t ca_u_boolean8_t;
+typedef int8_t     ca_u_int8_t;
+typedef uint8_t    ca_u_uint8_t;
+typedef int16_t    ca_u_int16_t    CA_UNALIGNED;
+typedef uint16_t   ca_u_uint16_t   CA_UNALIGNED;
+typedef int32_t    ca_u_int32_t    CA_UNALIGNED;
+typedef uint32_t   ca_u_uint32_t   CA_UNALIGNED;
+typedef int64_t    ca_u_int64_t    CA_UNALIGNED;
+typedef uint64_t   ca_u_uint64_t   CA_UNALIGNED;
+typedef float32_t  ca_u_float32_t  CA_UNALIGNED;
+typedef float64_t  ca_u_float64_t  CA_UNALIGNED;
+typedef cmplx64_t  ca_u_cmplx64_t  CA_UNALIGNED;
+typedef cmplx128_t ca_u_cmplx128_t CA_UNALIGNED;
+typedef VALUE      ca_u_VALUE      CA_UNALIGNED;
+
+typedef ca_u_float32_t ca_u_float;
+typedef ca_u_float64_t ca_u_double;
+
+/* CA_U(float64_t) is ca_u_float64_t (and CA_U(double) ca_u_double): for a
+   macro that takes the cell type. */
+#define CA_U(type) ca_u_##type
+
 /* -------------------------------------------------------------------- */
 
 #define CA_OBJ_TYPE_MAX  256

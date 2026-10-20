@@ -50,12 +50,12 @@ ruby utils/check_kernel_surface_freeze.rb
 ### `measure_leak.rb`
 
 Measures how many bytes one call of a Ruby expression leaves in the
-malloc zone, in a fresh process, after a warm-up and a GC on each side.
+C heap, in a fresh process, after a warm-up and a GC on each side.
 The expression's own raise is rescued, since the cases worth measuring are
 mostly the ones that raise. It sees C allocations that Ruby cannot see;
 the resident size is not used, since heap fragmentation moves it by more
-than a small leak. macOS only (it reads `malloc_zone_statistics` through
-Fiddle); exit status 2 elsewhere.
+than a small leak. It reads `malloc_zone_statistics` on macOS and
+`malloc_stats` on glibc, through Fiddle; exit status 2 elsewhere.
 
 It measures an expression you suspect; it does not find one. Make the
 buffer that would leak large (a wide cell, a long array) so a leak stands

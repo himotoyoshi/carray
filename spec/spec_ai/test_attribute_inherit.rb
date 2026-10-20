@@ -134,7 +134,7 @@ class TestAttributeInherit < Test::Unit::TestCase
     assert_equal "days", t.reshape(3, 1).attr(:units)
     assert_equal "days", t[CA_BOOLEAN([1, 0, 1])].attr(:units)
     assert_equal "days", t[0..1].copy.attr(:units)
-    t.parent.set_attr(:source, "x")
+    t.ticks.set_attr(:source, "x")
     assert_equal "x", t[0..1].attr(:source)
     s = CArray.string(CA_OBJECT(%w[a b]))
     s.set_attr(:units, "m")

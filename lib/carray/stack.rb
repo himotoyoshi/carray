@@ -69,27 +69,28 @@ class CArray
   # No data is copied; reads gather from parents on demand and writes flow
   # back to them (chain composability preserved).
   #
-  # Pieces must agree on `ndim`, `data_type`, byte width, and every axis
-  # length except `axis` (the "meld axis").  Mismatched `data_type` raises:
-  # cast the pieces yourself (`.to_type(:float64)`) or use
-  # {CArray.concatenate} (eager, auto-casts).
+  # Pieces must agree on `ndim` and every axis length except `axis` (the
+  # "meld axis").  Pieces of different data types are brought to a common
+  # one as {CArray.stack} brings them (`promote_list`), through read-only
+  # views of the pieces that need it.
   #
   # "meld" = melt + weld — pieces dissolve their boundaries along the named
   # axis and are regarded as one.
   #
-  # @overload meld(*arrays, axis: 0)
-  # @overload meld(list, axis: 0)
+  # @overload meld(*arrays, axis: 0, data_type: nil)
+  # @overload meld(list, axis: 0, data_type: nil)
   #   Convenience form: a single Array argument is treated as the list.
   #   @param arrays [Array<CArray>] pieces to weld.  A single Array
   #     argument is accepted for compatibility with older callers.
   #   @param axis [Integer, nil] existing axis to extend (normalises
   #     negative values against the reference ndim); `nil` is the same
   #     as `0`.
+  #   @param data_type [Symbol, Integer, nil] result `data_type`;
+  #     inferred when `nil`.
   #   @return [CAMeld] view over the welded pieces.
   #   @raise [ArgumentError] when the list is empty, ndim mismatch,
-  #     data_type mismatch, or non-axis dim mismatch across pieces
-  #     (surfaced by CAMeld.new).
-  def self.meld (*arrays, axis: 0)
+  #     or non-axis dim mismatch across pieces (surfaced by CAMeld.new).
+  def self.meld (*arrays, axis: 0, data_type: nil)
     if arrays.length == 1 && arrays[0].is_a?(Array)
       arrays = arrays[0]
     end
@@ -100,6 +101,7 @@ class CArray
       raise ArgumentError, "meld: entries must be CArray (got #{first.class})"
     end
     axis_norm = CArray.normalize_axis(axis, first.ndim, "meld")
+    arrays = CArray.promote_list(arrays, data_type: data_type)
     # Flatten nested CAMeld inputs that share our meld axis: they already
     # describe a segment sequence, so absorbing their parents keeps chain
     # depth at 1 (avoids 2-level xfer_all / reduce chains through the
@@ -119,14 +121,15 @@ class CArray
   # Instance form of {CArray.meld}; non-destructive, see the class method
   # for full semantics.
   #
-  # @overload meld(*others, axis: 0)
+  # @overload meld(*others, axis: 0, data_type: nil)
   #   @param others [Array<CArray>] additional pieces.
   #   @param axis [Integer] existing axis to extend.
+  #   @param data_type [Symbol, Integer, nil] result `data_type`.
   #   @return [CAMeld]
   #   @raise [ArgumentError] when no `others` are given.
-  def meld (*others, axis: 0)
+  def meld (*others, axis: 0, data_type: nil)
     raise ArgumentError, "meld: at least one other array required" if others.empty?
-    CArray.meld(self, *others, axis: axis)
+    CArray.meld(self, *others, axis: axis, data_type: data_type)
   end
 
   # Arrange `list` of uniform-shape pieces in a `tdim`-shape grid that

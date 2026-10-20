@@ -272,9 +272,11 @@ class TestCAStrideAliasAttach < Test::Unit::TestCase
     split.attach! do |v|
       v[0] = 0xff
     end
-    # On little-endian, byte 0 of u32[0] is the low byte (0x04 ->
-    # 0xff).  Result: u32[0] = 0x010203FF.
-    assert_equal(0x010203ff, u32[0],
+    # Byte 0 of u32[0] is its low byte on a little-endian host
+    # (u32[0] becomes 0x010203FF) and its high byte on a big-endian one.
+    bytes = [0x01020304].pack("L").bytes
+    bytes[0] = 0xff
+    assert_equal(bytes.pack("C*").unpack1("L"), u32[0],
                  "byte-reinterpret view write should alias-write to parent")
   end
 end

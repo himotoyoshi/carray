@@ -6,7 +6,7 @@
 # (ALLOCV), so a raise does not leave them behind.
 #
 # 32768 cells make the tables 768 KB, so a leak shows far above the 4 KB
-# threshold, measured by utils/measure_leak.rb (macOS only).
+# threshold, measured by utils/measure_leak.rb.
 
 require "test/unit"
 require "carray"
@@ -18,7 +18,7 @@ class TestConstStringCategorizeRaise < Test::Unit::TestCase
     class FailingOffsets < CAObject
       def initialize (n)
         @src = CArray.fixlen(n, bytes: 16)
-        @src[] = [0, 1].pack("q<q<")
+        @src[] = [0, 1].pack("qq")
         super(CA_FIXLEN, [n], bytes: 16)
       end
       private
@@ -41,8 +41,8 @@ class TestConstStringCategorizeRaise < Test::Unit::TestCase
 
   def test_a_raising_read_frees_the_tables
     grown = LeakMeter.bytes_per_call("strings.categorize rescue nil", setup: SETUP)
-    omit "malloc zone statistics unavailable" if grown.nil?
+    omit "measurement unavailable" if grown.nil?
     assert_operator grown, :<, 4096,
-                    "categorize: the malloc zone grew #{grown.round} bytes per call"
+                    "categorize: the C heap grew #{grown.round} bytes per call"
   end
 end

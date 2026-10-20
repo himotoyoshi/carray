@@ -71,4 +71,22 @@ class TestCATranspose < Test::Unit::TestCase
     assert_raise(ArgumentError) { CArray.float64(4).transpose(axis: 0) }
   end
 
+  # The axes are read as every axis argument is: negative from the end, an
+  # Integer only, out of range refused naming the method and the value.
+  def test_the_axes_follow_the_axis_rule
+    a = CArray.int32(2, 3, 4).seq
+    assert_equal a.transpose(2, 0, 1).to_a, a.transpose(-1, 0, 1).to_a
+    assert_raise(TypeError) { a.transpose(1.5, 0, 2) }
+    assert_raise(TypeError) { a.transpose(nil, 0, 1) }
+    { [3, 0, 1] => /\Atranspose: axis 3 out of range for ndim 3\z/,
+      [-4, 0, 1] => /\Atranspose: axis -4 out of range for ndim 3\z/,
+      [2**64, 0, 1] => /\Atranspose: axis 18446744073709551616 out of range/,
+      [0, 0, 1] => /\Atranspose: axis 0 is given twice\z/,
+      [-3, 0, 1] => /\Atranspose: axis 0 is given twice\z/,
+      [0, 1] => /\Atranspose: 2 axes given for ndim 3\z/ }.each do |axes, message|
+      e = assert_raise(ArgumentError, axes.inspect) { a.transpose(*axes) }
+      assert_match message, e.message
+    end
+  end
+
 end

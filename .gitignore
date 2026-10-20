@@ -20,6 +20,7 @@ ext/Makefile
 ext/.dev_build_mode
 ext/*.bundle
 ext/*.bundle.dSYM/
+ext/*.so
 ext/carray_config.h
 ext/carray_build_flags.h
 ext/mkmf.log
@@ -89,6 +90,7 @@ spec/spec_ai/ext_address_basis/*.bundle.dSYM/
 spec/spec_ai/ext_address_basis/*.o
 spec/spec_ai/ext_address_basis/mkmf.log
 spec/spec_ai/ext_iter_source_kind/mkmf.log
+spec/spec_ai/ext_*/*.so
 
 # Generated PDF bundles (rake pdf:*)
 guides/pdf/

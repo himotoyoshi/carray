@@ -63,8 +63,8 @@ class TestDatetimeStepSystem < Test::Unit::TestCase
     # returns a copy of the raw tick indices (== ticks's values).
     dt = CArray.time_series("2024-06-15T10:00", count: 3, unit: "10 minutes")
     assert_equal dt.ticks.to_a, dt.timesteps.to_a
-    refute dt.timesteps.equal?(dt.parent)          # a fresh array, not the live storage
-    assert dt.ticks.equal?(dt.parent)   # ticks stays zero-copy
+    refute dt.timesteps.equal?(dt.ticks)           # a fresh array, not the live storage
+    assert dt.ticks.equal?(dt.send(:face_storage))   # ticks stays zero-copy
   end
 
   # -- timesteps (fixed) ---------------------------------------------------
@@ -359,7 +359,7 @@ class TestDatetimeStepSystem < Test::Unit::TestCase
 
   def test_mask_propagates
     m = CA_INT64([0, 1, 2, 3]).time(unit: :h)
-    m.parent[1] = UNDEF
+    m.ticks[1] = UNDEF
     idx = m.timesteps(unit: "2 hours")
     assert_equal [false, true, false, false], idx.is_masked.to_a
     assert_equal [0, 1, 1], idx[idx.is_not_masked].to_a
@@ -557,7 +557,7 @@ class TestDatetimeStepSystem < Test::Unit::TestCase
 
   def test_field_accessor_mask_propagates
     dt = CArray.time(CA_OBJECT(["2024-01-01", "2024-06-15", "2024-12-31"]), unit: :D)
-    dt.parent[1] = UNDEF
+    dt.ticks[1] = UNDEF
     assert_equal [false, true, false], dt.year.is_masked.to_a   # civil path
     assert_equal [false, true, false], dt.hour.is_masked.to_a   # zero (collapse) path preserves mask too
   end

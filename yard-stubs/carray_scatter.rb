@@ -104,13 +104,15 @@ class CArray
   #   allocates view state); useful in hot loops where a scatter
   #   result is written back many times.
   #
-  #   Unlike the arithmetic `scatter_*!` family, `self` may be
-  #   **boolean** (assignment does not widen); `true` / `false` (or
-  #   `1` / `0`) are its scalar values. A scalar `UNDEF` masks every
-  #   addressed cell.
+  #   Unlike the arithmetic `scatter_*!` family, `self` may be of any
+  #   type (assignment does not widen): **boolean**, with `true` /
+  #   `false` (or `1` / `0`) as its scalar values, and **object** or
+  #   **fixlen**, written as `self.flatten[addrs] = vals` writes them
+  #   (as `put_nd` and `put_along_axis` take them). A scalar `UNDEF`
+  #   masks every addressed cell.
   #
   #   @param addrs [CArray, Array<Integer>]
-  #   @param vals [CArray, Numeric, true, false, UNDEF]
+  #   @param vals [CArray, Object, UNDEF]
   #   @return [self]
   def scatter_replace!(addrs, vals); end
 

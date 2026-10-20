@@ -89,4 +89,24 @@ class TestBooleanBytes < Test::Unit::TestCase
     assert_equal [true, false], CArray.boolean(2) { |i| 1 - i }.refer(:boolean).to_a
     assert_equal [2, 0], u.ne(0).to_type(:int32).to_a.map { |x| x * 2 }
   end
+  # A record's boolean member is a byte that other fields can write as any
+  # byte; it is read through a cast to boolean, which refuses one that is
+  # not 0 or 1, rather than answering differently in each method.
+  def test_a_boolean_member_refuses_a_byte_that_is_not_0_or_1
+    r = CArray.fixlen(4, bytes: 1)
+    r.field(0, :uint8)[] = [2, 255, 0, 1]
+    b = r.field(0, :boolean)
+    assert_raise(RangeError) { b.to_a }
+    assert_raise(RangeError) { b.count(true) }
+    r.field(0, :uint8)[] = [1, 0, 0, 1]
+    assert_equal [true, false, false, true], b.to_a
+    b[1] = true
+    assert_equal [1, 1, 0, 1], r.field(0, :uint8).to_a
+    st = CArray.struct { boolean :b; int8 :x }
+    rec = CARecord.new(st, 3)
+    rec["b"][] = [true, false, true]
+    assert_equal [true, false, true], rec["b"].to_a
+    assert_equal true, rec[0].b
+  end
+
 end

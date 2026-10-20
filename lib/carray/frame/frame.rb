@@ -840,13 +840,12 @@ class CAFrame
         case pieces.size
         when 0 then col[CArray.int32(0), *tail]   # replaced every row with none
         when 1 then pieces.first
-        else CArray.meld(pieces, axis: 0)         # CAMeld view; data type mismatch
-        end                                        # across pieces raises.
-                                                   # For data type conversion, cast
-                                                   # the incoming +other+'s
-                                                   # column beforehand — silent
-                                                   # promotion in a splice would
-                                                   # hide schema drift.
+        else
+          # A splice does not promote the column (it would hide schema
+          # drift); cast the incoming column beforehand.
+          CAFrame.send(:check_same_column_type, pieces, name, verb: "splice")
+          CArray.meld(pieces, axis: 0)
+        end
       splice_keep_attrs(new_cols[name], col)
     end
     new_index = splice_index(other, lo, hi)

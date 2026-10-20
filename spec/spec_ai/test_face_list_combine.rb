@@ -35,7 +35,7 @@ class TestFaceListCombine < Test::Unit::TestCase
 
   ENTRIES = {
     "CArray.stack"       => [->(l) { CArray.stack(l) },       "promote_list"],
-    "CArray.meld"        => [->(l) { CArray.meld(l) },        "CAMeld.new"],
+    "CArray.meld"        => [->(l) { CArray.meld(l) },        "promote_list"],
     "CArray.concatenate" => [->(l) { CArray.concatenate(l) }, "promote_list"],
     "promote_list"       => [->(l) { CArray.promote_list(l).first }, "promote_list"],
     "CAStack.new"        => [->(l) { CAStack.new(l) },        "CAStack.new"],

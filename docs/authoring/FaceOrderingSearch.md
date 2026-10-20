@@ -231,8 +231,8 @@ caller supplies, already declared to be in storage terms. What the write side
 does insist on is that raw means raw **storage** — an integer-storage Face
 takes integer cells only, so a bare float array is refused rather than
 truncated by the storage cast (matching the scalar path, where `to_comparable`
-refuses a `Float`). `t.parent[] = float_array` is where the caller owns the
-cast.
+refuses a `Float`). `t.ticks[] = float_array` is where the caller owns the
+cast (`t.parent` is a read-only view of the storage).
 
 `linear_fetch` is the exception that proves the rule: its argument is a
 *fractional position index*, not a value compared against the axis, so it is

@@ -30,6 +30,10 @@ class CArray
   #   Nothing in a value array is masked, so `unmask` on it does nothing,
   #   while a write that would mask a cell (`UNDEF`, `mask=`,
   #   `invert_mask`) raises TypeError.
+  #
+  #   On a Face the data slot is read through the Face. A {CACategorical}
+  #   cell excluded by the sentinel code has no label, so its value reads
+  #   as `nil` (the codes are in `codes`).
   #   @return [CArray]
   def value; end
 
@@ -180,10 +184,11 @@ class CArray
   #   of `self` and the masks of each array in `others`. Mutates
   #   `self`.
   #   @param others [Array<CArray>] arrays whose mask states are
-  #     OR-ed into `self`. Non-CArray arguments are ignored.
+  #     OR-ed into `self`.
   #   @return [self]
   #   @raise [ArgumentError] if an array in `others` other than a scalar
-  #     has fewer elements than `self`.
+  #     has a different number of elements from `self`.
+  #   @raise [TypeError] if an argument is not a CArray.
   def inherit_mask(*others); end
 
   # @overload inherit_mask_replace(*others)
@@ -194,7 +199,7 @@ class CArray
   #     new mask of `self`.
   #   @return [self]
   #   @raise [ArgumentError] if an array in `others` other than a scalar
-  #     has fewer elements than `self`.
+  #     has a different number of elements from `self`.
   def inherit_mask_replace(*others); end
 
   # @overload count_masked

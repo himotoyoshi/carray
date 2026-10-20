@@ -9,7 +9,7 @@
 # - wrap_memory_view frees its holder when the source is rejected.
 #
 # Each leak was 32 to 136 bytes per call; the threshold is 16 over 20000
-# calls, measured by utils/measure_leak.rb (macOS only).
+# calls, measured by utils/measure_leak.rb.
 
 require "test/unit"
 require "carray"
@@ -20,9 +20,9 @@ class TestMemoryViewLeaks < Test::Unit::TestCase
 
   def assert_leaves_nothing (expr, setup)
     bytes = LeakMeter.bytes_per_call(expr, setup: %{require "fiddle"; } + setup, calls: 20000)
-    omit "malloc zone statistics unavailable" if bytes.nil?
+    omit "measurement unavailable" if bytes.nil?
     assert_operator bytes, :<, 16,
-                    "#{expr}: the malloc zone grew #{bytes.round(1)} bytes per call"
+                    "#{expr}: the C heap grew #{bytes.round(1)} bytes per call"
   end
 
   def test_cscalar_export

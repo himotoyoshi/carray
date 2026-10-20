@@ -32,29 +32,29 @@ ca_fill_typed (char *dst, const char *val, ca_size_t bytes, ca_size_t n)
       break;
     }
     case 2: {
-      uint16_t  v = *(const uint16_t *)val;
-      uint16_t *p = (uint16_t *)dst;
+      uint16_t  v = *(const ca_u_uint16_t *)val;
+      ca_u_uint16_t *p = (ca_u_uint16_t *)dst;
       for ( i = 0; i < n; i++ ) p[i] = v;
       break;
     }
     case 4: {
-      uint32_t  v = *(const uint32_t *)val;
-      uint32_t *p = (uint32_t *)dst;
+      uint32_t  v = *(const ca_u_uint32_t *)val;
+      ca_u_uint32_t *p = (ca_u_uint32_t *)dst;
       for ( i = 0; i < n; i++ ) p[i] = v;
       break;
     }
     case 8: {
-      uint64_t  v = *(const uint64_t *)val;
-      uint64_t *p = (uint64_t *)dst;
+      uint64_t  v = *(const ca_u_uint64_t *)val;
+      ca_u_uint64_t *p = (ca_u_uint64_t *)dst;
       for ( i = 0; i < n; i++ ) p[i] = v;
       break;
     }
     case 16: {
       /* complex128 etc.  Two uint64_t stores per element.  Compiler
          pairs them into a NEON 128-bit or SSE2 store. */
-      uint64_t v0 = ((const uint64_t *)val)[0];
-      uint64_t v1 = ((const uint64_t *)val)[1];
-      uint64_t *p = (uint64_t *)dst;
+      uint64_t v0 = ((const ca_u_uint64_t *)val)[0];
+      uint64_t v1 = ((const ca_u_uint64_t *)val)[1];
+      ca_u_uint64_t *p = (ca_u_uint64_t *)dst;
       for ( i = 0; i < n; i++ ) {
         p[2*i]     = v0;
         p[2*i + 1] = v1;

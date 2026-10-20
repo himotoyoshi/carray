@@ -213,14 +213,15 @@ class TestFaceWriteScalar < Test::Unit::TestCase
     # The raw-storage escape stays raw, but it has to be raw *storage*: the
     # scalar path refuses a bare Float rather than truncating it through the
     # storage cast, so the bulk path refuses a bare float array for the same
-    # reason.  `.parent` is where the caller owns the cast.
+    # reason.  `#ticks` is where the caller owns the cast.
     t = dt()
     assert_raise(TypeError) { t[0..1] = CA_FLOAT64([0.5, 1.9]) }
     assert_raise(TypeError) { t[0..1] = CA_OBJECT([1, 2]) }
-    assert_equal [477336, 477337, 477338, 477339], t.parent.to_a   # untouched
+    assert_equal [477336, 477337, 477338, 477339], t.ticks.to_a   # untouched
 
-    t.parent[0..1] = CA_FLOAT64([0.5, 1.9])   # explicit storage write: caller's cast
-    assert_equal [0, 1, 477338, 477339], t.parent.to_a
+    t.ticks[0..1] = CA_FLOAT64([0.5, 1.9])   # explicit storage write: caller's cast
+    assert_equal [0, 1, 477338, 477339], t.ticks.to_a
+    assert_raise(RuntimeError) { t.parent[0] = 0 }   # the parent is a read-only view
   end
 
   # ---- UNDEF masking still works (not intercepted by the hook) ----

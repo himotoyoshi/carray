@@ -42,8 +42,8 @@ ca_trans_setup (CAStride *ca, CArray *parent, ca_size_t *imap)
                "specified %i-th dimension number out of range", i);
     }
     if (map[idim] != -1) {
-      rb_raise(rb_eArgError,
-               "specified %i-th dimension number is duplicated", i);
+      rb_raise(rb_eArgError, "%s: axis %" PRId64 " is given twice",
+               ca_calling_method_name(), (int64_t) idim);
     }
     map[idim] = i;
     newdim[i] = dim0[idim];
@@ -120,10 +120,14 @@ rb_ca_trans (int argc, VALUE *argv, VALUE self)
     for (i = 0; i < ca->ndim; i++) imap[i] = ca->ndim - i - 1;
   }
   else if (argc == ca->ndim) {
-    for (i = 0; i < ca->ndim; i++) imap[i] = NUM2SIZE(argv[i]);
+    /* Each axis read as every axis argument is: negative from the end. */
+    for (i = 0; i < ca->ndim; i++) {
+      imap[i] = ca_normalize_axis_arg(argv[i], ca->ndim, NULL);
+    }
   }
   else {
-    rb_raise(rb_eArgError, "# of arguments should be equal to ndim");
+    rb_raise(rb_eArgError, "%s: %d axes given for ndim %d",
+             ca_calling_method_name(), argc, (int) ca->ndim);
   }
 
   obj = rb_ca_trans_new(self, imap);

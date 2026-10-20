@@ -247,6 +247,10 @@ ca_stride_compose_through (CAStride *leaf, CAStride *parent,
   for (k = parent->ndim - 1; k >= 0; k--)
     prod[k] = prod[k + 1] * parent->dim[k];
 
+  /* A parent with a zero-length axis has no cell for the leaf to start at
+     (and prod[] below would divide by zero). */
+  if (prod[0] == 0) return 0;
+
   /* Compose base offset first.  We need the per-dim base position
      to validate stride composition against parent dim bounds (a small
      forward stride starting near the end of a parent dim wraps into
@@ -1686,19 +1690,19 @@ ca_stride_func_fill_data (void *ap, void *ptr)
       }
       case 2: {
         int16_t v; memcpy(&v, ptr, 2);
-        int16_t *d = (int16_t *) dst;
+        ca_u_int16_t *d = (ca_u_int16_t *) dst;
         for (i = 0; i < inner_count; i++) d[i] = v;
         break;
       }
       case 4: {
         int32_t v; memcpy(&v, ptr, 4);
-        int32_t *d = (int32_t *) dst;
+        ca_u_int32_t *d = (ca_u_int32_t *) dst;
         for (i = 0; i < inner_count; i++) d[i] = v;
         break;
       }
       case 8: {
         int64_t v; memcpy(&v, ptr, 8);
-        int64_t *d = (int64_t *) dst;
+        ca_u_int64_t *d = (ca_u_int64_t *) dst;
         for (i = 0; i < inner_count; i++) d[i] = v;
         break;
       }
@@ -2164,11 +2168,11 @@ rb_ca_as_strided (int argc, VALUE *argv, VALUE self)
   ca_check_rank_fits(len, NULL);
   ndim = (int8_t) len;
   for (i = 0; i < len; i++) {
-    shape[i]   = NUM2SIZE(RARRAY_AREF(rshape,   i));
-    strides[i] = NUM2SIZE(RARRAY_AREF(rstrides, i));
+    shape[i]   = ca_integer_arg(RARRAY_AREF(rshape, i), "a length", NULL);
+    strides[i] = ca_integer_arg(RARRAY_AREF(rstrides, i), "a stride", NULL);
   }
   if (! NIL_P(roffset)) {
-    base_offset = NUM2SIZE(roffset);
+    base_offset = ca_integer_arg(roffset, "offset", NULL);
   }
 
   VALUE obj = rb_ca_stride_new(self, parent->data_type, parent->bytes,
@@ -2215,12 +2219,12 @@ rb_ca_sliding_windows (int argc, VALUE *argv, VALUE self)
                RARRAY_LEN(wary), (int) ndim);
     }
     for (i = 0; i < ndim; i++) {
-      window[i] = NUM2SIZE(RARRAY_AREF(wary, i));
+      window[i] = ca_integer_arg(RARRAY_AREF(wary, i), "a window size", NULL);
     }
   }
   else if (nargs == ndim) {
     for (i = 0; i < ndim; i++) {
-      window[i] = NUM2SIZE(RARRAY_AREF(rposary, i));
+      window[i] = ca_integer_arg(RARRAY_AREF(rposary, i), "a window size", NULL);
     }
   }
   else {
@@ -2239,11 +2243,11 @@ rb_ca_sliding_windows (int argc, VALUE *argv, VALUE self)
                RARRAY_LEN(rstep), (int) ndim);
     }
     for (i = 0; i < ndim; i++) {
-      step[i] = NUM2SIZE(RARRAY_AREF(rstep, i));
+      step[i] = ca_integer_arg(RARRAY_AREF(rstep, i), "a step", NULL);
     }
   }
   else {
-    ca_size_t s = NUM2SIZE(rstep);
+    ca_size_t s = ca_integer_arg(rstep, "step", NULL);
     for (i = 0; i < ndim; i++) step[i] = s;
   }
 
@@ -2326,13 +2330,13 @@ rb_ca_unfold (int argc, VALUE *argv, VALUE self)
     }
     nspatial = (int8_t) RARRAY_LEN(wary);
     for (i = 0; i < nspatial; i++) {
-      window[i] = NUM2SIZE(RARRAY_AREF(wary, i));
+      window[i] = ca_integer_arg(RARRAY_AREF(wary, i), "a window size", NULL);
     }
   }
   else if (nargs >= 1 && nargs <= ndim) {
     nspatial = (int8_t) nargs;
     for (i = 0; i < nspatial; i++) {
-      window[i] = NUM2SIZE(RARRAY_AREF(rposary, i));
+      window[i] = ca_integer_arg(RARRAY_AREF(rposary, i), "a window size", NULL);
     }
   }
   else {
@@ -2355,11 +2359,11 @@ rb_ca_unfold (int argc, VALUE *argv, VALUE self)
                RARRAY_LEN(rstep), (int) nspatial);
     }
     for (i = 0; i < nspatial; i++) {
-      step[i] = NUM2SIZE(RARRAY_AREF(rstep, i));
+      step[i] = ca_integer_arg(RARRAY_AREF(rstep, i), "a step", NULL);
     }
   }
   else {
-    ca_size_t s = NUM2SIZE(rstep);
+    ca_size_t s = ca_integer_arg(rstep, "step", NULL);
     for (i = 0; i < nspatial; i++) step[i] = s;
   }
 
@@ -2441,12 +2445,12 @@ rb_ca_block_view (int argc, VALUE *argv, VALUE self)
                RARRAY_LEN(bary), (int) ndim);
     }
     for (i = 0; i < ndim; i++) {
-      block[i] = NUM2SIZE(RARRAY_AREF(bary, i));
+      block[i] = ca_integer_arg(RARRAY_AREF(bary, i), "a block size", NULL);
     }
   }
   else if (nargs == ndim) {
     for (i = 0; i < ndim; i++) {
-      block[i] = NUM2SIZE(RARRAY_AREF(rposary, i));
+      block[i] = ca_integer_arg(RARRAY_AREF(rposary, i), "a block size", NULL);
     }
   }
   else {
@@ -2571,7 +2575,12 @@ rb_ca_dim_view (int argc, VALUE *argv, VALUE self)
     if (! seen[i]) imap[k++] = i;
   }
 
-  return rb_ca_trans_new(self, imap);
+  {
+    /* A reordering of the axes, as transpose is: a Face stays its Face. */
+    volatile VALUE obj = rb_ca_trans_new(self, imap);
+    CA_WRAPPER_LIFT(obj, self, parent);
+    return obj;
+  }
 }
 
 /* flip(*axes) -- reverses the listed axes by negating their strides; with no
@@ -2740,14 +2749,14 @@ rb_ca_diagonal (int argc, VALUE *argv, VALUE self)
 
   /* offset from positional or keyword (not both) */
   if (nargs == 0) {
-    if (! NIL_P(roffset)) offset = NUM2SIZE(roffset);
+    if (! NIL_P(roffset)) offset = ca_integer_arg(roffset, "offset", NULL);
   }
   else if (nargs == 1) {
     if (! NIL_P(roffset)) {
       rb_raise(rb_eArgError,
                "diagonal: give offset positionally OR as keyword, not both");
     }
-    offset = NUM2SIZE(RARRAY_AREF(rposary, 0));
+    offset = ca_integer_arg(RARRAY_AREF(rposary, 0), "offset", NULL);
   }
   else {
     rb_raise(rb_eArgError,

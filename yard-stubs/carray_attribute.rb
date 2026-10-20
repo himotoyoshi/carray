@@ -103,7 +103,9 @@ class CArray
 
   # @overload parent
   #   Returns the parent CArray of `self`, or `nil` if `self` has no
-  #   parent (i.e. is an entity).
+  #   parent (i.e. is an entity). For a Face (CATime, CARecord, ...) it
+  #   is a read-only view of the storage; a Face whose storage may be
+  #   written names a method for it (`CATime#ticks`).
   #   @return [CArray, nil]
   def parent; end
 

@@ -66,7 +66,8 @@ over MemoryView) as records, without copying:
 ```ruby
 ent = CArray.new(CA_FIXLEN, [3], bytes: GeoCoord::DATA_SIZE)
 w   = CARecord.wrap(ent, GeoCoord)
-w.parent.equal?(ent)        # => true   (no copy; writes go to ent)
+w[0] = GeoCoord.new(lat: 1.0, lng: 2.0)   # no copy: the write goes to ent
+w.parent.read_only?         # => true   (a read-only view of ent)
 ```
 
 ### Subclass DSL
@@ -191,6 +192,11 @@ a.unique                    # distinct records, first-appearance order
 a.count(Site.new(1.0, 5.0)) # records equal to this one
 a.is_in(b)                  # b: a record array of the same struct
 ```
+
+`eq` / `ne` also take a plain fixlen array of the record's width, and compare
+it with the records byte for byte: it is the bytes of records of no struct
+in particular, so `a.eq(bytes)` is how records are matched against data read
+as raw bytes.
 
 They take records of the same `data_class` (whatever the record array's class)
 or a plain fixlen array of the same width, and refuse records of another

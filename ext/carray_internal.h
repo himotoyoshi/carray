@@ -393,6 +393,10 @@ VALUE    rb_ary_flatten_for_elements (VALUE ary, ca_size_t elements, void *ap);
 const char *ca_calling_method_name (void);
 VALUE       ca_answer_as_caller (VALUE (*body)(VALUE), VALUE arg);
 long        ca_integer_arg (VALUE v, const char *arg, const char *name);
+/* 1 with the position of an index key (an Integer, or a Float with no
+   fraction while exact), 2 for an Integer past int64, 0 otherwise. */
+int         ca_index_key_position (VALUE v, ca_size_t *out);
+void        ca_refuse_without_common_type (VALUE self, VALUE other);
 ca_size_t   ca_shape_elements (int8_t ndim, const ca_size_t *dim, ca_size_t bytes);
 void        ca_check_index_array (VALUE v);
 VALUE       ca_order_key (VALUE v, const char *name);
@@ -414,6 +418,13 @@ NORETURN(void ca_op_refuse_unimplemented (VALUE operand, int8_t data_type,
 void        ca_check_rank_fits (long ndim, const char *name);
 /* The checks of carray.h inside the library, each naming the method the
    user called; the public ones stay as they are for extensions. */
+/* A wrap of a caller's buffer lent to a CAObject hook (CA_FLAG_LENT), and
+   the mark that a view was taken of it while it was lent
+   (CA_FLAG_LENT_VIEWED).  rb_ca_set_parent sets the second; the hook's
+   caller reads both when it takes the buffer back (ca_obj_object.c). */
+#define CA_FLAG_LENT        2048
+#define CA_FLAG_LENT_VIEWED 4096
+
 #define CA_CHECK_DATA_TYPE_GIVEN(data_type) \
   do { \
     int ca_dt_ = (data_type); \
@@ -728,6 +739,7 @@ int         ca_op_raises_on_cell (int kind, int op_id, int8_t dt);
    gate first, and a string reference compares in its own type, padding
    included. */
 int8_t      ca_query_match_type (int8_t ref, VALUE query);
+VALUE       ca_fixlen_widen_for_query (VALUE self, VALUE query);
 
 static inline int
 ca_query_match_applies (CArray *ref, VALUE query)

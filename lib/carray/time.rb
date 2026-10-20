@@ -113,6 +113,13 @@ module CATimeUnitAlgebra
     end
   end
 
+  # How a refusal names an operand: a Face by its class, any other array as
+  # a CArray (a lazy expression's node classes are not the user's), anything
+  # else by its class.
+  def operand_name(x)
+    ( x.is_a?(CArray) && !x.face? ) ? "CArray" : x.class.to_s
+  end
+
   # A single value an operator meets an array with, as a one-cell array
   # marked scalar (a CScalar) of its kind, or nil when it is not one: a
   # duration -- a CATimedelta::Element, or a String that reads as one
@@ -136,6 +143,20 @@ module CATimeUnitAlgebra
     when Time, Date
       scalar_instant(CATimeLiteral.exact_instant(x), unit)
     end
+  end
+
+  # A duration String added to or subtracted from a time, as one step of its
+  # own resolution: "15 minutes" is one 15-minute step, the duration
+  # CArray.int64(1).timedelta(unit: "15 minutes") is, so it lands on a
+  # "10 minutes" grid or is refused in the same way.  nil for anything else.
+  def step_operand(x)
+    return nil unless x.is_a?(String)
+    res = begin
+            CATime::Resolution.parse(x)
+          rescue ArgumentError
+            return nil
+          end
+    CATimedelta.wrap(CScalar.int64 { 1 }, unit: res)
   end
 
   def scalar_instant(t, unit)
@@ -1071,7 +1092,7 @@ class CATime
   #   resolution (see §4 of docs/CATime.md).
   #   @return [CArray]
   def ticks
-    parent
+    face_storage
   end
 
   # @overload to_unit(unit)
@@ -1101,7 +1122,7 @@ class CATime
   #   @raise [RangeError] when the widened ticks overflow int64.
   def to_unit(unit)
     to = CATime::Resolution.parse(unit)
-    CATimeUnitAlgebra.convert_instant_floor(parent, self.unit, to).time(unit: to)
+    CATimeUnitAlgebra.convert_instant_floor(face_storage, self.unit, to).time(unit: to)
   end
 
   # @overload +(other)
@@ -1116,7 +1137,9 @@ class CATime
   #   into whole ticks; on any other (`:W`, `"3 days"`) a month raises, as a
   #   fixed duration on a month or year grid does.  Adding two datetimes is
   #   ill-defined.  A single duration -- a {CATimedelta::Element} or a String
-  #   such as `"3 days"` -- is added to every cell.
+  #   such as `"3 days"` -- is added to every cell; a String is one step of
+  #   its own resolution, so `"15 minutes"` on a `"10 minutes"` grid raises
+  #   as `CArray.int64(1).timedelta(unit: "15 minutes")` does.
   #   @param other [CATimedelta, CATimedelta::Element, String]
   #     (or a MemoryView producer whose +to_ca+ gives one, such as an Arrow
   #     duration array)
@@ -1126,17 +1149,18 @@ class CATime
   #   @raise [RangeError] when a result leaves the range of int64 ticks.
   def +(other)
     given, other = other, CATimeUnitAlgebra.operand(other)
-    other = CATimeUnitAlgebra.scalar_operand(other, unit) || other
+    other = CATimeUnitAlgebra.step_operand(other) ||
+            CATimeUnitAlgebra.scalar_operand(other, unit) || other
     case other
     when CATimedelta
       return shifted_by_months(other, 1) if moved_by_months?(other)
       d = CATimeUnitAlgebra.duration_on_grid(other.parent, other.unit, unit)
       d = d[0] if other.scalar?
-      CATimeUnitAlgebra.checked_add(parent, d).time(unit: unit)
+      CATimeUnitAlgebra.checked_add(face_storage, d).time(unit: unit)
     when CATime
       raise TypeError, "CATime + CATime is ill-defined"
     else
-      raise TypeError, "CATime + #{given.class} is not allowed: add a duration " \
+      raise TypeError, "CATime + #{CATimeUnitAlgebra.operand_name(given)} is not allowed: add a duration " \
                        "(a CATimedelta, a CATimedelta::Element or a String such as \"3 days\")"
     end
   end
@@ -1155,21 +1179,22 @@ class CATime
   #   @raise [TypeError] on an unsupported operand.
   def -(other)
     given, other = other, CATimeUnitAlgebra.operand(other)
-    other = CATimeUnitAlgebra.scalar_operand(other, unit) || other
+    other = CATimeUnitAlgebra.step_operand(other) ||
+            CATimeUnitAlgebra.scalar_operand(other, unit) || other
     case other
     when CATimedelta
       return shifted_by_months(other, -1) if moved_by_months?(other)
       d = CATimeUnitAlgebra.duration_on_grid(other.parent, other.unit, unit)
       d = d[0] if other.scalar?
-      CATimeUnitAlgebra.checked_sub(parent, d).time(unit: unit)
+      CATimeUnitAlgebra.checked_sub(face_storage, d).time(unit: unit)
     when CATime
       u = CATimeUnitAlgebra.diff_unit(unit, other.unit)
-      a = CATimeUnitAlgebra.convert_instant!(parent, unit, u)
+      a = CATimeUnitAlgebra.convert_instant!(face_storage, unit, u)
       b = CATimeUnitAlgebra.convert_instant!(other.parent, other.unit, u)
       b = b[0] if other.scalar?
       CATimeUnitAlgebra.checked_sub(a, b).timedelta(unit: u)
     else
-      raise TypeError, "CATime - #{given.class} is not allowed: subtract a duration " \
+      raise TypeError, "CATime - #{CATimeUnitAlgebra.operand_name(given)} is not allowed: subtract a duration " \
                        "(a CATimedelta, a CATimedelta::Element or a String such as \"3 days\") " \
                        "or a time (a CATime, a CATime::Element, a Time, a Date or a String)"
     end
@@ -1189,7 +1214,7 @@ class CATime
   private def shifted_by_months (td, sign)
     months = td.parent.int64 * (sign * CATimeUnitAlgebra.months_per_tick(td.unit))
     months = months[0] if td.scalar?
-    CATimeUnitAlgebra.shift_months(parent, unit, months).time(unit: unit)
+    CATimeUnitAlgebra.shift_months(face_storage, unit, months).time(unit: unit)
   end
 
   # @overload pmax(other)
@@ -1255,8 +1280,9 @@ class CATime
   # they run on the storage ticks and round the result back to the nearest
   # tick of `unit`.  A caller who needs a finer answer declares the grid
   # first (`t.to_unit(:ms).mean`) -- the same rule linear_fetch follows.
-  # Rounding is to nearest, not toward zero: a truncating round would flip
-  # the direction of the error at the epoch.
+  # Rounding is to nearest, and a tie goes to the later tick: rounding half
+  # away from zero would send a tie later after 1970 and earlier before it,
+  # so moving the data by whole days would change the answer.
 
   # @overload mean(axis: nil, **opts)
   #   Returns the centroid time on `self`'s unit (§8), rounded to the
@@ -1492,7 +1518,7 @@ class CATime
   #   @return [Element, CATime] an {Element} for a scalar `addr`, `nil` when
   #     that single answer is undetermined.
   def linear_fetch (addr, **opts)
-    r = parent.float64.linear_fetch(addr, **opts)
+    r = face_storage.float64.linear_fetch(addr, **opts)
     case r
     when CArray
       # mask_invalid before the int64 cast: the cast turns a NaN into 0, which
@@ -1523,7 +1549,7 @@ class CATime
   def to_time
     if CATimeUnitAlgebra::FIXED.key?(unit.base)
       f = unit.tick_ratio                        # exact seconds / tick (Rational)
-      parent.convert(:object) {|v| Time.at(v * f, in: 'UTC')}
+      face_storage.convert(:object) {|v| Time.at(v * f, in: 'UTC')}
     else                                         # calendar: exact granule midnight
       (days_since_epoch * 86400).convert(:object) {|v| Time.at(v, in: 'UTC')}
     end
@@ -1557,8 +1583,8 @@ class CATime
   # @return [CArray]
   def year
     case unit.base
-    when :Y then parent * unit.count + 1970
-    when :M then (parent * unit.count + 1970 * 12) / 12
+    when :Y then face_storage * unit.count + 1970
+    when :M then (face_storage * unit.count + 1970 * 12) / 12
     else CATimeCivil.civil_from_days(days_since_epoch)[0]
     end
   end
@@ -1568,9 +1594,9 @@ class CATime
   # @return [CArray] integer.
   def month
     case unit.base
-    when :Y then parent * 0 + 1
+    when :Y then face_storage * 0 + 1
     when :M
-      mo = parent * unit.count + 1970 * 12
+      mo = face_storage * unit.count + 1970 * 12
       mo % 12 + 1
     else CATimeCivil.civil_from_days(days_since_epoch)[1]
     end
@@ -1581,7 +1607,7 @@ class CATime
   # @return [CArray] integer.
   def day
     case unit.base
-    when :Y, :M then parent * 0 + 1
+    when :Y, :M then face_storage * 0 + 1
     else CATimeCivil.civil_from_days(days_since_epoch)[2]
     end
   end
@@ -1704,7 +1730,7 @@ class CATime
   # writes to_unit(:D) first) -- and the result is rounded back to a tick.
   def reduce_on_own_grid(op, kind, args, opts)
     with_surface_fill(opts) do |o|
-      round_and_relift(parent.public_send(op, *args, **o), kind)
+      round_and_relift(face_storage.public_send(op, *args, **o), kind)
     end
   end
 
@@ -1714,14 +1740,15 @@ class CATime
   def round_and_relift(r, kind)
     case r
     when Numeric
-      v = r.round
+      v = kind == :timedelta ? r.round : (r + 0.5).floor
       kind == :timedelta ? CATimedelta::Element.new(v, unit) : Element.new(v, unit)
     when CArray
       # A cell with no answer arrives masked and the mask survives the cast.
       # NaN does not: it has no int64 image, so a `fill_value: Float::NAN`
       # cell would cast to garbage bits.  mask_invalid turns it into UNDEF,
       # which is what "no answer" means here.
-      iv = r.round.mask_invalid.int64
+      near = kind == :timedelta ? r.round : (r + 0.5).floor
+      iv = near.mask_invalid.int64
       kind == :timedelta ? iv.timedelta(unit: unit) : iv.time(unit: unit)
     when Array
       r.map {|x| round_and_relift(x, kind)}
@@ -1781,7 +1808,7 @@ class CATimedelta
   #   measured in this array's resolution (see {CATime#ticks}).
   #   @return [CArray]
   def ticks
-    parent
+    face_storage
   end
 
   # @overload to_unit(unit)
@@ -1803,7 +1830,7 @@ class CATimedelta
   #   @raise [RangeError] when the widened ticks overflow int64.
   def to_unit(unit)
     to = CATime::Resolution.parse(unit)
-    CATimeUnitAlgebra.convert_scale_trunc(parent, self.unit, to).timedelta(unit: to)
+    CATimeUnitAlgebra.convert_scale_trunc(face_storage, self.unit, to).timedelta(unit: to)
   end
 
   # @overload +(other)
@@ -1821,16 +1848,16 @@ class CATimedelta
     case other
     when CATimedelta
       u = common_duration_unit(other.unit)
-      a = CATimeUnitAlgebra.convert_scale!(parent, unit, u)
+      a = CATimeUnitAlgebra.convert_scale!(face_storage, unit, u)
       b = CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
       b = b[0] if other.scalar?
       CATimeUnitAlgebra.checked_add(a, b).timedelta(unit: u)
     when CATime
       return other + self unless other.scalar?   # commutative -> time's unit
-      d = CATimeUnitAlgebra.duration_on_grid(parent, unit, other.unit)
+      d = CATimeUnitAlgebra.duration_on_grid(face_storage, unit, other.unit)
       CATimeUnitAlgebra.checked_add(d, other.parent[0]).time(unit: other.unit)
     else
-      raise TypeError, "CATimedelta + #{given.class} is not allowed"
+      raise TypeError, "CATimedelta + #{CATimeUnitAlgebra.operand_name(given)} is not allowed"
     end
   end
 
@@ -1848,12 +1875,12 @@ class CATimedelta
     case other
     when CATimedelta
       u = common_duration_unit(other.unit)
-      a = CATimeUnitAlgebra.convert_scale!(parent, unit, u)
+      a = CATimeUnitAlgebra.convert_scale!(face_storage, unit, u)
       b = CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
       b = b[0] if other.scalar?
       CATimeUnitAlgebra.checked_sub(a, b).timedelta(unit: u)
     else
-      raise TypeError, "CATimedelta - #{given.class} is not allowed"
+      raise TypeError, "CATimedelta - #{CATimeUnitAlgebra.operand_name(given)} is not allowed"
     end
   end
 
@@ -1862,14 +1889,14 @@ class CATimedelta
   #   unit.
   #   @return [CATimedelta]
   def abs
-    parent.abs.timedelta(unit: unit)
+    face_storage.abs.timedelta(unit: unit)
   end
 
   # @overload -@
   #   Returns each duration with its sign reversed, on the same unit.
   #   @return [CATimedelta]
   def -@
-    (-parent).timedelta(unit: unit)
+    (-face_storage).timedelta(unit: unit)
   end
 
   # @overload *(other)
@@ -1879,8 +1906,8 @@ class CATimedelta
   #   @raise [TypeError] when `other` is not an Integer.
   def *(other)
     case other
-    when Integer then CATimeUnitAlgebra.checked_mul(parent, other).timedelta(unit: unit)
-    else raise TypeError, "CATimedelta * #{other.class} is not allowed (Integer only)"
+    when Integer then CATimeUnitAlgebra.checked_mul(face_storage, other).timedelta(unit: unit)
+    else raise TypeError, "CATimedelta * #{CATimeUnitAlgebra.operand_name(other)} is not allowed (Integer only)"
     end
   end
 
@@ -1898,13 +1925,13 @@ class CATimedelta
     given, other = other, CATimeUnitAlgebra.operand(other)
     case other
     when Integer
-      CATimeUnitAlgebra.trunc_divide(parent, other).timedelta(unit: unit)
+      CATimeUnitAlgebra.trunc_divide(face_storage, other).timedelta(unit: unit)
     when CATimedelta
       # A ratio of durations is a number, not a count of whole ticks: 90 s /
       # 60 s is 1.5.  Both are brought to one unit first, so the ratio does
       # not depend on the units they are held in.
       u = common_duration_unit(other.unit)
-      CATimeUnitAlgebra.convert_scale!(parent, unit, u).to_type(:float64) /
+      CATimeUnitAlgebra.convert_scale!(face_storage, unit, u).to_type(:float64) /
         CATimeUnitAlgebra.convert_scale!(other.parent, other.unit, u)
     else raise TypeError, "CATimedelta / #{given.class} is not allowed"
     end
@@ -1926,7 +1953,7 @@ class CATimedelta
   #     reduction, if any of its cells does not).
   def sum(*args, **opts)
     with_surface_fill(opts) { |o|
-      exact_sum_relift(parent.accumulate(*args, **o), parent.sum(*args, **o))
+      exact_sum_relift(face_storage.accumulate(*args, **o), face_storage.sum(*args, **o))
     }
   end
 
@@ -1955,7 +1982,7 @@ class CATimedelta
   #   the same answer when it fits and raises RangeError when it does not.
   #   @return [Element, CATimedelta]
   def accumulate(*args, **opts)
-    with_surface_fill(opts) { |o| round_and_relift(parent.accumulate(*args, **o)) }
+    with_surface_fill(opts) { |o| round_and_relift(face_storage.accumulate(*args, **o)) }
   end
 
   # @overload cumsum(axis: nil)
@@ -1966,8 +1993,8 @@ class CATimedelta
   #   @return [CATimedelta]
   #   @raise [RangeError] if any cell of the running sum does not fit int64.
   def cumsum(*args, **opts)
-    exact_sum_relift(parent.send(:cumsum_in_own_type, *args, **opts),
-                     parent.cumsum(*args, **opts))
+    exact_sum_relift(face_storage.send(:cumsum_in_own_type, *args, **opts),
+                     face_storage.cumsum(*args, **opts))
   end
 
   # @overload prod(*)
@@ -1985,7 +2012,7 @@ class CATimedelta
   #   Returns the mean duration rounded to the nearest unit count.
   #   @return [Element, CATimedelta]
   def mean(*args, **opts)
-    with_surface_fill(opts) { |o| round_and_relift(parent.mean(*args, **o)) }
+    with_surface_fill(opts) { |o| round_and_relift(face_storage.mean(*args, **o)) }
   end
 
   # median / percentile / quantile / stddev / stddevp report on this array's
@@ -1997,7 +2024,7 @@ class CATimedelta
   #   Returns the median duration on `self`'s unit.
   #   @return [Element, CATimedelta]
   def median(*args, **opts)
-    with_surface_fill(opts) { |o| round_and_relift(parent.median(*args, **o)) }
+    with_surface_fill(opts) { |o| round_and_relift(face_storage.median(*args, **o)) }
   end
 
   # @overload percentile(*p, axis: nil, **opts)
@@ -2006,7 +2033,7 @@ class CATimedelta
   #   two or more give an Array).
   #   @return [Element, CATimedelta, Array<Element>, Array<CATimedelta>]
   def percentile(*args, **opts)
-    with_surface_fill(opts) { |o| round_and_relift(parent.percentile(*args, **o)) }
+    with_surface_fill(opts) { |o| round_and_relift(face_storage.percentile(*args, **o)) }
   end
 
   # @overload quantile(axis: nil, **opts)
@@ -2014,7 +2041,7 @@ class CATimedelta
   #   `self`'s unit.
   #   @return [Array<Element>, Array<CATimedelta>]
   def quantile(*args, **opts)
-    with_surface_fill(opts) { |o| round_and_relift(parent.quantile(*args, **o)) }
+    with_surface_fill(opts) { |o| round_and_relift(face_storage.quantile(*args, **o)) }
   end
 
   # @overload stddev(axis: nil, **opts)
@@ -2023,7 +2050,7 @@ class CATimedelta
   #   the precision matters.
   #   @return [Element, CATimedelta]
   def stddev(*args, **opts)
-    with_surface_fill(opts) { |o| round_and_relift(parent.stddev(*args, **o)) }
+    with_surface_fill(opts) { |o| round_and_relift(face_storage.stddev(*args, **o)) }
   end
 
   # @overload stddevp(axis: nil, **opts)
@@ -2031,7 +2058,7 @@ class CATimedelta
   #   {#stddev}.
   #   @return [Element, CATimedelta]
   def stddevp(*args, **opts)
-    with_surface_fill(opts) { |o| round_and_relift(parent.stddevp(*args, **o)) }
+    with_surface_fill(opts) { |o| round_and_relift(face_storage.stddevp(*args, **o)) }
   end
 
   def round_and_relift(r)
@@ -2168,7 +2195,7 @@ class CATimedelta
   #   @return [Element, CATimedelta] an {Element} for a scalar `addr`, `nil`
   #     when that single answer is undetermined.
   def linear_fetch (addr, **opts)
-    r = parent.float64.linear_fetch(addr, **opts)
+    r = face_storage.float64.linear_fetch(addr, **opts)
     case r
     when CArray  then r.mask_invalid.round.int64.timedelta(unit: unit)
     when Numeric then r.to_f.nan? ? nil : Element.new(r.round, unit)
@@ -3464,8 +3491,18 @@ class CATime
       fl = o + q * step_ticks
       return bucket_head_as_time(fl + step_ticks * n.ne(fl), mul, su)
     when :round
-      r = d - q * step_ticks                      # 0 <= r < step_ticks
-      q = q + r.ge((step_ticks + 1) / 2)          # ties -> future; no 2*d / 2*r
+      if mul == 1 and [:M, :Y].include?(su.base)
+        # A month or year tick is the start of its month or year, so the
+        # nearest head is by the instant, measured in days.
+        fl   = o + q * step_ticks
+        here = days_since_epoch
+        lo   = fl.time(unit: su).send(:days_since_epoch)
+        hi   = (fl + step_ticks).time(unit: su).send(:days_since_epoch)
+        q    = q + (hi - here).le(here - lo)      # ties -> future
+      else
+        r = d - q * step_ticks                    # 0 <= r < step_ticks
+        q = q + r.ge((step_ticks + 1) / 2)        # ties -> future; no 2*d / 2*r
+      end
     end
     bucket_head_as_time(o + q * step_ticks, mul, su)
   end
@@ -3517,8 +3554,10 @@ class CATime
   # @overload round(grid = nil, unit:, origin: nil)
   #   {#snap} with `direction: :round` -- each element at its nearest bucket
   #   head, ties toward the future.  Exact for odd `step_ticks` (no half-tick
-  #   loss).  For a calendar bucket the nearest head is by absolute tick
-  #   distance (month lengths vary), ties toward the future.
+  #   loss).  For a calendar bucket the nearest head is by the instant (month
+  #   lengths vary), ties toward the future.  A month or year storage tick
+  #   stands for the start of its month or year, so a `:M` array rounds as
+  #   the same dates on `:D` do: 1889-07 to the year is 1889.
   #   @return [CATime]
   def round(grid = nil, unit: nil, origin: nil)
     snap(grid, unit: unit, origin: origin, direction: :round)
@@ -3604,7 +3643,7 @@ class CATime
 
   # Storage ticks lifted into the numerator grid (see {#resolve_timestep_grid}).
   def storage_ticks_in_numerator_grid(mul)
-    mul == 1 ? parent : CATimeUnitAlgebra.widen(parent, mul)
+    mul == 1 ? face_storage : CATimeUnitAlgebra.widen(face_storage, mul)
   end
 
   # A bucket head computed in numerator ticks, back as a {CATime} in the
@@ -3638,15 +3677,15 @@ class CATime
   # an empty array, or one whose every cell is masked.
   def raise_if_int64_overflow(su, mul, o, step_ticks = nil, kind = nil)
     return unless mul > 1 or FINE_UNITS.include?(su.base)
-    min = parent.min
+    min = face_storage.min
     return if min == UNDEF
     lo  = Integer(min) * mul
-    hi  = Integer(parent.max) * mul
+    hi  = Integer(face_storage.max) * mul
     chk = ->(v, w) { CATimeGrid.check_int64_range(v, w) }
     chk.(lo, "ticks in bucket resolution")
     chk.(hi, "ticks in bucket resolution")
-    chk.(lo - o, "parent - origin")
-    chk.(hi - o, "parent - origin")
+    chk.(lo - o, "face_storage - origin")
+    chk.(hi - o, "face_storage - origin")
     if kind
       chk.(bucket_head_ticks(lo, o, step_ticks, kind), "bucket head")
       chk.(bucket_head_ticks(hi, o, step_ticks, kind), "bucket head")
@@ -3674,22 +3713,22 @@ class CATime
     case res.base
     when :Y
       ones = CArray.int64(*shape) { 1 }
-      CATimeCivil.days_from_civil(parent * res.count + 1970, ones, ones)
+      CATimeCivil.days_from_civil(face_storage * res.count + 1970, ones, ones)
     when :M
-      mo = parent * res.count + 1970 * 12
+      mo = face_storage * res.count + 1970 * 12
       y  = mo / 12
       m  = mo - y * 12 + 1
       CATimeCivil.days_from_civil(y, m, CArray.int64(*shape) { 1 })
-    when :W then parent * res.count * 7
-    when :D then parent * res.count
+    when :W then face_storage * res.count * 7
+    when :D then face_storage * res.count
     else                                                   # fixed sub-day storage
       day = CATime::Resolution.new(1, :D)
       r   = CATimeUnitAlgebra.ratio(day, res)          # storage ticks per day
       if r.denominator == 1
-        parent / r.numerator
+        face_storage / r.numerator
       else                                                 # non-day-aligned tick
         tr = res.tick_ratio                                # seconds / tick
-        parent * tr.numerator / (86400 * tr.denominator)
+        face_storage * tr.numerator / (86400 * tr.denominator)
       end
     end
   end
@@ -3702,9 +3741,9 @@ class CATime
   # calendar-storage element has no intra-day field, so it collapses to 0.
   def clock_field(fu)
     r = CATimeUnitAlgebra.ratio(unit, CATime::Resolution.new(1, fu))  # fu ticks / storage tick
-    return parent * 0 if r.nil?                            # calendar storage: no clock field
-    fi = r.denominator == 1 ? parent * r.numerator         # epoch-relative fu index
-                            : parent * r.numerator / r.denominator
+    return face_storage * 0 if r.nil?                            # calendar storage: no clock field
+    fi = r.denominator == 1 ? face_storage * r.numerator         # epoch-relative fu index
+                            : face_storage * r.numerator / r.denominator
     cycle = fu == :h ? 24 : 60                             # hour 0..23; min/sec 0..59
     fi % cycle
   end
@@ -3725,12 +3764,12 @@ class CATime
     return k if kind == :index
     head = CATimeGrid.calendar_bucket_head_ticks(k, st, su, origin)
     return head.time(unit: su) if kind == :floor
-    return parent.eq(head)          if kind == :on
+    return face_storage.eq(head)          if kind == :on
     head_next = CATimeGrid.calendar_bucket_head_ticks(k + 1, st, su, origin)
     sel =                                # boolean 0/1: pick head_next?
       case kind
-      when :ceil  then parent.ne(head)                 # on-boundary keeps head
-      when :round then (head_next - parent).le(parent - head)  # nearest, ties -> future
+      when :ceil  then face_storage.ne(head)                 # on-boundary keeps head
+      when :round then (head_next - face_storage).le(face_storage - head)  # nearest, ties -> future
       end
     (head + (head_next - head) * sel).time(unit: su)
   end

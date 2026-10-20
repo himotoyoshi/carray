@@ -109,7 +109,7 @@ class TestReinitializeRefused < Test::Unit::TestCase
     bytes = LeakMeter.bytes_per_call(
       "CArray.send(:register_axis_group_classes, CACategorical, AxisGroup)",
       setup: "CACategorical ; AxisGroup", calls: 20000)
-    omit "malloc zone statistics unavailable" if bytes.nil?
+    omit "measurement unavailable" if bytes.nil?
     assert_operator bytes, :<, 8
   end
 

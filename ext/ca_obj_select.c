@@ -130,7 +130,8 @@ ca_select_snapshot (CArray *select)
 
 /* Set up the view over `parent` from an owned selector snapshot (see
    ca_select_snapshot) and pre-compute ca->indices (TRUE positions in flat
-   parent order).  Does not raise. */
+   parent order).  Raises only when the indices cannot be allocated, after
+   every field free_ca_select reads is set. */
 static int
 ca_select_setup (CASelect *ca, CArray *parent, CArray *snapshot)
 {
@@ -211,14 +212,42 @@ ca_select_setup (CASelect *ca, CArray *parent, CArray *snapshot)
   return 0;
 }
 
+typedef struct {
+  CASelect *ca;
+  CArray   *parent;
+  CArray   *snapshot;
+} ca_select_new_arg;
+
+static VALUE
+ca_select_new_alloc (VALUE varg)
+{
+  ca_select_new_arg *a = (ca_select_new_arg *) varg;
+  a->ca = ALLOC(CASelect);
+  return Qnil;
+}
+
+static VALUE
+ca_select_new_setup (VALUE varg)
+{
+  ca_select_new_arg *a = (ca_select_new_arg *) varg;
+  ca_select_setup(a->ca, a->parent, a->snapshot);
+  return Qnil;
+}
+
+/* The struct and the indices are allocated after the snapshot.  When the
+   struct cannot be allocated the snapshot goes; when the indices cannot,
+   the struct goes and takes the snapshot with it (the setup stores the
+   snapshot before it allocates the indices). */
 CArray *
 ca_select_new (CArray *parent, CArray *select)
 {
-  CArray *snapshot = ca_select_snapshot(select);
+  ca_select_new_arg a;
+  a.parent   = parent;
+  a.snapshot = ca_select_snapshot(select);
   /* check: the setup checks nothing */
-  CASelect *ca = ALLOC(CASelect);
-  ca_select_setup(ca, parent, snapshot);
-  return (CArray*) ca;
+  ca_fill_or_free(a.snapshot, ca_select_new_alloc, (VALUE) &a);
+  ca_fill_or_free((CArray *) a.ca, ca_select_new_setup, (VALUE) &a);
+  return (CArray*) a.ca;
 }
 
 /* Alias for source compatibility.  Both constructors produce a

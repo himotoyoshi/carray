@@ -117,7 +117,7 @@ class TestCAStackFaceLift < Test::Unit::TestCase
     a = CATime.new(3, unit: :ns)
     s = CArray.stack([a])
     assert_kind_of CATime, s
-    assert_kind_of CAStack, s.parent
+    assert_kind_of CAStack, s.send(:face_storage)
     assert_equal [1, 3], s.shape
   end
 

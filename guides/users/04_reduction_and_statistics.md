@@ -356,6 +356,11 @@ CA_FLOAT64([Float::NAN, Float::NAN]).cummin   #  => [ NaN, NaN ]
 This is the same rule the element-wise `pmin` / `pmax` follow, and it is why
 they and `min` / `max` agree on any array.
 
+The two zeros are the one place they may not. `-0.0` and `0.0` are equal, so
+which of them `min` or `max` answers is not specified: it can depend on where
+they sit in the array. `pmin` gives `-0.0` and `pmax` gives `0.0` in either
+order.
+
 `min_index` and its relatives answer `UNDEF` there instead. They return a
 position, and no position in an array of `NaN` is the one holding the
 minimum:

@@ -36,7 +36,7 @@ class TestCAObjectFaceDefault < Test::Unit::TestCase
     NUMERIC.each do |name, make|
       f = Plain.new(make.call)
       assert_equal :fixlen, f.data_type, name.to_s
-      assert_raise(TypeError, name.to_s)               { f + 1 }
+      assert_raise(CArray::DataTypeError, name.to_s)               { f + 1 }
       assert_raise(CArray::DataTypeError, name.to_s)   { f.sum }
       assert_raise(TypeError, name.to_s)               { f.to_type(:float64) }
     end

@@ -472,6 +472,8 @@ class CArray
   #
   #   - CArray instance -> its `data_type`
   #   - Symbol / String / Class -> data_type representation (name lookup)
+  #   - MemoryView producer -> the data_type its format names; one whose
+  #     format carray cannot read is refused, as an operator refuses it
   #   - Integer / Float / Complex / true / false / nil / Object -> *value*,
   #     data_type inferred (3 -> `:int64`, 3.14 -> `:float64`,
   #     1+2i -> `:cmplx128`, ...)

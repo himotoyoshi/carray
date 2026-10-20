@@ -1215,26 +1215,48 @@ typedef struct {
   boolean8_t *scratch;
 } ca_to_type_ctx_t;
 
-/* Marks in `m` the cells of a float or complex array that hold NaN (in
-   either part).  A NaN has no integer, and C leaves its conversion
-   undefined. */
+/* Whether a double truncates into integer type `dt`: not NaN, not an
+   infinity, and inside the open interval of values whose integer part `dt`
+   holds (closed below for int64: -2**63-1 rounds to -2**63 in double).
+   The same bounds as the generated casts in carray_cast_func.rb. */
+static int
+ca_double_fits_integer (double v, int8_t dt)
+{
+  switch ( dt ) {
+  case CA_INT8:   return v > -129.0                 && v < 128.0;
+  case CA_UINT8:  return v > -1.0                   && v < 256.0;
+  case CA_INT16:  return v > -32769.0               && v < 32768.0;
+  case CA_UINT16: return v > -1.0                   && v < 65536.0;
+  case CA_INT32:  return v > -2147483649.0          && v < 2147483648.0;
+  case CA_UINT32: return v > -1.0                   && v < 4294967296.0;
+  case CA_INT64:  return v >= -9223372036854775808.0 && v < 9223372036854775808.0;
+  case CA_UINT64: return v > -1.0                   && v < 18446744073709551616.0;
+  default:        return 1;
+  }
+}
+
+/* Marks in `m` the cells of a float or complex array that have no integer
+   of type `dt`: NaN (in either part), an infinity, or a value out of
+   range.  C leaves their conversion undefined, and machines differ. */
 static void
-ca_mark_nan (CArray *ca, boolean8_t *m)
+ca_mark_unconvertible (CArray *ca, boolean8_t *m, int8_t dt)
 {
   ca_size_t i, n = ca->elements;
   switch ( ca->data_type ) {
-  case CA_FLOAT32: { float32_t *p = (float32_t *) ca->ptr;
-    for (i=0; i<n; i++) if ( isnan(p[i]) ) m[i] = 1;
+  case CA_FLOAT32: { ca_u_float32_t *p = (ca_u_float32_t *) ca->ptr;
+    for (i=0; i<n; i++) if ( ! ca_double_fits_integer(p[i], dt) ) m[i] = 1;
     break; }
-  case CA_FLOAT64: { float64_t *p = (float64_t *) ca->ptr;
-    for (i=0; i<n; i++) if ( isnan(p[i]) ) m[i] = 1;
+  case CA_FLOAT64: { ca_u_float64_t *p = (ca_u_float64_t *) ca->ptr;
+    for (i=0; i<n; i++) if ( ! ca_double_fits_integer(p[i], dt) ) m[i] = 1;
     break; }
 #ifdef HAVE_COMPLEX_H
-  case CA_CMPLX64: { cmplx64_t *p = (cmplx64_t *) ca->ptr;
-    for (i=0; i<n; i++) if ( isnan(crealf(p[i])) || isnan(cimagf(p[i])) ) m[i] = 1;
+  case CA_CMPLX64: { ca_u_cmplx64_t *p = (ca_u_cmplx64_t *) ca->ptr;
+    for (i=0; i<n; i++)
+      if ( ! ca_double_fits_integer(crealf(p[i]), dt) || isnan(cimagf(p[i])) ) m[i] = 1;
     break; }
-  case CA_CMPLX128: { cmplx128_t *p = (cmplx128_t *) ca->ptr;
-    for (i=0; i<n; i++) if ( isnan(creal(p[i])) || isnan(cimag(p[i])) ) m[i] = 1;
+  case CA_CMPLX128: { ca_u_cmplx128_t *p = (ca_u_cmplx128_t *) ca->ptr;
+    for (i=0; i<n; i++)
+      if ( ! ca_double_fits_integer(creal(p[i]), dt) || isnan(cimag(p[i])) ) m[i] = 1;
     break; }
 #endif
   default:
@@ -1274,11 +1296,11 @@ ca_to_type_cast (VALUE arg)
     else {
       memset(scratch, 0, ne);
     }
-    /* float -> integer: a NaN cell becomes UNDEF, as an unparseable object
-       cell does.  A finite value outside the integer type is converted the
-       way the machine's C converts it, which differs between machines. */
+    /* float -> integer: a cell with no integer of the type (NaN, an
+       infinity, a value out of range) becomes UNDEF, as an unparseable
+       object cell does. */
     if ( from_float ) {
-      ca_mark_nan(ca, scratch);
+      ca_mark_unconvertible(ca, scratch, cb->data_type);
       memset(cb->ptr, 0, ne * cb->bytes);
     }
     ca_cast_block_with_mask(ne, ca, ca->ptr, cb, cb->ptr, scratch);
@@ -2017,7 +2039,9 @@ rb_ca_wrap_readonly (VALUE arg, VALUE rtype)
     else {
       CArray *ca_tmp;
       volatile VALUE ref = obj;
-      ca_size_t dim = RSTRING_LEN(ref)/ca_sizeof[data_type];
+      ca_size_t bytes = ca_sizeof[data_type];
+      CA_CHECK_BYTES_GIVEN(data_type, bytes);
+      ca_size_t dim = RSTRING_LEN(ref)/bytes;
       obj = rb_carray_new(data_type, 1, &dim, 0, NULL);
       TypedData_Get_Struct(obj, CArray, &carray_data_type, ca_tmp);
       memcpy(ca_tmp->ptr, RSTRING_PTR(ref), dim * ca_sizeof[data_type]);
@@ -2150,7 +2174,15 @@ ca_fixlen_scalar_operand (volatile VALUE *scalar, VALUE reference)
   if ( cr->data_type != CA_FIXLEN ) {
     return 0;
   }
-  *scalar = rb_cscalar_new_with_value(CA_FIXLEN, cr->bytes, *scalar);
+  /* A String longer than the cell keeps its length: cut to the cell, it
+     would equal a cell it does not (a two-byte "ab" equal to "abX").  The
+     wider scalar is then compared as two fixlen widths are. */
+  {
+    ca_size_t len = (ca_size_t) RSTRING_LEN(*scalar);
+    *scalar = rb_cscalar_new_with_value(CA_FIXLEN,
+                                        len > cr->bytes ? len : cr->bytes,
+                                        *scalar);
+  }
   return 1;
 }
 
@@ -2240,6 +2272,69 @@ ca_integer_scalar_operand (volatile VALUE *scalar, VALUE reference)
   return 1;
 }
 
+/* A Ruby Array operand against a numeric or boolean array is read as its
+   cells, as the array CArray.wrap_readonly makes of it (nested Arrays give
+   its axes).  Its data type is the
+   one the cells would take one at a time as scalar operands of the same
+   operation (an Integer
+   against an integer array takes the array's type and has to fit it),
+   promoted together.  Against an object array, a Face or a fixlen array an
+   Array stays one value. */
+static int
+ca_array_operand (volatile VALUE *ary, VALUE reference, int both)
+{
+  CArray *cr;
+  volatile VALUE flat, probe_self, probe;
+  long i, n;
+  int8_t type = -1, seen_fix = -1, seen_big = -1, seen_flo = -1, seen_cpx = -1,
+         seen_bool = -1;
+
+  if ( ! RB_TYPE_P(*ary, T_ARRAY) || ! rb_obj_is_carray(reference) ) {
+    return 0;
+  }
+  TypedData_Get_Struct(reference, CArray, &carray_data_type, cr);
+  if ( ca_is_face(cr) || ca_is_object_type(cr) || ca_is_fixlen_type(cr) ) {
+    return 0;
+  }
+
+  flat = rb_funcall(*ary, rb_intern("flatten"), 0);
+  n = RARRAY_LEN(flat);
+  for (i = 0; i < n; i++) {
+    VALUE e = RARRAY_AREF(flat, i);
+    int8_t *seen, t;
+    CArray *cp;
+    if      ( FIXNUM_P(e) )               seen = &seen_fix;
+    else if ( RB_TYPE_P(e, T_BIGNUM) )    seen = &seen_big;
+    else if ( RB_FLOAT_TYPE_P(e) )        seen = &seen_flo;
+    else if ( RB_TYPE_P(e, T_COMPLEX) )   seen = &seen_cpx;
+    else if ( e == Qtrue || e == Qfalse ) seen = &seen_bool;
+    else                                  seen = NULL;
+    if ( RB_INTEGER_TYPE_P(e) && ca_is_integer_type(cr) ) {
+      ca_check_integer_fits(e, cr->data_type);
+    }
+    if ( seen && *seen >= 0 ) {
+      continue;
+    }
+    probe_self = reference;
+    probe      = e;
+    if ( both ) {
+      rb_ca_cast_self_or_other(&probe_self, &probe);
+    }
+    else {
+      rb_ca_cast_other((VALUE *) &probe_self, (volatile VALUE *) &probe);
+    }
+    TypedData_Get_Struct(probe, CArray, &carray_data_type, cp);
+    t = cp->data_type;
+    if ( seen ) *seen = t;
+    type = ( type < 0 ) ? t : ca_promote_type(type, t);
+  }
+  if ( type < 0 ) {
+    type = cr->data_type;
+  }
+  *ary = rb_ca_wrap_readonly(*ary, INT2NUM(type));
+  return 1;
+}
+
 /* CArray.cast(value) -- singleton entry delegating to rb_ca_cast, which
    returns a CArray unchanged and coerces a Ruby value to a CScalar / CArray.
    User doc lives in yard-stubs/carray_cast.rb. */
@@ -2302,6 +2397,10 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
   if ( ! rb_obj_is_carray(*other) && TYPE(*other) != T_STRING &&
        rb_memory_view_available_p(*other) ) {
     *other = ca_operand_from_memory_view(*other);
+  }
+
+  if ( ! ca_array_operand(other, *self, 1) ) {
+    ca_array_operand(self, *other, 1);
   }
 
   if ( ! rb_obj_is_carray(*self) ) {
@@ -2427,10 +2526,30 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
     return;
   }
 
-  rb_raise(rb_eTypeError,
+  /* A data type the operation does not take, as `sqrt!` on an integer
+     array is refused (CArray::DataTypeError is a TypeError). */
+  rb_raise(rb_eCADataTypeError,
            "can't coerce carray with data_types of '%s' and '%s'",
            ca_coerce_operand_name(*self, ca),
            ca_coerce_operand_name(*other, cb));
+}
+
+/* Refuses a pair of arrays with no common data_type in the words of
+   rb_ca_cast_self_or_other (the eager operators'), and returns otherwise
+   without casting either.  A lazy builder calls it before it works out
+   the kernel's data_types, so that a pair the eager operator refuses is
+   refused the same way. */
+void
+ca_refuse_without_common_type (VALUE self, VALUE other)
+{
+  CArray *ca, *cb;
+  TypedData_Get_Struct(self,  CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(other, CArray, &carray_data_type, cb);
+  if ( ca->data_type != cb->data_type
+       && ca_cast_table[cb->data_type][ca->data_type] < 0
+       && ca_cast_table[ca->data_type][cb->data_type] < 0 ) {
+    rb_ca_cast_self_or_other(&self, &other);   /* raises */
+  }
 }
 
 /* CArray.cast_self_or_other(self, other) — promote self and other
@@ -2470,6 +2589,15 @@ ca_arg_to_data_type (VALUE obj)
   else if ( ( data_type = ca_mv_probe_data_type(obj) ) >= 0 ) {
     /* MemoryView producer -> its format's data_type (T_STRING excluded above,
        so a String never reaches here).  data_type already assigned. */
+  }
+  else if ( rb_memory_view_available_p(obj) ) {
+    /* A MemoryView producer whose format says nothing usable (typeless, the
+       other byte order) is read as the operators read it, and refused in
+       the same words. */
+    VALUE ca_obj = ca_operand_from_memory_view(obj);
+    CArray *ca;
+    TypedData_Get_Struct(ca_obj, CArray, &carray_data_type, ca);
+    data_type = ca->data_type;
   }
   else {
     data_type = ca_value_to_data_type(obj);
@@ -2606,6 +2734,24 @@ ca_query_match_type (int8_t ref, VALUE query)
   return ref;
 }
 
+/* A fixlen array searched or counted for a String longer than its cells
+   is read as cells of the String's width (NUL-padded), so the query is not
+   cut to the cell: "abX" matches no two-byte cell, as a wider scalar does
+   not in `eq`.  Anything else is returned as given. */
+VALUE
+ca_fixlen_widen_for_query (VALUE self, VALUE query)
+{
+  CArray *ca;
+  if ( ! RB_TYPE_P(query, T_STRING) || ! rb_obj_is_carray(self) ) {
+    return self;
+  }
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  if ( ca->data_type != CA_FIXLEN || RSTRING_LEN(query) <= ca->bytes ) {
+    return self;
+  }
+  return rb_ca_to_type(self, INT2NUM(CA_FIXLEN), SIZE2NUM(RSTRING_LEN(query)));
+}
+
 /* ca.query_match_type(query) -- ca_query_match_type with self as the
    reference, for the set family and locate_addr. */
 static VALUE
@@ -2641,7 +2787,7 @@ ca_arg_is_scalar (VALUE obj)
   if ( TYPE(obj) == T_SYMBOL || TYPE(obj) == T_STRING || TYPE(obj) == T_CLASS ) {
     return 0;
   }
-  return ca_mv_probe_data_type(obj) < 0;
+  return ! rb_memory_view_available_p(obj);
 }
 
 /* The type a scalar `obj` (of type `st`) and an array of type `at` share,
@@ -2852,6 +2998,8 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
     *other = ca_operand_from_memory_view(*other);
   }
 
+  ca_array_operand(other, *self, 0);
+
   if ( ! rb_obj_is_carray(*other) ) {
     if ( rb_ca_is_object_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_OBJECT, 0, *other);
@@ -2894,7 +3042,9 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
     return;
   }
 
-  rb_raise(rb_eTypeError,
+  /* A data type the operation does not take, as `sqrt!` on an integer
+     array is refused (CArray::DataTypeError is a TypeError). */
+  rb_raise(rb_eCADataTypeError,
            "can't coerce carray with data_types of '%s' and '%s'",
            ca_coerce_operand_name(*self, ca),
            ca_coerce_operand_name(*other, cb));
@@ -2920,77 +3070,88 @@ rb_ca_cast_with (VALUE self, VALUE other)
 /* -----------------------------------------------------------------------
    clip_<type> family — clip into the target data type's representable
    range, then cast.  Sugar for `clip(lo, hi).as_<type>`.
+
+   A float source takes a saturating path instead.  The type's maximum is
+   not always exact in the source float (INT64_MAX and UINT64_MAX round up
+   in float64, INT32_MAX and UINT32_MAX in float32), so clip-then-cast
+   would hand the cast a value just past the range.  Instead each cell is
+   compared in double against the range the cast truncates into
+   (ca_double_fits_integer) and saturates to the type's minimum or maximum
+   outside it.  A NaN that is not masked is refused.
 ----------------------------------------------------------------------- */
 
-#define CLIP_CAST_FUNC(name, lo_expr, hi_expr, cast_func) \
-static VALUE \
-rb_ca_##name (VALUE self) \
-{ \
-  return cast_func(rb_ca_clip(self, lo_expr, hi_expr)); \
-}
-
-CLIP_CAST_FUNC(clip_int8,   INT2NUM(-128),                    INT2NUM(127),                    rb_ca_as_int8)
-CLIP_CAST_FUNC(clip_int16,  INT2NUM(-32768),                  INT2NUM(32767),                  rb_ca_as_int16)
-CLIP_CAST_FUNC(clip_int32,  INT2NUM(-2147483648),             INT2NUM(2147483647),             rb_ca_as_int32)
-CLIP_CAST_FUNC(clip_int64,  LL2NUM(-9223372036854775807-1),   LL2NUM(9223372036854775807),     rb_ca_as_int64)
-CLIP_CAST_FUNC(clip_uint8,  INT2NUM(0),                       INT2NUM(255),                    rb_ca_as_uint8)
-CLIP_CAST_FUNC(clip_uint16, INT2NUM(0),                       INT2NUM(65535),                  rb_ca_as_uint16)
-CLIP_CAST_FUNC(clip_uint32, INT2NUM(0),                       UINT2NUM(4294967295U),           rb_ca_as_uint32)
-
-#undef CLIP_CAST_FUNC
-
-/* CArray#clip_uint64 -- dedicated implementation.
-
-   UINT64_MAX (= 2^64-1) is not exactly representable in float64; the nearest
-   double rounds up to 2^64.  A generic clip-then-cast path therefore clamps
-   an overflowing float source (e.g. 1e20) to 2^64 and the subsequent cast to
-   uint64 wraps around to 0.  For floating-point sources we take a saturating
-   path: compare in float space against 2^64 (which IS representable) and
-   saturate to UINT64_MAX above it and 0 below zero.  Other source data types use
-   the plain clip-then-cast path. */
 static VALUE
-rb_ca_clip_uint64 (VALUE self)
+ca_clip_float_to_integer (VALUE self, int8_t to_dt)
 {
   CArray *ca;
   GetCArray(self, ca);
-  int dt = ca->data_type;
-  if ( dt == CA_FLOAT32 || dt == CA_FLOAT64 ) {
-    volatile VALUE vsrc = ( dt == CA_FLOAT64 ) ? self : rb_ca_as_float64(self);
-    CArray *src;
-    GetCArray(vsrc, src);
-    volatile VALUE vout = rb_carray_new(CA_UINT64, ca->ndim, ca->dim, 0, NULL);
-    CArray *out;
-    GetCArray(vout, out);
-    ca_attach(src);   /* window: nothing raises inside */
-    double  *sp = (double  *) src->ptr;
-    uint64_t *op = (uint64_t *) out->ptr;
-    ca_size_t n = ca->elements;
-    const double LIMIT = 18446744073709551616.0; /* 2^64, exact in f64 */
-    boolean8_t *m = ca_has_mask(src) ? (boolean8_t *) src->mask->ptr : NULL;  /* attached with src */
-    int found_nan = 0;
-    for ( ca_size_t i = 0; i < n; i++ ) {
-      double v = sp[i];
-      if ( v != v ) {                 /* NaN has no integer: refused below */
-        op[i] = 0;
-        if ( ! m || ! m[i] ) found_nan = 1;
-      }
-      else if ( v >= LIMIT ) op[i] = UINT64_MAX;
-      else if ( v <= 0.0 )   op[i] = 0;
-      else                   op[i] = (uint64_t) v;
+  volatile VALUE vsrc = ( ca->data_type == CA_FLOAT64 ) ? self : rb_ca_as_float64(self);
+  CArray *src;
+  GetCArray(vsrc, src);
+  volatile VALUE vout = rb_carray_new(to_dt, ca->ndim, ca->dim, 0, NULL);
+  CArray *out;
+  GetCArray(vout, out);
+  ca_attach(src);   /* window: nothing raises inside */
+  double *sp = (double *) src->ptr;
+  char   *op = out->ptr;
+  ca_size_t n = ca->elements;
+  boolean8_t *m = ca_has_mask(src) ? (boolean8_t *) src->mask->ptr : NULL;  /* attached with src */
+  int found_nan = 0;
+  for ( ca_size_t i = 0; i < n; i++ ) {
+    double v = sp[i];
+    int fits = ca_double_fits_integer(v, to_dt);
+    if ( v != v ) {                 /* NaN has no integer: refused below */
+      v = 0.0;
+      fits = 1;
+      if ( ! m || ! m[i] ) found_nan = 1;
     }
-    ca_detach(src);
-    if ( found_nan ) {
-      rb_raise(rb_eFloatDomainError, "%s: NaN cannot be converted to uint64",
-               ca_calling_method_name());
+#define CLIP_STORE(type, lo, hi) \
+    ((type *) op)[i] = fits ? (type) v : ( v > 0 ? (hi) : (lo) )
+    switch ( to_dt ) {
+    case CA_INT8:   CLIP_STORE(int8_t,   INT8_MIN,  INT8_MAX);   break;
+    case CA_UINT8:  CLIP_STORE(uint8_t,  0,         UINT8_MAX);  break;
+    case CA_INT16:  CLIP_STORE(int16_t,  INT16_MIN, INT16_MAX);  break;
+    case CA_UINT16: CLIP_STORE(uint16_t, 0,         UINT16_MAX); break;
+    case CA_INT32:  CLIP_STORE(int32_t,  INT32_MIN, INT32_MAX);  break;
+    case CA_UINT32: CLIP_STORE(uint32_t, 0,         UINT32_MAX); break;
+    case CA_INT64:  CLIP_STORE(int64_t,  INT64_MIN, INT64_MAX);  break;
+    case CA_UINT64: CLIP_STORE(uint64_t, 0,         UINT64_MAX); break;
     }
-    if ( ca_has_mask(ca) ) {
-      ca_copy_mask(out, ca);
-    }
-    return vout;
+#undef CLIP_STORE
   }
-  return rb_ca_as_uint64(rb_ca_clip(self, INT2NUM(0),
-                                    ULL2NUM(18446744073709551615ULL)));
+  ca_detach(src);
+  if ( found_nan ) {
+    rb_raise(rb_eFloatDomainError, "%s: NaN cannot be converted to %s",
+             ca_calling_method_name(), ca_type_name[to_dt]);
+  }
+  if ( ca_has_mask(ca) ) {
+    ca_copy_mask(out, ca);
+  }
+  return vout;
 }
+
+#define CLIP_CAST_FUNC(name, to_dt, lo_expr, hi_expr, cast_func) \
+static VALUE \
+rb_ca_##name (VALUE self) \
+{ \
+  CArray *ca; \
+  GetCArray(self, ca); \
+  if ( ca->data_type == CA_FLOAT32 || ca->data_type == CA_FLOAT64 ) { \
+    return ca_clip_float_to_integer(self, to_dt); \
+  } \
+  return cast_func(rb_ca_clip(self, lo_expr, hi_expr)); \
+}
+
+CLIP_CAST_FUNC(clip_int8,   CA_INT8,   INT2NUM(-128),                  INT2NUM(127),                  rb_ca_as_int8)
+CLIP_CAST_FUNC(clip_int16,  CA_INT16,  INT2NUM(-32768),                INT2NUM(32767),                rb_ca_as_int16)
+CLIP_CAST_FUNC(clip_int32,  CA_INT32,  INT2NUM(-2147483648),           INT2NUM(2147483647),           rb_ca_as_int32)
+CLIP_CAST_FUNC(clip_int64,  CA_INT64,  LL2NUM(-9223372036854775807-1), LL2NUM(9223372036854775807),   rb_ca_as_int64)
+CLIP_CAST_FUNC(clip_uint8,  CA_UINT8,  INT2NUM(0),                     INT2NUM(255),                  rb_ca_as_uint8)
+CLIP_CAST_FUNC(clip_uint16, CA_UINT16, INT2NUM(0),                     INT2NUM(65535),                rb_ca_as_uint16)
+CLIP_CAST_FUNC(clip_uint32, CA_UINT32, INT2NUM(0),                     UINT2NUM(4294967295U),         rb_ca_as_uint32)
+CLIP_CAST_FUNC(clip_uint64, CA_UINT64, INT2NUM(0),                     ULL2NUM(18446744073709551615ULL), rb_ca_as_uint64)
+
+#undef CLIP_CAST_FUNC
 
 /* ------------------------------------------------------------------------
    Global cast functions CA_INT32(data) ... CA_OBJECT(data) etc.

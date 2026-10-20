@@ -245,8 +245,9 @@ CA_INT64([0, 1, 2, 3, 4]).linear_section(2.5)   # => 2.5
 **Return value.**
 
 * For a 1-D `self` with a scalar query you get a plain Ruby `Float`, or
-  `nil` when there is no answer (`linear_fetch` out of range, or
-  `linear_section method: :linear` out of range).
+  `nil` when there is no answer (`linear_fetch` out of range or between
+  samples one of which is `NaN`, or `linear_section method: :linear` out
+  of range).
 * Otherwise you get a `Float64` CArray. Positions with no answer hold
   `NaN` (these become `nil` only in the 1-D scalar shortcut above).
 
@@ -353,6 +354,7 @@ ys.linear_fetch(xs.linear_section(x_query))
 |---|---|
 | grid requirement | monotonic ascending or descending |
 | out of range (whole family) | returns `nil` (scalar) / `NaN` (array); never extrapolates |
+| `linear_fetch` next to a `NaN` sample | no answer, as out of range: `nil` (scalar) / `NaN` (array) |
 | `:binary` vs `:linear` | same function, different cost — agree on every input |
 | default search | `:binary` (`O(log n)`, `O(1)` for equispaced grids) |
 | compute / result type | `Float64` (inputs coerced) |

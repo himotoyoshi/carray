@@ -23,14 +23,15 @@ class CArray
   #   @return [CATranspose]
   # @overload transpose(*imap)
   #   Returns a {CATranspose} view of `self` permuted by `imap`, a
-  #   permutation of `0 ... self.ndim`.  Element
-  #   `view[i_0, ..., i_{n-1}]` aliases parent element with axis `k`
-  #   sourced from `i` at position `imap[k]`.
+  #   permutation of `0 ... self.ndim`; a negative axis counts from the
+  #   end.  Element `view[i_0, ..., i_{n-1}]` aliases parent element with
+  #   axis `k` sourced from `i` at position `imap[k]`.
   #   @param imap [Array<Integer>] permutation of `0 ... ndim`.
   #   @return [CATranspose]
   #   @raise [ArgumentError] when `imap.length != ndim`.
   #   @raise [ArgumentError] when an entry of `imap` is out of range
-  #     or duplicated.
+  #     or names an axis given before.
+  #   @raise [TypeError] when an entry of `imap` is not an Integer.
   def transpose(*imap); end
 
   # Alias of {#transpose}.

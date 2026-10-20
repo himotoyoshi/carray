@@ -141,7 +141,15 @@ class CArray::Serializer   # :nodoc:
             "keep its values with Marshal.dump(ca.to_type(:object))"
     end
 
-    file_endian = endian || CArray.endian
+    file_endian = case endian
+                  when nil, :native        then CArray.endian
+                  when :big, CA_BIG_ENDIAN then CA_BIG_ENDIAN
+                  when :little, CA_LITTLE_ENDIAN then CA_LITTLE_ENDIAN
+                  else
+                    raise ArgumentError,
+                          "endian: must be :big, :little, :native, " \
+                          "CA_BIG_ENDIAN or CA_LITTLE_ENDIAN (got #{endian.inspect})"
+                  end
     swap        = (file_endian != CArray.endian)
 
     elements     = ca.elements
@@ -383,6 +391,7 @@ class CArray::Serializer   # :nodoc:
       "members"      => members,
     }
     schema["name"] = klass.name if klass.name
+    schema["order_by"] = klass.order_by.map(&:to_s) if klass.order_by
     schema
   end
 
@@ -439,7 +448,15 @@ class CArray::Serializer   # :nodoc:
     members      = schema["members"]
     record_bytes = schema["record_bytes"]
     builder      = (schema["kind"] == "union") ? CArray.method(:union) : CArray.method(:struct)
-    builder.call(:pack => 1, :size => record_bytes) do
+    order_by     = schema["order_by"]
+    names        = members.map { |m| m["name"].to_s }
+    if order_by && !(order_by.is_a?(Array) && order_by.all? { |n| names.include?(n.to_s) })
+      raise ArgumentError, "corrupt CArray binary data (order_by #{order_by.inspect} " \
+            "names a member the data_class does not have)"
+    end
+    opts = { :pack => 1, :size => record_bytes }
+    opts[:order_by] = order_by.map(&:to_sym) if order_by
+    builder.call(**opts) do
       members.each do |m|
         sym = PEP_TO_SYMBOL[m["type"]]
         unless sym

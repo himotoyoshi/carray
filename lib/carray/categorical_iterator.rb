@@ -15,7 +15,7 @@
 #      grp.median   # order statistics share the same surface
 #      grp.stddev
 #
-#  This is the consumer of the sort_addr / reduceat_index foundation on
+#  This is the consumer of the group_addr / reduceat_index foundation on
 #  CACategorical.  Order statistics (median / percentile / quantile) cannot be
 #  scattered — they need every value of a group held together — so the values
 #  are materialized into contiguous blocks once, and every reduction (monoid or
@@ -82,7 +82,7 @@ class CACategoricalIterator < CASegmentIterator
   # once and shared by every payload column and iterator — see
   # CACategorical's grouping-plan note). The plan gives the segment STARTS
   # (reduceat_index) and the group-major permutation (perm[slot] = source index
-  # at that grouped slot, = the valid prefix of sort_addr); gathering value
+  # at that grouped slot, = the valid prefix of group_addr); gathering value
   # through perm is the only per-column work. Excluded cells (masked or
   # out-of-vocabulary code) are absent from perm, so they never join a group;
   # the value mask rides the gather into the grouped copy.
@@ -109,7 +109,7 @@ class CACategoricalIterator < CASegmentIterator
       @offsets  = cat.reduceat_index                # cached segment STARTS (int64[k])
       @bounds   = CArray.segment_offsets(lengths: @elements)  # every boundary (int64[k+1])
       # The group-major source indices (#perm) are taken from the cached
-      # sort_addr when first asked for.
+      # group_addr when first asked for.
       @nvalid   = nvalid
       @codes    = cat.codes.reshape(cat.elements)   # flat codes view (map re-walk / weights)
       # Gather value into category-contiguous order via the cached permutation
@@ -316,12 +316,12 @@ class CACategoricalIterator < CASegmentIterator
 
   # Both are built with the grouping plan, and only on the flat path; the
   # per-fiber form has neither and must not build a segment's.
-  # Group-major source indices = the valid prefix of the cached sort_addr.
+  # Group-major source indices = the valid prefix of the cached group_addr.
   # With no classified cell the prefix is empty (and slicing a length-0
-  # sort_addr would be out of range), so take the empty permutation directly.
+  # group_addr would be out of range), so take the empty permutation directly.
   def perm
     if @nvalid && ! @perm
-      @perm = @nvalid > 0 ? @cat.sort_addr[0...@nvalid] : CArray.int64(0)
+      @perm = @nvalid > 0 ? @cat.group_addr[0...@nvalid] : CArray.int64(0)
     end
     @perm
   end

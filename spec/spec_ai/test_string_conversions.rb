@@ -26,7 +26,7 @@ class TestStringConversions < Test::Unit::TestCase
     o = CArray.object(2); o[0] = "x"; o[1] = "y"
     s = CArray.string(o)
     assert_kind_of CAString, s
-    assert_same o, s.parent            # zero-copy: object storage wrapped
+    assert_same o, s.send(:face_storage)            # zero-copy: object storage wrapped
   end
 
   def test_to_string_on_castring_is_self
@@ -61,7 +61,7 @@ class TestStringConversions < Test::Unit::TestCase
     fx[0] = "ab"; fx[1] = "cd"
     f = CArray.fixlen_string(fx)
     assert_kind_of CAFixlenString, f
-    assert_same fx, f.parent           # zero-copy: raw fixlen storage wrapped
+    assert_same fx, f.send(:face_storage)           # zero-copy: raw fixlen storage wrapped
   end
 
   def test_to_fixlen_string_on_cafixlenstring_is_self

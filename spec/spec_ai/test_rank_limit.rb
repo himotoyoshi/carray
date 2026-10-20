@@ -20,7 +20,7 @@ require "carray"
 class TestRankLimit < Test::Unit::TestCase
 
   MAX = CA_RANK_MAX
-  MESSAGE = /\A(?<name>[\w.!?#]+): ndim (?<n>\d+) exceeds CA_RANK_MAX #{MAX}\z/
+  MESSAGE = /\A(?<name>[\w.!?#\[\]]+): ndim (?<n>\d+) exceeds CA_RANK_MAX #{MAX}\z/
 
   # Run `code` in a child; return its last line of output, or the signal.
   def child (code)
@@ -70,6 +70,41 @@ class TestRankLimit < Test::Unit::TestCase
       e = assert_raise(ArgumentError, name) { call.() }
       assert_refused name, n, "ArgumentError: #{e.message}"
     end
+  end
+
+  # A bit view adds an axis to its parent.
+  def test_bitarray_of_an_array_at_the_limit
+    assert_refused "bitarray", MAX + 1,
+                   child("b = CArray.uint8(*[1] * #{MAX}).bitarray; b.transpose")
+    assert_equal "ok", child("b = CArray.uint8(*[1] * #{MAX - 1}).bitarray; raise unless b.ndim == #{MAX}")
+  end
+
+  # A field taken through a template has the array's axes and the template's.
+  def test_field_through_a_template_past_the_limit
+    assert_refused "field", 2 * MAX,
+                   child("CArray.fixlen(*[1] * #{MAX}, bytes: 1).field(0, CArray.int8(*[1] * #{MAX}))")
+  end
+
+  # Reading a wider type as a narrower one at the limit: the view keeps the
+  # rank asked for, and its mask has one cell per narrow element.
+  def test_narrowing_refer_of_a_masked_array_at_the_limit
+    code = <<~RUBY
+      a = CArray.int32(*([1] * #{MAX - 1} + [2])).seq
+      a[0, *[0] * #{MAX - 1}] = UNDEF   # the first int32
+      v = a.refer(:int8, [1] * #{MAX - 1} + [8])
+      raise "ndim" unless v.ndim == #{MAX}
+      raise v.is_masked.to_a.flatten.inspect unless v.is_masked.to_a.flatten == [true] * 4 + [false] * 4
+    RUBY
+    assert_equal "ok", child(code)
+  end
+
+  # The result of :_ has the base's axes and one for each :_; the rank is
+  # checked before any of them is written.
+  def test_newaxis_past_the_limit
+    assert_refused "[]", MAX + 1, child("CArray.int32(*[1] * #{MAX})[:_, *[nil] * #{MAX}]")
+    assert_refused "[]", 201, child("CArray.int32(1)[*[:_] * 200, nil]")
+    assert_refused "[]", 40, child("CArray.int32(1)[*[:_] * 40, 0]")
+    assert_equal "ok", child("raise unless CArray.int32(1)[*[:_] * #{MAX - 1}, nil].ndim == #{MAX}")
   end
 
 end

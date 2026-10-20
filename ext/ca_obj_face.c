@@ -281,7 +281,8 @@ ca_face_lift (VALUE view, VALUE face_parent)
        handled by builder-side pre-strip.  data_type above stays a full strip
        (surface concern, §8 #7) — the parent pointer is the structural concern
        (§8.3); the two axes are deliberately separate. */
-    if ( ((CAView *) view_ca)->parent == fp
+    if ( ca_is_view(view_ca)                /* an entity (a copy) has no parent field */
+         && ((CAView *) view_ca)->parent == fp
          && ! ca_test_flag(view_ca, CA_FLAG_MULTI_PARENTS) ) {
       ((CAView *) view_ca)->parent = ((CAView *) fp)->parent;   /* C pointer: one level */
       rb_ca_set_parent(view, rb_ca_parent(face_parent));        /* @parent ivar: lockstep */
@@ -1233,6 +1234,25 @@ ca_face_reconcile_comparison (volatile VALUE *pself, volatile VALUE *pother)
     return;
   }
 
+  /* Two string arrays of different kinds (CAString, CAFixlenString,
+     CAConstString) or of different cell widths hold their strings in
+     different storage: the padded bytes of one are not the bytes of the
+     other.  They are compared by their strings. */
+  if ( RTEST(rb_obj_is_carray(other)) ) {
+    static ID id_to_string = 0;
+    CArray *oc;
+    if ( id_to_string == 0 ) id_to_string = rb_intern("to_string");
+    TypedData_Get_Struct(other, CArray, &carray_data_type, oc);
+    if ( ca_is_face(oc) && rb_respond_to(self, id_to_string)
+         && rb_respond_to(other, id_to_string)
+         && ( rb_obj_class(self) != rb_obj_class(other)
+              || sc->bytes != oc->bytes ) ) {
+      *pself  = rb_ca_strip_face_value(rb_funcall(self, id_to_string, 0));
+      *pother = rb_ca_strip_face_value(rb_funcall(other, id_to_string, 0));
+      return;
+    }
+  }
+
   storage = ca_strip_face(sc);
   if ( storage->data_type == CA_FIXLEN ) {
     /* genuine fixlen semantics: memcmp is the correct comparison, so self
@@ -1262,6 +1282,26 @@ ca_face_reconcile_comparison (volatile VALUE *pself, volatile VALUE *pother)
   }
 }
 
+/* A Face's parent, the array its values are stored in, is handed out as a
+   read-only view: a write through it would change the Face's values
+   without the Face's conversion (a tick count stored into a time, bytes
+   into a record).  The storage is written through the Face's own named
+   methods (CATime#ticks), which take it with face_storage. */
+static VALUE
+rb_ca_face_parent (VALUE self)
+{
+  volatile VALUE st = rb_ca_parent(self), view;
+  CArray *cs, *cv;
+  if ( NIL_P(st) ) {
+    return st;
+  }
+  TypedData_Get_Struct(st, CArray, &carray_data_type, cs);
+  view = rb_ca_refer_new(st, cs->data_type, cs->ndim, cs->dim, cs->bytes, 0);
+  TypedData_Get_Struct(view, CArray, &carray_data_type, cv);
+  ca_set_flag(cv, CA_FLAG_READ_ONLY);
+  return view;
+}
+
 void
 Init_ca_face (void)
 {
@@ -1271,6 +1311,7 @@ Init_ca_face (void)
      ahead of this Init) — CAFace inherits from it. */
   rb_cCAFace = rb_define_class("CAFace", rb_cCAView);
   rb_define_alloc_func(rb_cCAFace, rb_ca_face_s_allocate_forbidden);
+  rb_define_method(rb_cCAFace, "parent", rb_ca_face_parent, 0);
 
   /* Initialise the portable table to -1 for every slot so dispatch
      can distinguish "explicitly registered 0" (CAConstString) from

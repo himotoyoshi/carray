@@ -63,8 +63,12 @@ CArray.const_string(labels, encoding: Encoding::UTF_8)
 
 Shared conventions (all three):
 
-- **`nil` is a masked element; `""` is a valid empty string** — distinct.
-  `nil` fetches as `UNDEF`; `""` is a real zero-length string.
+- **`nil` is a masked element when the array is built; `""` is a valid
+  empty string** — distinct. `nil` fetches as `UNDEF`; `""` is a real
+  zero-length string. An assignment does not read `nil` that way: storing
+  `nil` into a cell raises `TypeError`, and `UNDEF` is what masks a cell.
+  A constructor reads a list that may have holes; an assignment puts one
+  value, and says which with `UNDEF`.
 - A block of **arity 0** is evaluated once and broadcast (the same quirk as
   `CArray.float64(n){ ... }`); use `{ |i| ... }` for per-element values.
 
@@ -79,7 +83,13 @@ Type-specific:
   A value longer than the slot is governed by `truncate:` at *construction*
   time: `:error` (default) raises; `:silent` keeps the leading `bytes` bytes.
   (A per-cell `fix[i] = long` always truncates silently — the native fixlen
-  store has no length check.)
+  store has no length check.)  A **query** longer than the slot is not cut:
+  `eq` / `count` / `search` / `bsearch` / `is_in` with `"abX"` match no cell
+  of a two-byte column, as `CAString` and `CAConstString` answer.
+- Two string arrays of **different kinds** (`CAString` against
+  `CAFixlenString`, say) or of **different widths** are compared by their
+  strings, so `CArray.string(%w[ab]).eq(CArray.fixlen_string(%w[ab], bytes: 8))`
+  is `[true]`.
 - **`const_string`** — element encoding must match `:encoding` (default UTF-8);
   pure-ASCII passes regardless.  There is no offset-sharing dedup: every
   element's bytes are stored once in logical order (for a high-duplication

@@ -801,16 +801,40 @@ ca_window_create_bounds_mask (VALUE view)
   return Qnil;
 }
 
+typedef struct {
+  CAWindow  *ca;
+  CArray    *parent;
+  ca_size_t *start;
+  ca_size_t *count;
+  uint8_t   *bounds;
+  char      *fill;
+} ca_window_new_arg;
+
+static VALUE
+ca_window_new_setup (VALUE varg)
+{
+  ca_window_new_arg *a = (ca_window_new_arg *) varg;
+  ca_window_setup(a->ca, a->parent, a->start, a->count, a->bounds, a->fill);
+  return Qnil;
+}
+
+/* The setup allocates the fill value after the struct and its pool: when
+   that fails, the struct goes too. */
 CAWindow *
 ca_window_new (CArray *parent,
                ca_size_t *start, ca_size_t *count, uint8_t *bounds, char *fill)
 {
-  CAWindow *ca;
+  ca_window_new_arg a;
   ca_window_setup(NULL, parent, start, count, bounds, fill);
-  ca = (CAWindow *) ca_array_alloc(CA_OBJ_WINDOW, parent->ndim);
-  ca_window_setup(ca, parent, start, count, bounds, fill);
-  ca_fill_or_free((CArray *) ca, ca_window_create_bounds_mask, (VALUE) ca);
-  return ca;
+  a.ca     = (CAWindow *) ca_array_alloc(CA_OBJ_WINDOW, parent->ndim);
+  a.parent = parent;
+  a.start  = start;
+  a.count  = count;
+  a.bounds = bounds;
+  a.fill   = fill;
+  ca_fill_or_free((CArray *) a.ca, ca_window_new_setup, (VALUE) &a);
+  ca_fill_or_free((CArray *) a.ca, ca_window_create_bounds_mask, (VALUE) a.ca);
+  return a.ca;
 }
 
 static void
@@ -1674,51 +1698,56 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
     if ( SYMBOL_P(rbounds) ) {
       rbounds = rb_sym2str(rbounds);
     }
-    switch ( TYPE(rbounds) ) {
-    case T_STRING:
-      cbounds = StringValuePtr(rbounds);
-      if ( rfval == CA_UNDEF && strncmp(cbounds, "fill", 4) 
-                             && strncmp(cbounds, "mask", 4) ) {
-        rb_raise(rb_eArgError, "conflicted bounds and fill_value");
-      }
-      if ( ! strncmp(cbounds, "ruby", 4) ) {
-        bounds = CA_BOUNDS_RUBY;
-      }
-      else if ( ! strncmp(cbounds, "strict", 6) ) {
-        bounds = CA_BOUNDS_STRICT;
-      }
-      else if ( ! strncmp(cbounds, "nearest", 7) ) {
-        bounds = CA_BOUNDS_NEAREST;
-      }
-      else if ( ! strncmp(cbounds, "periodic", 8) ) {
-        rb_raise(rb_eArgError,
-                 "bounds=>'periodic' removed in 3.0; "
-                 "use CArray#roll(...) for cyclic shift "
-                 "(returns a CARoll view)");
-      }
-      else if ( ! strncmp(cbounds, "reflect", 7) ) {
-        rb_raise(rb_eArgError,
-                 "bounds=>'reflect' removed in 3.0; "
-                 "there is no view-based alternative");
-      }
-      else if ( ! strncmp(cbounds, "mask", 4) ) {
-        rb_warn("CAWindow option :bounds=>\"mask\" will be obsolete");
-        rb_warn("use ca.window(..., fill_value: UNDEF)");
-        bounds = CA_BOUNDS_MASK;
-      }
-      else if ( ! strncmp(cbounds, "fill", 4) ) {
-        bounds = CA_BOUNDS_FILL;
-      }
-      else {
-        rb_raise(rb_eArgError, 
-                 "unknown option value '%s' for :bounds", cbounds);        
-      }
-      break;
-    case T_FIXNUM:
-      bounds = NUM2INT(rbounds);
-      break;
-    default:
-      rb_raise(rb_eArgError, "invalid option value for :bounds");
+    if ( ! RB_TYPE_P(rbounds, T_STRING) ) {
+      rb_raise(rb_eTypeError,
+               "window: bounds: must be a Symbol or a String (got %s)",
+               rb_obj_classname(rbounds));
+    }
+    cbounds = StringValueCStr(rbounds);
+    if ( ! strcmp(cbounds, "ruby") ) {
+      bounds = CA_BOUNDS_RUBY;
+    }
+    else if ( ! strcmp(cbounds, "strict") ) {
+      bounds = CA_BOUNDS_STRICT;
+    }
+    else if ( ! strcmp(cbounds, "nearest") ) {
+      bounds = CA_BOUNDS_NEAREST;
+    }
+    else if ( ! strcmp(cbounds, "periodic") ) {
+      rb_raise(rb_eArgError,
+               "bounds=>'periodic' removed in 3.0; "
+               "use CArray#roll(...) for cyclic shift "
+               "(returns a CARoll view)");
+    }
+    else if ( ! strcmp(cbounds, "reflect") ) {
+      rb_raise(rb_eArgError,
+               "bounds=>'reflect' removed in 3.0; "
+               "there is no view-based alternative");
+    }
+    else if ( ! strcmp(cbounds, "mask") ) {
+      rb_warn("CAWindow option :bounds=>\"mask\" will be obsolete");
+      rb_warn("use ca.window(..., fill_value: UNDEF)");
+      bounds = CA_BOUNDS_MASK;
+    }
+    else if ( ! strcmp(cbounds, "fill") ) {
+      bounds = ( rfval == CA_UNDEF ) ? CA_BOUNDS_MASK : CA_BOUNDS_FILL;
+    }
+    else {
+      rb_raise(rb_eArgError,
+               "window: unknown bounds: '%s'", cbounds);
+    }
+    /* A fill value says what the cells outside the array are; the other
+       policies say something else about them. */
+    if ( rfval != CA_UNSPECIFIED
+         && bounds != CA_BOUNDS_FILL && bounds != CA_BOUNDS_MASK ) {
+      rb_raise(rb_eArgError,
+               "window: fill_value: is for bounds: :fill, not :%s", cbounds);
+    }
+    if ( rfval != CA_UNSPECIFIED && rfval != CA_UNDEF
+         && bounds == CA_BOUNDS_MASK ) {
+      rb_raise(rb_eArgError,
+               "window: fill_value: %+"PRIsVALUE" conflicts with bounds: :mask "
+               "(use fill_value: UNDEF to mask the cells outside)", rfval);
     }
   }
 

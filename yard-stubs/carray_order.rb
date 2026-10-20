@@ -128,7 +128,8 @@ class CArray
 
   # @overload bsearch(val)
   #   Returns the flat address of `val` in `self` via binary search.
-  #   `self` must be sorted along its single (flat) axis. Returns
+  #   `self` must be sorted along its single (flat) axis. Of several
+  #   equal cells, the first one's address is returned. Returns
   #   `nil` if `val` is not present. When `val` is a CArray, returns
   #   a CArray of `:int64` addresses (one per element of `val`),
   #   with `UNDEF` at positions where the value is not present.
@@ -159,7 +160,8 @@ class CArray
   # @overload search(val, eps = nil)
   #   Returns the flat address of the first element of `self` equal
   #   to `val`. For float types, `eps` (default machine epsilon)
-  #   sets the tolerance. Returns `nil` if no match.
+  #   sets the tolerance; a negative or NaN `eps` raises
+  #   `ArgumentError`. Returns `nil` if no match.
   #
   #   `val` is compared in the type both share, as `self.eq(val)`
   #   compares: an integer array searched with a Float is compared in
@@ -201,7 +203,10 @@ class CArray
 
   # @overload search_nearest(val)
   #   Returns the flat address of the element of `self` whose value
-  #   is closest to `val`.
+  #   is closest to `val`. Of several equally close elements, the one
+  #   at the lowest address wins, as {#search} answers the first match
+  #   (`[0, 2, 4].search_nearest(1)` is 0). {#locate_nearest_addr}
+  #   rounds a position instead, and answers the larger value on a tie.
   #
   #   In an `:object` array the distance is `val.distance(other)` when
   #   `val` answers `#distance`, and `(val - other).abs` when it is a
@@ -268,7 +273,9 @@ class CArray
   #   `self` is coerced to `:float64` if it is not already. When
   #   `axis: nil`, `self` is flattened to 1-D first.
   #
-  #   Out-of-range `addr` returns NaN.
+  #   A position with no answer -- out of range, or between samples one
+  #   of which is NaN -- gives `nil` for a scalar `addr` and NaN in the
+  #   cell of an array result.
   #
   #   Because this half of the pair returns a *value* rather than a
   #   position, a Face axis gets its Face back: `CATime#linear_fetch` /
@@ -279,6 +286,95 @@ class CArray
   #   @return [Float, CArray]
   #   @see file:docs/topics/LinearInterpolation.md
   def linear_fetch(addr, axis: nil); end
+
+  # @overload nlargest(n, axis: nil)
+  #   Returns the `n` largest values, largest first. Without `axis:` the
+  #   array is read flat; with it, each fiber along `axis` gives its own
+  #   `n` and the axis keeps length `n`. A NaN and a masked cell lose to
+  #   every value; when fewer cells remain than `n`, the result is
+  #   shorter (or, per fiber, ends in UNDEF).
+  #   @param n [Integer] how many values, 0 or more.
+  #   @param axis [Integer, nil]
+  #   @return [CArray]
+  #   @raise [ArgumentError] when `n` is negative.
+  def nlargest(n, axis: nil); end
+
+  # @overload nsmallest(n, axis: nil)
+  #   Returns the `n` smallest values, smallest first. As {#nlargest}
+  #   otherwise.
+  #   @param n [Integer]
+  #   @param axis [Integer, nil]
+  #   @return [CArray]
+  #   @raise [ArgumentError] when `n` is negative.
+  def nsmallest(n, axis: nil); end
+
+  # @overload nlargest_index(n, axis:)
+  #   Returns, along `axis`, the axis-local positions of each fiber's `n`
+  #   largest values, largest first (`take_along_axis` reads the values
+  #   back). `axis:` is required.
+  #   @param n [Integer]
+  #   @param axis [Integer]
+  #   @return [CArray] `:int64` positions.
+  #   @raise [ArgumentError] when `axis:` is missing or `n` is negative.
+  def nlargest_index(n, axis:); end
+
+  # @overload nsmallest_index(n, axis:)
+  #   As {#nlargest_index}, for the `n` smallest values.
+  #   @param n [Integer]
+  #   @param axis [Integer]
+  #   @return [CArray] `:int64` positions.
+  #   @raise [ArgumentError] when `axis:` is missing or `n` is negative.
+  def nsmallest_index(n, axis:); end
+
+  # @overload sort_by_key(key, axis: 0)
+  #   Returns `self` reordered along `axis` by the order of `key` (an
+  #   array of `self`'s shape): `self[key.sort_addr(axis:)]`.
+  #   @param key [CArray] the values to order by.
+  #   @param axis [Integer]
+  #   @return [CArray]
+  #   @raise [ArgumentError] when `key`'s shape differs from `self`'s.
+  def sort_by_key(key, axis: 0); end
+
+  # @overload max_by_key(key, axis: nil)
+  #   Returns the value of `self` where `key` is largest: one value, or
+  #   one per fiber along `axis`. UNDEF where there is no cell to compare.
+  #   @param key [CArray] the values to compare, of `self`'s shape.
+  #   @param axis [Integer, nil]
+  #   @return [Object, CArray]
+  #   @raise [ArgumentError] when `key`'s shape differs from `self`'s.
+  def max_by_key(key, axis: nil); end
+
+  # @overload min_by_key(key, axis: nil)
+  #   As {#max_by_key}, where `key` is smallest.
+  #   @param key [CArray]
+  #   @param axis [Integer, nil]
+  #   @return [Object, CArray]
+  #   @raise [ArgumentError] when `key`'s shape differs from `self`'s.
+  def min_by_key(key, axis: nil); end
+
+  # @overload take_along_axis(indices, axis: 0)
+  #   Returns the values of `self` at axis-local `indices` along `axis`
+  #   (`indices` has `self`'s shape except along `axis`), as the
+  #   `*_index(axis:)` methods answer them. A masked index reads UNDEF.
+  #   @param indices [CArray] integer positions along `axis`.
+  #   @param axis [Integer]
+  #   @return [CArray]
+  def take_along_axis(indices, axis: 0); end
+
+  # @overload put_along_axis(indices, values, axis: 0)
+  #   Writes `values` into `self` at axis-local `indices` along `axis`,
+  #   the inverse of {#take_along_axis}. A masked index writes nothing.
+  #   @param indices [CArray] integer positions along `axis`.
+  #   @param values [CArray, Object]
+  #   @param axis [Integer]
+  #   @return [self]
+  def put_along_axis(indices, values, axis: 0); end
+
+  # @overload range
+  #   Returns `min..max` of `self` from one pass (`UNDEF..UNDEF` when no
+  #   cell takes part).
+  #   @return [Range]
+  def range; end
 
   # @!endgroup
 end

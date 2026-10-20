@@ -453,16 +453,15 @@ DEFINE_PARTITION_NAN(double,    f64);
    preserved), so argsort on NaN-containing input keeps NaN indices
    in ascending order.
 
-   Implementation: 2-pass stable filter via xmalloc scratch (single
-   xmalloc + xfree per fiber; negligible overhead vs the sort
-   itself). */
+   Implementation: 2-pass stable filter through scratch, n pairs that
+   the caller provides.  The caller takes it before it opens its walks:
+   an allocation here, inside the walk, would raise past their finish. */
 #define DEFINE_PARTITION_NAN_PAIR(TYPE, SUFFIX)                            \
 ca_size_t                                                                  \
-ca_partition_nan_pair_##SUFFIX (ca_pair_##SUFFIX *a, ca_size_t n)          \
+ca_partition_nan_pair_##SUFFIX (ca_pair_##SUFFIX *a, ca_size_t n,          \
+                                ca_pair_##SUFFIX *scratch)                 \
 {                                                                          \
   if ( n == 0 ) return 0;                                                  \
-  ca_pair_##SUFFIX *scratch =                                              \
-    (ca_pair_##SUFFIX *) xmalloc((size_t) n * sizeof(ca_pair_##SUFFIX));   \
   ca_size_t fin = 0, nan_pos = 0;                                          \
   for ( ca_size_t k = 0; k < n; k++ ) {                                    \
     if ( !isnan(a[k].v) ) scratch[fin++] = a[k];                           \
@@ -472,7 +471,6 @@ ca_partition_nan_pair_##SUFFIX (ca_pair_##SUFFIX *a, ca_size_t n)          \
     if ( isnan(a[k].v) ) scratch[finite_count + nan_pos++] = a[k];         \
   }                                                                        \
   memcpy(a, scratch, (size_t) n * sizeof(ca_pair_##SUFFIX));               \
-  xfree(scratch);                                                          \
   return finite_count;                                                     \
 }                                                                          \
 struct ca_partition_nan_pair_##SUFFIX##_eat_semicolon

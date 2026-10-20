@@ -1964,20 +1964,20 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
         /* f64 / i64 hot path: store one cell per inner iter, compiler
            can keep `src` in a vector reg and stream cleanly. */
         for ( int32_t kk = 0; kk < K; kk++ ) {
-          const uint64_t *src = (const uint64_t *)
+          const ca_u_uint64_t *src = (const ca_u_uint64_t *)
                                 (pptrs[kk] + parent_off);
-          uint64_t *dst = (uint64_t *) (cache + (ca_size_t) kk * bytes);
+          ca_u_uint64_t *dst = (ca_u_uint64_t *) (cache + (ca_size_t) kk * bytes);
           for ( ca_size_t t = 0; t < want; t++ ) {
-            *(uint64_t *)((char *) dst + t * stride_t) = src[t];
+            *(ca_u_uint64_t *)((char *) dst + t * stride_t) = src[t];
           }
         }
       } else if ( bytes == 4 ) {
         for ( int32_t kk = 0; kk < K; kk++ ) {
-          const uint32_t *src = (const uint32_t *)
+          const ca_u_uint32_t *src = (const ca_u_uint32_t *)
                                 (pptrs[kk] + parent_off);
-          uint32_t *dst = (uint32_t *) (cache + (ca_size_t) kk * bytes);
+          ca_u_uint32_t *dst = (ca_u_uint32_t *) (cache + (ca_size_t) kk * bytes);
           for ( ca_size_t t = 0; t < want; t++ ) {
-            *(uint32_t *)((char *) dst + t * stride_t) = src[t];
+            *(ca_u_uint32_t *)((char *) dst + t * stride_t) = src[t];
           }
         }
       } else {
