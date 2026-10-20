@@ -1483,6 +1483,13 @@ dt[0] = dt[2]
 dt[0] == dt[2]     # => true
 ```
 
+An `Integer` written into a time is a tick count on the array's grid, as
+`CArray.time` reads one: `dt[0] = 5` on a `:D` axis is 1970-01-06. The
+same holds wherever a value goes into the array's cells — the fill of a
+`fill_value:`, a branch of `then_else` — so `t.min(fill_value: 5)` and
+`cond.then_else(t, 5)` give 1970-01-06 too. Write a `Time`, a `Date`, a
+String or an `Element` to mean an instant.
+
 A bare `Integer` is *not* converted — it is written to storage raw, the
 deliberate storage-space escape (§16.2). A value the unit algebra
 cannot convert (a cross-group instant) raises rather than mis-storing.
