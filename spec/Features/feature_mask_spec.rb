@@ -424,7 +424,8 @@ describe "Feature: Masking" do
 
     is_asserted_by { 0 == a.accumulate }
     is_asserted_by { 0 == a.accumulate(:min_count => 0) }
-    is_asserted_by { 0 == a.accumulate(:min_count => 0, :fill_value => -9999) }
+    # A fill the uint8 result cannot hold is refused even when no cell needs it.
+    expect { a.accumulate(:min_count => 0, :fill_value => -9999) }.to raise_error(RangeError)
 
     # ---
     a = CArray.uint8(256) { 1 }
@@ -436,9 +437,10 @@ describe "Feature: Masking" do
     is_asserted_by { 254 == a.accumulate(:min_count => 0) }
     is_asserted_by { UNDEF == a.accumulate(:min_count => 256) }
     is_asserted_by { UNDEF == a.accumulate(:min_count => 255) }
-    is_asserted_by { 254 == a.accumulate(:min_count => 0, :fill_value => -9999) }
+    is_asserted_by { 254 == a.accumulate(:min_count => 0, :fill_value => 99) }
     # The fill goes into the uint8 result as a store would, and a store
     # refuses a value the cell cannot hold.
+    expect { a.accumulate(:min_count => 0, :fill_value => -9999) }.to raise_error(RangeError)
     expect { a.accumulate(:min_count => 256, :fill_value => -9999) }.to raise_error(RangeError)
     expect { a.accumulate(:min_count => 255, :fill_value => -9999) }.to raise_error(RangeError)
   end
