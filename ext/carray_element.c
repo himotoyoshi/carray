@@ -31,7 +31,7 @@ elem_index_value (VALUE v)
   case 1:
     return k;
   case 2:
-    rb_raise(rb_eIndexError, "index %"PRIsVALUE" is out of range", rb_inspect(v));
+    return CA_LENGTH_MAX;   /* past int64: past every axis, refused as out of range */
   default:
     rb_raise(rb_eIndexError, "object '%"PRIsVALUE"' is invalid for an index",
              rb_inspect(v));
