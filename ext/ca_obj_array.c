@@ -467,13 +467,39 @@ cscalar_setup (CScalar *ca,
  * constructs a CScalar struct without initialization
  */
 
+typedef struct {
+  CScalar  *ca;
+  int8_t    data_type;
+  ca_size_t bytes;
+} cscalar_new_arg;
+
+static VALUE
+cscalar_new_setup (VALUE varg)
+{
+  cscalar_new_arg *a = (cscalar_new_arg *) varg;
+  cscalar_setup(a->ca, a->data_type, a->bytes, NULL);
+  return Qnil;
+}
+
+/* The setup allocates the cell after the struct: when that fails, the
+   struct goes too.  It goes by xfree, not ca_free, because its ptr was
+   never set. */
+static CScalar *
+cscalar_new_i (int8_t data_type, ca_size_t bytes)
+{
+  cscalar_new_arg a;
+  cscalar_setup(NULL, data_type, bytes, NULL);
+  a.ca        = ALLOC(CScalar);
+  a.data_type = data_type;
+  a.bytes     = bytes;
+  ca_fill_or_xfree(a.ca, cscalar_new_setup, (VALUE) &a);
+  return a.ca;
+}
+
 CScalar *
 cscalar_new (int8_t data_type, ca_size_t bytes, CArray *mask)
 {
-  CScalar *ca;
-  cscalar_setup(NULL, data_type, bytes, NULL);
-  ca = ALLOC(CScalar);
-  cscalar_setup(ca, data_type, bytes, NULL);
+  CScalar *ca = cscalar_new_i(data_type, bytes);
   return (CScalar *) carray_new_with_mask((CArray *) ca, mask);
 }
 
@@ -484,10 +510,7 @@ cscalar_new (int8_t data_type, ca_size_t bytes, CArray *mask)
 CScalar *
 cscalar_new2 (int8_t data_type, ca_size_t bytes, char *val)
 {
-  CScalar *ca;
-  cscalar_setup(NULL, data_type, bytes, NULL);
-  ca = ALLOC(CScalar);
-  cscalar_setup(ca, data_type, bytes, NULL);
+  CScalar *ca = cscalar_new_i(data_type, bytes);
   memcpy(ca->ptr, val, ca->bytes);
   return ca;
 }
