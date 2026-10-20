@@ -66,7 +66,9 @@ class CAFrame
   #   attrs:    attribute keys for the lines right below the header, one
   #             key per line: field j of a line becomes that attribute of
   #             column j (an empty field gives none). The data then starts
-  #             below them. What to_csv(attrs:) writes, it reads back
+  #             below them. What to_csv(attrs:) writes, it reads back. The
+  #             fields are read as the data fields are, so strip: trims them
+  #             too
   #
   #   CAFrame.from_csv("obs.csv", header: 2)            # a title above
   #   CAFrame.from_csv("obs.csv", header: 0, data: 3)   # units on lines 1-2

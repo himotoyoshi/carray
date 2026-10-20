@@ -1696,6 +1696,7 @@ There are two levels. `freeze` fixes the frame's structure — its columns, rows
 | assign to rows (`df[sel] = ...`) | raises `FrozenError` | raises `FrozenError` |
 | in-place verbs (`fill`, `mask_eq`, `cast`, `set_index`, ...) | raises `FrozenError` | raises `FrozenError` |
 | write a cell or a mask through a column (`df["temp"][0] = v`) | writes | raises |
+| set an attribute on a column (`df["temp"].set_attr(...)`) | writes | writes — `protect` guards the values, not the metadata |
 
 `freeze` leaves the cells to the columns, as `Array#freeze` leaves an Array's elements alone. Both change the frame and return it.
 
