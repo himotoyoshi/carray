@@ -1076,6 +1076,14 @@ df.group_by("station").mean(min_count: 20)                  # too few readings -
 df.group_by("station").sum(min_count: 1, fill_value: 0.0)
 ```
 
+One `fill_value` goes to every reduced column and has to suit each one (a
+number into a string column raises). A Hash fills by column, and leaves the
+columns it does not name as they are:
+
+```ruby
+df.group_by("station").min(fill_value: { "temp" => -99.0, "note" => "-" })
+```
+
 ### A reduction per column — `aggregate`
 
 Map each output name to `[input_column, reduction]`. The reduction is a **Symbol** (a vectorized reduction) or a **Proc** (called with each group's slice of the column, for any computation):
