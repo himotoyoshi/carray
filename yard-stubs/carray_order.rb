@@ -203,7 +203,10 @@ class CArray
 
   # @overload search_nearest(val)
   #   Returns the flat address of the element of `self` whose value
-  #   is closest to `val`.
+  #   is closest to `val`. Of several equally close elements, the one
+  #   at the lowest address wins, as {#search} answers the first match
+  #   (`[0, 2, 4].search_nearest(1)` is 0). {#locate_nearest_addr}
+  #   rounds a position instead, and answers the larger value on a tie.
   #
   #   In an `:object` array the distance is `val.distance(other)` when
   #   `val` answers `#distance`, and `(val - other).abs` when it is a
