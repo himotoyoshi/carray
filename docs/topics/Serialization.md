@@ -371,6 +371,10 @@ in the data region, it computes a pointer to each field from the
 - `record_bytes` — bytes per record (equals `element_bytes`).
 - `members` — a flat list of `{name, type, offset, bytes}`, where
   `type` is the bare PEP 3118 character from the table above.
+- `order_by` — present when the struct declares an order
+  (`CArray.struct(order_by: [...])`): the member names, in order.  A
+  struct rebuilt from the members declares it again, so the records still
+  sort; a name that is not a member is read as a corrupt file.
 
 In v1.0 a `data_class` schema describes **flat, primitive-typed members
 only**.  Nested records, bitfields, and packed sub-byte columns cannot
