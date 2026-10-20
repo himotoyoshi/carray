@@ -5659,6 +5659,13 @@ module MkKernel
       io.puts "  VALUE rval  = argv[0];"
       io.puts "  VALUE raxis = argv[1];"
       io.puts "  VALUE reps  = (argc >= 3) ? argv[2] : Qnil;"
+      io.puts "  /* A tolerance is a distance: a negative one (or NaN) means nothing. */"
+      io.puts "  if ( ! NIL_P(reps) ) {"
+      io.puts "    double eps_given = NUM2DBL(reps);"
+      io.puts "    if ( ! ( eps_given >= 0.0 ) ) {"
+      io.puts %Q[      rb_raise(rb_eArgError, "%s: eps must be zero or positive (got %"PRIsVALUE")", ca_calling_method_name(), rb_inspect(reps));]
+      io.puts "    }"
+      io.puts "  }"
     end
     io.puts "  /* Query gate: the reference Face and the query are brought into one"
     io.puts "     space (ca_face_reconcile_pair), then the reference descends to"

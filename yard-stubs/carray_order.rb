@@ -160,7 +160,8 @@ class CArray
   # @overload search(val, eps = nil)
   #   Returns the flat address of the first element of `self` equal
   #   to `val`. For float types, `eps` (default machine epsilon)
-  #   sets the tolerance. Returns `nil` if no match.
+  #   sets the tolerance; a negative or NaN `eps` raises
+  #   `ArgumentError`. Returns `nil` if no match.
   #
   #   `val` is compared in the type both share, as `self.eq(val)`
   #   compares: an integer array searched with a Float is compared in
