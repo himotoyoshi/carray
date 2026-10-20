@@ -1151,6 +1151,7 @@ Init_ca_obj_monop (void)
   rb_define_const(rb_cCAMonOp, "OP_RAD_PI",  INT2NUM(CA_MONOP_RAD_PI));
   rb_define_const(rb_cCAMonOp, "OP_SIGN",    INT2NUM(CA_MONOP_SIGN));
   rb_define_const(rb_cCAMonOp, "OP_ARG_I",   INT2NUM(CA_MONOP_ARG_I));
+  rb_define_const(rb_cCAMonOp, "OP_BYTE_SWAP", INT2NUM(CA_MONOP_BYTE_SWAP));
   rb_define_const(rb_cCAMonOp, "CAST_BASE",  INT2NUM(CA_MONOP_CAST_BASE));
 
   rb_define_alloc_func(rb_cCAMonOp, rb_ca_monop_s_allocate);

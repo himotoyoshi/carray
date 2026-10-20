@@ -33,7 +33,9 @@
 #    parent's cells, so the parent's attributes do not describe them.
 #    `a.lazy` itself (CALazyMarker) is a view of `a` and walks through,
 #    and so does a lazy type conversion (the cast lane `promote_list`
-#    and `wrap_readonly` build), for the reason `to_type` carries them.
+#    and `wrap_readonly` build), for the reason `to_type` carries them,
+#    and `swap_bytes`: like `refer`, `bitarray` and `bitfield`, a view
+#    that reads the same cells another way carries them.
 #    A view of a Face shows the attributes of the Face it was taken
 #    from (the walk goes to that Face, which the view's own parent
 #    chain skips).
@@ -243,7 +245,10 @@ class CArray
   private_class_method :attrs_shared_by
 
   def attr_computing_view? (ca)
-    return ca.__op_id__ < CAMonOp::CAST_BASE if ca.is_a?(CAMonOp)
+    if ca.is_a?(CAMonOp)
+      op = ca.__op_id__
+      return op < CAMonOp::CAST_BASE && op != CAMonOp::OP_BYTE_SWAP
+    end
     ca.is_a?(CABinOp) || ca.is_a?(CATriOp) ||
       ca.is_a?(CAMonCmp) || ca.is_a?(CABinCmp)
   end
