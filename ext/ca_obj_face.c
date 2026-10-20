@@ -1234,6 +1234,25 @@ ca_face_reconcile_comparison (volatile VALUE *pself, volatile VALUE *pother)
     return;
   }
 
+  /* Two string arrays of different kinds (CAString, CAFixlenString,
+     CAConstString) or of different cell widths hold their strings in
+     different storage: the padded bytes of one are not the bytes of the
+     other.  They are compared by their strings. */
+  if ( RTEST(rb_obj_is_carray(other)) ) {
+    static ID id_to_string = 0;
+    CArray *oc;
+    if ( id_to_string == 0 ) id_to_string = rb_intern("to_string");
+    TypedData_Get_Struct(other, CArray, &carray_data_type, oc);
+    if ( ca_is_face(oc) && rb_respond_to(self, id_to_string)
+         && rb_respond_to(other, id_to_string)
+         && ( rb_obj_class(self) != rb_obj_class(other)
+              || sc->bytes != oc->bytes ) ) {
+      *pself  = rb_ca_strip_face_value(rb_funcall(self, id_to_string, 0));
+      *pother = rb_ca_strip_face_value(rb_funcall(other, id_to_string, 0));
+      return;
+    }
+  }
+
   storage = ca_strip_face(sc);
   if ( storage->data_type == CA_FIXLEN ) {
     /* genuine fixlen semantics: memcmp is the correct comparison, so self

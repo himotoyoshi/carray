@@ -86,6 +86,10 @@ Type-specific:
   store has no length check.)  A **query** longer than the slot is not cut:
   `eq` / `count` / `search` / `bsearch` / `is_in` with `"abX"` match no cell
   of a two-byte column, as `CAString` and `CAConstString` answer.
+- Two string arrays of **different kinds** (`CAString` against
+  `CAFixlenString`, say) or of **different widths** are compared by their
+  strings, so `CArray.string(%w[ab]).eq(CArray.fixlen_string(%w[ab], bytes: 8))`
+  is `[true]`.
 - **`const_string`** — element encoding must match `:encoding` (default UTF-8);
   pure-ASCII passes regardless.  There is no offset-sharing dedup: every
   element's bytes are stored once in logical order (for a high-duplication
