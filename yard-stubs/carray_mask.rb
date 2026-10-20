@@ -30,6 +30,10 @@ class CArray
   #   Nothing in a value array is masked, so `unmask` on it does nothing,
   #   while a write that would mask a cell (`UNDEF`, `mask=`,
   #   `invert_mask`) raises TypeError.
+  #
+  #   On a Face the data slot is read through the Face. A {CACategorical}
+  #   cell excluded by the sentinel code has no label, so its value reads
+  #   as `nil` (the codes are in `codes`).
   #   @return [CArray]
   def value; end
 

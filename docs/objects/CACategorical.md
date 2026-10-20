@@ -114,7 +114,11 @@ codes = CArray.uint8(4) { |i| [0, 0xFF, 1, 0][i] }
 cat   = CACategorical.from_codes(codes, %w[a b])
 cat.has_mask?         # => true (derived from the sentinel)
 cat.to_a              # => ["a", UNDEF, "b", "a"]
+cat.value.to_a        # => ["a", nil, "b", "a"]
 ```
+
+`value` reads past the mask, and a sentinel cell has no label, so it reads
+as `nil` there. The code itself is in `cat.codes`.
 
 **Signed codes** (`-1` = missing):
 
