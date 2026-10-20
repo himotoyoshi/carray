@@ -281,7 +281,8 @@ ca_face_lift (VALUE view, VALUE face_parent)
        handled by builder-side pre-strip.  data_type above stays a full strip
        (surface concern, §8 #7) — the parent pointer is the structural concern
        (§8.3); the two axes are deliberately separate. */
-    if ( ((CAView *) view_ca)->parent == fp
+    if ( ca_is_view(view_ca)                /* an entity (a copy) has no parent field */
+         && ((CAView *) view_ca)->parent == fp
          && ! ca_test_flag(view_ca, CA_FLAG_MULTI_PARENTS) ) {
       ((CAView *) view_ca)->parent = ((CAView *) fp)->parent;   /* C pointer: one level */
       rb_ca_set_parent(view, rb_ca_parent(face_parent));        /* @parent ivar: lockstep */

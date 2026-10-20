@@ -7,8 +7,10 @@
 # the growth divided by +calls+.  A raise from the expression is rescued,
 # since the cases worth measuring are mostly the ones that raise.
 #
-# The number is read from macOS's malloc_zone_statistics through Fiddle,
-# so it counts C allocations (xmalloc, ALLOC_N) that Ruby cannot see.  The
+# The number is read through Fiddle from the C allocator, so it counts C
+# allocations (xmalloc, ALLOC_N) that Ruby cannot see: macOS's
+# malloc_zone_statistics, or glibc's malloc_stats, whose report (written
+# to fd 2) ends with the bytes in use across all arenas and mmap.  The
 # resident set size is not used: heap fragmentation moves it by more than
 # a leak of a few kilobytes per call, and a buffer that is allocated but
 # never written does not become resident at all.
@@ -28,7 +30,7 @@
 # It prints the bytes per call and the carray_ext the child loaded; check
 # the latter, since a build missing from the load path silently falls back
 # to an installed gem.  Exit status 2 means the measurement is unavailable
-# (not macOS, or no Fiddle).
+# (neither macOS nor glibc, or no Fiddle).
 #
 # From Ruby (the tests in spec/spec_ai use this):
 #
@@ -56,17 +58,37 @@ module LeakMeter
       $stderr.puts "carray_ext: " + $LOADED_FEATURES.grep(/carray_ext/).first.to_s
       begin
         require "fiddle"
-        stats = Fiddle::Function.new(
-          Fiddle::Handle::DEFAULT["malloc_zone_statistics"],
-          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
+        if RUBY_PLATFORM =~ /darwin/
+          stats = Fiddle::Function.new(
+            Fiddle::Handle::DEFAULT["malloc_zone_statistics"],
+            [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOID)
+          in_use = -> {
+            buf = Fiddle::Pointer.malloc(32, Fiddle::RUBY_FREE)
+            stats.call(nil, buf)
+            buf[8, 8].unpack1("Q")      # malloc_statistics_t#size_in_use
+          }
+        else
+          require "tempfile"
+          stats = Fiddle::Function.new(Fiddle::Handle::DEFAULT["malloc_stats"],
+                                       [], Fiddle::TYPE_VOID)
+          report = Tempfile.new("malloc_stats")
+          stderr = $stderr.dup
+          in_use = -> {
+            $stderr.reopen(report.path, "w")
+            begin
+              stats.call
+            ensure
+              $stderr.reopen(stderr)
+            end
+            # glibc prints the total as an unsigned int; the growth is
+            # taken modulo 2**32 below.
+            total = File.read(report.path).split("incl. mmap").last
+            Integer(total[/in use bytes *= *([0-9]+)/, 1])
+          }
+        end
       rescue LoadError, Fiddle::DLError
         exit #{UNAVAILABLE}
       end
-      in_use = -> {
-        buf = Fiddle::Pointer.malloc(32, Fiddle::RUBY_FREE)
-        stats.call(nil, buf)
-        buf[8, 8].unpack1("Q")          # malloc_statistics_t#size_in_use
-      }
       #{setup}
       call = -> { (#{expr}) rescue nil }
       #{warmup}.times { call.() }
@@ -74,7 +96,9 @@ module LeakMeter
       before = in_use.()
       #{calls}.times { call.() }
       GC.start
-      puts (in_use.() - before).fdiv(#{calls})
+      growth = in_use.() - before
+      growth -= 1 << 32 if RUBY_PLATFORM !~ /darwin/ && growth >= 1 << 31
+      puts growth.fdiv(#{calls})
     RUBY
   end
 
@@ -82,7 +106,7 @@ module LeakMeter
   # child fails for any other reason than the measurement being
   # unavailable (a syntax error in +expr+, a raise in +setup+).
   def measure (expr, setup: "", calls: 200, warmup: 50, load_path: $LOAD_PATH)
-    return [nil, ""] unless RUBY_PLATFORM =~ /darwin/
+    return [nil, ""] unless RUBY_PLATFORM =~ /darwin|linux/
     inc = load_path.flat_map { |d| ["-I", d] }
     out, err, status = Open3.capture3(RbConfig.ruby, *inc, "-e",
                                       child_script(expr, setup, calls, warmup))
@@ -117,7 +141,7 @@ if $0 == __FILE__
   end
   $stderr.print err
   if bytes.nil?
-    warn "measurement unavailable (needs macOS and Fiddle)"
+    warn "measurement unavailable (needs macOS or glibc, and Fiddle)"
     exit LeakMeter::UNAVAILABLE
   end
   puts format("%.1f bytes per call", bytes)

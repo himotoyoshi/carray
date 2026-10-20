@@ -4,7 +4,7 @@
 # would have left the other pointing at freed memory.  The CAObject now
 # frees its mask, and a dup makes its own from the parent.
 #
-# The leak is measured by utils/measure_leak.rb (macOS only): an 8-D mask
+# The leak is measured by utils/measure_leak.rb: an 8-D mask
 # struct is about 220 bytes, against a threshold of 64.
 
 require "test/unit"
@@ -32,7 +32,7 @@ class TestCAObjectFaceMaskFree < Test::Unit::TestCase
     setup = FACE + "; pm = CArray.float64(2,2,2,2,2,2,2,2).seq; pm[1] = UNDEF; " \
             "x = FaceObj.new(pm); x.is_masked"
     bytes = LeakMeter.bytes_per_call(expr, setup: setup, calls: 5000, warmup: 500)
-    omit "malloc zone statistics unavailable" if bytes.nil?
+    omit "measurement unavailable" if bytes.nil?
     bytes
   end
 

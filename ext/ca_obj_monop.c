@@ -370,12 +370,19 @@ apply_monop_in_place (uint16_t op_id, int8_t cur_dt,
   fn(slab_n, mask, (char *) data, 1, (char *) data, 1);
 }
 
-/* Minimal CArray-shaped stub used as ca_cast_block's data_type-only carrier.
-   ca_cast_block only reads data_type to index into ca_cast_func_table.  */
-typedef struct {
-  int16_t obj_type;
-  int8_t  data_type;
-} ca_data_type_stub_t;
+/* A zeroed CArray carrying only data_type and bytes, handed to
+   ca_cast_block in place of a real array.  It is a whole CArray, not a
+   shorter struct cast to one: ca_cast_block reads data_type through a
+   CArray pointer, and a fixlen cast reads bytes as well.  */
+static CArray
+ca_data_type_stub (int8_t data_type)
+{
+  CArray stub;
+  memset(&stub, 0, sizeof(stub));
+  stub.data_type = data_type;
+  stub.bytes     = ca_sizeof[data_type];
+  return stub;
+}
 
 /* Pull leaf into the output buffer.  Three paths:
 
@@ -428,8 +435,8 @@ pull_leaf_with_optional_cast (CArray *leaf, uint16_t innermost_op,
   if ( has_cast_at_leaf ) {
     /* Path 2: cast scratch → data with output layout in target data_type.  */
     int8_t target_dt = (int8_t)(innermost_op - CA_MONOP_CAST_BASE);
-    ca_data_type_stub_t src_stub = { 0, leaf->data_type };
-    ca_data_type_stub_t dst_stub = { 0, target_dt };
+    CArray src_stub = ca_data_type_stub(leaf->data_type);
+    CArray dst_stub = ca_data_type_stub(target_dt);
     ca_cast_block(slab_n, &src_stub, scratch, &dst_stub, data);
     result_dt = target_dt;
   } else {
@@ -555,6 +562,30 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
     chain_apply_count = chain_len - 1;
   }
 
+  /* The chain runs in place, so the buffer must hold slab_n cells of the
+     widest type along it: the leaf, or a step that widens before a later
+     one narrows (cmplx128.lazy.abs pulls 16-byte cells and answers 8-byte
+     ones).  When that is wider than the output, run in a scratch and copy
+     the answer into `data` at the end. */
+  void   *out  = data;
+  void   *work = NULL;
+  {
+    ca_size_t max_bytes = leaf->bytes;
+    int8_t    dt        = leaf->data_type;
+    for ( i = chain_len - 1; i >= 0; i-- ) {
+      dt = ca_monop_is_cast(op_chain[i])
+             ? (int8_t)(op_chain[i] - CA_MONOP_CAST_BASE)
+             : ca_lazy_promote_monop(op_chain[i], dt);
+      if ( ca_sizeof[dt] > max_bytes ) max_bytes = ca_sizeof[dt];
+    }
+    if ( max_bytes > mo->bytes ) {
+      work = ( leaf->data_type == CA_OBJECT )
+               ? ca_lazy_arena_acquire_object((slab_n * max_bytes + sizeof(VALUE) - 1) / sizeof(VALUE))
+               : ca_lazy_arena_acquire(slab_n * max_bytes);
+      data = work;
+    }
+  }
+
   /* === 2. pull leaf into output buffer (with optional cast) === */
   cur_dt = pull_leaf_with_optional_cast(
     leaf,
@@ -576,8 +607,8 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
       ca_size_t src_bytes = ca_sizeof[cur_dt];
       ca_size_t total_bytes = slab_n * src_bytes;
       void *scratch;
-      ca_data_type_stub_t src_stub = { 0, cur_dt };
-      ca_data_type_stub_t dst_stub = { 0, target_dt };
+      CArray src_stub = ca_data_type_stub(cur_dt);
+      CArray dst_stub = ca_data_type_stub(target_dt);
 
       /* Copy current data → scratch (in src data_type), then cast scratch
          → data (in target data_type).  Required because in-place cast
@@ -603,6 +634,10 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
   }
   if ( slab_mask ) {
     ca_lazy_arena_release(slab_mask);
+  }
+  if ( work ) {
+    memcpy(out, work, slab_n * mo->bytes);
+    ca_lazy_arena_release(work);
   }
 }
 

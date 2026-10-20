@@ -569,7 +569,7 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
     r_resolved = ca_lazy_settle_scalar(r_resolved, r_scalar);
   }
 
-  ca_refuse_without_common_type(&l_resolved, &r_resolved);
+  ca_refuse_without_common_type(l_resolved, r_resolved);
   TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);
   TypedData_Get_Struct(r_resolved, CArray, &carray_data_type, r);
 

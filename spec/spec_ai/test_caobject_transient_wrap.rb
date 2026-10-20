@@ -151,7 +151,7 @@ class TestCAObjectTransientWrap < Test::Unit::TestCase
       end
     RUBY
     bytes = LeakMeter.bytes_per_call("Nest.new(CArray.float64(100_000).seq!).copy", setup: setup)
-    omit "malloc zone statistics unavailable" if bytes.nil?
+    omit "measurement unavailable" if bytes.nil?
     assert_operator bytes, :<, 20_000, "the inner mask (100 KB) leaks per call"
   end
 

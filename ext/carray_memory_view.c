@@ -1410,7 +1410,7 @@ ca_mv_wrap_body (VALUE arg)
                            a->target_class);
   rb_ivar_set(wrap, rb_intern("memory_view_source"), a->obj);
   rb_ivar_set(wrap, rb_intern("memory_view_holder"), a->data_holder_obj);
-  ca_mv_extract(wrap, &ca);
+  GetCArray(wrap, ca);
   if ( v->readonly ) {
     ca_set_flag(ca, CA_FLAG_READ_ONLY);
   }
@@ -1527,7 +1527,7 @@ ca_mv_from_body (VALUE arg)
 
   result = rb_carray_new(data_type, d->ndim, d->dim,
                          ca_mv_carray_bytes_for(data_type, v->item_size), NULL);
-  ca_mv_extract(result, &ca);
+  GetCArray(result, ca);
 
   if ( d->contiguous ) {
     memcpy(ca->ptr, v->data, (size_t) ca_length(ca));

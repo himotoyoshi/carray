@@ -117,13 +117,15 @@ class CArray
   end
 
   # @overload drop_axis
-  #   Returns a view of `self` with every size-1 axis dropped.
+  #   Returns a view of `self` with every size-1 axis dropped.  When every
+  #   axis has size 1, one axis of size 1 is kept.
   #   @return [CArray] view with reduced `ndim`.
   def drop_axis
     if ndim == 1
       return self[]
     else
       newdim = shape.reject{|x| x == 1 }
+      newdim = [1] if newdim.empty?     # every axis has size 1: keep one
       return ( ndim != newdim.size ) ? reshape(*newdim) : self[]
     end
   end

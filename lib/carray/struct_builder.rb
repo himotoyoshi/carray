@@ -224,11 +224,13 @@ class CAStruct::Builder  # :nodoc:
     end
     vtype = {1 => :uint8, 2 => :uint16, 4 => :uint32, 8 => :uint64}[view_bytes]
     range = bit_in_byte..(bit_in_byte + bits - 1)
+    # The word is read little-endian on every host: bits are numbered
+    # byte by byte from the record's start, as the layout places them.
     reader = ->(data) {
-      data.field(start_byte, vtype).bitfield(range)[0]
+      data.field(start_byte, vtype).endian(:little).bitfield(range)[0]
     }
     writer = ->(data, val) {
-      data.field(start_byte, vtype).bitfield(range)[0] = val
+      data.field(start_byte, vtype).endian(:little).bitfield(range)[0] = val
     }
     [reader, writer].freeze
   end

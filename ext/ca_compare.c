@@ -21,8 +21,8 @@
 static int                                             \
 elem_cmp_## type (const void *va, const void *vb)      \
 {                                                      \
-  const type *a = (const type *) va;                   \
-  const type *b = (const type *) vb;                   \
+  const CA_U(type) *a = (const CA_U(type) *) va;       \
+  const CA_U(type) *b = (const CA_U(type) *) vb;       \
   if ( *a > *b ) return  1;                            \
   if ( *a < *b ) return -1;                            \
   return 0;                                            \
@@ -33,8 +33,8 @@ elem_cmp_## type (const void *va, const void *vb)      \
 static int                                             \
 elem_cmp_## type (const void *va, const void *vb)      \
 {                                                      \
-  const type a = *(const type *) va;                   \
-  const type b = *(const type *) vb;                   \
+  const type a = *(const CA_U(type) *) va;             \
+  const type b = *(const CA_U(type) *) vb;             \
   return CA_FLOAT_ORDER_CMP(a, b);                     \
 }
 

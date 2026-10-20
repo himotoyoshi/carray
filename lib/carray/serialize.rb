@@ -141,7 +141,15 @@ class CArray::Serializer   # :nodoc:
             "keep its values with Marshal.dump(ca.to_type(:object))"
     end
 
-    file_endian = endian || CArray.endian
+    file_endian = case endian
+                  when nil, :native        then CArray.endian
+                  when :big, CA_BIG_ENDIAN then CA_BIG_ENDIAN
+                  when :little, CA_LITTLE_ENDIAN then CA_LITTLE_ENDIAN
+                  else
+                    raise ArgumentError,
+                          "endian: must be :big, :little, :native, " \
+                          "CA_BIG_ENDIAN or CA_LITTLE_ENDIAN (got #{endian.inspect})"
+                  end
     swap        = (file_endian != CArray.endian)
 
     elements     = ca.elements

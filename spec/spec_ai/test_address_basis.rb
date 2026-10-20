@@ -515,7 +515,7 @@ class TestAddressBasis < Test::Unit::TestCase
   # --- the region buffer is freed, not leaked ---------------------------
 
   # A tier-3 open mallocs the region; closing frees it.  The only way to
-  # see that from Ruby is to watch the malloc zone across many calls.
+  # see that from Ruby is to watch the C heap across many calls.
   def bytes_per_call (script, setup = "")
     prelude = <<~SETUP
       AB = CArray::AddressBasis
@@ -530,7 +530,7 @@ class TestAddressBasis < Test::Unit::TestCase
   def assert_frees_the_region (script, setup = "")
     grown = bytes_per_call(script, setup)
     assert_operator grown, :<, 4096,
-                    "#{script}: the malloc zone grew #{grown.round} bytes per call"
+                    "#{script}: the C heap grew #{grown.round} bytes per call"
   end
 
   def test_a_completed_open_frees_the_region

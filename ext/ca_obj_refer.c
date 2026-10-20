@@ -625,6 +625,9 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
+  if ( argc == 0 ) {
+    rb_raise(rb_eArgError, "reshape: give at least one axis");
+  }
   ca_check_rank_fits(argc, "reshape");
 
   /* Locate the (at most one) auto-infer placeholder.  `-1` is the

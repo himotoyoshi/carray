@@ -312,7 +312,7 @@ histogram_scatter_walk (VALUE arg)
       ca_size_t off = fiber_base;
       int       masked = 0;
       for ( kk = 0; kk < (ca_size_t) M; kk++ ) {
-        double v = *(const double *)(p + a * ss + kk * cs);
+        double v = *(const ca_u_float64_t *)(p + a * ss + kk * cs);
         if ( (m && m[a * sms + kk * cms]) || isnan(v) ) { masked = 1; break; }
         off += histbin_index(&axes[kk], v) * ext_stride[kk];
       }

@@ -63,7 +63,7 @@ typedef union {
 #define LOOP_SCALAR(T, APPLY) LOOP_SCALAR_V(T, APPLY, SCALAR_REAL(T))
 
 #define LOOP_SCALAR_V(T, APPLY, VS) do { \
-  T *q = (T *) qbase; \
+  CA_U(T) *q = (CA_U(T) *) qbase; \
   T  vs = VS; \
   if ( mself ) { \
     for (i = 0; i < n; i++) { \
@@ -85,8 +85,8 @@ typedef union {
 } while (0)
 
 #define LOOP_VEC(T, APPLY) do { \
-  T *q = (T *) qbase; \
-  T *r = (T *) cv->ptr; \
+  CA_U(T) *q = (CA_U(T) *) qbase; \
+  CA_U(T) *r = (CA_U(T) *) cv->ptr; \
   if ( mself ) { \
     for (i = 0; i < n; i++) { \
       if ( maddrs && maddrs[i] ) continue; \
@@ -120,7 +120,7 @@ typedef union {
 #define LOOP_SCALAR_REPLACE(T) LOOP_SCALAR_REPLACE_V(T, SCALAR_REAL(T))
 
 #define LOOP_SCALAR_REPLACE_V(T, VS) do { \
-  T *q = (T *) qbase; \
+  CA_U(T) *q = (CA_U(T) *) qbase; \
   T  vs = VS; \
   for (i = 0; i < n; i++) { \
     if ( maddrs && maddrs[i] ) continue; \
@@ -136,8 +136,8 @@ typedef union {
 } while (0)
 
 #define LOOP_VEC_REPLACE(T) do { \
-  T *q = (T *) qbase; \
-  T *r = (T *) cv->ptr; \
+  CA_U(T) *q = (CA_U(T) *) qbase; \
+  CA_U(T) *r = (CA_U(T) *) cv->ptr; \
   for (i = 0; i < n; i++) { \
     if ( maddrs && maddrs[i] ) continue; \
     addr = p[i]; \

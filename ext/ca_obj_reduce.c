@@ -56,6 +56,10 @@ ca_reduce_setup (CAReduce *ca, CArray *parent, ca_size_t count, ca_size_t offset
              "[BUG] CAReduce can't inherit other than boolean array");
   }
 
+  if ( count <= 0 ) {
+    rb_raise(rb_eArgError, "CAReduce: count should be positive");
+  }
+
   /* ca == NULL asks for the checks above only, so that a constructor can
      run them before it allocates. */
   if ( ca == NULL ) {

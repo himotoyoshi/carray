@@ -160,9 +160,9 @@ class CArray
 
     def self.extract (block)
       sequence = RubyVM::InstructionSequence.of(block) rescue nil
-      location = sequence && sequence.to_a[4][:code_location]
       path     = sequence && (sequence.absolute_path || sequence.path)
-      unless location && path && File.readable?(path)
+      location = path && File.readable?(path) && code_location(sequence, path)
+      unless location
         raise ArgumentError,
               "CArray.fuse cannot read this block's source (defined in irb, " \
               "eval, or a file that is no longer there).  Write `.lazy` on " \
@@ -178,6 +178,35 @@ class CArray
         [lines[first_line - 1].byteslice(first_column..),
          *lines[first_line...(last_line - 1)],
          lines[last_line - 1].byteslice(0...last_column)].join
+      end
+    end
+
+    # [first_line, first_column, last_line, last_column] of the block.  The
+    # block that starts on the sequence's first line is found in the file's
+    # syntax tree.  Only when two start on that line is the sequence itself
+    # dumped: InstructionSequence#to_a reads the instructions while another
+    # Ractor may be running them, and that can crash the process.
+    def self.code_location (sequence, path)
+      line = sequence.first_lineno
+      found = []
+      pending = [Prism.parse_file(path).value]
+      until pending.empty?
+        node = pending.pop
+        next unless node
+        # A lambda's code starts after the arrow, at its parameters or brace.
+        start = case node
+                when Prism::BlockNode  then node.location
+                when Prism::LambdaNode then (node.parameters || node).location
+                end
+        start = node.opening_loc if start && node.is_a?(Prism::LambdaNode) && !node.parameters
+        found << [start, node.location] if start && start.start_line == line
+        pending.concat(node.compact_child_nodes)
+      end
+      if found.size == 1
+        start, whole = found.first
+        [start.start_line, start.start_column, whole.end_line, whole.end_column]
+      else
+        sequence.to_a[4][:code_location]
       end
     end
 

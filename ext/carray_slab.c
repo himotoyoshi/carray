@@ -861,7 +861,6 @@ ca_slab_reduce_setup (ca_slab_iter_state_t *st, CArray **out_src,
                       ca_size_t *out_n)
 {
   CArray *src;
-  CArray *out;
   ca_size_t fiber_len;
   ca_size_t out_dim[CA_RANK_MAX];
   int8_t out_ndim;
@@ -904,7 +903,6 @@ ca_slab_reduce_setup (ca_slab_iter_state_t *st, CArray **out_src,
 
   st->output = rb_carray_new(st->out_data_type, out_ndim, out_dim,
                              st->out_bytes, NULL);
-  TypedData_Get_Struct(st->output, CArray, &carray_data_type, out);
 
   /* FIBER_CONTIG is naxes==1 only (T1 substrate contract).  Multi-axis
      omits the flag and uses bare CA_SLAB_AXES; T1 picks an in-src

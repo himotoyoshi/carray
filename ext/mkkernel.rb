@@ -44,26 +44,29 @@ module MkKernel
   # value_arg: dispatchers (CF.1) to cast a positional Ruby argument to
   # the kernel's T_IN type.  Signed integers use NUM2LL, unsigned
   # NUM2ULL, floats NUM2DBL, with the dispatcher adding the per-type cast.
+  # `c` of a multi-byte type is its unaligned typedef from carray.h
+  # (ca_u_float64_t): a view's cells may sit at any byte, and a kernel
+  # reads them through `c *`.
   DTYPES = {
     i8:  { c: "int8_t",   ca: "CA_INT8",    ruby: "LL2NUM",  num2c: "NUM2LL",
            limit_hi: "INT8_MAX",   limit_lo: "INT8_MIN" },
     u8:  { c: "uint8_t",  ca: "CA_UINT8",   ruby: "ULL2NUM", num2c: "NUM2ULL",
            limit_hi: "UINT8_MAX",  limit_lo: "0" },
-    i16: { c: "int16_t",  ca: "CA_INT16",   ruby: "LL2NUM",  num2c: "NUM2LL",
+    i16: { c: "ca_u_int16_t",  ca: "CA_INT16",   ruby: "LL2NUM",  num2c: "NUM2LL",
            limit_hi: "INT16_MAX",  limit_lo: "INT16_MIN" },
-    u16: { c: "uint16_t", ca: "CA_UINT16",  ruby: "ULL2NUM", num2c: "NUM2ULL",
+    u16: { c: "ca_u_uint16_t", ca: "CA_UINT16",  ruby: "ULL2NUM", num2c: "NUM2ULL",
            limit_hi: "UINT16_MAX", limit_lo: "0" },
-    i32: { c: "int32_t",  ca: "CA_INT32",   ruby: "LL2NUM",  num2c: "NUM2LL",
+    i32: { c: "ca_u_int32_t",  ca: "CA_INT32",   ruby: "LL2NUM",  num2c: "NUM2LL",
            limit_hi: "INT32_MAX",  limit_lo: "INT32_MIN" },
-    u32: { c: "uint32_t", ca: "CA_UINT32",  ruby: "ULL2NUM", num2c: "NUM2ULL",
+    u32: { c: "ca_u_uint32_t", ca: "CA_UINT32",  ruby: "ULL2NUM", num2c: "NUM2ULL",
            limit_hi: "UINT32_MAX", limit_lo: "0" },
-    i64: { c: "int64_t",  ca: "CA_INT64",   ruby: "LL2NUM",  num2c: "NUM2LL",
+    i64: { c: "ca_u_int64_t",  ca: "CA_INT64",   ruby: "LL2NUM",  num2c: "NUM2LL",
            limit_hi: "INT64_MAX",  limit_lo: "INT64_MIN" },
-    u64: { c: "uint64_t", ca: "CA_UINT64",  ruby: "ULL2NUM", num2c: "NUM2ULL",
+    u64: { c: "ca_u_uint64_t", ca: "CA_UINT64",  ruby: "ULL2NUM", num2c: "NUM2ULL",
            limit_hi: "UINT64_MAX", limit_lo: "0" },
-    f32: { c: "float",    ca: "CA_FLOAT32", ruby: "rb_float_new", num2c: "NUM2DBL",
+    f32: { c: "ca_u_float32_t",    ca: "CA_FLOAT32", ruby: "rb_float_new", num2c: "NUM2DBL",
            limit_hi: "INFINITY",   limit_lo: "-INFINITY" },
-    f64: { c: "double",   ca: "CA_FLOAT64", ruby: "rb_float_new", num2c: "NUM2DBL",
+    f64: { c: "ca_u_float64_t",   ca: "CA_FLOAT64", ruby: "rb_float_new", num2c: "NUM2DBL",
            limit_hi: "INFINITY",   limit_lo: "-INFINITY" },
     # E.6a (2026-06-03): boolean as a first-class source DTYPE.
     # Intentionally NOT included in ALL_NUMERIC -- kernels opt boolean in
@@ -90,11 +93,11 @@ module MkKernel
     # CA_NTYPE coverage parity with mkmath, mkkernel needs to know the
     # complex and object data_types too.  These entries are NOT included in
     # ALL_NUMERIC; pick up via MATH_TYPES / MATH_NUMERIC aliases.
-    cmplx64:  { c: "cmplx64_t",  ca: "CA_CMPLX64",  ruby: "CC2NUM",
+    cmplx64:  { c: "ca_u_cmplx64_t",  ca: "CA_CMPLX64",  ruby: "CC2NUM",
                 num2c: "NUM2CC",  limit_hi: "0", limit_lo: "0" },
-    cmplx128: { c: "cmplx128_t", ca: "CA_CMPLX128", ruby: "CC2NUM",
+    cmplx128: { c: "ca_u_cmplx128_t", ca: "CA_CMPLX128", ruby: "CC2NUM",
                 num2c: "NUM2CC",  limit_hi: "0", limit_lo: "0" },
-    object:   { c: "VALUE",      ca: "CA_OBJECT",   ruby: "(VALUE)",
+    object:   { c: "VALUE",           ca: "CA_OBJECT",   ruby: "(VALUE)",
                 num2c: "(VALUE)", limit_hi: "0", limit_lo: "0" },
     # P.5b.4: fixlen for bincmp (= match, eq/ne/gt/lt/ge/le against
     # fixed-byte strings).  The c: type is `char` because fixlen kernels
@@ -1775,13 +1778,15 @@ module MkKernel
 
   # Emits the native function of one source data type.  The object lane
   # calls Ruby for every cell, so any cell can raise in the middle of a walk;
-  # its function is rebuilt around ca_iter_ensure (see guard_object_native).
-  # Every other lane is emitted as the emitter writes it.
-  def self.emit_native_for(io, k, src)
-    if src == :object
+  # its function is rebuilt around ca_iter_ensure (see guard_native).  So is
+  # every lane of a family that passes guard: true, whose walks allocate
+  # (an output mask made on the first empty slab, a scratch buffer), since a
+  # failed allocation raises too.  Other lanes are emitted as written.
+  def self.emit_native_for(io, k, src, guard: false)
+    if src == :object || guard
       buf = StringIO.new
       yield buf
-      io.print guard_object_native(buf.string, "#{k[:name]}_ki_native_object")
+      io.print guard_native(buf.string, "#{k[:name]}_ki_native_#{src}")
     else
       yield io
     end
@@ -1822,7 +1827,7 @@ module MkKernel
   # frame is gone once the body raises.  The body text is kept as written:
   # the parameters are unpacked from the frame under their own names, and
   # each state name is defined to its slot for the length of the body.
-  def self.guard_object_native(text, fn)
+  def self.guard_native(text, fn)
     header = /^static VALUE\n#{fn} \(([^)]*)\)\n\{\n/
     m = header.match(text) or raise "mkkernel: #{fn} not found"
     close = matching_brace(text, m.end(0) - 2)
@@ -1845,9 +1850,9 @@ module MkKernel
 
     out = StringIO.new
     out.print m.pre_match
-    out.puts "/* The object lane calls Ruby for every cell, so a walk can raise part"
-    out.puts "   way.  Its states live in the caller's frame, and ca_iter_ensure"
-    out.puts "   finishes them however the body leaves. */"
+    out.puts "/* The walks can raise part way (a Ruby call per cell in the object"
+    out.puts "   lane, an allocation in any lane).  Their states live in the caller's"
+    out.puts "   frame, and ca_iter_ensure finishes them however the body leaves. */"
     out.puts "typedef struct {"
     out.puts "  ca_iter_state states[#{states.size}];"
     params.each { |type, name| out.puts "  #{type} #{name};".sub(/\* /, "*") }
@@ -1882,7 +1887,7 @@ module MkKernel
     io.puts
     io.puts "/* ===== #{k[:name]}_ki ============================================ */"
     k[:source].each do |src|
-      emit_native_for(io, k, src) { |o| emit_reduce_native(o, k, src) }
+      emit_native_for(io, k, src, guard: true) { |o| emit_reduce_native(o, k, src) }
     end
     emit_reduce_dispatch(io, k)
   end
@@ -3571,17 +3576,21 @@ module MkKernel
       wio.puts "      cw = cv;"
       wio.puts "    }"
       wio.puts "    else if ( naxes == 1 && cv->ndim == 1 && cv->dim[0] == src->dim[slab_axes[0]] ) {"
-      wio.puts "      /* W-A2: 1-D axis-broadcast -> materialize to full shape */"
-      wio.puts "      ca_attach(cv);   /* window: nothing raises inside */"
+      wio.puts "      /* W-A2: 1-D axis-broadcast -> materialize to full shape.  cw and"
+      wio.puts "         its mask are made before cv is attached: making them allocates. */"
       wio.puts "      vcw = rb_carray_new(#{waca}, src->ndim, src->dim, 0, NULL);"
       wio.puts "      GetCArray(vcw, cw);"
+      wio.puts "      if ( ca_has_mask(cv) ) {"
+      wio.puts "        ca_create_mask(cw);"
+      wio.puts "      }"
+      wio.puts "      ca_attach(cv);   /* window: nothing raises inside */"
       wio.puts "      /* broadcast cv (1-D, length src->dim[slab_axes[0]]) along reduce axis */"
       wio.puts "      {"
       wio.puts "        int8_t baxis = slab_axes[0];"
       wio.puts "        ca_size_t inner_stride = 1;"
       wio.puts "        for ( int8_t ii = baxis + 1; ii < src->ndim; ii++ ) inner_stride *= src->dim[ii];"
       wio.puts "        ca_size_t axis_n = src->dim[baxis];"
-      wio.puts "        ca_size_t outer  = src->elements / (axis_n * inner_stride);"
+      wio.puts "        ca_size_t outer  = ( axis_n && inner_stride ) ? src->elements / (axis_n * inner_stride) : 0;   /* a zero-length axis leaves nothing to fill */"
       wio.puts "        for ( ca_size_t o = 0; o < outer; o++ ) {"
       wio.puts "          for ( ca_size_t a = 0; a < axis_n; a++ ) {"
       wio.puts "            for ( ca_size_t in = 0; in < inner_stride; in++ ) {"
@@ -3593,15 +3602,14 @@ module MkKernel
       wio.puts "      }"
       wio.puts "      /* Propagate cv mask via W-A3 overlay path below (= mask materialize) */"
       wio.puts "      if ( ca_has_mask(cv) ) {"
-      wio.puts "        /* Allocate cw mask + broadcast cv mask along axis */"
-      wio.puts "        ca_create_mask(cw);"
+      wio.puts "        /* broadcast cv mask along axis */"
       wio.puts "        boolean8_t *cw_m = (boolean8_t *)cw->mask->ptr;"
       wio.puts "        boolean8_t *cv_m = (boolean8_t *)cv->mask->ptr;"
       wio.puts "        int8_t baxis = slab_axes[0];"
       wio.puts "        ca_size_t inner_stride = 1;"
       wio.puts "        for ( int8_t ii = baxis + 1; ii < src->ndim; ii++ ) inner_stride *= src->dim[ii];"
       wio.puts "        ca_size_t axis_n = src->dim[baxis];"
-      wio.puts "        ca_size_t outer  = src->elements / (axis_n * inner_stride);"
+      wio.puts "        ca_size_t outer  = ( axis_n && inner_stride ) ? src->elements / (axis_n * inner_stride) : 0;   /* a zero-length axis leaves nothing to fill */"
       wio.puts "        for ( ca_size_t o = 0; o < outer; o++ ) {"
       wio.puts "          for ( ca_size_t a = 0; a < axis_n; a++ ) {"
       wio.puts "            for ( ca_size_t in = 0; in < inner_stride; in++ ) {"
@@ -3827,6 +3835,8 @@ module MkKernel
     # fiber's mask base.
     mask_setup =
       if gated
+        # Before the walks open: creating the mask allocates, and a raise
+        # inside them would jump past their finish.
         "\n" \
         "    boolean8_t *op_mask = NULL;\n" \
         "    if ( ca_has_mask(ca) ) {\n" \
@@ -3867,6 +3877,7 @@ module MkKernel
            INIT inside the macro. */
         int8_t slab_axes[CA_RANK_MAX];
         slab_axes[0] = (int8_t) axis;
+      #{mask_setup}
         ca_iter_state st_in, st_out;
         int rc;
         rc = ca_iter_state_init_l2(&st_in,  ca, CA_SLAB_AXES,
@@ -3882,7 +3893,6 @@ module MkKernel
           rb_raise(rb_eRuntimeError,
                    "%s: output init failed rc=%d", ca_calling_method_name(), rc);
         }
-      #{mask_setup}
         char       *pi, *po;
         boolean8_t *mi, *mo;
         while ( ca_iter_state_next_slab_axes(&st_in,  &pi, &mi) &&
@@ -4167,7 +4177,7 @@ module MkKernel
     if is_fixlen
       io.puts "          buf[#{dst}].vp = pi + #{kexpr} * istride; buf[#{dst}].nb = (ca_size_t) ca->bytes;"
     else
-      io.puts "          buf[#{dst}].v = *(#{si[:c]} *) (pi + #{kexpr} * istride);"
+      io.puts "          memcpy(&buf[#{dst}].v, pi + #{kexpr} * istride, sizeof(buf[#{dst}].v));"
     end
   end
 
@@ -4263,6 +4273,41 @@ module MkKernel
       io.puts "     when input has any mask. */"
       io.puts "  if ( ca_has_mask(ca) ) ca_create_mask(co);"
     end
+    # The buffers are taken before the walks open: an allocation that
+    # raises inside them would jump past their finish.  The slab is the
+    # sort axis alone, so a fiber holds ca->dim[axis] cells.
+    io.puts "  ca_size_t fiber_n = ca->dim[axis];"
+    if src == :object
+      # The object comparator calls <=>, so the sort can raise part way.
+      # ALLOCV frees these buffers whether the function returns or unwinds.
+      # A full sort also needs aux: ca_sort_merge_pair_object is a mergesort.
+      io.puts "  volatile VALUE hbuf = 0, haux = 0;"
+      io.puts "  #{name}_pair_#{src} *buf = ALLOCV_N(#{name}_pair_#{src}, hbuf, fiber_n);"
+      if partition
+        io.puts "  (void) haux;"
+      else
+        io.puts "  #{name}_pair_#{src} *aux = ALLOCV_N(#{name}_pair_#{src}, haux, fiber_n);"
+      end
+    else
+      io.puts "  volatile VALUE hbuf = 0, haux = 0;"
+      io.puts "  #{name}_pair_#{src} *buf = ALLOCV_N(#{name}_pair_#{src}, hbuf, fiber_n);"
+    end
+    if has_kind && %i[f32 f64].include?(src)
+      # aux is the mergesort's ping-pong buffer and, before that, the
+      # scratch of the NaN pre-partition, so a float kernel always takes it.
+      io.puts "  #{name}_pair_#{src} *aux = ALLOCV_N(#{name}_pair_#{src}, haux, fiber_n);"
+    elsif has_kind && src != :object && src != :fixlen
+      # The aux pair buffer for ca_sort_merge_pair_<src> (a ping-pong
+      # bottom-up mergesort), taken once outside the fiber loop.  The fixlen
+      # lane sorts with qsort and needs none.
+      io.puts "  #{name}_pair_#{src} *aux = NULL;"
+      io.puts "  if ( do_stable ) {"
+      io.puts "    aux = ALLOCV_N(#{name}_pair_#{src}, haux, fiber_n);"
+      io.puts "  }"
+    elsif src != :object
+      io.puts "  (void) haux;"
+    end
+
     io.puts "  ca_iter_state st_in, st_out;"
     io.puts "  int rc;"
     io.puts "  rc = ca_iter_state_init_l2(&st_in,  ca, CA_SLAB_AXES,"
@@ -4276,36 +4321,6 @@ module MkKernel
     io.puts "    ca_iter_state_finish(&st_in);"
     io.puts %Q[    rb_raise(rb_eRuntimeError, "%s: output init failed rc=%d", ca_calling_method_name(), rc);]
     io.puts "  }"
-    io.puts
-    io.puts "  ca_size_t fiber_n = st_in.slab_elements;"
-    if src == :object
-      # The object comparator calls <=>, so the sort can raise part way.
-      # ALLOCV frees these buffers whether the function returns or unwinds.
-      # A full sort also needs aux: ca_sort_merge_pair_object is a mergesort.
-      io.puts "  volatile VALUE hbuf = 0, haux = 0;"
-      io.puts "  #{name}_pair_#{src} *buf = ALLOCV_N(#{name}_pair_#{src}, hbuf, fiber_n);"
-      if partition
-        io.puts "  (void) haux;"
-      else
-        io.puts "  #{name}_pair_#{src} *aux = ALLOCV_N(#{name}_pair_#{src}, haux, fiber_n);"
-      end
-    else
-      # ALLOCV as well: the walk that fills buf is the only thing that
-      # could raise, and it does not today, but the buffers need not rely
-      # on that.
-      io.puts "  volatile VALUE hbuf = 0, haux = 0;"
-      io.puts "  #{name}_pair_#{src} *buf = ALLOCV_N(#{name}_pair_#{src}, hbuf, fiber_n);"
-    end
-    if has_kind && src != :object
-      # The aux pair buffer for ca_sort_merge_pair_<src> (a ping-pong
-      # bottom-up mergesort), taken once outside the fiber loop.
-      io.puts "  #{name}_pair_#{src} *aux = NULL;"
-      io.puts "  if ( do_stable ) {"
-      io.puts "    aux = ALLOCV_N(#{name}_pair_#{src}, haux, fiber_n);"
-      io.puts "  }"
-    elsif src != :object
-      io.puts "  (void) haux;"
-    end
 
     if view_flat
       io.puts
@@ -4358,7 +4373,7 @@ module MkKernel
         if is_fixlen
           io.puts "      buf[k].vp = pi + k * istride; buf[k].nb = (ca_size_t) ca->bytes;"
         else
-          io.puts "      buf[k].v = *(#{si[:c]} *) (pi + k * istride);"
+          io.puts "      memcpy(&buf[k].v, pi + k * istride, sizeof(buf[k].v));"
         end
         io.puts "      buf[k].i = #{payload.call("k")};"
         io.puts "    }"
@@ -4373,7 +4388,7 @@ module MkKernel
       if is_fixlen
         io.puts "      buf[k_unmasked].vp = pi + k * istride; buf[k_unmasked].nb = (ca_size_t) ca->bytes;"
       else
-        io.puts "      buf[k_unmasked].v = *(#{si[:c]} *) (pi + k * istride);"
+        io.puts "      memcpy(&buf[k_unmasked].v, pi + k * istride, sizeof(buf[k_unmasked].v));"
       end
       io.puts "      buf[k_unmasked].i = k;"
       io.puts "      k_unmasked++;"
@@ -4389,7 +4404,7 @@ module MkKernel
       if is_fixlen
         io.puts "      buf[k].vp = pi + k * istride; buf[k].nb = (ca_size_t) ca->bytes;"
       else
-        io.puts "      buf[k].v = *(#{si[:c]} *) (pi + k * istride);"
+        io.puts "      memcpy(&buf[k].v, pi + k * istride, sizeof(buf[k].v));"
       end
       io.puts "      buf[k].i = k;"
       io.puts "    }"
@@ -4462,7 +4477,7 @@ module MkKernel
         io.puts "    /* P.3/P.4: NaN pre-partition for float argsort -- NaN pairs are"
         io.puts "       pushed to the tail (= NaN-at-end policy, matches sort_copy"
         io.puts "       AC8).  Only the finite slice is sorted. */"
-        io.puts "    ca_size_t finite_n = ca_partition_nan_pair_#{src}((ca_pair_#{src} *) #{buf_expr}, (ca_size_t) #{sort_n_expr});"
+        io.puts "    ca_size_t finite_n = ca_partition_nan_pair_#{src}((ca_pair_#{src} *) #{buf_expr}, (ca_size_t) #{sort_n_expr}, (ca_pair_#{src} *) aux);"
         io.puts "    if ( do_stable ) {"
         io.puts "      ca_sort_merge_pair_#{src}((ca_pair_#{src} *) #{buf_expr}, (ca_pair_#{src} *) aux, finite_n);"
         io.puts "    } else {"
@@ -5004,7 +5019,7 @@ module MkKernel
     io.puts
     io.puts "/* ===== #{k[:name]}_ki ============================================ */"
     k[:source].each do |src|
-      emit_native_for(io, k, src) { |o| emit_search_native(o, k, src) }
+      emit_native_for(io, k, src, guard: true) { |o| emit_search_native(o, k, src) }
     end
     emit_search_dispatch(io, k)
   end
@@ -5264,7 +5279,7 @@ module MkKernel
           CArray *co;
           GetCArray(vout, co);
           #{oi[:c]} *op = (#{oi[:c]} *) co->ptr;
-          #{op_mask_decl}
+          #{undef_nm ? op_mask_decl : ""}
 
           ca_iter_state st;
           int rc = ca_iter_state_init_l2(&st, ca, CA_SLAB_AXES,
@@ -5486,6 +5501,12 @@ module MkKernel
         #{op_mask_decl}
 
         #{entity_bc}
+        /* The output mask is made before the window opens, since making it
+           allocates; it comes off again below when no cell needed it. */
+        if ( #{undef_nm ? "1" : "ca_has_mask(cv)"} ) {
+          ca_create_mask(co);
+          op_mask = (boolean8_t *) co->mask->ptr;
+        }
         /* Attach self + val; rev4 uses raw row-major byte addressing. */
         ca_attach_n(2, ca, cv);   /* window: numeric bodies do not raise; the object lane reads entities */
 
@@ -5592,6 +5613,11 @@ module MkKernel
 
         ca_detach(ca);
         ca_detach(cv);
+        if ( op_mask && ! memchr(op_mask, 1, (size_t) co->elements) ) {
+          CArray *unused = co->mask;
+          co->mask = NULL;
+          ca_free(unused);
+        }
         return vout;
       }
     C
@@ -5687,13 +5713,14 @@ module MkKernel
   # (`ca_monop_<name>_<suffix>`).  mkmath uses typedef names
   # `float32_t` / `float64_t` here, not the raw C types `float` / `double`,
   # so that `ca_monop_dispatch.c`'s extern references stay ABI-stable.
-  # For all other data_types, the suffix matches `DTYPES[src][:c]`.
+  # For all other data_types, the suffix is `DTYPES[src][:c]` without the
+  # `ca_u_` of its unaligned cell typedef (ca_u_int32_t -> int32_t).
   def self.math_suffix(src)
     case src
     when :f32 then "float32_t"
     when :f64 then "float64_t"
     when :fixlen then "fixlen"   # symbol suffix differs from c-type "char"
-    else DTYPES[src][:c]
+    else DTYPES[src][:c].sub(/\Aca_u_/, "")
     end
   end
 
@@ -5772,7 +5799,8 @@ module MkKernel
     uses_input = raw.include?("#1")
     # SL.2.x phase 2 (monop emit substrate hardening, MEMO_MONOP_STRIDED_AUDIT.md):
     # 3-way split (mask / contig / strided) symmetric with binop SL.2.x phase 1.
-    # contig branch (i1==1 && i2==1) uses index form + `__restrict__` + `omp simd`.
+    # contig branch (i1==1 && i2==1) uses index form + `omp simd` (`__restrict__`
+    # only when input and output are apart).
     # strided branch uses `p += i` increment form (per-iter multiply removed).
     # mask branch unchanged (per-cell predicate, not SIMD-amenable).
     if uses_input
@@ -5780,11 +5808,11 @@ module MkKernel
 
         static void
         ca_monop_#{k[:name]}_#{suffix} (ca_size_t n, boolean8_t *m,
-                                         char * __restrict__ ptr1, ca_size_t i1,
-                                         char * __restrict__ ptr2, ca_size_t i2)
+                                         char *ptr1, ca_size_t i1,
+                                         char *ptr2, ca_size_t i2)
         {
-          #{c_type_in}  * __restrict__ q1 = (#{c_type_in}  *) ptr1;
-          #{c_type_out} * __restrict__ q2 = (#{c_type_out} *) ptr2;
+          #{c_type_in}  *q1 = (#{c_type_in}  *) ptr1;
+          #{c_type_out} *q2 = (#{c_type_out} *) ptr2;
           ca_size_t k;
           if ( m ) {
             #{c_type_in}  *p1 = q1;
@@ -5800,17 +5828,38 @@ module MkKernel
             }
           } else if ( i1 == 1 && i2 == 1 ) {
             /* contig branch: SIMD-friendly form.  Index-form `q[k]` exposes
-               the unit-stride access to the vectorizer; `__restrict__` on
-               q1/q2 promises no aliasing so the omp simd pragma can license
-               lane-parallel loads/stores.  Element-wise monop has no
-               reassoc, so ε-close numeric contract is unaffected. */
+               the unit-stride access to the vectorizer.  Element-wise monop
+               has no reassoc, so ε-close numeric contract is unaffected.
+               The input and output are either apart, the same cells (a
+               bang, or the lazy scratch applied in place), or overlapping
+               otherwise; `__restrict__` is promised only when apart, since
+               the body may store part of a cell before it has read it. */
             #{c_type_in}  *p1;
             #{c_type_out} *p2;
             (void)p1; (void)p2;
-            #pragma omp simd
-            for (k=0; k<n; k++) {
-              p1 = q1 + k; p2 = q2 + k;
-              { #{expr_body} }
+            uintptr_t a1 = (uintptr_t) q1, a2 = (uintptr_t) q2;
+            if ( a2 + n * sizeof(*q2) <= a1 || a1 + n * sizeof(*q1) <= a2 ) {
+              #{c_type_in}  * __restrict__ r1 = q1;
+              #{c_type_out} * __restrict__ r2 = q2;
+              #pragma omp simd
+              for (k=0; k<n; k++) {
+                p1 = r1 + k; p2 = r2 + k;
+                { #{expr_body} }
+              }
+            }
+            else if ( a1 == a2 && sizeof(*q1) == sizeof(*q2) ) {
+              /* in place: an iteration reads and writes only its own cell */
+              #pragma omp simd
+              for (k=0; k<n; k++) {
+                p1 = q1 + k; p2 = q2 + k;
+                { #{expr_body} }
+              }
+            }
+            else {
+              for (k=0; k<n; k++) {
+                p1 = q1 + k; p2 = q2 + k;
+                { #{expr_body} }
+              }
             }
           } else {
             /* strided branch: numo-shape `p += s` increment form. */
@@ -5996,7 +6045,8 @@ module MkKernel
     expr_body = raw.gsub(/#1/, "*p1").gsub(/#2/, "*p2").gsub(/#3/, "*p3").gsub(/<type>/, suffix)
     # Option B+C pilot (binop emit substrate hardening, MEMO_BINOP_STRIDED_AUDIT.md):
     # The no-mask body is split into a contig branch (i1==i2==i3==1) using the
-    # `q[k]` index form with `__restrict__`-qualified pointers + `#pragma omp simd`
+    # `q[k]` index form with `#pragma omp simd` (`__restrict__`-qualified only
+    # when the output is apart from both inputs)
     # (SL.2.x-style insurance, element-wise has no reassoc -> ε-close unaffected),
     # and a strided branch using `p += i` increment form (numo-shape inner loop).
     # `i1`/`i2`/`i3` remain element units (NOT byte) -- byte-flip is Option A scope.
@@ -6006,13 +6056,13 @@ module MkKernel
 
       static void
       ca_binop_#{k[:name]}_#{suffix} (ca_size_t n, boolean8_t *m,
-                                       char * __restrict__ ptr1, ca_size_t i1,
-                                       char * __restrict__ ptr2, ca_size_t i2,
-                                       char * __restrict__ ptr3, ca_size_t i3)
+                                       char *ptr1, ca_size_t i1,
+                                       char *ptr2, ca_size_t i2,
+                                       char *ptr3, ca_size_t i3)
       {
-        #{c_type} * __restrict__ q1 = (#{c_type} *) ptr1;
-        #{c_type} * __restrict__ q2 = (#{c_type} *) ptr2;
-        #{c_type} * __restrict__ q3 = (#{c_type} *) ptr3;
+        #{c_type} *q1 = (#{c_type} *) ptr1;
+        #{c_type} *q2 = (#{c_type} *) ptr2;
+        #{c_type} *q3 = (#{c_type} *) ptr3;
         ca_size_t k;
         if ( m ) {
           #{c_type} *p1 = q1, *p2 = q2, *p3 = q3;
@@ -6028,16 +6078,41 @@ module MkKernel
           }
         } else if ( i1 == 1 && i2 == 1 && i3 == 1 ) {
           /* contig branch: SIMD-friendly form.  Index-form `q[k]` exposes
-             the unit-stride access to the vectorizer; `__restrict__` on
-             q1/q2/q3 promises no aliasing so the omp simd pragma can
-             license lane-parallel loads/stores.  Element-wise binop has
-             no reassoc, so ε-close numeric contract is unaffected. */
+             the unit-stride access to the vectorizer.  Element-wise binop
+             has no reassoc, so ε-close numeric contract is unaffected.
+             The output is apart from each input, the same cells as it (a
+             bang), or overlaps it otherwise; `__restrict__` is promised
+             only when apart from both, since the body may store part of a
+             cell before it has read it. */
           #{c_type} *p1, *p2, *p3;
+          uintptr_t a1 = (uintptr_t) q1, a2 = (uintptr_t) q2, a3 = (uintptr_t) q3;
+          uintptr_t nb = (uintptr_t) n * sizeof(*q3);
+          int apart1 = ( a3 + nb <= a1 || a1 + nb <= a3 );
+          int apart2 = ( a3 + nb <= a2 || a2 + nb <= a3 );
           (void)p1; (void)p2; (void)p3;
-          #pragma omp simd
-          for (k=0; k<n; k++) {
-            p1 = q1 + k; p2 = q2 + k; p3 = q3 + k;
-            { #{expr_body} }
+          if ( apart1 && apart2 ) {
+            #{c_type} * __restrict__ r1 = q1;
+            #{c_type} * __restrict__ r2 = q2;
+            #{c_type} * __restrict__ r3 = q3;
+            #pragma omp simd
+            for (k=0; k<n; k++) {
+              p1 = r1 + k; p2 = r2 + k; p3 = r3 + k;
+              { #{expr_body} }
+            }
+          }
+          else if ( ( apart1 || a1 == a3 ) && ( apart2 || a2 == a3 ) ) {
+            /* in place: an iteration reads and writes only its own cell */
+            #pragma omp simd
+            for (k=0; k<n; k++) {
+              p1 = q1 + k; p2 = q2 + k; p3 = q3 + k;
+              { #{expr_body} }
+            }
+          }
+          else {
+            for (k=0; k<n; k++) {
+              p1 = q1 + k; p2 = q2 + k; p3 = q3 + k;
+              { #{expr_body} }
+            }
           }
         } else {
           /* strided branch: numo-shape `p += s` increment form. */
@@ -6500,13 +6575,21 @@ module MkKernel
                     cmplx64 cmplx128].freeze
   CAST_INEXACT = %i[f32 f64 cmplx64 cmplx128].freeze
 
+  # The plain C type of a data type, for a body that leaves this file
+  # (CArray.__kernel_body__, a fusion plan): the unaligned typedef in :c is
+  # about how a kernel reaches a cell, not about the value.
+  def self.value_c(src)
+    { "ca_u_float32_t" => "float", "ca_u_float64_t" => "double" }
+      .fetch(DTYPES[src][:c]) { |c| c.sub(/\Aca_u_/, "") }
+  end
+
   def self.cast_body_rows
     CAST_SOURCES.product(CAST_TARGETS).filter_map { |src, dst|
       next if CAST_INEXACT.include?(src) && !CAST_INEXACT.include?(dst)
       name = DTYPES[dst][:ca].sub(/\ACA_/, "").downcase
       via  = ( %i[i64 u64].include?(src) && %i[f32 cmplx64].include?(dst) ) ? "(double)" : ""
       ["monop", "cast_#{name}", DTYPES[src][:ca].sub(/\ACA_/, "").downcase,
-       "(#2) = (#{DTYPES[dst][:c]})#{via}(#1);"]
+       "(#2) = (#{value_c(dst)})#{via}(#1);"]
     }
   end
 
@@ -8152,13 +8235,13 @@ MkKernel.search :linear_section_binary,
     if ( slab_n <= 1 ) {
       /* A one-point axis has no segment: only the point itself is in
        * range, at 0.  An empty one has nothing in range. */
-      if ( slab_n == 1 && query_val == *(double *)slab_ptr ) {
+      if ( slab_n == 1 && query_val == *(ca_u_float64_t *)slab_ptr ) {
         result = 0.0;
       }
     }
     else {
-      double y0 = *(double *)(slab_ptr + 0 * slab_stride);
-      double yn = *(double *)(slab_ptr + (slab_n - 1) * slab_stride);
+      double y0 = *(ca_u_float64_t *)(slab_ptr + 0 * slab_stride);
+      double yn = *(ca_u_float64_t *)(slab_ptr + (slab_n - 1) * slab_stride);
       int ascending = ( yn >= y0 );   /* grid direction (monotonic assumed) */
       ca_size_t x1 = 0;
       int       found = 0;
@@ -8181,8 +8264,8 @@ MkKernel.search :linear_section_binary,
           double  gd = (query_val - y0) / (yn - y0) * (double)(slab_n - 1);
           if ( gd >= 0.0 && gd < (double)(slab_n - 1) ) {
             ca_size_t ag = (ca_size_t) gd;
-            double yga  = *(double *)(slab_ptr + ag * slab_stride);
-            double ygb  = *(double *)(slab_ptr + (ag + 1) * slab_stride);
+            double yga  = *(ca_u_float64_t *)(slab_ptr + ag * slab_stride);
+            double ygb  = *(ca_u_float64_t *)(slab_ptr + (ag + 1) * slab_stride);
             if ( (yga - query_val) * (ygb - query_val) <= 0 ) {
               x1 = ag; found = 1;
             }
@@ -8197,7 +8280,7 @@ MkKernel.search :linear_section_binary,
           double    ya = y0;
           while ( (b - a) > 1 ) {
             ca_size_t c  = (a + b) / 2;
-            double    yc = *(double *)(slab_ptr + c * slab_stride);
+            double    yc = *(ca_u_float64_t *)(slab_ptr + c * slab_stride);
             if ( (ya - query_val) * (yc - query_val) <= 0 ) { b = c; }
             else { a = c; ya = yc; }
           }
@@ -8206,8 +8289,8 @@ MkKernel.search :linear_section_binary,
       }
 
       if ( found ) {
-        double y1 = *(double *)(slab_ptr + x1 * slab_stride);
-        double y2 = *(double *)(slab_ptr + (x1 + 1) * slab_stride);
+        double y1 = *(ca_u_float64_t *)(slab_ptr + x1 * slab_stride);
+        double y2 = *(ca_u_float64_t *)(slab_ptr + (x1 + 1) * slab_stride);
         double rest = (query_val - y1) / (y2 - y1);
         if ( y2 != 0.0 && fabs(y2 - query_val) / fabs(y2) < DBL_EPSILON * 100 ) {
           result = (double)(x1 + 1);
@@ -8243,7 +8326,7 @@ MkKernel.search :linear_section_linear,
     if ( slab_n <= 1 ) {
       /* A one-point axis has no segment: only the point itself is in
        * range, at 0.  An empty one has nothing in range. */
-      if ( slab_n == 1 && query_val == *(double *)slab_ptr ) {
+      if ( slab_n == 1 && query_val == *(ca_u_float64_t *)slab_ptr ) {
         result = 0.0;
       }
     }
@@ -8251,15 +8334,15 @@ MkKernel.search :linear_section_linear,
       ca_size_t x1 = 0;
       int       found = 0;
       for ( ca_size_t k = 0; k < slab_n - 1; k++ ) {
-        double yk  = *(double *)(slab_ptr + k * slab_stride);
-        double yk1 = *(double *)(slab_ptr + (k + 1) * slab_stride);
+        double yk  = *(ca_u_float64_t *)(slab_ptr + k * slab_stride);
+        double yk1 = *(ca_u_float64_t *)(slab_ptr + (k + 1) * slab_stride);
         if ( (query_val - yk) * (query_val - yk1) <= 0 ) {
           x1 = k; found = 1; break;
         }
       }
       if ( found ) {
-        double y1 = *(double *)(slab_ptr + x1 * slab_stride);
-        double y2 = *(double *)(slab_ptr + (x1 + 1) * slab_stride);
+        double y1 = *(ca_u_float64_t *)(slab_ptr + x1 * slab_stride);
+        double y2 = *(ca_u_float64_t *)(slab_ptr + (x1 + 1) * slab_stride);
         result = (query_val - y1) / (y2 - y1) + (double) x1;
       }
 
@@ -8286,8 +8369,8 @@ MkKernel.search :linear_fetch,
       ca_size_t il = (ca_size_t) floor(query_val);
       ca_size_t iu = (ca_size_t) ceil(query_val);
       double    w  = query_val - floor(query_val);
-      double    yl = *(double *)(slab_ptr + il * slab_stride);
-      double    yu = *(double *)(slab_ptr + iu * slab_stride);
+      double    yl = *(ca_u_float64_t *)(slab_ptr + il * slab_stride);
+      double    yu = *(ca_u_float64_t *)(slab_ptr + iu * slab_stride);
       result = yu * w + yl * (1.0 - w);
     }
   C
@@ -8847,7 +8930,7 @@ MkKernel.monfunc :rad_pi,
 # Pair-wise max / min — three flavours:
 #
 #   pmax / pmin      CArray legacy names (kept for backwards compat),
-#                    NaN-skip semantics via C99 fmax / fmin.
+#                    NaN-skip semantics, as C99 fmax / fmin.
 #   fmax / fmin      Ruby-level aliases of pmax / pmin (= same kernel,
 #                    same NaN-skip behaviour).  Matches the C99 library
 #                    function of the same name.
@@ -8857,12 +8940,15 @@ MkKernel.monfunc :rad_pi,
 #
 # Integer branches are identical across all three (no NaN).  The float
 # and object branches differ: pmax / pmin let a NaN lose (an object cell's
-# Float NaN included), maximum / minimum let it win.
+# Float NaN included), maximum / minimum let it win.  In both flavours, of
+# two zeros the max is +0 and the min is -0 in either order.  C's fmax /
+# fmin leave that choice to the library (glibc and macOS answer
+# differently), so the float branch does not call them.
 MkKernel.binop :pmax,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) > (#2) ? (#1) : (#2);",
-    float:  "(#3) = fmax(#1, #2);",
+    float:  "(#3) = isnan(#1) ? (#2) : isnan(#2) ? (#1) : ((#1) > (#2) || ((#1) == (#2) && !signbit(#1))) ? (#1) : (#2);",
     object: '(#3) = ca_obj_extremum_replaces((#2), (#1), rb_intern(">")) ? (#2) : (#1);',
   }
 
@@ -8870,7 +8956,7 @@ MkKernel.binop :pmin,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) < (#2) ? (#1) : (#2);",
-    float:  "(#3) = fmin(#1, #2);",
+    float:  "(#3) = isnan(#1) ? (#2) : isnan(#2) ? (#1) : ((#1) < (#2) || ((#1) == (#2) && signbit(#1))) ? (#1) : (#2);",
     object: '(#3) = ca_obj_extremum_replaces((#2), (#1), rb_intern("<")) ? (#2) : (#1);',
   }
 

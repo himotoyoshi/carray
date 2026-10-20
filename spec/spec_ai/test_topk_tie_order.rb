@@ -23,8 +23,7 @@ class TestTopkTieOrder < Test::Unit::TestCase
     assert_equal a.sort_index.to_a.first(5), a.nsmallest_index(5, axis: 0).to_a
   end
 
-  # A float array with no NaN and no masked cell takes the partition, as an
-  # integer array does; ties still go by position.
+  # A float array with no NaN and no masked cell; ties go by position.
   def test_float_without_nan_or_masked_cells
     a = CA_FLOAT64(Array.new(2000) { |i| (i * 37 % 11) * 0.5 })
     m = a.copy
@@ -59,6 +58,38 @@ class TestTopkTieOrder < Test::Unit::TestCase
         got = desc ? a.nlargest_index(k, axis: axis) : a.nsmallest_index(k, axis: axis)
         assert_equal reference(a, k, axis, desc), got.to_a,
                      "#{t} #{shape} axis=#{axis} k=#{k} desc=#{desc}"
+      end
+    end
+  end
+
+  # Fibers longer than the walk keeps at a time (a few times k), so the
+  # kept cells are cut back to k during the walk: in order, in reverse
+  # order, with many ties, NaN and masked cells, the extremes of the
+  # type, and along an axis whose fibers are not contiguous.
+  def test_long_fibers
+    srand(5)
+    len = 3000
+    {
+      int64:   [-2**63, 2**63 - 1, 0, 1],
+      uint8:   [0, 255, 7],
+      float32: [-0.0, 0.0, Float::INFINITY, Float::NAN, 1.5],
+      float64: [-Float::INFINITY, Float::INFINITY, Float::NAN, 2.5, -0.0, 0.0],
+    }.each do |t, pool|
+      rand_a = CArray.new(t, [len]); rand_a[] = Array.new(len) { pool.sample }
+      masked = rand_a.copy; masked[CArray.boolean(len) { |*| rand < 0.1 }] = UNDEF
+      asc = CArray.new(t, [len]).seq!
+      [rand_a, masked, asc, asc.flip(0)].each do |a|
+        [1, 3, 40, 999].each do |k|
+          [true, false].each do |desc|
+            got = desc ? a.nlargest_index(k, axis: 0) : a.nsmallest_index(k, axis: 0)
+            assert_equal reference(a, k, 0, desc), got.to_a, "#{t} k=#{k} desc=#{desc}"
+          end
+        end
+      end
+      b = masked.reshape(60, 50)
+      [0, 1].each do |axis|
+        assert_equal reference(b, 7, axis, true), b.nlargest_index(7, axis: axis).to_a
+        assert_equal reference(b, 7, axis, false), b.nsmallest_index(7, axis: axis).to_a
       end
     end
   end

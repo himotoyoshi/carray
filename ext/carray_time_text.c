@@ -359,7 +359,7 @@ rb_ca_parse_time_text (int argc, VALUE *argv, VALUE self)
   boolean8_t *m_in, *m_out;
   int64_t *days, *nsod, *months, *ticks;
   int64_t per_day = 1, ns_per_tick = 1;
-  ID unit;
+  ID unit = 0;
   int clock = 0, fraction = 0, coarse = 2, any = 0, wide;
   int calendar = 0;              /* 1 ticks of months, 2 of years */
   ca_size_t i;

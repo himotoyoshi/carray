@@ -200,7 +200,7 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
 
   # --- buffers that a raise must not strand -------------------------------
 
-  # Bytes the malloc zone grows by per call of +expr+ after +setup+, or nil
+  # Bytes the C heap grows by per call of +expr+ after +setup+, or nil
   # where the measurement is not available.
   #
   # The buffers these cases strand are hundreds of kilobytes per call, while
@@ -216,7 +216,6 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
   # does not compare raises part way through, and the pair buffers go with
   # the unwind.
   def test_object_sort_frees_its_buffers_when_a_pair_does_not_compare
-    omit "malloc zone statistics are macOS only" unless RUBY_PLATFORM =~ /darwin/
     setup = "o = CArray.object(20_000) { |i| i }; o[19_999] = Object.new"
     %w[o.sort_index o.rank_index o.partition_index(10_000)].each do |expr|
       growth = malloc_growth_per_call(setup, expr)
@@ -229,7 +228,6 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
   # the length of the walk; an element whose #hash raises must not strand
   # them.
   def test_discovery_frees_its_tables_when_hash_raises
-    omit "malloc zone statistics are macOS only" unless RUBY_PLATFORM =~ /darwin/
     setup = <<~SETUP
       class NoHash ; def hash ; raise "no hash" ; end ; end
       o = CArray.object(20_000) { |i| i }
@@ -246,7 +244,6 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
   # CArray.sort_addr orders its keys inside libc's sort; an object key that
   # does not compare must not unwind through it, stranding its buffers.
   def test_sort_addr_frees_its_buffers_when_keys_do_not_compare
-    omit "malloc zone statistics are macOS only" unless RUBY_PLATFORM =~ /darwin/
     setup = "o = CArray.object(20_000) { |i| i }; o[19_999] = 's'"
     growth = malloc_growth_per_call(setup, "CArray.sort_addr(o)")
     omit "measurement unavailable" if growth.nil?
@@ -256,7 +253,6 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
   # AddressBasis frees every region buffer when one region's write-back
   # raises.
   def test_address_basis_frees_its_regions_when_a_write_back_raises
-    omit "malloc zone statistics are macOS only" unless RUBY_PLATFORM =~ /darwin/
     setup = <<~SETUP
       #{FAILING_SYNC}
       a = FailingSync.new(20_000)
@@ -273,7 +269,6 @@ class TestAttachWindowRaiseProcess < Test::Unit::TestCase
   # --- a block of scratch allocated before the arguments are checked ---
 
   def test_address_basis_open_frees_its_block_when_an_argument_is_refused
-    omit "malloc zone statistics are macOS only" unless RUBY_PLATFORM =~ /darwin/
     setup = <<~SETUP
       arrays = [CArray.int32(3).freeze] * 64
       flags  = [true] * 64               # writable, which a frozen array refuses

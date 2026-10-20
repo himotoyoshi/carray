@@ -4,10 +4,11 @@
   cell, exposing it as an unsigned-integer (or boolean, when
   bitlen == 1) CArray of the same shape as the parent.
 
-  Byte-straddling fields are handled by loading up to 8 bytes from
-  the parent starting at `byte_offset`, masking with `bit_mask`, and
-  shifting by `bit_offset`.  Big-endian hosts adjust byte_offset /
-  bit_offset so the field selection is invariant to host byte order.
+  Bits are counted from the least significant bit of the parent cell
+  read as a host-order integer.  Byte-straddling fields are handled
+  by loading up to 8 bytes, the least significant first, starting
+  `byte_offset` bytes above the least significant byte, masking with
+  `bit_mask`, and shifting by `bit_offset`.
 
 ---------------------------------------------------------------------------- */
 
@@ -32,7 +33,7 @@ typedef struct {
   ca_size_t   byte_offset;
   ca_size_t   bit_offset;
   uint64_t  bit_mask;
-  ca_size_t   bit_start;  /* original offset before endian adjustment */
+  ca_size_t   bit_start;  /* the offset of the field's lowest bit */
   ca_size_t   bit_length; /* width of the field in bits */
   int8_t      sign_extend; /* the field is read as a signed integer */
 } CABitfield;
@@ -85,6 +86,40 @@ static VALUE rb_cCABitfield;
  * 8-bit field starting at bit 4 of a 2-byte parent) sees the full
  * bit_mask.  A dbytes-typed cast would silently truncate bit_mask
  * to `1 << (dbytes * 8)`, dropping the upper bits of the field. */
+/* The `span` bytes of a cell from `lo` bytes above its least
+   significant byte, as an integer.  On a big-endian host the least
+   significant byte is the last one. */
+static inline uint64_t
+bitfield_load (const char *cell, ca_size_t cbytes, ca_size_t lo, ca_size_t span)
+{
+  uint64_t v = 0;
+#ifdef WORDS_BIGENDIAN
+  ca_size_t j;
+  for (j = 0; j < span; j++) {
+    v |= (uint64_t) (uint8_t) cell[cbytes - 1 - lo - j] << (8 * j);
+  }
+#else
+  (void) cbytes;
+  memcpy(&v, cell + lo, (size_t) span);
+#endif
+  return v;
+}
+
+static inline void
+bitfield_save (char *cell, ca_size_t cbytes, ca_size_t lo, ca_size_t span,
+               uint64_t v)
+{
+#ifdef WORDS_BIGENDIAN
+  ca_size_t j;
+  for (j = 0; j < span; j++) {
+    cell[cbytes - 1 - lo - j] = (char) (v >> (8 * j));
+  }
+#else
+  (void) cbytes;
+  memcpy(cell + lo, &v, (size_t) span);
+#endif
+}
+
 static void
 bitfield_fetch(char *dst, ca_size_t dbytes,
                    char *src, ca_size_t sbytes,
@@ -98,13 +133,12 @@ bitfield_fetch(char *dst, ca_size_t dbytes,
   if (span > 8) span = 8;
   ca_size_t dwrite = (dbytes > 8) ? 8 : dbytes;
   for (k = 0; k < elements; k++) {
-    uint64_t tmp = 0;
-    memcpy(&tmp, src + k * sbytes + byte_offset, (size_t) span);
+    uint64_t tmp = bitfield_load(src + k * sbytes, sbytes, byte_offset, span);
     uint64_t result = (tmp & bit_mask) >> bit_offset;
     if ( result & sign ) {
       result |= ~( ( sign << 1 ) - 1 );   /* the field's top bit is its sign */
     }
-    memcpy(dst + k * dbytes, &result, (size_t) dwrite);
+    bitfield_save(dst + k * dbytes, dwrite, 0, dwrite, result);
   }
 }
 
@@ -124,12 +158,10 @@ bitfield_store(char *src, ca_size_t sbytes,
   if (span > 8) span = 8;
   ca_size_t sread = (sbytes > 8) ? 8 : sbytes;
   for (k = 0; k < elements; k++) {
-    uint64_t srcv = 0;
-    memcpy(&srcv, src + k * sbytes, (size_t) sread);
-    uint64_t tmp = 0;
-    memcpy(&tmp, dst + k * dbytes + byte_offset, (size_t) span);
+    uint64_t srcv = bitfield_load(src + k * sbytes, sread, 0, sread);
+    uint64_t tmp = bitfield_load(dst + k * dbytes, dbytes, byte_offset, span);
     tmp = (tmp & ~bit_mask) | ((srcv << bit_offset) & bit_mask);
-    memcpy(dst + k * dbytes + byte_offset, &tmp, (size_t) span);
+    bitfield_save(dst + k * dbytes, dbytes, byte_offset, span, tmp);
   }
 }
 
@@ -215,32 +247,11 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
              (long long) bitlen, ca_type_name[data_type]);
   }
 
-  if ( ca_endian == CA_BIG_ENDIAN ) {
-    /* The window is placed by the narrowest width that holds the field,
-       not by the type it is read as, which may be wider. */
-    ca_size_t window = ( bitlen <= 8 ) ? 1 : ( bitlen <= 16 ) ? 2 :
-                       ( bitlen <= 32 ) ? 4 : 8;
-    byte_offset = parent->bytes - offset/8 - window;
-    bit_offset  = offset % 8;
-    bit_mask    = 0;
-    for (i=0; i<bitlen; i++) {
-      bit_mask += 1ULL << ( bit_offset + i );
-    }
-    if ( byte_offset < 0 ) {
-      for (i=0; i<-byte_offset; i++) {
-        bit_mask = bit_mask << 8;
-        bit_offset += 8;
-      }
-      byte_offset = 0;
-    }
-  }
-  else {
-    byte_offset = offset / 8;
-    bit_offset  = offset % 8;
-    bit_mask    = 0;
-    for (i=0; i<bitlen; i++) {
-      bit_mask += 1ULL << ( bit_offset + i );
-    }
+  byte_offset = offset / 8;
+  bit_offset  = offset % 8;
+  bit_mask    = 0;
+  for (i=0; i<bitlen; i++) {
+    bit_mask += 1ULL << ( bit_offset + i );
   }
 
   /* ca == NULL asks for the checks above only, so that a constructor can

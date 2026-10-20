@@ -6,7 +6,7 @@
 # is freed rather than left behind.
 #
 # The buffer is plain malloc, invisible from Ruby, so it is measured by
-# the malloc zone's bytes-in-use: at these sizes the resident size reads
+# the C heap's bytes in use: at these sizes the resident size reads
 # the heap's own growth rather than the leak.
 
 require "test/unit"
@@ -15,9 +15,9 @@ require_relative "../../utils/measure_leak"
 
 class TestCopyRaiseCleanup < Test::Unit::TestCase
 
-  # Bytes the malloc zone grows by per call of `expr`, with `input` bound
+  # Bytes the C heap grows by per call of `expr`, with `input` bound
   # to a float64 view over an object array holding a cell that is not a
-  # number (utils/measure_leak.rb; macOS only).
+  # number (utils/measure_leak.rb).
   def bytes_per_call (expr, n, calls)
     setup = <<~SETUP
       o = CArray.object(#{n}) { 1.0 }
@@ -25,14 +25,14 @@ class TestCopyRaiseCleanup < Test::Unit::TestCase
       input = CArray.wrap_readonly(o, CA_FLOAT64)
     SETUP
     bytes = LeakMeter.bytes_per_call(expr, setup: setup, calls: calls)
-    omit "malloc zone statistics unavailable" if bytes.nil?
+    omit "measurement unavailable" if bytes.nil?
     bytes
   end
 
   def assert_frees_scratch (expr, n: 1 << 14, calls: 200)
     grown = bytes_per_call(expr, n, calls)
     assert_operator grown, :<, 4096,
-                    "#{expr}: the malloc zone grew #{grown.round} bytes per call"
+                    "#{expr}: the C heap grew #{grown.round} bytes per call"
   end
 
   def failing_input

@@ -62,11 +62,14 @@ void ca_sort_merge_f64 (double    *a, double    *aux, ca_size_t n);
 ca_size_t ca_partition_nan_f32 (float32_t *a, ca_size_t n);
 ca_size_t ca_partition_nan_f64 (double    *a, ca_size_t n);
 
-/* P.4: pair variant of NaN pre-partition for float argsort kernels. */
+/* Pair variant of NaN pre-partition for float argsort kernels.  scratch
+   holds n pairs; its contents on return are unspecified. */
 struct ca_pair_f32;
 struct ca_pair_f64;
-ca_size_t ca_partition_nan_pair_f32 (struct ca_pair_f32 *a, ca_size_t n);
-ca_size_t ca_partition_nan_pair_f64 (struct ca_pair_f64 *a, ca_size_t n);
+ca_size_t ca_partition_nan_pair_f32 (struct ca_pair_f32 *a, ca_size_t n,
+                                     struct ca_pair_f32 *scratch);
+ca_size_t ca_partition_nan_pair_f64 (struct ca_pair_f64 *a, ca_size_t n,
+                                     struct ca_pair_f64 *scratch);
 
 /* P.9: value-level quickselect for partition_copy.
    Reorders a[0..n) so that a[kth] is exact + left/right regions
