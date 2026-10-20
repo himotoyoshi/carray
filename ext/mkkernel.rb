@@ -5777,7 +5777,8 @@ module MkKernel
     uses_input = raw.include?("#1")
     # SL.2.x phase 2 (monop emit substrate hardening, MEMO_MONOP_STRIDED_AUDIT.md):
     # 3-way split (mask / contig / strided) symmetric with binop SL.2.x phase 1.
-    # contig branch (i1==1 && i2==1) uses index form + `__restrict__` + `omp simd`.
+    # contig branch (i1==1 && i2==1) uses index form + `omp simd` (`__restrict__`
+    # only when input and output are apart).
     # strided branch uses `p += i` increment form (per-iter multiply removed).
     # mask branch unchanged (per-cell predicate, not SIMD-amenable).
     if uses_input
@@ -5785,11 +5786,11 @@ module MkKernel
 
         static void
         ca_monop_#{k[:name]}_#{suffix} (ca_size_t n, boolean8_t *m,
-                                         char * __restrict__ ptr1, ca_size_t i1,
-                                         char * __restrict__ ptr2, ca_size_t i2)
+                                         char *ptr1, ca_size_t i1,
+                                         char *ptr2, ca_size_t i2)
         {
-          #{c_type_in}  * __restrict__ q1 = (#{c_type_in}  *) ptr1;
-          #{c_type_out} * __restrict__ q2 = (#{c_type_out} *) ptr2;
+          #{c_type_in}  *q1 = (#{c_type_in}  *) ptr1;
+          #{c_type_out} *q2 = (#{c_type_out} *) ptr2;
           ca_size_t k;
           if ( m ) {
             #{c_type_in}  *p1 = q1;
@@ -5805,17 +5806,38 @@ module MkKernel
             }
           } else if ( i1 == 1 && i2 == 1 ) {
             /* contig branch: SIMD-friendly form.  Index-form `q[k]` exposes
-               the unit-stride access to the vectorizer; `__restrict__` on
-               q1/q2 promises no aliasing so the omp simd pragma can license
-               lane-parallel loads/stores.  Element-wise monop has no
-               reassoc, so ε-close numeric contract is unaffected. */
+               the unit-stride access to the vectorizer.  Element-wise monop
+               has no reassoc, so ε-close numeric contract is unaffected.
+               The input and output are either apart, the same cells (a
+               bang, or the lazy scratch applied in place), or overlapping
+               otherwise; `__restrict__` is promised only when apart, since
+               the body may store part of a cell before it has read it. */
             #{c_type_in}  *p1;
             #{c_type_out} *p2;
             (void)p1; (void)p2;
-            #pragma omp simd
-            for (k=0; k<n; k++) {
-              p1 = q1 + k; p2 = q2 + k;
-              { #{expr_body} }
+            uintptr_t a1 = (uintptr_t) q1, a2 = (uintptr_t) q2;
+            if ( a2 + n * sizeof(*q2) <= a1 || a1 + n * sizeof(*q1) <= a2 ) {
+              #{c_type_in}  * __restrict__ r1 = q1;
+              #{c_type_out} * __restrict__ r2 = q2;
+              #pragma omp simd
+              for (k=0; k<n; k++) {
+                p1 = r1 + k; p2 = r2 + k;
+                { #{expr_body} }
+              }
+            }
+            else if ( a1 == a2 && sizeof(*q1) == sizeof(*q2) ) {
+              /* in place: an iteration reads and writes only its own cell */
+              #pragma omp simd
+              for (k=0; k<n; k++) {
+                p1 = q1 + k; p2 = q2 + k;
+                { #{expr_body} }
+              }
+            }
+            else {
+              for (k=0; k<n; k++) {
+                p1 = q1 + k; p2 = q2 + k;
+                { #{expr_body} }
+              }
             }
           } else {
             /* strided branch: numo-shape `p += s` increment form. */
@@ -6001,7 +6023,8 @@ module MkKernel
     expr_body = raw.gsub(/#1/, "*p1").gsub(/#2/, "*p2").gsub(/#3/, "*p3").gsub(/<type>/, suffix)
     # Option B+C pilot (binop emit substrate hardening, MEMO_BINOP_STRIDED_AUDIT.md):
     # The no-mask body is split into a contig branch (i1==i2==i3==1) using the
-    # `q[k]` index form with `__restrict__`-qualified pointers + `#pragma omp simd`
+    # `q[k]` index form with `#pragma omp simd` (`__restrict__`-qualified only
+    # when the output is apart from both inputs)
     # (SL.2.x-style insurance, element-wise has no reassoc -> ε-close unaffected),
     # and a strided branch using `p += i` increment form (numo-shape inner loop).
     # `i1`/`i2`/`i3` remain element units (NOT byte) -- byte-flip is Option A scope.
@@ -6011,13 +6034,13 @@ module MkKernel
 
       static void
       ca_binop_#{k[:name]}_#{suffix} (ca_size_t n, boolean8_t *m,
-                                       char * __restrict__ ptr1, ca_size_t i1,
-                                       char * __restrict__ ptr2, ca_size_t i2,
-                                       char * __restrict__ ptr3, ca_size_t i3)
+                                       char *ptr1, ca_size_t i1,
+                                       char *ptr2, ca_size_t i2,
+                                       char *ptr3, ca_size_t i3)
       {
-        #{c_type} * __restrict__ q1 = (#{c_type} *) ptr1;
-        #{c_type} * __restrict__ q2 = (#{c_type} *) ptr2;
-        #{c_type} * __restrict__ q3 = (#{c_type} *) ptr3;
+        #{c_type} *q1 = (#{c_type} *) ptr1;
+        #{c_type} *q2 = (#{c_type} *) ptr2;
+        #{c_type} *q3 = (#{c_type} *) ptr3;
         ca_size_t k;
         if ( m ) {
           #{c_type} *p1 = q1, *p2 = q2, *p3 = q3;
@@ -6033,16 +6056,41 @@ module MkKernel
           }
         } else if ( i1 == 1 && i2 == 1 && i3 == 1 ) {
           /* contig branch: SIMD-friendly form.  Index-form `q[k]` exposes
-             the unit-stride access to the vectorizer; `__restrict__` on
-             q1/q2/q3 promises no aliasing so the omp simd pragma can
-             license lane-parallel loads/stores.  Element-wise binop has
-             no reassoc, so ε-close numeric contract is unaffected. */
+             the unit-stride access to the vectorizer.  Element-wise binop
+             has no reassoc, so ε-close numeric contract is unaffected.
+             The output is apart from each input, the same cells as it (a
+             bang), or overlaps it otherwise; `__restrict__` is promised
+             only when apart from both, since the body may store part of a
+             cell before it has read it. */
           #{c_type} *p1, *p2, *p3;
+          uintptr_t a1 = (uintptr_t) q1, a2 = (uintptr_t) q2, a3 = (uintptr_t) q3;
+          uintptr_t nb = (uintptr_t) n * sizeof(*q3);
+          int apart1 = ( a3 + nb <= a1 || a1 + nb <= a3 );
+          int apart2 = ( a3 + nb <= a2 || a2 + nb <= a3 );
           (void)p1; (void)p2; (void)p3;
-          #pragma omp simd
-          for (k=0; k<n; k++) {
-            p1 = q1 + k; p2 = q2 + k; p3 = q3 + k;
-            { #{expr_body} }
+          if ( apart1 && apart2 ) {
+            #{c_type} * __restrict__ r1 = q1;
+            #{c_type} * __restrict__ r2 = q2;
+            #{c_type} * __restrict__ r3 = q3;
+            #pragma omp simd
+            for (k=0; k<n; k++) {
+              p1 = r1 + k; p2 = r2 + k; p3 = r3 + k;
+              { #{expr_body} }
+            }
+          }
+          else if ( ( apart1 || a1 == a3 ) && ( apart2 || a2 == a3 ) ) {
+            /* in place: an iteration reads and writes only its own cell */
+            #pragma omp simd
+            for (k=0; k<n; k++) {
+              p1 = q1 + k; p2 = q2 + k; p3 = q3 + k;
+              { #{expr_body} }
+            }
+          }
+          else {
+            for (k=0; k<n; k++) {
+              p1 = q1 + k; p2 = q2 + k; p3 = q3 + k;
+              { #{expr_body} }
+            }
           }
         } else {
           /* strided branch: numo-shape `p += s` increment form. */
