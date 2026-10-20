@@ -1274,8 +1274,9 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
         int k;
         for (k = 0; k < cs->ndim; k++) rb_ary_push(sshape, SIZE2NUM(cs->dim[k]));
         rb_raise(rb_eArgError,
-                 "index array of shape %"PRIsVALUE" on axis %d (an index array "
-                 "picks along one axis; use .flatten)", sshape, (int) i);
+                 "%s: index array of shape %"PRIsVALUE" on axis %d (an index "
+                 "array picks along one axis; use .flatten)",
+                 ca_calling_method_name(), sshape, (int) i);
       }
     }
     if ( rb_ca_is_boolean_type(rval) ) {

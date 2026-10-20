@@ -235,17 +235,13 @@ class CAFrame
   def self.check_same_column_type(pieces, name, verb:)
     first = pieces.first
     pieces.each_with_index do |c, i|
-      next if column_type_name(c) == column_type_name(first)
+      next if CArray::Inspector.type_label(c) == CArray::Inspector.type_label(first)
       raise ArgumentError,
-            "#{verb}: column #{name.inspect} is #{column_type_name(c)} in piece #{i}, " \
-            "#{column_type_name(first)} in piece 0 (cast it first, or use concatenate)"
+            "#{verb}: column #{name.inspect} is #{CArray::Inspector.type_label(c)} in piece #{i}, " \
+            "#{CArray::Inspector.type_label(first)} in piece 0 (cast it first, or use concatenate)"
     end
   end
-
-  def self.column_type_name(c)
-    c.face? ? c.class.name : c.data_type_name
-  end
-  private_class_method :check_same_column_type, :column_type_name
+  private_class_method :check_same_column_type
 
   # Two indexes hold the same rows when their values agree cell by cell; a
   # NaN label matches a NaN label, and a masked cell a masked cell.
