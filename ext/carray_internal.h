@@ -739,6 +739,7 @@ int         ca_op_raises_on_cell (int kind, int op_id, int8_t dt);
    gate first, and a string reference compares in its own type, padding
    included. */
 int8_t      ca_query_match_type (int8_t ref, VALUE query);
+VALUE       ca_fixlen_widen_for_query (VALUE self, VALUE query);
 
 static inline int
 ca_query_match_applies (CArray *ref, VALUE query)

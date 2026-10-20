@@ -382,6 +382,7 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
         self = rb_ca_wrap_readonly(self, INT2NUM(qt));
       }
     }
+    self = ca_fixlen_widen_for_query(self, rval);
     /* Pass full argv; count_equal_ki pops argv[0] as value_arg. */
     return rb_ca_count_equal_ki(argc, argv, self);
   }

@@ -2174,7 +2174,15 @@ ca_fixlen_scalar_operand (volatile VALUE *scalar, VALUE reference)
   if ( cr->data_type != CA_FIXLEN ) {
     return 0;
   }
-  *scalar = rb_cscalar_new_with_value(CA_FIXLEN, cr->bytes, *scalar);
+  /* A String longer than the cell keeps its length: cut to the cell, it
+     would equal a cell it does not (a two-byte "ab" equal to "abX").  The
+     wider scalar is then compared as two fixlen widths are. */
+  {
+    ca_size_t len = (ca_size_t) RSTRING_LEN(*scalar);
+    *scalar = rb_cscalar_new_with_value(CA_FIXLEN,
+                                        len > cr->bytes ? len : cr->bytes,
+                                        *scalar);
+  }
   return 1;
 }
 
@@ -2722,6 +2730,24 @@ ca_query_match_type (int8_t ref, VALUE query)
     return ref_int ? ca_promote_scalar_type(ref, query, CA_INT64) : ref;
   }
   return ref;
+}
+
+/* A fixlen array searched or counted for a String longer than its cells
+   is read as cells of the String's width (NUL-padded), so the query is not
+   cut to the cell: "abX" matches no two-byte cell, as a wider scalar does
+   not in `eq`.  Anything else is returned as given. */
+VALUE
+ca_fixlen_widen_for_query (VALUE self, VALUE query)
+{
+  CArray *ca;
+  if ( ! RB_TYPE_P(query, T_STRING) || ! rb_obj_is_carray(self) ) {
+    return self;
+  }
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  if ( ca->data_type != CA_FIXLEN || RSTRING_LEN(query) <= ca->bytes ) {
+    return self;
+  }
+  return rb_ca_to_type(self, INT2NUM(CA_FIXLEN), SIZE2NUM(RSTRING_LEN(query)));
 }
 
 /* ca.query_match_type(query) -- ca_query_match_type with self as the

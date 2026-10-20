@@ -5689,6 +5689,8 @@ module MkKernel
     io.puts "      GetCArray(self, src);"
     io.puts "    }"
     io.puts "  }"
+    io.puts "  self = ca_fixlen_widen_for_query(self, rval);"
+    io.puts "  GetCArray(self, src);"
 
     case k[:mask_self]
     when :raise
