@@ -33,7 +33,7 @@ class TestArrayOperandCells < Test::Unit::TestCase
     x = CA_INT32([1, 2, 3])
     x.add!([1, 1, 1])
     assert_equal [2, 3, 4], x.to_a
-    assert_raise(TypeError) { x.add!([1.5, 1, 1]) }
+    assert_raise(CArray::DataTypeError) { x.add!([1.5, 1, 1]) }
   end
 
   def test_an_object_array_keeps_an_array_as_one_value

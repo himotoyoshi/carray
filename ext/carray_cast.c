@@ -2526,7 +2526,9 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
     return;
   }
 
-  rb_raise(rb_eTypeError,
+  /* A data type the operation does not take, as `sqrt!` on an integer
+     array is refused (CArray::DataTypeError is a TypeError). */
+  rb_raise(rb_eCADataTypeError,
            "can't coerce carray with data_types of '%s' and '%s'",
            ca_coerce_operand_name(*self, ca),
            ca_coerce_operand_name(*other, cb));
@@ -3040,7 +3042,9 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
     return;
   }
 
-  rb_raise(rb_eTypeError,
+  /* A data type the operation does not take, as `sqrt!` on an integer
+     array is refused (CArray::DataTypeError is a TypeError). */
+  rb_raise(rb_eCADataTypeError,
            "can't coerce carray with data_types of '%s' and '%s'",
            ca_coerce_operand_name(*self, ca),
            ca_coerce_operand_name(*other, cb));

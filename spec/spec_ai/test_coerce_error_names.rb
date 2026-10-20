@@ -18,23 +18,23 @@ class TestCoerceErrorNames < Test::Unit::TestCase
 
   FACES.each do |name, build|
     define_method("test_#{name}_on_the_right") do
-      error = assert_raise(TypeError) { CArray.int64(2) + build.call }
+      error = assert_raise(CArray::DataTypeError) { CArray.int64(2) + build.call }
       assert_equal "can't coerce carray with data_types of 'int64' and '#{name}'", error.message
     end
   end
 
   def test_face_on_the_left
-    error = assert_raise(TypeError) { FACES["CACategorical"].call + CArray.int64(2) }
+    error = assert_raise(CArray::DataTypeError) { FACES["CACategorical"].call + CArray.int64(2) }
     assert_equal "can't coerce carray with data_types of 'CACategorical' and 'int64'", error.message
   end
 
   def test_in_place_operator
-    error = assert_raise(TypeError) { CArray.int64(2).add!(FACES["CATimedelta"].call) }
+    error = assert_raise(CArray::DataTypeError) { CArray.int64(2).add!(FACES["CATimedelta"].call) }
     assert_equal "can't coerce carray with data_types of 'int64' and 'CATimedelta'", error.message
   end
 
   def test_plain_array_keeps_its_data_type
-    error = assert_raise(TypeError) { CArray.int64(2) + CArray.fixlen(2, bytes: 8) }
+    error = assert_raise(CArray::DataTypeError) { CArray.int64(2) + CArray.fixlen(2, bytes: 8) }
     assert_equal "can't coerce carray with data_types of 'int64' and 'fixlen'", error.message
   end
 
@@ -44,7 +44,7 @@ class TestCoerceErrorNames < Test::Unit::TestCase
     i  = CArray.int32(2)
     fl = CArray.fixlen(2, bytes: 2)
     [-> { i.lazy + fl }, -> { i.lazy < fl }, -> { fl + i.lazy }, -> { i.lazy.clip(fl, fl) }].each do |call|
-      error = assert_raise(TypeError) { call.() }
+      error = assert_raise(CArray::DataTypeError) { call.() }
       assert_match(/\Acan't coerce carray with data_types of '(int32|fixlen)' and '(int32|fixlen)'\z/, error.message)
     end
   end
