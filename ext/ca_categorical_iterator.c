@@ -1109,8 +1109,13 @@ rb_ca_fiber_scatter_moments (VALUE self, VALUE rcodes, VALUE raxis, VALUE rk,
              h->data_type);
   }
 
+  ca_detach(h);
+  ca_detach(codes);
+
   /* Mask empty (count == 0) cells in mins/maxs: value slot is 0 but meaningless.
-     Matches __reduceat_moments__ contract for empty segments. */
+     Matches __reduceat_moments__ contract for empty segments.  After the
+     detach: creating a mask allocates, and a raise must not leave h and
+     codes attached. */
   ca_create_mask(mins);
   ca_create_mask(maxs);
   minm = (boolean8_t *) mins->mask->ptr;
@@ -1118,9 +1123,6 @@ rb_ca_fiber_scatter_moments (VALUE self, VALUE rcodes, VALUE raxis, VALUE rk,
   for ( cell = 0; cell < total; cell++ ) {
     if ( countp[cell] == 0 ) { minm[cell] = 1; maxm[cell] = 1; }
   }
-
-  ca_detach(h);
-  ca_detach(codes);
   return Qnil;
 }
 

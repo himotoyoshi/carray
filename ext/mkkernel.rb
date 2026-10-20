@@ -1778,13 +1778,15 @@ module MkKernel
 
   # Emits the native function of one source data type.  The object lane
   # calls Ruby for every cell, so any cell can raise in the middle of a walk;
-  # its function is rebuilt around ca_iter_ensure (see guard_object_native).
-  # Every other lane is emitted as the emitter writes it.
-  def self.emit_native_for(io, k, src)
-    if src == :object
+  # its function is rebuilt around ca_iter_ensure (see guard_native).  So is
+  # every lane of a family that passes guard: true, whose walks allocate
+  # (an output mask made on the first empty slab, a scratch buffer), since a
+  # failed allocation raises too.  Other lanes are emitted as written.
+  def self.emit_native_for(io, k, src, guard: false)
+    if src == :object || guard
       buf = StringIO.new
       yield buf
-      io.print guard_object_native(buf.string, "#{k[:name]}_ki_native_object")
+      io.print guard_native(buf.string, "#{k[:name]}_ki_native_#{src}")
     else
       yield io
     end
@@ -1825,7 +1827,7 @@ module MkKernel
   # frame is gone once the body raises.  The body text is kept as written:
   # the parameters are unpacked from the frame under their own names, and
   # each state name is defined to its slot for the length of the body.
-  def self.guard_object_native(text, fn)
+  def self.guard_native(text, fn)
     header = /^static VALUE\n#{fn} \(([^)]*)\)\n\{\n/
     m = header.match(text) or raise "mkkernel: #{fn} not found"
     close = matching_brace(text, m.end(0) - 2)
@@ -1848,9 +1850,9 @@ module MkKernel
 
     out = StringIO.new
     out.print m.pre_match
-    out.puts "/* The object lane calls Ruby for every cell, so a walk can raise part"
-    out.puts "   way.  Its states live in the caller's frame, and ca_iter_ensure"
-    out.puts "   finishes them however the body leaves. */"
+    out.puts "/* The walks can raise part way (a Ruby call per cell in the object"
+    out.puts "   lane, an allocation in any lane).  Their states live in the caller's"
+    out.puts "   frame, and ca_iter_ensure finishes them however the body leaves. */"
     out.puts "typedef struct {"
     out.puts "  ca_iter_state states[#{states.size}];"
     params.each { |type, name| out.puts "  #{type} #{name};".sub(/\* /, "*") }
@@ -1885,7 +1887,7 @@ module MkKernel
     io.puts
     io.puts "/* ===== #{k[:name]}_ki ============================================ */"
     k[:source].each do |src|
-      emit_native_for(io, k, src) { |o| emit_reduce_native(o, k, src) }
+      emit_native_for(io, k, src, guard: true) { |o| emit_reduce_native(o, k, src) }
     end
     emit_reduce_dispatch(io, k)
   end
@@ -3574,10 +3576,14 @@ module MkKernel
       wio.puts "      cw = cv;"
       wio.puts "    }"
       wio.puts "    else if ( naxes == 1 && cv->ndim == 1 && cv->dim[0] == src->dim[slab_axes[0]] ) {"
-      wio.puts "      /* W-A2: 1-D axis-broadcast -> materialize to full shape */"
-      wio.puts "      ca_attach(cv);   /* window: nothing raises inside */"
+      wio.puts "      /* W-A2: 1-D axis-broadcast -> materialize to full shape.  cw and"
+      wio.puts "         its mask are made before cv is attached: making them allocates. */"
       wio.puts "      vcw = rb_carray_new(#{waca}, src->ndim, src->dim, 0, NULL);"
       wio.puts "      GetCArray(vcw, cw);"
+      wio.puts "      if ( ca_has_mask(cv) ) {"
+      wio.puts "        ca_create_mask(cw);"
+      wio.puts "      }"
+      wio.puts "      ca_attach(cv);   /* window: nothing raises inside */"
       wio.puts "      /* broadcast cv (1-D, length src->dim[slab_axes[0]]) along reduce axis */"
       wio.puts "      {"
       wio.puts "        int8_t baxis = slab_axes[0];"
@@ -3596,8 +3602,7 @@ module MkKernel
       wio.puts "      }"
       wio.puts "      /* Propagate cv mask via W-A3 overlay path below (= mask materialize) */"
       wio.puts "      if ( ca_has_mask(cv) ) {"
-      wio.puts "        /* Allocate cw mask + broadcast cv mask along axis */"
-      wio.puts "        ca_create_mask(cw);"
+      wio.puts "        /* broadcast cv mask along axis */"
       wio.puts "        boolean8_t *cw_m = (boolean8_t *)cw->mask->ptr;"
       wio.puts "        boolean8_t *cv_m = (boolean8_t *)cv->mask->ptr;"
       wio.puts "        int8_t baxis = slab_axes[0];"
@@ -3830,6 +3835,8 @@ module MkKernel
     # fiber's mask base.
     mask_setup =
       if gated
+        # Before the walks open: creating the mask allocates, and a raise
+        # inside them would jump past their finish.
         "\n" \
         "    boolean8_t *op_mask = NULL;\n" \
         "    if ( ca_has_mask(ca) ) {\n" \
@@ -3870,6 +3877,7 @@ module MkKernel
            INIT inside the macro. */
         int8_t slab_axes[CA_RANK_MAX];
         slab_axes[0] = (int8_t) axis;
+      #{mask_setup}
         ca_iter_state st_in, st_out;
         int rc;
         rc = ca_iter_state_init_l2(&st_in,  ca, CA_SLAB_AXES,
@@ -3885,7 +3893,6 @@ module MkKernel
           rb_raise(rb_eRuntimeError,
                    "%s: output init failed rc=%d", ca_calling_method_name(), rc);
         }
-      #{mask_setup}
         char       *pi, *po;
         boolean8_t *mi, *mo;
         while ( ca_iter_state_next_slab_axes(&st_in,  &pi, &mi) &&
@@ -4266,6 +4273,41 @@ module MkKernel
       io.puts "     when input has any mask. */"
       io.puts "  if ( ca_has_mask(ca) ) ca_create_mask(co);"
     end
+    # The buffers are taken before the walks open: an allocation that
+    # raises inside them would jump past their finish.  The slab is the
+    # sort axis alone, so a fiber holds ca->dim[axis] cells.
+    io.puts "  ca_size_t fiber_n = ca->dim[axis];"
+    if src == :object
+      # The object comparator calls <=>, so the sort can raise part way.
+      # ALLOCV frees these buffers whether the function returns or unwinds.
+      # A full sort also needs aux: ca_sort_merge_pair_object is a mergesort.
+      io.puts "  volatile VALUE hbuf = 0, haux = 0;"
+      io.puts "  #{name}_pair_#{src} *buf = ALLOCV_N(#{name}_pair_#{src}, hbuf, fiber_n);"
+      if partition
+        io.puts "  (void) haux;"
+      else
+        io.puts "  #{name}_pair_#{src} *aux = ALLOCV_N(#{name}_pair_#{src}, haux, fiber_n);"
+      end
+    else
+      io.puts "  volatile VALUE hbuf = 0, haux = 0;"
+      io.puts "  #{name}_pair_#{src} *buf = ALLOCV_N(#{name}_pair_#{src}, hbuf, fiber_n);"
+    end
+    if has_kind && %i[f32 f64].include?(src)
+      # aux is the mergesort's ping-pong buffer and, before that, the
+      # scratch of the NaN pre-partition, so a float kernel always takes it.
+      io.puts "  #{name}_pair_#{src} *aux = ALLOCV_N(#{name}_pair_#{src}, haux, fiber_n);"
+    elsif has_kind && src != :object && src != :fixlen
+      # The aux pair buffer for ca_sort_merge_pair_<src> (a ping-pong
+      # bottom-up mergesort), taken once outside the fiber loop.  The fixlen
+      # lane sorts with qsort and needs none.
+      io.puts "  #{name}_pair_#{src} *aux = NULL;"
+      io.puts "  if ( do_stable ) {"
+      io.puts "    aux = ALLOCV_N(#{name}_pair_#{src}, haux, fiber_n);"
+      io.puts "  }"
+    elsif src != :object
+      io.puts "  (void) haux;"
+    end
+
     io.puts "  ca_iter_state st_in, st_out;"
     io.puts "  int rc;"
     io.puts "  rc = ca_iter_state_init_l2(&st_in,  ca, CA_SLAB_AXES,"
@@ -4279,37 +4321,6 @@ module MkKernel
     io.puts "    ca_iter_state_finish(&st_in);"
     io.puts %Q[    rb_raise(rb_eRuntimeError, "%s: output init failed rc=%d", ca_calling_method_name(), rc);]
     io.puts "  }"
-    io.puts
-    io.puts "  ca_size_t fiber_n = st_in.slab_elements;"
-    if src == :object
-      # The object comparator calls <=>, so the sort can raise part way.
-      # ALLOCV frees these buffers whether the function returns or unwinds.
-      # A full sort also needs aux: ca_sort_merge_pair_object is a mergesort.
-      io.puts "  volatile VALUE hbuf = 0, haux = 0;"
-      io.puts "  #{name}_pair_#{src} *buf = ALLOCV_N(#{name}_pair_#{src}, hbuf, fiber_n);"
-      if partition
-        io.puts "  (void) haux;"
-      else
-        io.puts "  #{name}_pair_#{src} *aux = ALLOCV_N(#{name}_pair_#{src}, haux, fiber_n);"
-      end
-    else
-      # ALLOCV as well: the walk that fills buf is the only thing that
-      # could raise, and it does not today, but the buffers need not rely
-      # on that.
-      io.puts "  volatile VALUE hbuf = 0, haux = 0;"
-      io.puts "  #{name}_pair_#{src} *buf = ALLOCV_N(#{name}_pair_#{src}, hbuf, fiber_n);"
-    end
-    if has_kind && src != :object && src != :fixlen
-      # The aux pair buffer for ca_sort_merge_pair_<src> (a ping-pong
-      # bottom-up mergesort), taken once outside the fiber loop.  The fixlen
-      # lane sorts with qsort and needs none.
-      io.puts "  #{name}_pair_#{src} *aux = NULL;"
-      io.puts "  if ( do_stable ) {"
-      io.puts "    aux = ALLOCV_N(#{name}_pair_#{src}, haux, fiber_n);"
-      io.puts "  }"
-    elsif src != :object
-      io.puts "  (void) haux;"
-    end
 
     if view_flat
       io.puts
@@ -4466,7 +4477,7 @@ module MkKernel
         io.puts "    /* P.3/P.4: NaN pre-partition for float argsort -- NaN pairs are"
         io.puts "       pushed to the tail (= NaN-at-end policy, matches sort_copy"
         io.puts "       AC8).  Only the finite slice is sorted. */"
-        io.puts "    ca_size_t finite_n = ca_partition_nan_pair_#{src}((ca_pair_#{src} *) #{buf_expr}, (ca_size_t) #{sort_n_expr});"
+        io.puts "    ca_size_t finite_n = ca_partition_nan_pair_#{src}((ca_pair_#{src} *) #{buf_expr}, (ca_size_t) #{sort_n_expr}, (ca_pair_#{src} *) aux);"
         io.puts "    if ( do_stable ) {"
         io.puts "      ca_sort_merge_pair_#{src}((ca_pair_#{src} *) #{buf_expr}, (ca_pair_#{src} *) aux, finite_n);"
         io.puts "    } else {"
@@ -5008,7 +5019,7 @@ module MkKernel
     io.puts
     io.puts "/* ===== #{k[:name]}_ki ============================================ */"
     k[:source].each do |src|
-      emit_native_for(io, k, src) { |o| emit_search_native(o, k, src) }
+      emit_native_for(io, k, src, guard: true) { |o| emit_search_native(o, k, src) }
     end
     emit_search_dispatch(io, k)
   end
@@ -5490,6 +5501,12 @@ module MkKernel
         #{op_mask_decl}
 
         #{entity_bc}
+        /* The output mask is made before the window opens, since making it
+           allocates; it comes off again below when no cell needed it. */
+        if ( #{undef_nm ? "1" : "ca_has_mask(cv)"} ) {
+          ca_create_mask(co);
+          op_mask = (boolean8_t *) co->mask->ptr;
+        }
         /* Attach self + val; rev4 uses raw row-major byte addressing. */
         ca_attach_n(2, ca, cv);   /* window: numeric bodies do not raise; the object lane reads entities */
 
@@ -5596,6 +5613,11 @@ module MkKernel
 
         ca_detach(ca);
         ca_detach(cv);
+        if ( op_mask && ! memchr(op_mask, 1, (size_t) co->elements) ) {
+          CArray *unused = co->mask;
+          co->mask = NULL;
+          ca_free(unused);
+        }
         return vout;
       }
     C
