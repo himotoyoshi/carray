@@ -309,6 +309,9 @@ rb_ca_record_s_wrap (int argc, VALUE *argv, VALUE klass)
     rb_scan_args(argc, argv, "2", &entity_val, &data_class);
   }
   rb_check_carray_object(entity_val);
+  /* A record array (or another Face) is wrapped from its storage, so the
+     new record is not a Face over a Face. */
+  entity_val = rb_ca_strip_face_value(entity_val);
   return ca_record_build(klass, data_class, entity_val);
 }
 
