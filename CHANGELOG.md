@@ -34,17 +34,210 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
      neighbour ("as well", "the producer above") or leave unnamed the
      method, class or keyword it is about. -->
 
-## 3.0.5 (unreleased)
+## 3.0.5
+
+- New: `GroupedFrame#aggregate` takes a block instead of a spec. The block
+  is given the grouping once and returns a Hash of output name => a
+  CArray with one value per group, built from `g["col"]` iterators and
+  CArray arithmetic (`g["temp"].max - g["temp"].min`). `grp[array]`
+  groups any CArray with one entry per row, such as a value computed
+  from columns or a column with cells masked.
+
+- New: a `CAFrame` grouped reduction takes a Hash of column name => value
+  as `fill_value:`, filling only the named columns. A single
+  `fill_value:` still goes to every column and has to suit each.
+
+- New: `CArray.meld` brings pieces of different data types to a common
+  one, as `CArray.stack` does, and takes `data_type:`. `CAFrame.meld` and
+  a frame splice still refuse a column whose pieces differ in data type;
+  cast the column first, or use `concatenate`.
+
+- New: `scatter_replace!` takes an object or fixed-length array, as
+  `put_nd` and `put_along_axis` do. The accumulating members
+  (`scatter_add!` and the others) still take numeric arrays only.
+
+- New: `CAConstString#count` and `CACategorical#count` with no argument
+  count the cells that are not masked, as `CArray#count` does.
+
+- New: `CAFixlenString` answers `minmax`, `cummax` and `cummin`, as
+  `CAString` does.
+
+- New (C extensions): `carray.h` defines `ca_u_<type>` cell types and
+  `CA_U(type)`, of the same size and value as the plain types but with no
+  alignment requirement, for reading cells that need not be aligned (a
+  refer with a byte offset, a struct member, a wrapped buffer). The slab
+  macros in `ca_kernel_iterator.h` use them for their pointers.
+
+- Change: `CACategorical#sort_addr` is renamed `group_addr`, the order of
+  the cells by category. `sort_addr` on a categorical now raises, as
+  `sort_index` does, since a categorical has no order of values.
+
+- Change: a Face's `parent` (of a `CATime`, `CARecord`, ...) is a
+  read-only view of its storage. Write the storage of a time through
+  `CATime#ticks`.
+
+- Change: an operator that cannot bring two data types together raises
+  `CArray::DataTypeError` instead of `TypeError`. `DataTypeError` is a
+  `TypeError`, so `rescue TypeError` still catches it.
 
 - Change: a float cell with no integer of the target type -- an infinity,
-  or a value out of the type's range -- is now treated as NaN already
-  was. `to_type` (`int32`, `as_int64`, ...) masks it to `UNDEF`; storing
-  it into an integer array raises `RangeError` (`FloatDomainError` for an
-  infinity). Before, it became whatever the machine's C conversion gave,
-  which differed between x86 and ARM. `clip_int64` and the other
-  `clip_<type>` methods saturate a float source to the type's limits on
-  every machine; integer `linspace` raises `RangeError` for a span the
-  type cannot hold.
+  or a value out of the type's range -- is now treated the way NaN
+  already was. `to_type` (`int32`, `as_int64`, ...) masks it to `UNDEF`;
+  storing it into an integer array raises `RangeError`
+  (`FloatDomainError` for an infinity). Before, it became whatever the
+  machine's C conversion gave, which differed between x86 and ARM.
+  `clip_int64` and the other `clip_<type>` methods saturate a float
+  source to the type's limits on every machine; integer `linspace` raises
+  `RangeError` for a span the type cannot hold.
+
+- Change: a Ruby Array operand of a numeric or boolean array is read as
+  its cells: `a.eq([1, 5, 3])` compares cell by cell (it compared every
+  cell with the whole Array), and `a + [1, 2, 3]` adds (it raised).
+  Nested Arrays give the axes. An object array still takes an Array as
+  one value.
+
+- Change: `window`'s `bounds:` is a policy named by a Symbol or String,
+  matched whole; an Integer and an abbreviation raise. A `fill_value:`
+  given with a policy that does not use it (`:nearest`, `:strict`, ...)
+  raises instead of being dropped.
+
+- Change: a length, count, offset or shift given to a view
+  (`sliding_windows`, `block_view`, `tile`, `roll`, `shift`, `field`,
+  `diagonal`) must be an Integer; a Float raises `TypeError` instead of
+  being truncated. `transpose` reads its axes as the other axis arguments
+  are read: negative from the end, an Integer only.
+
+- Change: `drop_axis` on an array whose every axis has size 1 keeps one
+  axis of size 1, and `reshape` with no axes raises.
+
+- Change: in an index of one key per axis, an index array of more than
+  one axis on one axis raises `ArgumentError`; it was read flat. Pass
+  `idx.flatten` for the old reading.
+
+- Change: `elem_fetch`, `elem_store` and the other `elem_*` methods read
+  an index as `[]` reads a key: a Float with no fraction is an index, a
+  Float with a fraction raises `IndexError`.
+
+- Change: two string arrays of different kinds (`CAString`,
+  `CAFixlenString`, `CAConstString`) or of different widths compare by
+  their strings. A String query longer than a fixed-width cell matches
+  no cell in `eq`, `count`, `search`, `bsearch` and `is_in`; it was cut
+  to the cell's width.
+
+- Change: `str_index` and `rindex` give `UNDEF` for a cell that does not
+  hold the substring; they raised for the whole array.
+
+- Change: `bsearch` and `bsearch_addr` answer the first of several equal
+  cells.
+
+- Change: `search` and `search_addr` raise `ArgumentError` for a negative
+  or NaN `eps`, which acted as an exact match.
+
+- Change: `inherit_mask` and `inherit_mask_replace` raise `ArgumentError`
+  for a source whose number of cells differs from the receiver's (a
+  scalar source still applies to every cell).
+
+- Change: a reduction's `fill_value:` that its result cannot hold raises
+  even when no cell needs it, and `fill` on an empty array checks its
+  value as an assignment does.
+
+- Change: rounding a `:M` or `:Y` `CATime` to a calendar bucket
+  (`round(unit: :Y)`, `"3 months"`) measures the distance by the instant,
+  so it agrees with the same dates on `:D`.
+
+- Change: a `CATime` reduction (`mean`, `median`, ...) sends a tie to the
+  later tick on both sides of 1970; before 1970 it went to the earlier
+  one.
+
+- Change: a duration String added to or subtracted from a `CATime` is
+  one step of its own resolution, so `"15 minutes"` on a `"10 minutes"`
+  grid raises, as the same duration as a `CATimedelta` does. It was read
+  as fifteen one-minute steps and cut to the grid.
+
+- Change: of `-0.0` and `0.0`, `pmax` gives `0.0` and `pmin` gives
+  `-0.0`, in either order and on every platform, as `maximum` and
+  `minimum` do. Which zero `min` and `max` answer is not specified.
+
+- Change: a one-sided `clip` passes a NaN cell through, as a two-sided
+  `clip` does.
+
+- Change: a categorical's `fill_value:` (of `shift`, `window`, `project`)
+  is a label; a `CAConstString` takes only `UNDEF` as a fill value.
+
+- Change: a lazy operator with a Face operand (a categorical, a time, a
+  string array) answers as the eager operator does; it read the Face's
+  storage. `CAConstString#eq` with another array compares cell by cell.
+
+- Change: a boolean member of a record (or `field(offset, :boolean)` of a
+  fixed-length array) raises `RangeError` when read as a byte that is not
+  0 or 1, instead of answering differently in each method.
+
+- Change: unmasking a cell of a `CAString` that holds no String gives an
+  empty String.
+
+- Change: `swap_bytes` keeps the attributes, as `refer` and `bitfield`
+  do. An array with no cells has no say in the attributes a `meld`,
+  `stack` or `concatenate` keeps.
+
+- Change: `dim_view` keeps a Face, as `transpose` does.
+
+- Change: `CArray.string(n)` without a block, and `CArray.string("ab")`,
+  raise; `fixlen_string` and `to_fixlen_string` raise for `bytes:` below 1.
+  `project` raises for a keyword argument, `paste` into a frozen array
+  raises `FrozenError`, and `CArray.result_type` refuses a MemoryView
+  operand whose format carray cannot read, as the operators do.
+
+- Change: `CArray.sort_addr` with numeric keys is two to three times as fast, and
+  `nlargest` / `nsmallest` read each fiber once with a work area of a
+  few times n.
+
+- Fix: x86-64 Linux. Inputs that reached an integer division by zero
+  inside the library stopped the process with SIGFPE there (on ARM they
+  were refused later or gave a wrong answer): a sum over a view with a
+  zero-length axis, `wsum` / `wmean` with 1-D weights over a zero-length
+  axis, a view of a stack of empty arrays, `window` with a step of 0, and
+  `wrap_readonly(String, CA_FIXLEN)`. Each now answers or raises
+  `ArgumentError`. The extension builds with GCC 14 without warnings.
+
+- Fix: big-endian hosts. `bitfield` read 0 and lost writes, a struct's
+  bit members overwrote each other, and an element-wise operation applied
+  in place could give a wrong cell.
+
+- Fix: `save` and `dump` with `endian: :little` or `:big` wrote the other
+  byte order. `load` reads the marker, so files written so far still load
+  correctly.
+
+- Fix: running out of memory inside a kernel left a view attached, lost
+  the keywords of the call (`a.sum(axis: 1)` returned the total), or
+  leaked the array being built.
+
+- Fix: an array with 16 axes (the maximum) given to `bitarray`, `field`,
+  a narrowing `refer` or a `:_` index wrote past an internal array.
+
+- Fix: a lazy chain whose step narrows the cells (`a.lazy.abs` of a
+  complex array) overran the heap; `seq` on an empty object array wrote
+  past its end.
+
+- Fix: a CAObject's copy and sync hooks: a view the hook kept of the
+  array it was lent, or the lent array's mask, pointed at freed memory
+  after the hook returned.
+
+- Fix: `CArray.fuse` crashed when several Ractors ran a fuse block for the
+  first time at once.
+
+- Fix: a grouped `variancep` / `stddevp` matches `CArray#variancep` to the
+  last bit.
+
+- Fix: `count` with an array of values honours `keep_axis:`.
+
+- Fix: `CARecord.wrap` of a record array wraps its storage, not the
+  record array.
+
+- Fix: an unnamed struct's `order_by` survives `save` / `load` and
+  Marshal.
+
+- Fix: `CAFrame.from_csv` and `cast(name => :time)` read a leap second
+  (`23:59:60`) as `CArray.time` does, into the next minute.
 
 ## 3.0.4
 
