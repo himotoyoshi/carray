@@ -2575,7 +2575,12 @@ rb_ca_dim_view (int argc, VALUE *argv, VALUE self)
     if (! seen[i]) imap[k++] = i;
   }
 
-  return rb_ca_trans_new(self, imap);
+  {
+    /* A reordering of the axes, as transpose is: a Face stays its Face. */
+    volatile VALUE obj = rb_ca_trans_new(self, imap);
+    CA_WRAPPER_LIFT(obj, self, parent);
+    return obj;
+  }
 }
 
 /* flip(*axes) -- reverses the listed axes by negating their strides; with no
