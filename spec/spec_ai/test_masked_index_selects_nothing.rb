@@ -87,10 +87,9 @@ class TestMaskedIndexSelectsNothing < Test::Unit::TestCase
     "object" => -> { CA_OBJECT([10, 20, 30]) },
   }
 
-  # The scatter family takes numeric and boolean arrays only.
-  # scatter_replace! writes numeric and boolean arrays only.  put_along_axis
-  # and put_nd go through the store, masked index or not, and write any.
-  SCATTER_DOORS = ["scatter_replace!"]
+  # Every write door takes an object array (scatter_replace! writes it
+  # through the indexer, as put_along_axis and put_nd go through the store).
+  SCATTER_DOORS = []
 
   WRITE_DOORS.each do |door, fn|
     WRITE_PARENTS.each do |pname, mk|
