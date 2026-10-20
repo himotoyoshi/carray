@@ -243,7 +243,7 @@ class CAStruct::Builder  # :nodoc:
   def self.build_nested_struct_dispatcher (offset, nested_class)
     reader = ->(data) {
       element = nested_class.allocate
-      element.instance_variable_set(:@data, data.field(offset, nested_class).parent)
+      element.instance_variable_set(:@data, data.field(offset, nested_class).send(:face_storage))
       element.freeze if data.frozen?
       element
     }

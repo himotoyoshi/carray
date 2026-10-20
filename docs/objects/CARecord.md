@@ -66,7 +66,8 @@ over MemoryView) as records, without copying:
 ```ruby
 ent = CArray.new(CA_FIXLEN, [3], bytes: GeoCoord::DATA_SIZE)
 w   = CARecord.wrap(ent, GeoCoord)
-w.parent.equal?(ent)        # => true   (no copy; writes go to ent)
+w[0] = GeoCoord.new(lat: 1.0, lng: 2.0)   # no copy: the write goes to ent
+w.parent.read_only?         # => true   (a read-only view of ent)
 ```
 
 ### Subclass DSL

@@ -63,7 +63,7 @@ class TestCAFacePhase4 < Test::Unit::TestCase
     assert_equal "2024-06-15", r[0]
     assert_equal "2024-06-16", r[1]
     # mask propagates
-    dt.parent[1] = UNDEF
+    dt.ticks[1] = UNDEF
     assert_equal [false, true, false], dt.strftime("%Y-%m-%d").is_masked.to_a
   end
 
@@ -105,7 +105,7 @@ class TestCAFacePhase4 < Test::Unit::TestCase
     m = CArray.time_series("2024-03-15", count: 2, unit: :M)
     assert_equal [Date.new(2024, 3, 1), Date.new(2024, 4, 1)], m.to_date.to_a
     # mask propagates
-    dt.parent[1] = UNDEF
+    dt.ticks[1] = UNDEF
     assert_equal [false, true], dt.to_date.is_masked.to_a
   end
 

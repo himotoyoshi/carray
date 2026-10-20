@@ -102,7 +102,7 @@ class TestCARecord < Test::Unit::TestCase
     # R.6: Face strip — field view is on parent, not Face
     a = CARecord.new(GeoCoord, 3)
     f = a["lat"]
-    assert_same a.parent, f.parent
+    assert_same a.send(:face_storage), f.parent
   end
 
   def test_ac2_field_cache_consistency
@@ -623,7 +623,7 @@ class TestCARecord < Test::Unit::TestCase
   def test_dup_shares_the_storage
     a = CARecord.new(GeoCoord, 3)
     b = a.dup
-    assert_same a.parent, b.parent
+    assert_same a.send(:face_storage), b.send(:face_storage)
     b["lat"][1] = 5.0
     assert_equal 5.0, a["lat"][1]
   end
@@ -677,7 +677,7 @@ class TestCARecord < Test::Unit::TestCase
   def test_ac13_wrap_parent_aliases_entity
     ent = CArray.new(CA_FIXLEN, [5], bytes: GeoCoord::DATA_SIZE)
     w = CARecord.wrap(ent, GeoCoord)
-    assert_same ent, w.parent
+    assert_same ent, w.send(:face_storage)
   end
 
   def test_ac13_wrap_zero_copy_via_field_write

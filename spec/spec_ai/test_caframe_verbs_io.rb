@@ -162,7 +162,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
     with_csv("a,b\n1,2\n3,4\n") do |path|
       df = CAFrame.from_csv(path)
       assert_kind_of CAString, df["a"]
-      assert_kind_of CABlock, df["a"].parent
+      assert_kind_of CABlock, df["a"].send(:face_storage)
     end
   end
 

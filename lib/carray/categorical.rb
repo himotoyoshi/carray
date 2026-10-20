@@ -299,7 +299,7 @@ class CACategorical < CAObject
   #   `codes[i] = x` raises; use `codes.copy` for a mutable copy.
   #   @return [CArray]
   def codes
-    parent
+    face_storage
   end
 
   # Face hook: carry the vocabulary across lifted views (slice / reshape / …).
@@ -328,7 +328,7 @@ class CACategorical < CAObject
   # Face hook: decode a per-cell code into its category label, through the one
   # decode every code-to-label path shares (see #label_at).
   def storage_to_element(raw)
-    code = raw.is_a?(String) ? raw.unpack1(UNPACK_FORMAT.fetch(parent.data_type)) : raw
+    code = raw.is_a?(String) ? raw.unpack1(UNPACK_FORMAT.fetch(face_storage.data_type)) : raw
     label_at(code)
   end
 

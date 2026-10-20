@@ -68,6 +68,13 @@ See §3 for the worked example.
 
 ---
 
+
+`parent` hands the storage out as a **read-only view**: a write through it
+would change a Face's values without the Face's conversion (a tick count
+into a time, bytes into a record). A Face that lets its storage be written
+names a method for it (`CATime#ticks`); inside a Face class the storage is
+`face_storage`.
+
 ## 2. The flag is the gate, the class hierarchy is organisation
 
 The single source of truth for "is this a Face?" is the

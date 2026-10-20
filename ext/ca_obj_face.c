@@ -1263,6 +1263,26 @@ ca_face_reconcile_comparison (volatile VALUE *pself, volatile VALUE *pother)
   }
 }
 
+/* A Face's parent, the array its values are stored in, is handed out as a
+   read-only view: a write through it would change the Face's values
+   without the Face's conversion (a tick count stored into a time, bytes
+   into a record).  The storage is written through the Face's own named
+   methods (CATime#ticks), which take it with face_storage. */
+static VALUE
+rb_ca_face_parent (VALUE self)
+{
+  volatile VALUE st = rb_ca_parent(self), view;
+  CArray *cs, *cv;
+  if ( NIL_P(st) ) {
+    return st;
+  }
+  TypedData_Get_Struct(st, CArray, &carray_data_type, cs);
+  view = rb_ca_refer_new(st, cs->data_type, cs->ndim, cs->dim, cs->bytes, 0);
+  TypedData_Get_Struct(view, CArray, &carray_data_type, cv);
+  ca_set_flag(cv, CA_FLAG_READ_ONLY);
+  return view;
+}
+
 void
 Init_ca_face (void)
 {
@@ -1272,6 +1292,7 @@ Init_ca_face (void)
      ahead of this Init) — CAFace inherits from it. */
   rb_cCAFace = rb_define_class("CAFace", rb_cCAView);
   rb_define_alloc_func(rb_cCAFace, rb_ca_face_s_allocate_forbidden);
+  rb_define_method(rb_cCAFace, "parent", rb_ca_face_parent, 0);
 
   /* Initialise the portable table to -1 for every slot so dispatch
      can distinguish "explicitly registered 0" (CAConstString) from

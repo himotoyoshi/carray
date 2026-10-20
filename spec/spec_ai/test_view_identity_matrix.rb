@@ -189,8 +189,12 @@ class TestViewIdentityMatrix < Test::Unit::TestCase
     each_view do |row, source, view|
       case row[:parent] || :source
       when :source
-        assert_same source, view.parent,
+        # A Face hands its parent out as a read-only view; the link itself is
+        # its storage.
+        link = view.face? ? view.send(:face_storage) : view.parent
+        assert_same source, link,
                     "#{row[:name]}#parent is not the array it was built from"
+        assert view.parent.read_only?, "#{row[:name]}#parent is writable" if view.face?
       when :internal
         assert_kind_of CArray, view.parent, "#{row[:name]} has no parent"
       when :none
