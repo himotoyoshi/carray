@@ -346,6 +346,26 @@ ca_slab_build_output_view (int8_t data_type, ca_size_t bytes,
   return TypedData_Wrap_Struct(rb_cCAWrap, &cawrap_data_type, cw);
 }
 
+/* The array the slab views move onto when the walk ends (see
+   slab_state_release_views), made with the carrier and held by it.  It is
+   made here rather than at the end: the end runs in an ensure, after the
+   block, and an allocation failing there would leave the walk open and
+   the views pointing into freed scratch. */
+static void
+ca_slab_prepare_backing (ca_slab_iter_state_t *st)
+{
+  CArray *cw, *backing;
+  volatile VALUE bv;
+  TypedData_Get_Struct(st->carrier, CArray, &carray_data_type, cw);
+  bv = rb_carray_new(cw->data_type, cw->ndim, cw->dim, cw->bytes, NULL);
+  TypedData_Get_Struct(bv, CArray, &carray_data_type, backing);
+  if ( cw->mask ) {
+    ca_create_mask(backing);
+  }
+  rb_ivar_set(st->carrier, rb_intern("__slab_backing__"), bv);
+  RB_GC_GUARD(bv);
+}
+
 /* Common setup of the input slab view for all 4 forms.  Decides ALIAS
    vs SCRATCH from T1's slab_strides[0] vs src->bytes equality, builds
    the slab_view + (when SCRATCH) carrier in place.  The mask travels
@@ -463,6 +483,10 @@ ca_slab_setup_input_slab_view (ca_slab_iter_state_t *st, CArray *src,
       st->slab_view = ca_slab_build_slab_view(st->carrier, src->data_type,
                                               src->bytes, 1, dim, strides);
     }
+  }
+
+  if ( st->carrier != Qnil ) {
+    ca_slab_prepare_backing(st);
   }
 
   /* The slab is a window onto the source when the fiber is contiguous and
@@ -1176,8 +1200,9 @@ slab_state_run_body (VALUE arg)
    as it has a ptr.  Before the scratch they point into is freed, the
    input slab and its carrier are moved onto a copy of the last slab,
    held by the carrier, and the internal output view lets go of its
-   buffer.  A slab that is a window onto the source itself points into
-   the source and needs nothing. */
+   buffer.  The copy is made into the array ca_slab_prepare_backing set
+   aside, so nothing here allocates.  A slab that is a window onto the
+   source itself points into the source and needs nothing. */
 static void
 slab_state_release_views (ca_slab_iter_state_t *st)
 {
@@ -1194,12 +1219,12 @@ slab_state_release_views (ca_slab_iter_state_t *st)
     if ( cw->ptr == NULL ) {
       return;
     }
-    backing = ca_copy(cw);
-    bv = ca_wrap_struct(backing);
-    if ( cw->mask && ! backing->mask ) {
-      ca_create_mask(backing);
+    bv = rb_ivar_get(st->carrier, rb_intern("__slab_backing__"));
+    TypedData_Get_Struct(bv, CArray, &carray_data_type, backing);
+    memcpy(backing->ptr, cw->ptr, (size_t) (cw->elements * cw->bytes));
+    if ( cw->mask && cw->mask->ptr ) {
+      memcpy(backing->mask->ptr, cw->mask->ptr, (size_t) cw->elements);
     }
-    rb_ivar_set(st->carrier, rb_intern("__slab_backing__"), bv);
     if ( cs->ptr ) {
       cs->ptr = backing->ptr;
     }
