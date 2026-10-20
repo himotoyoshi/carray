@@ -88,7 +88,14 @@ typedef enum {
 
 /* ---- kernel flags ------------------------------------------------------ */
 #define CA_KERNEL_READ        0x0
-#define CA_KERNEL_WRITE       0x1    /* the kernel writes the slab back  */
+#define CA_KERNEL_WRITE       0x1    /* the kernel writes the slab back.
+                                        The slab is read first (so a
+                                        kernel may change only some cells),
+                                        and a view that cannot be read --
+                                        CAFake of an object array whose
+                                        cells do not convert -- raises
+                                        there, even for a kernel that
+                                        writes every cell                */
 #define CA_KERNEL_NO_MASK     0x2    /* the kernel cannot take a mask:
                                         a masked source is refused     */
 #define CA_KERNEL_CHUNK_HINT  0x4    /* reserved: init refuses it
