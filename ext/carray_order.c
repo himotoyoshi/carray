@@ -721,13 +721,14 @@ rb_ca_range_method (VALUE self)
 
 /* ---- nlargest / nsmallest family ------------------------------------- */
 
-/* The partition picks the right values but, among cells that tie with the
-   last one picked, any of them.  The answer is the cells first in the
-   order (value, then NaN, then masked; the values descending for the
-   largest) with ties broken by position, as `order` breaks them.  So the
-   tied candidates are replaced by the earliest cells that tie, and the
-   candidates are sorted by (order, position): O(n) per fiber besides the
-   sort of the candidates. */
+/* The answer is the cells first in the order (value, then NaN, then
+   masked; the values descending for the largest) with ties broken by
+   position, as `order` breaks them.  Fewer cells than the fiber are found
+   by the buffered walk below.  The other routes (the whole fiber, and the
+   keys the walk does not read) sort or partition every cell, which picks
+   the right values but, among cells that tie with the last one picked,
+   any of them; ca_topk_stable replaces the tied candidates by the
+   earliest cells that tie and sorts the candidates by (order, position). */
 
 typedef struct {
   const char       *v;      /* the fiber's values, contiguous */
@@ -936,6 +937,206 @@ ca_topk_has_cells_after_numbers (VALUE self, CArray *ca)
   return 0;
 }
 
+/* ---- the buffered walk ------------------------------------------------
+   Each fiber is read once.  The cells that come before the cut (the last
+   of the cap cells kept so far, in (order, position)) are collected in a
+   buffer of a few times cap; when it fills, a selection keeps the first
+   cap and the cut moves up.  The work area is the buffer, whatever the
+   length of the fiber, and a fiber in order costs one selection per
+   bufferful instead of a heap update per cell.
+
+   The walk is written once as a macro over three others: CLASS(i) (0 a
+   value, 1 NaN, 2 masked), AFTER(i, j) (cell i comes after cell j in
+   (order, position)) and ENTERS(j) (cell j comes before the cut), and
+   instantiated per type so that the comparisons
+   are inline.  The fixlen type takes the generic comparison. */
+
+/* Rearranges b[0..nb) so that b[0..cap) hold the cap cells first in
+   (order, position): quickselect with median-of-three pivots; past a
+   depth limit the remaining range is sorted (tmp holds nb positions). */
+#define CA_TOPK_SELECT(AFTER)                                                 \
+  do {                                                                        \
+    lo = 0; hi = nb;                                                        \
+    depth = 2;                                                              \
+    for (s = nb; s > 1; s >>= 1) depth += 2;                                \
+    while ( hi - lo > 16 ) {                                                \
+      mid = lo + ( hi - lo ) / 2; last = hi - 1;                            \
+      if ( depth-- == 0 ) break;                                            \
+      if ( AFTER(b[lo], b[mid]) )   { t = b[lo]; b[lo] = b[mid]; b[mid] = t; }     \
+      if ( AFTER(b[mid], b[last]) ) { t = b[mid]; b[mid] = b[last]; b[last] = t; } \
+      if ( AFTER(b[lo], b[mid]) )   { t = b[lo]; b[lo] = b[mid]; b[mid] = t; }     \
+      t = b[mid]; b[mid] = b[last]; b[last] = t;                            \
+      for (s = lo, i = lo; i < last; i++) {                                 \
+        if ( AFTER(b[last], b[i]) ) { t = b[s]; b[s] = b[i]; b[i] = t; s++; } \
+      }                                                                     \
+      t = b[s]; b[s] = b[last]; b[last] = t;                                \
+      if ( s == cap || s + 1 == cap ) { lo = hi; break; }                   \
+      if ( cap < s ) hi = s;                                                \
+      else           lo = s + 1;                                            \
+    }                                                                       \
+    if ( hi > lo ) ca_topk_sort(f, b + lo, tmp, hi - lo);                   \
+  } while (0)
+
+#define CA_TOPK_DEFINE_BUF(NAME, T, CLASS, AFTER, ENTERS)                    \
+static void                                                                   \
+NAME (const ca_topk_fiber_t *f, ca_size_t len, ca_size_t cap,                 \
+      ca_size_t *b, ca_size_t *tmp, ca_size_t size)                           \
+{                                                                             \
+  const T *v_ = (const T *) f->v;                                             \
+  ca_size_t j, nb = 0, cut = 0, lo, hi, i, s, t, mid, last;                   \
+  int rc_ = 3, depth;                                                         \
+  T rv_;                                                                      \
+  (void) v_;                                                                  \
+  memset(&rv_, 0, sizeof(rv_));                                               \
+  for (j = 0; j < len; j++) {                                                 \
+    if ( rc_ != 3 && ! ( ENTERS(j) ) ) continue;                              \
+    b[nb++] = j;                                                              \
+    if ( nb == size ) {                                                       \
+      CA_TOPK_SELECT(AFTER);                                                  \
+      nb = cap;                                                               \
+    }                                                                         \
+    else if ( ! ( nb == cap && rc_ == 3 ) ) {    /* the first cap cells */    \
+      continue;                                                               \
+    }                                                                         \
+    cut = b[0];                                                               \
+    for (i = 1; i < cap; i++) if ( AFTER(b[i], cut) ) cut = b[i];             \
+    rc_ = CLASS(cut);                                                         \
+    if ( rc_ == 0 ) memcpy(&rv_, f->v + cut * f->bytes, sizeof(rv_));         \
+  }                                                                           \
+  if ( nb > cap ) CA_TOPK_SELECT(AFTER);                                      \
+  ca_topk_sort(f, b, tmp, cap);                                               \
+}
+
+/* The typed comparisons.  A cell enters when it comes before the cut;
+   one that ties the cut does not, it lies later. */
+#define CA_TOPK_CLASS_INT(i)   ( ( f->m && f->m[i] ) ? 2 : 0 )
+#define CA_TOPK_CLASS_FLT(i)   ( ( f->m && f->m[i] ) ? 2 : ( isnan(v_[i]) ? 1 : 0 ) )
+#define CA_TOPK_AFTER_V(CLASS, i, j)                                          \
+  ( CLASS(i) != CLASS(j) ? CLASS(i) > CLASS(j)                                \
+  : ( CLASS(i) == 0 && v_[i] != v_[j] )                                       \
+      ? ( f->desc ? v_[i] < v_[j] : v_[i] > v_[j] )                           \
+      : (i) > (j) )
+#define CA_TOPK_AFTER_INT(i, j) CA_TOPK_AFTER_V(CA_TOPK_CLASS_INT, i, j)
+#define CA_TOPK_AFTER_FLT(i, j) CA_TOPK_AFTER_V(CA_TOPK_CLASS_FLT, i, j)
+#define CA_TOPK_ENTERS_V(CLASS, j)                                            \
+  ( CLASS(j) < rc_ ||                                                         \
+    ( CLASS(j) == 0 && rc_ == 0 &&                                            \
+      ( f->desc ? v_[j] > rv_ : v_[j] < rv_ ) ) )
+#define CA_TOPK_ENTERS_INT(j) CA_TOPK_ENTERS_V(CA_TOPK_CLASS_INT, j)
+#define CA_TOPK_ENTERS_FLT(j) CA_TOPK_ENTERS_V(CA_TOPK_CLASS_FLT, j)
+
+CA_TOPK_DEFINE_BUF(ca_topk_buf_u8,  uint8_t,  CA_TOPK_CLASS_INT, CA_TOPK_AFTER_INT, CA_TOPK_ENTERS_INT)
+CA_TOPK_DEFINE_BUF(ca_topk_buf_i8,  int8_t,   CA_TOPK_CLASS_INT, CA_TOPK_AFTER_INT, CA_TOPK_ENTERS_INT)
+CA_TOPK_DEFINE_BUF(ca_topk_buf_i16, int16_t,  CA_TOPK_CLASS_INT, CA_TOPK_AFTER_INT, CA_TOPK_ENTERS_INT)
+CA_TOPK_DEFINE_BUF(ca_topk_buf_u16, uint16_t, CA_TOPK_CLASS_INT, CA_TOPK_AFTER_INT, CA_TOPK_ENTERS_INT)
+CA_TOPK_DEFINE_BUF(ca_topk_buf_i32, int32_t,  CA_TOPK_CLASS_INT, CA_TOPK_AFTER_INT, CA_TOPK_ENTERS_INT)
+CA_TOPK_DEFINE_BUF(ca_topk_buf_u32, uint32_t, CA_TOPK_CLASS_INT, CA_TOPK_AFTER_INT, CA_TOPK_ENTERS_INT)
+CA_TOPK_DEFINE_BUF(ca_topk_buf_i64, int64_t,  CA_TOPK_CLASS_INT, CA_TOPK_AFTER_INT, CA_TOPK_ENTERS_INT)
+CA_TOPK_DEFINE_BUF(ca_topk_buf_u64, uint64_t, CA_TOPK_CLASS_INT, CA_TOPK_AFTER_INT, CA_TOPK_ENTERS_INT)
+CA_TOPK_DEFINE_BUF(ca_topk_buf_f32, float,    CA_TOPK_CLASS_FLT, CA_TOPK_AFTER_FLT, CA_TOPK_ENTERS_FLT)
+CA_TOPK_DEFINE_BUF(ca_topk_buf_f64, double,   CA_TOPK_CLASS_FLT, CA_TOPK_AFTER_FLT, CA_TOPK_ENTERS_FLT)
+
+/* fixlen: the generic comparison; v_ is unused. */
+#define CA_TOPK_CLASS_GEN(i)    ca_topk_class(f, i)
+#define CA_TOPK_AFTER_GEN(i, j) ca_topk_after(f, i, j)
+#define CA_TOPK_ENTERS_GEN(j)   ( ca_topk_cmp(f, j, cut) < 0 )
+
+/* Whether cell i comes after cell j in (order, position). */
+static int
+ca_topk_after (const ca_topk_fiber_t *f, ca_size_t i, ca_size_t j)
+{
+  int r = ca_topk_cmp(f, i, j);
+  return r > 0 || ( r == 0 && i > j );
+}
+
+CA_TOPK_DEFINE_BUF(ca_topk_buf_gen, char, CA_TOPK_CLASS_GEN, CA_TOPK_AFTER_GEN, CA_TOPK_ENTERS_GEN)
+
+#undef CA_TOPK_DEFINE_BUF
+#undef CA_TOPK_SELECT
+#undef CA_TOPK_CLASS_INT
+#undef CA_TOPK_CLASS_FLT
+#undef CA_TOPK_AFTER_V
+#undef CA_TOPK_AFTER_INT
+#undef CA_TOPK_AFTER_FLT
+#undef CA_TOPK_ENTERS_V
+#undef CA_TOPK_ENTERS_INT
+#undef CA_TOPK_ENTERS_FLT
+#undef CA_TOPK_CLASS_GEN
+#undef CA_TOPK_AFTER_GEN
+#undef CA_TOPK_ENTERS_GEN
+
+/* The first cap cells of one fiber in (order, position), sorted, into
+   b[0..cap).  b and tmp hold size positions, cap < size <= len. */
+static void
+ca_topk_buf_fiber (const ca_topk_fiber_t *f, ca_size_t len, ca_size_t cap,
+                   ca_size_t *b, ca_size_t *tmp, ca_size_t size)
+{
+  switch ( f->type ) {
+  case CA_BOOLEAN:
+  case CA_UINT8:   ca_topk_buf_u8(f, len, cap, b, tmp, size);  break;
+  case CA_INT8:    ca_topk_buf_i8(f, len, cap, b, tmp, size);  break;
+  case CA_INT16:   ca_topk_buf_i16(f, len, cap, b, tmp, size); break;
+  case CA_UINT16:  ca_topk_buf_u16(f, len, cap, b, tmp, size); break;
+  case CA_INT32:   ca_topk_buf_i32(f, len, cap, b, tmp, size); break;
+  case CA_UINT32:  ca_topk_buf_u32(f, len, cap, b, tmp, size); break;
+  case CA_INT64:   ca_topk_buf_i64(f, len, cap, b, tmp, size); break;
+  case CA_UINT64:  ca_topk_buf_u64(f, len, cap, b, tmp, size); break;
+  case CA_FLOAT32: ca_topk_buf_f32(f, len, cap, b, tmp, size); break;
+  case CA_FLOAT64: ca_topk_buf_f64(f, len, cap, b, tmp, size); break;
+  default:         ca_topk_buf_gen(f, len, cap, b, tmp, size); break;
+  }
+}
+
+/* Per-axis top-k positions of `key` (an order key: not object, not
+   complex) by the buffered walk, for cap < the length of the axis.  The
+   fibers come in the row-major order of the other axes, so the answer is
+   filled with the axis last and moved into place at the end (cap cells
+   per fiber). */
+static VALUE
+ca_topk_buffered_positions (VALUE key, long cap, long axis, int desc)
+{
+  volatile VALUE holder = 0, out;
+  VALUE perm[CA_RANK_MAX];
+  ca_size_t odim[CA_RANK_MAX];
+  CArray *ck, *co;
+  ca_iter_state st;
+  ca_topk_fiber_t f;
+  ca_size_t *buf, *tmp, n, o = 0, k, len, size;
+  int64_t *op;
+  boolean8_t *m;
+  char *p;
+  int ndim, i, j = 0;
+
+  GetCArray(key, ck);
+  ndim = ck->ndim;
+  for (i = 0; i < ndim; i++) if ( i != axis ) odim[j++] = ck->dim[i];
+  odim[ndim - 1] = cap;
+  len = ck->dim[axis];
+  out = rb_carray_new(CA_INT64, ndim, odim, 0, NULL);
+  GetCArray(out, co);
+  op = (int64_t *) co->ptr;
+
+  f.type  = ck->data_type;
+  f.bytes = ck->bytes;
+  f.desc  = desc;
+  size = ( len < 4 * cap + 256 ) ? len : 4 * cap + 256;
+  buf = ALLOCV_N(ca_size_t, holder, 2 * size);
+  tmp = buf + size;
+  CA_FOR_EACH_FIBER_MASKED(st, ck, axis, 0, p, n, m) {
+    f.v = p;
+    f.m = m;
+    ca_topk_buf_fiber(&f, n, cap, buf, tmp, size);
+    for (k = 0; k < cap; k++) op[o * cap + k] = (int64_t) buf[k];
+    o++;
+  }
+  ALLOCV_END(holder);
+  if ( axis == ndim - 1 ) return out;
+  for (i = 0; i < ndim; i++) {
+    perm[i] = INT2FIX( i < axis ? i : ( i == axis ? ndim - 1 : i - 1 ) );
+  }
+  return rb_ca_copy(rb_funcallv(out, rb_intern("transpose"), ndim, perm));
+}
+
 /* Per-axis top-k positions (cap clamped, axis normalized).
  * Called by rb_ca_topk_index below. */
 static VALUE
@@ -945,6 +1146,18 @@ rb_ca_topk_positions (VALUE self, long cap, long axis_norm, int desc)
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   long dim_axis = (long) ca->dim[axis_norm];
   VALUE raxis_norm = LONG2NUM(axis_norm);
+
+  /* The buffered walk reads any key but an object (its cells compare in
+     Ruby) or a complex one (no order), and keeps cap cells per fiber. */
+  if ( ca->data_type != CA_OBJECT && ! ca_is_complex_type(ca) ) {
+    VALUE key = ca_order_key(self, desc ? "nlargest" : "nsmallest");
+    CArray *ck;
+    GetCArray(key, ck);
+    if ( ck->data_type != CA_OBJECT && ! ca_is_complex_type(ck) &&
+         cap < dim_axis ) {
+      return ca_topk_buffered_positions(key, cap, axis_norm, desc);
+    }
+  }
 
   /* The largest: reversing the ascending order would put the NaN and the
      masked cells first, so rank them descending (NaN, then the masked
