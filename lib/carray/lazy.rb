@@ -631,6 +631,8 @@ class CAMonOp
     op_id = __op_id__
     if op_id >= CAMonOp::CAST_BASE
       "cast_#{CArray.data_type_name(op_id - CAMonOp::CAST_BASE)}"
+    elsif op_id == CAMonOp::OP_BYTE_SWAP
+      "swap_bytes"       # a view of its own, not a lazy operation by name
     else
       (OP_NAMES[op_id] || "op_#{op_id}").to_s
     end
