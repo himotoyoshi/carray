@@ -1880,6 +1880,19 @@ rb_ca_mask_where (int argc, VALUE *argv, VALUE self)
   return ca_mask_copy_where(self, argc, argv);
 }
 
+/* inherit_mask's sources are read cell by cell over self, so an array
+   source has self's number of cells (a scalar's one cell applies to all). */
+static void
+ca_inherit_mask_check_source (CArray *ca, CArray *cs)
+{
+  if ( ! ca_is_scalar(cs) && cs->elements != ca->elements ) {
+    rb_raise(rb_eArgError,
+             "%s: mask source has %lld elements, the receiver %lld",
+             ca_calling_method_name(),
+             (long long) cs->elements, (long long) ca->elements);
+  }
+}
+
 /* @overload inherit_mask (*others):
 
 (Masking, Destructive)
@@ -1903,6 +1916,7 @@ rb_ca_inherit_mask_method (int argc, VALUE *argv, VALUE self)
   for (i=0; i<argc; i++) {
     if ( rb_obj_is_carray(argv[i]) ) {
       TypedData_Get_Struct(argv[i], CArray, &carray_data_type, cs);
+      ca_inherit_mask_check_source(ca, cs);
       slist[i] = cs;
     }
     else {
@@ -1946,6 +1960,7 @@ rb_ca_inherit_mask (VALUE self, int n, ...)
     other = va_arg(rothers, VALUE);
     if ( rb_obj_is_carray(other) ) {
       TypedData_Get_Struct(other, CArray, &carray_data_type, cs);
+      ca_inherit_mask_check_source(ca, cs);
       slist[i] = cs;
     }
     else {
@@ -1984,6 +1999,7 @@ rb_ca_inherit_mask_replace_method (int argc, VALUE *argv, VALUE self)
   for (i=0; i<argc; i++) {
     if ( rb_obj_is_carray(argv[i]) ) {
       TypedData_Get_Struct(argv[i], CArray, &carray_data_type, cs);
+      ca_inherit_mask_check_source(ca, cs);
       slist[i] = cs;
     }
     else {
@@ -2027,6 +2043,7 @@ rb_ca_inherit_mask_replace (VALUE self, int n, ...)
     other = va_arg(rothers, VALUE);
     if ( rb_obj_is_carray(other) ) {
       TypedData_Get_Struct(other, CArray, &carray_data_type, cs);
+      ca_inherit_mask_check_source(ca, cs);
       slist[i] = cs;
     }
     else {
