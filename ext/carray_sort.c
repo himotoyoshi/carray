@@ -172,7 +172,7 @@ msd_refine_##SUFFIX (CArray *key, ca_size_t *perm, void *vbuf,                \
     for (k=0; k<n; k++) {                                                     \
       ca_size_t row = p[k];                                                   \
       if ( m && m[row] )                 n_mask++;                            \
-      else if ( IS_FLOAT && isnan(ptr[row]) ) n_nan++;                        \
+      else if ( IS_FLOAT && isnan((double) ptr[row]) ) n_nan++;               \
       else                               n_num++;                             \
     }                                                                         \
     o_mask = masked_last ? n_num + n_nan : 0;                                 \
@@ -185,7 +185,7 @@ msd_refine_##SUFFIX (CArray *key, ca_size_t *perm, void *vbuf,                \
         TYPE v = ptr[row];                                                    \
         ca_size_t at;                                                         \
         if ( m && m[row] )             at = i_mask++;                         \
-        else if ( IS_FLOAT && isnan(v) ) at = i_nan++;                        \
+        else if ( IS_FLOAT && isnan((double) v) ) at = i_nan++;               \
         else                           at = i_num++;                          \
         buf[at].v = v;                                                        \
         buf[at].i = row;                                                      \
