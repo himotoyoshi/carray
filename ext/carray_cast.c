@@ -2264,6 +2264,69 @@ ca_integer_scalar_operand (volatile VALUE *scalar, VALUE reference)
   return 1;
 }
 
+/* A Ruby Array operand against a numeric or boolean array is read as its
+   cells, as the array CArray.wrap_readonly makes of it (nested Arrays give
+   its axes).  Its data type is the
+   one the cells would take one at a time as scalar operands of the same
+   operation (an Integer
+   against an integer array takes the array's type and has to fit it),
+   promoted together.  Against an object array, a Face or a fixlen array an
+   Array stays one value. */
+static int
+ca_array_operand (volatile VALUE *ary, VALUE reference, int both)
+{
+  CArray *cr;
+  volatile VALUE flat, probe_self, probe;
+  long i, n;
+  int8_t type = -1, seen_fix = -1, seen_big = -1, seen_flo = -1, seen_cpx = -1,
+         seen_bool = -1;
+
+  if ( ! RB_TYPE_P(*ary, T_ARRAY) || ! rb_obj_is_carray(reference) ) {
+    return 0;
+  }
+  TypedData_Get_Struct(reference, CArray, &carray_data_type, cr);
+  if ( ca_is_face(cr) || ca_is_object_type(cr) || ca_is_fixlen_type(cr) ) {
+    return 0;
+  }
+
+  flat = rb_funcall(*ary, rb_intern("flatten"), 0);
+  n = RARRAY_LEN(flat);
+  for (i = 0; i < n; i++) {
+    VALUE e = RARRAY_AREF(flat, i);
+    int8_t *seen, t;
+    CArray *cp;
+    if      ( FIXNUM_P(e) )               seen = &seen_fix;
+    else if ( RB_TYPE_P(e, T_BIGNUM) )    seen = &seen_big;
+    else if ( RB_FLOAT_TYPE_P(e) )        seen = &seen_flo;
+    else if ( RB_TYPE_P(e, T_COMPLEX) )   seen = &seen_cpx;
+    else if ( e == Qtrue || e == Qfalse ) seen = &seen_bool;
+    else                                  seen = NULL;
+    if ( RB_INTEGER_TYPE_P(e) && ca_is_integer_type(cr) ) {
+      ca_check_integer_fits(e, cr->data_type);
+    }
+    if ( seen && *seen >= 0 ) {
+      continue;
+    }
+    probe_self = reference;
+    probe      = e;
+    if ( both ) {
+      rb_ca_cast_self_or_other(&probe_self, &probe);
+    }
+    else {
+      rb_ca_cast_other((VALUE *) &probe_self, (volatile VALUE *) &probe);
+    }
+    TypedData_Get_Struct(probe, CArray, &carray_data_type, cp);
+    t = cp->data_type;
+    if ( seen ) *seen = t;
+    type = ( type < 0 ) ? t : ca_promote_type(type, t);
+  }
+  if ( type < 0 ) {
+    type = cr->data_type;
+  }
+  *ary = rb_ca_wrap_readonly(*ary, INT2NUM(type));
+  return 1;
+}
+
 /* CArray.cast(value) -- singleton entry delegating to rb_ca_cast, which
    returns a CArray unchanged and coerces a Ruby value to a CScalar / CArray.
    User doc lives in yard-stubs/carray_cast.rb. */
@@ -2326,6 +2389,10 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
   if ( ! rb_obj_is_carray(*other) && TYPE(*other) != T_STRING &&
        rb_memory_view_available_p(*other) ) {
     *other = ca_operand_from_memory_view(*other);
+  }
+
+  if ( ! ca_array_operand(other, *self, 1) ) {
+    ca_array_operand(self, *other, 1);
   }
 
   if ( ! rb_obj_is_carray(*self) ) {
@@ -2893,6 +2960,8 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
        rb_memory_view_available_p(*other) ) {
     *other = ca_operand_from_memory_view(*other);
   }
+
+  ca_array_operand(other, *self, 0);
 
   if ( ! rb_obj_is_carray(*other) ) {
     if ( rb_ca_is_object_type(*self) ) {

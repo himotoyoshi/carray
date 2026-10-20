@@ -99,6 +99,20 @@ a - b
 #       [ -27, -36, -45 ] ]
 ```
 
+A Ruby Array on the right of an operator is read as an array of its cells, nested Arrays giving its axes, so its shape has to match as an array's would. Each cell takes the type it would take as a scalar operand: Integers against an integer array keep the array's type, a Float widens the result.
+
+```ruby
+a + [[1, 1, 1], [2, 2, 2]]
+#  => [ [ 1, 2, 3 ],
+#       [ 5, 6, 7 ] ]
+
+a.eq([[0, 0, 2], [3, 0, 5]])
+#  => [ [ true, false, true ],
+#       [ true, false, true ] ]
+```
+
+Against an object array an Array stays one value, as a cell of such an array can hold an Array.
+
 ## In-place forms
 
 Many operations have a bang (`!`) variant that modifies the array in place instead of returning a new one. This avoids allocating a result when you do not need the original.
