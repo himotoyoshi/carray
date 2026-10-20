@@ -1091,6 +1091,15 @@ nearest head with ties toward the future, and is exact even for odd step widths
 (no half-tick loss). These take an argument, so they do **not** collide with the
 argument-less numeric `CArray#floor` / `#round`.
 
+"Nearest" is measured by the instant. A `:M` or `:Y` value stands for the start
+of its month or year, so a month array rounds to the year the way the same
+dates do on `:D`:
+
+```ruby
+CArray.time(%w[1889-07 1889-08], unit: :M).round(unit: :Y)       # => 1889, 1890
+CArray.time(%w[1889-07-01 1889-08-01], unit: :D).round(unit: :Y) # => 1889, 1890
+```
+
 All three are `snap` with `direction:` fixed — the shape `CArray#snap`
 (`step`, `offset:`, `direction:`) already has for numbers, with a grid
 standing in for the step-and-offset pair:

@@ -3491,8 +3491,18 @@ class CATime
       fl = o + q * step_ticks
       return bucket_head_as_time(fl + step_ticks * n.ne(fl), mul, su)
     when :round
-      r = d - q * step_ticks                      # 0 <= r < step_ticks
-      q = q + r.ge((step_ticks + 1) / 2)          # ties -> future; no 2*d / 2*r
+      if mul == 1 and [:M, :Y].include?(su.base)
+        # A month or year tick is the start of its month or year, so the
+        # nearest head is by the instant, measured in days.
+        fl   = o + q * step_ticks
+        here = days_since_epoch
+        lo   = fl.time(unit: su).send(:days_since_epoch)
+        hi   = (fl + step_ticks).time(unit: su).send(:days_since_epoch)
+        q    = q + (hi - here).le(here - lo)      # ties -> future
+      else
+        r = d - q * step_ticks                    # 0 <= r < step_ticks
+        q = q + r.ge((step_ticks + 1) / 2)        # ties -> future; no 2*d / 2*r
+      end
     end
     bucket_head_as_time(o + q * step_ticks, mul, su)
   end
@@ -3544,8 +3554,10 @@ class CATime
   # @overload round(grid = nil, unit:, origin: nil)
   #   {#snap} with `direction: :round` -- each element at its nearest bucket
   #   head, ties toward the future.  Exact for odd `step_ticks` (no half-tick
-  #   loss).  For a calendar bucket the nearest head is by absolute tick
-  #   distance (month lengths vary), ties toward the future.
+  #   loss).  For a calendar bucket the nearest head is by the instant (month
+  #   lengths vary), ties toward the future.  A month or year storage tick
+  #   stands for the start of its month or year, so a `:M` array rounds as
+  #   the same dates on `:D` do: 1889-07 to the year is 1889.
   #   @return [CATime]
   def round(grid = nil, unit: nil, origin: nil)
     snap(grid, unit: unit, origin: origin, direction: :round)
