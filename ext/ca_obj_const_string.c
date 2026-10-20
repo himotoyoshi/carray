@@ -846,16 +846,22 @@ rb_ca_const_string_eq (VALUE self, VALUE other)
   return ca_const_string_predicate(self, other, CA_TEXT_EQ);
 }
 
-/* CAConstString#count(value): number of (non-masked) elements byte-equal to value. */
+/* CAConstString#count(value): number of (non-masked) elements byte-equal to
+   value.  With no value, the number of non-masked elements, as CArray#count
+   answers. */
 static VALUE
-rb_ca_const_string_count (VALUE self, VALUE query)
+rb_ca_const_string_count (int argc, VALUE *argv, VALUE self)
 {
   ca_const_string_scan_t s;
   const char *qp, *p;
   long qlen;
   int64_t len;
   ca_size_t i, c = 0;
+  VALUE query;
 
+  if ( rb_scan_args(argc, argv, "01", &query) == 0 ) {
+    return rb_funcall(self, rb_intern("count_not_masked"), 0);
+  }
   if ( TYPE(query) != T_STRING ) {
     query = rb_obj_as_string(query);
   }
@@ -1222,7 +1228,7 @@ Init_ca_obj_const_string (void)
   /* native byte ops (§3.7) */
   rb_define_method(rb_cCAConstString, "byte_length", rb_ca_const_string_byte_length, 0);
   rb_define_method(rb_cCAConstString, "eq",          rb_ca_const_string_eq, 1);
-  rb_define_method(rb_cCAConstString, "count",       rb_ca_const_string_count, 1);
+  rb_define_method(rb_cCAConstString, "count",       rb_ca_const_string_count, -1);
   rb_define_method(rb_cCAConstString, "start_with?", rb_ca_const_string_start_with, 1);
   rb_define_method(rb_cCAConstString, "end_with?",   rb_ca_const_string_end_with, 1);
   rb_define_method(rb_cCAConstString, "include?",    rb_ca_const_string_include, 1);

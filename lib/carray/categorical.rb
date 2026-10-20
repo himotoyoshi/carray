@@ -396,7 +396,14 @@ class CACategorical < CAObject
   #   (0 for an unknown label).
   #   @param label [Object] category to count.
   #   @return [Integer]
-  def count(label)
+  # @overload count
+  #   Returns the number of cells in some category (not masked), as
+  #   {CArray#count} with no value does.
+  #   @return [Integer]
+  def count(*args)
+    return count_not_masked if args.empty?
+    raise ArgumentError, "count: wrong number of arguments (given #{args.size}, expected 0..1)" if args.size > 1
+    label = args[0]
     code = @labels.index(label)
     code ? codes.count(code) : 0
   end
