@@ -284,8 +284,10 @@ a[CA_INT([0, 2]), nil]
 A symbol in the first argument position is sugar for asking the array a question about itself and indexing by the answer:
 
 ```ruby
-a[:method, arg]   # is exactly  a[a.method(arg)]
+a[:method, arg]   # is  a[a.method(arg)]
 ```
+
+One difference: when the method returns a Ruby Array, the Array is read as one key per axis, so `a[:m]` with `m` returning `[1, 2]` is `a[1, 2]`, not `a[[1, 2]]`. A method can return a key for every axis this way.
 
 So `:eq` turns the indexer into a **condition matcher**, the same as building a boolean mask first and using the form in §3.1.
 
