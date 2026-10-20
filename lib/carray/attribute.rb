@@ -42,7 +42,8 @@
 #    A view of several arrays (CAStack / CAMeld, so `stack`, `meld` and
 #    `montage`) shows, below its own @attr, the keys every one of its
 #    arrays shows with the same value; a key they disagree on, or one
-#    some of them lack, is not shown.
+#    some of them lack, is not shown.  An array with no cells is left out
+#    of that count, unless all of them are empty.
 #
 #  Stored values are frozen copies, nested Arrays and Hashes included, so
 #  an attribute changes only through set_attr / set_attrs: a value read
@@ -237,7 +238,12 @@ class CArray
   end
 
   # The attributes every array in `list` shows with the same value.
+  # An array with no cells holds no values for the attributes to describe,
+  # so it has no say (unless every one is empty), as CAFrame leaves a frame
+  # with no rows out of a meld.
   def self.attrs_shared_by (list)
+    with_cells = list.reject { |a| a.elements == 0 }
+    list = with_cells unless with_cells.empty?
     first, *rest = list.map(&:attrs)
     return {} if first.nil?
     first.select { |k, v| rest.all? { |h| h.key?(k) && h[k] == v } }
