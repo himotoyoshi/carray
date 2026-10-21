@@ -798,6 +798,7 @@ class GroupedFrame
   #
   #   df.group_by("station").fill("temp", :ffill)
   #   df.group_by("station").fill("temp", :linear)
+  #   df.group_by("station").fill("temp" => :linear, "rain" => 0.0)
   #
   # +:ffill+ and +:bfill+ follow the row order: sort the frame first
   # (+sort_by_key("time")+) when its rows are not in time order. +:linear+
@@ -809,7 +810,19 @@ class GroupedFrame
   # @return [GroupedFrame] self
   # @raise [ArgumentError] for another Symbol, or for +:linear+ on a column
   #   or index +CAFrame#fill+ cannot interpolate.
-  def fill (name, method_or_value)
+  def fill (name, *method_or_value)
+    if name.is_a?(Hash)
+      unless method_or_value.empty?
+        raise ArgumentError, "fill: give a column and a method or value, or one Hash of them"
+      end
+      @frame.__send__(:fill_by_map, name, "fill") { |key, how| fill(key, how) }
+      return self
+    end
+    unless method_or_value.size == 1
+      raise ArgumentError,
+            "fill: give a column and a method or value (or a Hash of them); got #{method_or_value.size + 1} arguments"
+    end
+    method_or_value = method_or_value.first
     refuse_changed_rows("fill")
     case method_or_value
     when :ffill, :bfill

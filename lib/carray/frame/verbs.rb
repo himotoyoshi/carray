@@ -62,18 +62,28 @@ class CAFrame
 
   # Rename columns, returning a new frame (column names change, memo §3.8).
   # Column order is preserved (memo §13.2 "column order = insertion order");
-  # columns are shared by reference.
-  def rename(mapping)
+  # columns are shared by reference. The new names are given as a Hash of
+  # old name => new name, or by a block that receives each column's name and
+  # returns its new one. Names may be exchanged; two columns may not end up
+  # with one name.
+  #
+  #   df.rename("temp" => "T")
+  #   df.rename { |name| name.upcase }
+  def rename(mapping = nil)
+    if block_given?
+      raise ArgumentError, "rename: give a Hash or a block, not both" unless mapping.nil?
+      mapping = @columns.keys.to_h { |name| [name, yield(name)] }
+    end
+    raise ArgumentError, "rename: give a Hash of old name => new name, or a block" if mapping.nil?
     norm = {}
     mapping.each do |old, new|
       o = column_key(old, "rename")
       n = column_name_arg(new, "rename")
       raise KeyError, "no column #{o.inspect}" unless @columns.key?(o)
-      if n != o && @columns.key?(n)
-        raise ArgumentError, "rename target #{n.inspect} already exists"
-      end
       norm[o] = n
     end
+    CAFrame.__send__(:refuse_repeated_names, @columns.keys.map { |k| norm[k] || k },
+                     "rename", "the columns would be named")
     rebuilt = {}
     @columns.each { |k, v| rebuilt[norm[k] || k] = v }
     rebuild(rebuilt)
@@ -699,7 +709,23 @@ class CAFrame
   # CATimedelta) column.  A categorical column's codes are read-only
   # (memo §13.4), so any fill on it raises — rebind a filled copy instead:
   # `df.append(name, df[name].strip_mask(method: :forward))`.
-  def fill(name, method_or_value)
+  #
+  # A Hash fills several columns, each its own way, checked before any is
+  # filled:
+  #
+  #   fill("temp" => :linear, "wind" => 0.0)
+  def fill(name, *method_or_value)
+    if name.is_a?(Hash)
+      unless method_or_value.empty?
+        raise ArgumentError, "fill: give a column and a method or value, or one Hash of them"
+      end
+      return fill_by_map(name, "fill") { |key, how| fill(key, how) }
+    end
+    unless method_or_value.size == 1
+      raise ArgumentError,
+            "fill: give a column and a method or value (or a Hash of them); got #{method_or_value.size + 1} arguments"
+    end
+    method_or_value = method_or_value.first
     refuse_if_frozen
     key = column_key(name, "fill")
     raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
@@ -719,6 +745,21 @@ class CAFrame
       col.unmask(method_or_value)   # constant fill, in place
     end
     self
+  end
+
+  # A fill Hash, name => method or value, checked (names, methods) before
+  # any column is filled; each pair is then given to the block.
+  private def fill_by_map (map, verb)
+    raise ArgumentError, "#{verb}: the Hash names no column" if map.empty?
+    keys = column_keys(map.keys, verb)
+    keys.each { |key| raise KeyError, "no column #{key.inspect}" unless @columns.key?(key) }
+    map.each_value do |how|
+      next unless how.is_a?(Symbol) && !%i[ffill bfill linear].include?(how)
+      raise ArgumentError,
+            "#{verb}: unknown method #{how.inspect} (:ffill | :bfill | :linear, or a constant fill value)"
+    end
+    keys.zip(map.values) { |key, how| yield key, how }
+    return self
   end
 
   private def fill_linear_column(key, col)

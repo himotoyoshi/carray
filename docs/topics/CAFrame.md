@@ -696,7 +696,7 @@ df.fill("temp", :linear)                            # fill masked cells
 
 - **`append(name, col)`** returns a new frame with the column added at the end, or replacing an existing column of that name in place. With `before: "temp"` or `after: "station"` it goes next to that column instead, and an existing column of that name is moved there: `df.append("id", ids, before: df.column_names.first)` puts it leftmost. Its length must be `N`. Only a frame with **no columns and no index** takes `N` from the column appended to it; a frame of zero rows that still has a column or an index requires length 0 (see [A frame with only an index](#a-frame-with-only-an-index)).
 - **`drop(*names)`** returns a new frame without those columns. The data is not touched. As in `select`, a name may be given as a Range of names or a Regexp.
-- **`rename(old => new, ...)`** returns a new frame with the columns renamed, in the same order.
+- **`rename(old => new, ...)`** returns a new frame with the columns renamed, in the same order. A block gives each column's new name from its old one (`df.rename { |name| name.upcase }`). Names may be exchanged (`rename("a" => "b", "b" => "a")`); two columns ending up with one name raise.
 
 The same changes can be made to the frame itself with `df["name"] =`:
 
@@ -904,6 +904,7 @@ A zone named after a place (`JST`, `CST`) is not a candidate, since some of thos
 df.fill("temp", :ffill)     # forward-fill: carry the last present value
 df.fill("temp", :bfill)     # back-fill: carry the next present value
 df.fill("temp", :linear)    # linear interpolation between present values
+df.fill("temp" => :linear, "rain" => 0.0)   # several columns, each its own way
 df.fill("temp", 0.0)        # a constant
 ```
 
