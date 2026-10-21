@@ -356,8 +356,8 @@ class CAFrame
   #   df.to_csv("out.csv", attrs: [:units, :long_name])
   #
   # +precision:+ writes each float cell rounded to that many decimal places,
-  # as +to_table+ shows it (a complex cell each part); NaN and infinities are
-  # written as they are. Without it a float is written in full, so that
+  # still as a float (precision: 0 writes 3.0), and each part of a complex
+  # cell likewise; NaN and infinities are written as they are. Without it a float is written in full, so that
   # from_csv reads back the same value.
   #
   #   df.to_csv("out.csv", precision: 2)
@@ -664,9 +664,11 @@ class CAFrame
       elsif e.respond_to?(:iso8601)
         e.iso8601
       elsif precision && e.is_a?(Float)
-        e.finite? ? e.round(precision).to_s : e.to_s
+        # Still a float, so precision: 0 writes 3.0 and the column reads
+        # back as floats.
+        e.finite? ? e.round(precision).to_f.to_s : e.to_s
       elsif precision && e.is_a?(Complex) && e.real.is_a?(Float)
-        Complex(*[e.real, e.imaginary].map { |x| x.finite? ? x.round(precision) : x }).to_s
+        Complex(*[e.real, e.imaginary].map { |x| x.finite? ? x.round(precision).to_f : x }).to_s
       else
         e.to_s
       end

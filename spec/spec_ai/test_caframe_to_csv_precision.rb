@@ -28,6 +28,12 @@ class TestCAFrameToCsvPrecision < Test::Unit::TestCase
     assert_equal [1.235, 0.667], [back["f"][0], back["f"][2]]
   end
 
+  def test_zero_places_still_writes_floats
+    df = CAFrame.new("x" => CA_FLOAT64([2.5, -0.4]), "z" => CA_CMPLX128([Complex(1.6, 2.4), 0]))
+    assert_equal ["x,z", "3.0,2.0+2.0i", "0.0,0.0+0.0i"], df.to_csv(precision: 0).lines.map(&:chomp)
+    assert_equal :float64, CAFrame.from_csv(StringIO.new(df.select("x").to_csv(precision: 0))).data_types["x"]
+  end
+
   def test_refusals
     assert_raise(ArgumentError) { frame.to_csv(precision: -1) }
     assert_raise(ArgumentError) { frame.to_csv(precision: 1.5) }
