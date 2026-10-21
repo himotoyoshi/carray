@@ -901,9 +901,9 @@ class TestCAFrameAxisNameRoundTrip < Test::Unit::TestCase
 
   def test_the_round_trip_is_the_identity_on_the_default_name
     df = CAFrame.new("t" => CA_INT32([1, 2]), "v" => CA_FLOAT64([1, 2]))
-    before = df.axis_name
-    df.set_index("t").reset_index
-    assert_equal before, df.axis_name
+    back = df.set_index("t").reset_index
+    assert_equal df.axis_name, back.axis_name
+    assert_equal df.column_names, back.column_names
   end
 
   # Only the name held before the frame had an index is remembered, so a second
@@ -928,11 +928,11 @@ class TestCAFrameAxisNameRoundTrip < Test::Unit::TestCase
   end
 
   def test_resetting_twice_is_harmless
-    df = frame("obs")
-    df.set_index("t").reset_index
+    df = frame("obs").set_index("t").reset_index
     assert_equal "obs", df.axis_name
     df = df.reset_index
     assert_equal "obs", df.axis_name
+    assert_equal %w[t v], df.column_names
   end
 end
 
