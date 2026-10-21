@@ -104,7 +104,7 @@ Numbers are read as decimal numbers: `"010"` is ten, and `"0x1F"` or `"1_000"` a
 
 ### Exceptions to the worked-out types
 
-In the Hash, `nil` keeps a named column as text, and `default:` sets the type of every column the Hash does not name — a type, or `:string` to keep them all text:
+In the Hash, `:string` (or `nil`) keeps a named column as text, and `default:` sets the type of every column the Hash does not name — a type, or `:string` to keep them all text:
 
 ```ruby
 text = <<~CSV

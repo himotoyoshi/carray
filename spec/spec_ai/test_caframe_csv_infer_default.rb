@@ -36,6 +36,12 @@ class TestCAFrameCSVInferDefault < Test::Unit::TestCase
     assert_equal CATime, df.data_types["date"]
   end
 
+  def test_string_for_a_column_keeps_it_text
+    df = CAFrame.from_csv(StringIO.new(CSV_TEXT), types: { "n" => :string })
+    assert_equal CAString, df.data_types["n"]
+    assert_equal :float64, df.data_types["t"]
+  end
+
   def test_default_text_keeps_the_rest_text
     df = CAFrame.from_csv(StringIO.new(CSV_TEXT), types: { default: :string, "n" => :float64 })
     assert_equal :float64, df.data_types["n"]

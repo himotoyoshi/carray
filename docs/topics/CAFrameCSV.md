@@ -58,7 +58,7 @@ df.infer_types        # => { "time" => :time, "temp" => :float64, "count" => :in
 df = df.cast(df.infer_types.merge("count" => :int32))
 ```
 
-**Mostly one rule, with exceptions.** `default:` in the map sets every column the map does not name — `:infer` to infer them (what `from_csv` does without `default:`), `:string` to keep them text, or a type to cast them all — and a named column takes its own entry instead. `nil` leaves a column as the text it was read as, which is how to keep a column out of inference:
+**Mostly one rule, with exceptions.** `default:` in the map sets every column the map does not name — `:infer` to infer them (what `from_csv` does without `default:`), `:string` to keep them text, or a type to cast them all — and a named column takes its own entry instead. `:string` (or `nil`) leaves a column as the text it was read as, which is how to keep a column out of inference:
 
 ```ruby
 CAFrame.from_csv("obs.csv", types: { "count" => :int32, "id" => nil })
