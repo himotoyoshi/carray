@@ -13,7 +13,7 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | read a CSV file | `CAFrame.from_csv` | 3 |
 | read CSV text I already have in a String | `CAFrame.from_csv(StringIO.new(text))` | 3 |
 | have the column types worked out | `from_csv` (by default) | 3 |
-| read every column as text | `from_csv(types: :text)` | 3 |
+| read every column as text | `from_csv(types: :string)` | 3 |
 | see the types that would be chosen, before converting | `infer_types` | 3 |
 | treat `-1`, `NA` or another code as missing | `from_csv(missing: [...])` | 3 |
 | be told about cells that cannot be read | `from_csv(on_error: :warn)` | 3 |
@@ -28,6 +28,7 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | glance at a frame | `p df` | 4 |
 | print every row | `puts df`, `to_table(rows: nil)` | 4 |
 | check every column's type, missing count and range | `describe` | 4 |
+| pick the columns of a kind (numbers, text, times) | `select(:numeric)`, `drop(:string)` | 5 |
 | one summary of every column, as one row | `df.mean`, `df.max("x", "y")` | 4 |
 | the same computation on several columns | `transform("a".."c") { \|col\| ... }` | 7 |
 | know the size, the column names, the types | `nrow`, `column_names`, `data_types` | 4 |

@@ -50,12 +50,12 @@ A column gets a type only when every one of its present cells fits that type:
 
 One unreadable cell keeps a whole column as text. That is what happened to `rating` above: the `n/a` in it is not a number. Telling `from_csv` how the file writes missing values (next section) usually settles it.
 
-### Everything as text — `types: :text`
+### Everything as text — `types: :string`
 
-`types: :text` reads every column as text. Nothing is converted, so nothing is lost or misread; you can convert columns yourself afterwards (chapter 7):
+`types: :string` reads every column as text. Nothing is converted, so nothing is lost or misread; you can convert columns yourself afterwards (chapter 7):
 
 ```ruby
-df = CAFrame.from_csv("sales.csv", types: :text)
+df = CAFrame.from_csv("sales.csv", types: :string)
 df["revenue"].class   # => CAString
 df["revenue"][0]      # => "2121.39"
 ```
@@ -104,7 +104,7 @@ Numbers are read as decimal numbers: `"010"` is ten, and `"0x1F"` or `"1_000"` a
 
 ### Exceptions to the worked-out types
 
-In the Hash, `nil` keeps a named column as text, and `default:` sets the type of every column the Hash does not name — a type, or `:text` to keep them all text:
+In the Hash, `nil` keeps a named column as text, and `default:` sets the type of every column the Hash does not name — a type, or `:string` to keep them all text:
 
 ```ruby
 text = <<~CSV
@@ -125,7 +125,7 @@ df.data_types
 When you would rather see the decision before it is made, read the file as text and ask:
 
 ```ruby
-raw = CAFrame.from_csv("sales.csv", types: :text)
+raw = CAFrame.from_csv("sales.csv", types: :string)
 raw.infer_types
 # => {"date" => :time, "visitors" => :int64, "revenue" => :float64}
 ```
@@ -348,7 +348,7 @@ sales["shop"].class   # => CAConstString
 | the file… | option |
 |---|---|
 | has numbers, dates, yes/no columns | worked out by default; `types:` to name them |
-| should be read as text, unconverted | `types: :text` |
+| should be read as text, unconverted | `types: :string` |
 | writes missing values with a code | `missing:` |
 | may contain mistakes you want to hear about | `on_error: :warn` / `:raise` |
 | has title or unit lines, or no header | `header:` / `data:` / `column_names:` / `attrs:` |

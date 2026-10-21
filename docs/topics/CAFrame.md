@@ -250,7 +250,7 @@ Read a CSV from a path or from an open IO. The header row gives the column names
 ```ruby
 df = CAFrame.from_csv("obs.csv")                                    # each column's type inferred
 df = CAFrame.from_csv("obs.csv", types: { "temp" => :float64 })     # temp read as float64, the rest inferred
-df = CAFrame.from_csv("obs.csv", types: :text)                      # every column as text
+df = CAFrame.from_csv("obs.csv", types: :string)                      # every column as text
 ```
 
 The inference (the rules are under [`infer_types`](#finding-the-types--infer_types)). A time column read this way is already a `CATime`, so it goes straight to `set_index`; `parse_to_time` is for a column still held as text.
@@ -504,6 +504,15 @@ df.filter { |f| f.index.is_masked }   # every row with no label
 sub = df.select("station", "temp")   # => CAFrame with two columns
 df.select("tmax".."rain")            # the columns from tmax to rain, in the frame's order
 df.select(/^t/)                      # the columns whose names match
+df.select(:numeric)                  # the columns of a kind
+```
+
+A Symbol picks the columns of a kind — `:numeric` (integers, floats and complex numbers, as `CArray#numeric?` says), `:string` (text columns: `CAString`, `CAConstString`, `CAFixlenString`, or an object column whose present cells are all Strings), `:time` (`CATime`) or `:categorical` — or of a data type as `cast` names it (`:float64`, `:int32`, `:boolean`, …; a Face column is not counted as its storage type). Kinds, names, Ranges and Regexps mix, and `drop` and `transform` take them too:
+
+```ruby
+df.select(:numeric).to_ca.mean(axis: 1)           # a row mean across the numeric columns
+df.transform(:numeric) { |col| col.round(1) }
+df.drop(:string)
 sub.column_names                     # => ["station", "temp"]
 ```
 

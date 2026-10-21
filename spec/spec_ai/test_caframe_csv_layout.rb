@@ -10,7 +10,7 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
   TEXT = "Observations\n\nstation,temp\nname,degC\nTokyo,1\nOsaka,2\nNagoya,3\nSendai,4\n"
 
   def read(text, **opts, &block)
-    CAFrame.from_csv(StringIO.new(text), types: :text, **opts, &block)
+    CAFrame.from_csv(StringIO.new(text), types: :string, **opts, &block)
   end
 
   def cells(df)

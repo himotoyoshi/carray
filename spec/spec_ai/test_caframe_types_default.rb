@@ -14,7 +14,7 @@ class TestCAFrameTypesDefault < Test::Unit::TestCase
   CSV
 
   def frame(**opts)
-    CAFrame.from_csv(StringIO.new(CSV_TEXT), types: :text, **opts)
+    CAFrame.from_csv(StringIO.new(CSV_TEXT), types: :string, **opts)
   end
 
   def test_infer_with_a_column_set_by_hand

@@ -8,7 +8,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
   MALFORMED = CAFrame::CSVParser::MalformedCSV
 
   def read(text, **opts, &dsl)
-    CAFrame.from_csv(StringIO.new(text), types: :text, **opts, &dsl)
+    CAFrame.from_csv(StringIO.new(text), types: :string, **opts, &dsl)
   end
 
   # Text after a closing quote used to end the record and drop every later
@@ -153,10 +153,10 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
     Dir.mktmpdir do |dir|
       path = File.join(dir, "obs.csv")
       File.write(path, "a,b\n1,2\n3,x\"y\n")
-      err = assert_raise(MALFORMED) { CAFrame.from_csv(path, types: :text) }
+      err = assert_raise(MALFORMED) { CAFrame.from_csv(path, types: :string) }
       assert_equal path, err.path
       assert_match(/\A#{Regexp.escape(path)}:3: a quote inside unquoted field 2 /, err.message)
-      err = assert_raise(MALFORMED) { File.open(path) { |io| CAFrame.from_csv(io, types: :text) } }
+      err = assert_raise(MALFORMED) { File.open(path) { |io| CAFrame.from_csv(io, types: :string) } }
       assert_match(/\A#{Regexp.escape(path)}:3: /, err.message)
     end
   end
@@ -190,7 +190,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
 
   def test_a_parser_keeps_its_rows
     rows = [["1"], ["2", "3"]]
-    df = CAFrame.from_csv(nil, parser: ->(_) { [["a", "b"], rows] }, types: :text)
+    df = CAFrame.from_csv(nil, parser: ->(_) { [["a", "b"], rows] }, types: :string)
     assert_equal [["1"], ["2", "3"]], rows
     assert_equal ["1", "2"], df["a"].to_a
     assert_equal [UNDEF, "3"], df["b"].to_a
@@ -258,7 +258,7 @@ class TestCAFrameCSVMalformed < Test::Unit::TestCase
   def test_a_separator_in_another_encoding_says_how_to_read
     io = StringIO.new("a;b\n1;2\n".encode("UTF-16LE"))
     io.set_encoding("UTF-16LE")
-    err = assert_raise(Encoding::CompatibilityError) { CAFrame.from_csv(io, types: :text) }
+    err = assert_raise(Encoding::CompatibilityError) { CAFrame.from_csv(io, types: :string) }
     assert_match(/transcoded to UTF-8/, err.message)
   end
 

@@ -49,12 +49,12 @@ class TestFrameRepeatedNames < Test::Unit::TestCase
   def test_a_csv
     Tempfile.create(["d", ".csv"]) do |f|
       f.write("a,b,a\n1,2,3\n"); f.flush
-      assert_repeated("from_csv", "the header row names", "a") { CAFrame.from_csv(f.path, types: :text) }
+      assert_repeated("from_csv", "the header row names", "a") { CAFrame.from_csv(f.path, types: :string) }
     end
     Tempfile.create(["d", ".csv"]) do |f|
       f.write("a,b,c\n1,2,3\n"); f.flush
-      assert_repeated("from_csv", "columns: names", "z") { CAFrame.from_csv(f.path, columns: { "a" => "z", "b" => "z" }, types: :text) }
-      assert_repeated("from_csv", "columns: selects column", 0) { CAFrame.from_csv(f.path, columns: [0, 0], types: :text) }
+      assert_repeated("from_csv", "columns: names", "z") { CAFrame.from_csv(f.path, columns: { "a" => "z", "b" => "z" }, types: :string) }
+      assert_repeated("from_csv", "columns: selects column", 0) { CAFrame.from_csv(f.path, columns: [0, 0], types: :string) }
     end
   end
 

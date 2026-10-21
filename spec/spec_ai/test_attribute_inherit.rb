@@ -208,7 +208,7 @@ class TestAttributeInherit < Test::Unit::TestCase
   end
 
   def test_frame_text_cast_and_outer_join_keep_attributes
-    df = CAFrame.from_csv(StringIO.new("a,b\nK,m\n1,x\n2,y\n"), attrs: [:units], types: :text)
+    df = CAFrame.from_csv(StringIO.new("a,b\nK,m\n1,x\n2,y\n"), attrs: [:units], types: :string)
     assert_equal "m", df.head(1)["b"].attr(:units)
     assert_equal "K", df.cast(:infer)["a"].attr(:units)
     assert_equal "K", df.cast("a" => :float64)["a"].attr(:units)
@@ -225,7 +225,7 @@ class TestAttributeInherit < Test::Unit::TestCase
     assert_equal "m", a.categorize.attr(:units)
     assert_equal "m", a.categorize(sort_labels: true).attr(:units)
     csv = "t,b,c,i\nT,B,C,I\n2024-01-01,1,x,3\n2024-01-02,0,y,4\n"
-    read = -> { CAFrame.from_csv(StringIO.new(csv), attrs: [:units], types: :text) }
+    read = -> { CAFrame.from_csv(StringIO.new(csv), attrs: [:units], types: :string) }
     assert_equal "B", read.().cast("b" => :boolean)["b"].attr(:units)
     assert_equal "I", read.().cast("i" => :int32).cast("i" => :boolean)["i"].attr(:units)
     assert_equal "T", read.().cast("t" => :time)["t"].attr(:units)

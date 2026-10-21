@@ -64,6 +64,16 @@ p sales.select("shop", "revenue").head(3)
 
 `select` with one name still gives a frame. The frame `select` returns holds the same column arrays as `sales`, so writing through it reaches `sales` (chapter 16).
 
+Columns can also be picked by a Range of names, a pattern, or their kind:
+
+```ruby
+sales.select("visitors".."rating").column_names   # => ["visitors", "revenue", "rating"]
+sales.select(/^r/).column_names                   # => ["revenue", "rating"]
+sales.select(:numeric).column_names               # => ["visitors", "revenue", "rating"]
+```
+
+The kinds are `:numeric`, `:string`, `:time` and `:categorical`, or a data type such as `:float64`. `drop` takes the same.
+
 To leave out a few columns instead of naming the ones to keep, use `drop`:
 
 ```ruby

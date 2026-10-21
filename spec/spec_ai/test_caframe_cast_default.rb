@@ -14,7 +14,7 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
   CSV
 
   def frame
-    CAFrame.from_csv(StringIO.new(CSV_TEXT), types: :text)
+    CAFrame.from_csv(StringIO.new(CSV_TEXT), types: :string)
   end
 
   def test_infer

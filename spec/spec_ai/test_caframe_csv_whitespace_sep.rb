@@ -9,7 +9,7 @@ require "carray"
 class TestCAFrameCSVWhitespaceSep < Test::Unit::TestCase
 
   def cols(text, **opts)
-    df = CAFrame.from_csv(StringIO.new(text), types: :text, **opts)
+    df = CAFrame.from_csv(StringIO.new(text), types: :string, **opts)
     df.column_names.map { |n| df[n].to_a }
   end
 
@@ -30,7 +30,7 @@ class TestCAFrameCSVWhitespaceSep < Test::Unit::TestCase
     a = CA_OBJECT(["", "x"]); a[0] = UNDEF
     df = CAFrame.new("a" => a, "b" => CA_OBJECT(%w[2 y]))
     text = df.to_csv(sep: " ").encode("CP932")
-    back = CAFrame.from_csv(StringIO.new(text), sep: " ", types: :text)
+    back = CAFrame.from_csv(StringIO.new(text), sep: " ", types: :string)
     assert_equal [[UNDEF, "x"], ["2", "y"]], back.column_names.map { |n| back[n].to_a.map { |v| v == UNDEF ? v : v.encode("UTF-8") } }
   end
 

@@ -397,13 +397,58 @@ class CAFrame
     self
   end
 
-  # The names that the arguments of select / drop pick: a name, or a Range
-  # or Regexp expanded as stack_columns expands it; none twice.
+  # The names that the arguments of select / drop / transform pick: a name,
+  # a Range or Regexp expanded as stack_columns expands it, or a Symbol for
+  # the columns of a kind (columns_of_kind); none twice.
   private def names_selected(args, verb)
     names = args.flat_map do |a|
-      a.is_a?(Range) || a.is_a?(Regexp) ? columns_selected(a, verb) : [a]
+      case a
+      when Range, Regexp then columns_selected(a, verb)
+      when Symbol        then columns_of_kind(a, verb)
+      else                    [a]
+      end
     end
     return column_keys(names, verb)
+  end
+
+  # The names of the columns of a kind, in the frame's order:
+  #   :numeric      numbers (CArray#numeric?: integers, floats, complex)
+  #   :string       text: CAString, CAConstString, CAFixlenString, or an
+  #                 object column whose present cells are all Strings
+  #   :time         CATime
+  #   :categorical  CACategorical
+  # or a data type as cast names it (:float64, :int32, :boolean, ...), which
+  # picks the columns of that type that are not a Face.
+  private def columns_of_kind(kind, verb)
+    matches =
+      case kind
+      when :numeric     then ->(col) { col.numeric? }
+      when :string      then ->(col) { string_kind_column?(col) }
+      when :time        then ->(col) { col.is_a?(CATime) }
+      when :categorical then ->(col) { col.is_a?(CACategorical) }
+      else
+        # A Symbol that is neither is a column name written as a Symbol.
+        name = begin
+                 CArray.data_type_name(kind)
+               rescue ArgumentError, TypeError, CArray::DataTypeError
+                 CAFrame.__send__(:column_key, kind, verb,
+                                  hint: "a Symbol names a kind of column (:numeric, :string, " \
+                                        ":time, :categorical) or a data type")
+               end
+        ->(col) { !col.face? && CArray.data_type_name(col.data_type) == name }
+      end
+    names = @columns.keys.select { |key| matches.(@columns[key]) }
+    raise ArgumentError, "#{verb}: #{kind.inspect} selects no column" if names.empty?
+    return names
+  end
+
+  # A column of text: a string Face, or an object column whose present
+  # cells are all Strings (one with none present is not).
+  private def string_kind_column?(col)
+    return true if col.is_a?(CArray::StringOperationMixin)
+    return false if col.face? || col.data_type != :object
+    present = col.to_a.reject { |v| UNDEF.equal?(v) }
+    return !present.empty? && present.all?(String)
   end
 
   # Column projection (memo §13.2): a view-frame holding the named columns as

@@ -2,14 +2,14 @@ require "test/unit"
 require "stringio"
 require "carray"
 
-# CAFrame.from_csv(missing:, types: :text) / CAFrame#to_csv(missing:): a file's own
+# CAFrame.from_csv(missing:, types: :string) / CAFrame#to_csv(missing:): a file's own
 # spelling of a missing value.
 
 class TestCAFrameCSVMissing < Test::Unit::TestCase
   CSV = "time,temp,rh\n1,20.5,-999\n2,-999,///\n3,///,40\n"
 
   def read(**opts)
-    CAFrame.from_csv(StringIO.new(CSV), types: :text, **opts)
+    CAFrame.from_csv(StringIO.new(CSV), types: :string, **opts)
   end
 
   def test_tokens_mask_every_column
@@ -49,7 +49,7 @@ class TestCAFrameCSVMissing < Test::Unit::TestCase
 
   def test_a_bad_default_token_raises_before_reading
     assert_raise(ArgumentError) do
-      CAFrame.from_csv("/nonexistent/file.csv", missing: { default: -999 }, types: :text)
+      CAFrame.from_csv("/nonexistent/file.csv", missing: { default: -999 }, types: :string)
     end
   end
 
@@ -65,17 +65,17 @@ class TestCAFrameCSVMissing < Test::Unit::TestCase
   end
 
   def test_tokens_match_the_text_exactly
-    df = CAFrame.from_csv(StringIO.new("v\n-999\n-999.0\n\"-999\"\n"), missing: "-999", types: :text)
+    df = CAFrame.from_csv(StringIO.new("v\n-999\n-999.0\n\"-999\"\n"), missing: "-999", types: :string)
     assert_equal [UNDEF, "-999.0", UNDEF], df["v"].to_a
   end
 
   def test_tokens_match_after_strip
-    df = CAFrame.from_csv(StringIO.new("v\n -999 \n1\n"), missing: "-999", strip: true, types: :text)
+    df = CAFrame.from_csv(StringIO.new("v\n -999 \n1\n"), missing: "-999", strip: true, types: :string)
     assert_equal [UNDEF, "1"], df["v"].to_a
   end
 
   def test_the_empty_field_stays_missing
-    df = CAFrame.from_csv(StringIO.new("a,b\n1,\n,x\n"), missing: "x", types: :text)
+    df = CAFrame.from_csv(StringIO.new("a,b\n1,\n,x\n"), missing: "x", types: :string)
     assert_equal ["1", UNDEF], df["a"].to_a
     assert_equal [UNDEF, UNDEF], df["b"].to_a
   end
@@ -91,7 +91,7 @@ class TestCAFrameCSVMissing < Test::Unit::TestCase
 
   def test_works_with_the_reading_dsl
     text = "# station A\ntime,temp\n1,-999\n"
-    df = CAFrame.from_csv(StringIO.new(text), missing: "-999", types: :text) { |r| r.skip 1; r.header; r.data }
+    df = CAFrame.from_csv(StringIO.new(text), missing: "-999", types: :string) { |r| r.skip 1; r.header; r.data }
     assert_equal [UNDEF], df["temp"].to_a
   end
 end
@@ -184,7 +184,7 @@ class TestCAFrameToCSVMissing < Test::Unit::TestCase
     df = @df.copy
     df["note"] = note
     spec = { default: "-999", "note" => "" }
-    back = CAFrame.from_csv(StringIO.new(df.to_csv(missing: spec)), missing: spec, types: :text)
+    back = CAFrame.from_csv(StringIO.new(df.to_csv(missing: spec)), missing: spec, types: :string)
     assert_equal ["20.5", UNDEF, "30.0"], back["temp"].to_a
     assert_equal ["ok", UNDEF, "-999"], back["note"].to_a
   end
@@ -194,7 +194,7 @@ class TestCAFrameToCSVMissing < Test::Unit::TestCase
     note[1] = UNDEF
     df = CAFrame.new("note" => note)
     spec = { default: "-999", "note" => "" }
-    back = CAFrame.from_csv(StringIO.new(df.to_csv(missing: spec)), missing: spec, types: :text)
+    back = CAFrame.from_csv(StringIO.new(df.to_csv(missing: spec)), missing: spec, types: :string)
     assert_equal ["", UNDEF], back["note"].to_a
   end
 end

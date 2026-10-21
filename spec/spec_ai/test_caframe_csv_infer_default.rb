@@ -4,7 +4,7 @@ require "test/unit"
 require "stringio"
 require "carray"
 
-# from_csv infers the column types by default; types: :text keeps every
+# from_csv infers the column types by default; types: :string keeps every
 # column text.
 class TestCAFrameCSVInferDefault < Test::Unit::TestCase
   CSV_TEXT = "date,station,t,n,code\n2024-01-01,A,1.5,3,007\n2024-01-02,B,,4,010\n"
@@ -24,7 +24,7 @@ class TestCAFrameCSVInferDefault < Test::Unit::TestCase
   end
 
   def test_text_keeps_every_column_text
-    df = CAFrame.from_csv(StringIO.new(CSV_TEXT), types: :text)
+    df = CAFrame.from_csv(StringIO.new(CSV_TEXT), types: :string)
     assert_equal [CAString] * 5, df.data_types.values
     assert_equal ["1.5", UNDEF], df["t"].to_a
   end
@@ -37,7 +37,7 @@ class TestCAFrameCSVInferDefault < Test::Unit::TestCase
   end
 
   def test_default_text_keeps_the_rest_text
-    df = CAFrame.from_csv(StringIO.new(CSV_TEXT), types: { default: :text, "n" => :float64 })
+    df = CAFrame.from_csv(StringIO.new(CSV_TEXT), types: { default: :string, "n" => :float64 })
     assert_equal :float64, df.data_types["n"]
     assert_equal [CAString] * 4, df.data_types.values_at("date", "station", "t", "code")
   end
