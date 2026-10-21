@@ -903,6 +903,7 @@ class GroupedFrame
         grouped = if frame.equal?(@frame)
                     self
                   else
+                    # key-labels: the groups' index as it is, on a copy of the frame
                     GroupedFrame.new(frame, @cat, @axis_name, @key_names, index: @index,
                                      label_columns: @label_columns)
                   end
