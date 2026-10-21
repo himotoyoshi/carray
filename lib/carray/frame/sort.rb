@@ -5,7 +5,7 @@
 # the single-key instance CArray#sort_index) -- and gathering every column and
 # the index by that address into a view-frame in key order:
 #
-#   sort_by_key(*keys, order:, masked_position:)  -- sort by named columns, with
+#   sort_by_key(*keys, descending:, masked_position:)  -- sort by named columns, with
 #                           per-key or blanket ascending/descending.
 #   sort_by { |f| ... }  -- sort by key CArrays the block builds (the escape,
 #                           §4.3): derived or composite keys are ordinary column
@@ -25,19 +25,20 @@ class CAFrame
   # row permutation and gathers every column and the index by it.
   #
   # Each key is a **column name** (or the index axis name), or a
-  # **`[name, :asc | :desc]`** pair for a per-key direction. The +order:+ keyword
-  # is the direction for bare-name keys (default +:asc+). +masked_position:+
+  # **`[name, :asc | :desc]`** pair for a per-key direction. +descending: true+
+  # sorts the bare-name keys from largest to smallest (default ascending), as
+  # +CArray#order+ takes it. +masked_position:+
   # sends masked key rows to the +:last+ (default) or +:first+ end.
   #
   #   df.sort_by_key("temp")                              # one column, ascending
   #   df.sort_by_key("station", "temp")                   # lexicographic
-  #   df.sort_by_key("temp", order: :desc)                # all keys descending
+  #   df.sort_by_key("temp", descending: true)            # all keys descending
   #   df.sort_by_key(["station", :asc], ["temp", :desc])  # per-key direction
   #   df.sort_by_key("temp", masked_position: :first)     # masked rows first
   #   df.sort_by_key("time")                              # by the index
-  def sort_by_key(*specs, order: :asc, masked_position: :last)
+  def sort_by_key(*specs, descending: false, masked_position: :last)
     raise ArgumentError, "sort_by_key requires at least one key" if specs.empty?
-    validate_sort_order(order)
+    order = descending ? :desc : :asc
     named = specs.map do |spec|
       name, dir = parse_sort_key_spec(spec, order)
       [column_key(name, "sort_by_key"), key_column(column_key(name, "sort_by_key"), "sort_by_key"), dir]

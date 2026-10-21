@@ -1063,7 +1063,7 @@ class TestCAFrameSort < Test::Unit::TestCase
   end
 
   def test_sort_by_key_order_desc
-    s = @df.sort_by_key("temp", order: :desc)
+    s = @df.sort_by_key("temp", descending: true)
     assert_equal [30.0, 25.0, 22.0, 19.0], s["temp"].to_a
   end
 
@@ -1076,7 +1076,7 @@ class TestCAFrameSort < Test::Unit::TestCase
   end
 
   def test_sort_by_key_blanket_order_over_multi_key
-    m = @df.sort_by_key("station", "temp", order: :desc)
+    m = @df.sort_by_key("station", "temp", descending: true)
     assert_equal %w[tokyo tokyo osaka osaka], m["station"].to_a
     assert_equal [22.0, 19.0, 30.0, 25.0], m["temp"].to_a
   end
@@ -1091,7 +1091,7 @@ class TestCAFrameSort < Test::Unit::TestCase
 
   def test_sort_by_key_object_descending
     df = CAFrame.new("s" => CA_OBJECT(%w[b a b c]))
-    assert_equal %w[c b b a], df.sort_by_key("s", order: :desc)["s"].to_a
+    assert_equal %w[c b b a], df.sort_by_key("s", descending: true)["s"].to_a
   end
 
   def test_sort_by_key_masked_position
@@ -1102,7 +1102,7 @@ class TestCAFrameSort < Test::Unit::TestCase
   end
 
   def test_sort_by_key_bad_order_and_spec_raise
-    assert_raise(ArgumentError) { @df.sort_by_key("temp", order: :up) }
+    assert_raise(ArgumentError) { @df.sort_by_key("temp", order: :desc) }   # the keyword is descending:
     assert_raise(ArgumentError) { @df.sort_by_key(["temp"]) }         # 1-element spec
     assert_raise(ArgumentError) { @df.sort_by_key(["temp", :up]) }    # bad per-key dir
   end

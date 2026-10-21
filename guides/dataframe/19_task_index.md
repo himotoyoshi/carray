@@ -56,7 +56,7 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | check rows against rules | `verify` | 6 |
 | sort by columns | `sort_by_key` | 6 |
 | sort by a computed value | `sort_by { \|f\| ... }` | 6 |
-| take the top few rows | `sort_by_key(..., order: :desc).head(n)` | 6 |
+| take the top few rows | `sort_by_key(..., descending: true).head(n)` | 6 |
 | remove repeated rows | `df[df.is_duplicate.not]` | 6 |
 | keep groups that pass a test | `group_by(...).filter { \|g\| ... }` | 10 |
 

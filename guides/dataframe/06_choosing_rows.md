@@ -202,7 +202,7 @@ p sales.sort_by_key("revenue").head(3)
 # 2024-03-11  south       101   1525.1     4.7
 ```
 
-`order: :desc` sorts every key from largest to smallest. To give each key its own direction, give `[name, :asc]` or `[name, :desc]` pairs:
+`descending: true` sorts every key from largest to smallest. To give each key its own direction, give `[name, :asc]` or `[name, :desc]` pairs:
 
 ```ruby
 p sales.sort_by_key(["shop", :asc], ["revenue", :desc]).head(4)
@@ -249,7 +249,7 @@ by_shop["visitors"][0..2].to_a   # => [402, 388, 355]
 Sorting and then taking the first rows gives the largest or smallest few:
 
 ```ruby
-top3 = sales.sort_by_key("revenue", order: :desc).head(3)
+top3 = sales.sort_by_key("revenue", descending: true).head(3)
 top3["shop"].to_a   # => ["north", "north", "central"]
 ```
 

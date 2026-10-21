@@ -64,7 +64,7 @@ p expected.join(partial, on: ["shop", "date"], how: :anti)
 Sort by the figure, largest first, and keep the first row of each shop:
 
 ```ruby
-ranked = sales.sort_by_key("revenue", order: :desc)
+ranked = sales.sort_by_key("revenue", descending: true)
 best = ranked[ranked.is_duplicate("shop").not]
 p best.select("shop", "date", "revenue")
 # #<CAFrame nrow=3 columns=[shop:CAString, date:CATime[D], revenue:float64]>

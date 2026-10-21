@@ -588,12 +588,12 @@ df["precip"][report["precip is not negative"].not] = UNDEF
 
 ### `sort_by_key` — reorder rows by key columns
 
-`sort_by_key(*keys, order:, masked_position:)` sorts rows by one or more key columns, the first key deciding first and the next breaking its ties. It returns a sub-frame.
+`sort_by_key(*keys, descending:, masked_position:)` sorts rows by one or more key columns, the first key deciding first and the next breaking its ties. It returns a sub-frame.
 
 ```ruby
 df.sort_by_key("temp")                             # one column, ascending
 df.sort_by_key("station", "temp")                  # by station, then temp
-df.sort_by_key("temp", order: :desc)               # all keys descending
+df.sort_by_key("temp", descending: true)           # all keys descending
 df.sort_by_key(["station", :asc], ["temp", :desc]) # a direction per key
 df.sort_by_key("temp", masked_position: :first)    # masked rows first
 df.sort_by_key("time")                             # by the index (its axis name)

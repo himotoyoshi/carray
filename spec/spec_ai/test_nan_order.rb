@@ -189,7 +189,7 @@ class TestNanOrder < Test::Unit::TestCase
     wrong = []
     %i[float64 object].each do |dt|
       [[1, ->(x) { CAFrame.new("x" => x, "k" => CArray.int64(24) { |i| i % 3 }).sort_by_key("x")["k"] }],
-       [-1, ->(x) { CAFrame.new("x" => x, "k" => CArray.int64(24) { |i| i % 3 }).sort_by_key("x", order: :desc)["k"] }],
+       [-1, ->(x) { CAFrame.new("x" => x, "k" => CArray.int64(24) { |i| i % 3 }).sort_by_key("x", descending: true)["k"] }],
        [1, ->(x) { CAFrame.new("x" => x, "k" => CArray.int64(24) { |i| i % 3 }).group_by("k").median["x"] }]].each_with_index do |(dir, op), i|
         f = ->(a) { op.call(a.flatten) }
         got = answer(f, dt, :entity, nil)
