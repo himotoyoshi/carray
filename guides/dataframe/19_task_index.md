@@ -115,6 +115,7 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | I want to… | use | chapter |
 |---|---|---|
 | a total or average per group | `group_by(...).sum`, `.mean` | 10 |
+| the number of rows in each group | `group_by(...).size` | 10 |
 | different summaries for different columns, with names | `aggregate` | 10 |
 | a result per group that uses several columns | `aggregate { \|g\| ... }` | 10 |
 | any Ruby computation on each group's rows | `table { \|g\| ... }` | 10 |

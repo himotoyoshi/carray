@@ -84,6 +84,16 @@ class TestCAFrameArgumentForms < Test::Unit::TestCase
     assert_raise(ArgumentError) { df.fill("a", "b", :sideways) }
   end
 
+  # A group key named in a reduction is refused by name; count points at size.
+  def test_a_group_key_named_in_a_reduction
+    grp = frame.group_by("g")
+    e = assert_raise(ArgumentError) { grp.count("g") }
+    assert_match(/"g" is the group key.*size/, e.message)
+    assert_raise(ArgumentError) { grp.max("g", "a") }
+    assert_equal [2, 2, 2, 2], grp.count("g", keep_rows: true).to_a
+    assert_equal [2, 2], grp.size["size"].to_a
+  end
+
   def test_sort_by_descending
     df = frame
     assert_equal %w[dd ccc bb a], df.sort_by(descending: true) { |f| f["s"] }["s"].to_a

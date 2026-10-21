@@ -1112,6 +1112,7 @@ class GroupedFrame
   # the frame of those columns only, one row per group; with +keep_rows+
   # they come back as df[...] returns them, each on the frame's rows.
   private def reduce_columns(reduction, names, keep_rows, args: [], **keywords)
+    refuse_key_as_result(reduction, names) unless keep_rows
     keywords = keywords.compact
     fills = keywords.delete(:fill_value)
     if fills.is_a?(Hash)
@@ -1137,6 +1138,16 @@ class GroupedFrame
       return CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index)
     end
     result_frame(named, false)
+  end
+
+  # A key column named in a reduction would be a result column beside the
+  # key it is the group of: the index, or a key column of the result.
+  private def refuse_key_as_result(reduction, names)
+    named = names.map { |n| n.is_a?(String) ? n : nil }.compact & @key_names
+    return if named.empty?
+    hint = reduction == :count ? "; the number of rows of each group is size" : ""
+    raise ArgumentError,
+          "#{reduction}: #{named.first.inspect} is the group key, already in the result#{hint}"
   end
 
   # One row per group, indexed by the labels; or, with +keep_rows+, the

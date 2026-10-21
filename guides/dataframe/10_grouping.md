@@ -71,6 +71,8 @@ by_shop["rating"].mean.to_a.map { |v| v.round(2) }   # => [4.2, 4.6, 3.76]
 | `all` `any` | for yes/no columns: whether every, or some, value is `true` |
 | `accumulate` | the total added up as C adds numbers of the column's type: a total larger than the type can hold wraps around (in an `int8` column, 100 + 100 gives −56). It is for when you want exactly that arithmetic; for a total, use `sum` |
 
+`count` counts each column's values present; the number of rows in each group, missing values or not, is `size`: `sales.group_by("shop").size` gives a frame of one column, `"size"`. A key column is not a summary column — `count("shop")` raises and points at `size`.
+
 Each leaves out missing values, as the same summary on a whole column does (chapter 8). Each applies to the columns whose type has it: a date column has a `min`, `max`, `mean` and `median` but no `sum`; a text column a `min` and `max`, by alphabetical order.
 
 ```ruby
