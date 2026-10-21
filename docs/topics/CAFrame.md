@@ -696,15 +696,16 @@ The same changes can be made to the frame itself with `df["name"] =`:
 
 ```ruby
 df["temp"] = col      # bind the name to that column (a new name is added)
+df["unit"] = "degC"   # a column holding that one value on every row
 df["temp"] = nil      # remove the column
 df["temp"] = UNDEF    # mask every cell of the column, in place
 ```
 
 These act on **this** frame only. (Ruby returns the right-hand side as the value of an assignment, so `[]=` has no way to return a new frame the way `append` / `drop` do.) A frame this one was derived from keeps its own columns — each frame has its own set of names.
 
-- **Rebinding is a replacement, not an edit.** `df["a"] = other_col` binds the name to a different column and leaves the old one alone, so frames that hold the old column do not see the change — like `cast` and `promote`, and unlike `fill` or `mask_eq`, which edit the shared column. Rebinding is also where a column enters an existing frame, so this is where its length must equal `nrow` (a frame with no columns and no index takes its `nrow` from the first column assigned).
+- **Rebinding is a replacement, not an edit.** `df["a"] = other_col` binds the name to a different column and leaves the old one alone, so frames that hold the old column do not see the change — like `cast` and `promote`, and unlike `fill` or `mask_eq`, which edit the shared column. Rebinding is also where a column enters an existing frame, so this is where its length must equal `nrow` (a frame with no columns and no index takes its `nrow` from the first column assigned). A single value that is not a column — a number, a String, a time — is repeated on every row and typed as a record's value is (see [`from_records`](#caframefrom_records)); a frame with no rows yet has nothing to repeat it on, so it raises. `nil` and `UNDEF` keep their meanings above.
 - **`df["c"] = UNDEF` does reach other frames**, because it masks the stored column in place rather than replacing it.
-- A scalar right-hand side is refused (there is no implicit broadcast — write `CArray.float64(df.nrow) { 3 }`), and so is a `CAFrame` (take a column from it, or splice rows with [`df[rows] = other`](#masking-deleting-and-splicing-rows)).
+- A `CAFrame` right-hand side is refused (take a column from it, or splice rows with [`df[rows] = other`](#masking-deleting-and-splicing-rows)).
 - When the frame has an index, its axis name is not a column name: assigning to it raises and points at `set_index` / `reset_index`.
 
 ### Changing a column's type

@@ -230,9 +230,9 @@ class TestCAFrameColumnAssign < Test::Unit::TestCase
     assert_raise(ArgumentError) { @df["c"] = CA_FLOAT64([1, 2]) }
   end
 
-  def test_a_scalar_right_hand_side_is_refused
-    # No implicit broadcast; write CArray.float64(df.nrow) { 3 }.
-    assert_raise(ArgumentError) { @df["c"] = 3 }
+  def test_a_single_value_is_repeated_on_every_row
+    @df["c"] = 3
+    assert_equal [3] * @df.nrow, @df["c"].to_a
   end
 
   def test_a_frame_right_hand_side_is_refused

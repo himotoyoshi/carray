@@ -320,6 +320,8 @@ class CAFrame
   # untouched.
   #
   #   df["temp"] = col     -> bind the name to that column (a new name is added)
+  #   df["unit"] = "degC"  -> a column holding that one value on every row,
+  #                           typed as a record's value is (from_records)
   #   df["temp"] = nil     -> remove the column
   #   df["temp"] = UNDEF   -> mask every cell of the column, in place
   private def column_assign(key, value)
@@ -331,9 +333,22 @@ class CAFrame
       raise ArgumentError,
             "df[name] = takes a column, not a CAFrame; take one with " \
             "other[\"name\"], or splice rows with df[rows] = other"
+    elsif one_value?(value)
+      if @columns.empty? && @index.nil?
+        raise ArgumentError,
+              "df[#{key.inspect}] = #{value.inspect}: the frame has no rows to repeat " \
+              "the value on yet; give a column (a CArray or an Array)"
+      end
+      rebind_column(key, CAFrame.__send__(:build_record_column, Array.new(@nrow, value), @nrow))
     else
       rebind_column(key, value)
     end
+  end
+
+  # A value that is not a column: neither an Array nor anything that turns
+  # into a CArray.
+  private def one_value?(value)
+    return !value.is_a?(Array) && !value.is_a?(CArray) && !value.respond_to?(:to_ca)
   end
 
   # Bind +key+ to +column+, adding the name when it is new.  This is where a
