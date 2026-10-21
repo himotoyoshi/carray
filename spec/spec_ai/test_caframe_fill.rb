@@ -241,3 +241,51 @@ class TestCAFrameFillLinearUnorderedIndex < Test::Unit::TestCase
     assert_equal([0.0, 10.0, 20.0, 40.0, 30.0], df["v"].to_a)
   end
 end
+
+# A row whose index is masked (or NaN) has no place on the line: it is not
+# interpolated between, and it is not filled.
+class TestCAFrameFillLinearIndexWithoutPlace < Test::Unit::TestCase
+  def test_a_masked_index_leaves_its_row_masked
+    idx = CA_INT64([0, 1, 2])
+    idx[1] = UNDEF
+    df = CAFrame.new({ "x" => CA_FLOAT64([100, UNDEF, 300]) }, axis_name: "t", index: idx)
+    df.fill("x", :linear)
+    assert_equal [100.0, UNDEF, 300.0], df["x"].to_a
+  end
+
+  def test_a_present_row_with_a_masked_index_is_kept_and_not_used
+    idx = CA_INT64([0, 1, 2, 3])
+    idx[1] = UNDEF
+    df = CAFrame.new({ "x" => CA_FLOAT64([100, 150, UNDEF, 300]) }, axis_name: "t", index: idx)
+    df.fill("x", :linear)
+    assert_equal [100.0, 150.0], df["x"].to_a[0, 2]
+    assert_in_delta 233.333333, df["x"][2], 1e-6
+  end
+
+  def test_a_nan_index
+    df = CAFrame.new({ "x" => CA_FLOAT64([100, UNDEF, 300, 400]) }, axis_name: "t",
+                     index: CA_FLOAT64([0, 1, Float::NAN, 3]))
+    df.fill("x", :linear)
+    assert_equal [100.0, 200.0, 300.0, 400.0], df["x"].to_a
+  end
+
+  def test_a_time_column_keeps_a_present_row_with_a_masked_index
+    t = CArray.time(%w[2024-01-01 2024-01-02 2024-01-03 2024-01-05])
+    t[1] = UNDEF
+    x = CA_FLOAT64([0, 1, 2, 3])
+    x[0] = UNDEF
+    df = CAFrame.new("x" => x, "when" => t).set_index("x")
+    df.fill("when", :linear)
+    assert_equal "2024-01-01", df["when"][0].to_s
+    assert_equal UNDEF, df["when"][1]          # x = 1 lies outside 2..3
+  end
+
+  def test_within_groups
+    idx = CA_INT64([0, 0, 1, 1, 2, 2])
+    idx[3] = UNDEF
+    df = CAFrame.new({ "g" => CA_OBJECT(%w[a b a b a b]), "x" => CA_FLOAT64([0, 100, UNDEF, UNDEF, 20, 300]) },
+                     axis_name: "t", index: idx)
+    df.group_by("g").fill("x", :linear)
+    assert_equal [0.0, 100.0, 10.0, UNDEF, 20.0, 300.0], df["x"].to_a
+  end
+end
