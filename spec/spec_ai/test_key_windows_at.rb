@@ -143,15 +143,15 @@ class TestKeyWindowsAt < Test::Unit::TestCase
     assert_equal "time", r.axis_name
     assert_equal grid.to_a, r.index.to_a
     assert_equal [2.0, 3.0, 4.0, 4.0], r["temp"].to_a
-    assert_equal [2.0, 3.0, 4.0, 4.0], w.mean("temp").to_a
-    assert_equal [3, 1, 1, 1], w.count("temp").to_a
+    assert_equal [2.0, 3.0, 4.0, 4.0], w.mean("temp")["temp"].to_a
+    assert_equal [3, 1, 1, 1], w.count("temp")["temp"].to_a
     assert_equal [0, 2, 3, 3], w.first_addr.to_a
   end
 
   def test_frame_empty_windows_answer_as_empty_reductions
     w = frame.windows(on: "time", at: grid, after: "30 minutes", exclude: :upper)
-    assert_equal [1.0, 3.0, UNDEF, 4.0], w.mean("temp").to_a   # 02:00 holds no row
-    assert_equal [1, 1, 0, 1], w.count("temp").to_a
+    assert_equal [1.0, 3.0, UNDEF, 4.0], w.mean("temp")["temp"].to_a   # 02:00 holds no row
+    assert_equal [1, 1, 0, 1], w.count("temp")["temp"].to_a
   end
 
   def test_frame_refuses_at_with_by
@@ -166,7 +166,7 @@ class TestKeyWindowsAt < Test::Unit::TestCase
     days = CArray.time(["2024-02-15"], unit: :D)
     err = assert_raise(ArgumentError) { df.windows(on: "t", at: days, before: "1 month") }
     assert_match(/\Awindows: at: holds points in 1 D/, err.message)
-    assert_equal [2.0], df.windows(on: "t", at: days.to_unit(:M), before: "1 month").sum("v").to_a
+    assert_equal [2.0], df.windows(on: "t", at: days.to_unit(:M), before: "1 month").sum("v")["v"].to_a
   end
 
   # The points are taken when the windows are made, and each result has an
