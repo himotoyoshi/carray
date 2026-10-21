@@ -358,7 +358,7 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
   end
 
   # Named columns give the frame of those columns, one row per group; with
-  # keep_rows they come back as df[...] gives them: one CArray, or an Array.
+  # keep_rows one comes back as df[name] gives it, several as a frame.
   def test_reductions_take_column_names
     g = @df.group_by("station")
     r = g.mean("temp")
@@ -374,8 +374,11 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
                  (@df["temp"] - g.mean("temp", keep_rows: true)).to_a.map { |v| v.round(2) }
     assert_raise(KeyError) { g.mean("nope") }
     assert_raise(TypeError) { g.mean(:temp) }
-    err = assert_raise(CArray::DataTypeError) { g.sum("station") }
-    assert_equal 'sum: column "station" (object) has no sum', err.message
+    err = assert_raise(ArgumentError) { g.sum("station") }
+    assert_equal 'sum: "station" is the group key, already in the result', err.message
+    d = CAFrame.new("k" => CA_INT32([1, 1]), "s" => CA_OBJECT(%w[x y]))
+    err = assert_raise(CArray::DataTypeError) { d.group_by("k").sum("s") }
+    assert_equal 'sum: column "s" (object) has no sum', err.message
   end
 
   def test_is_duplicate_marks_later_repeats
