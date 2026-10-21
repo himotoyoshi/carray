@@ -25,7 +25,7 @@ class TestCAFrameGroupFillHash < Test::Unit::TestCase
     assert_equal ["a", "?"], r["s"].to_a
     r = grouped.min(fill_value: { "x" => -9 })
     assert_equal ["a", UNDEF], r["s"].to_a
-    assert_equal [1.0, -1.0], grouped.min("x", fill_value: { "x" => -1 }).to_a
+    assert_equal [1.0, -1.0], grouped.min("x", fill_value: { "x" => -1 })["x"].to_a
   end
 
   def test_an_unknown_column_is_refused

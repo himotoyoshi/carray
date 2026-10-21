@@ -37,24 +37,23 @@ The visitor totals are floating-point numbers. `sum` is a statistic, and is comp
 
 ### Choosing the columns to summarise
 
-Name columns, and you get their results as arrays — one name gives one array, several give an Array of them:
+Name columns, and the result keeps only those, still labelled by the groups:
 
 ```ruby
-by_shop.sum("revenue").to_a.map { |v| v.round(2) }   # => [22994.93, 15292.67, 22113.01]
-visitors, rating = by_shop.mean("visitors", "rating")
-rating.to_a.map { |v| v.round(2) }                   # => [4.2, 4.6, 3.76]
-```
-
-To keep a frame, `select` or `drop` columns before grouping:
-
-```ruby
-p sales.select("shop", "visitors", "revenue").group_by("shop").mean
+p by_shop.mean("visitors", "revenue")
 # #<CAFrame nrow=3 columns=[visitors:float64, revenue:float64] index="shop">
 # shop       visitors      revenue
 # -------  ----------  -----------
 # north        233.75   2874.36625
 # south    129.857143   1911.58375
 # central     334.375  3159.001429
+```
+
+For the values alone, as an array in the order of the groups, summarise the column's groups, `by_shop["revenue"]`:
+
+```ruby
+by_shop["revenue"].sum.to_a.map { |v| v.round(2) }   # => [22994.93, 15292.67, 22113.01]
+by_shop["rating"].mean.to_a.map { |v| v.round(2) }   # => [4.2, 4.6, 3.76]
 ```
 
 ### The summaries
@@ -90,7 +89,7 @@ p sales.group_by("shop").last
 `min_count: n` gives `UNDEF` for a group with fewer than `n` values present; `fill_value:` puts a value of your choosing where a result is `UNDEF`:
 
 ```ruby
-by_shop.mean("visitors", min_count: 8).to_a   # => [233.75, UNDEF, 334.375]
+by_shop["visitors"].mean(min_count: 8).to_a   # => [233.75, UNDEF, 334.375]
 ```
 
 The south shop has seven counted days, so with `min_count: 8` it has no average. This is the way to refuse a figure that rests on too little data.
@@ -125,7 +124,7 @@ A key need not be a column of the frame. Any array with one value per row will d
 traffic = (sales["visitors"] >= 300).then_else("busy", "normal")
 g = sales.group_by(traffic)
 g.labels                                  # => ["normal", "busy"]
-g.mean("rating").to_a.map { |v| v.round(2) }   # => [4.36, 3.77]
+g["rating"].mean.to_a.map { |v| v.round(2) }   # => [4.36, 3.77]
 ```
 
 Busy days have lower ratings. The south shop's day with no visitor count has no traffic value, so it belongs to neither group (below).
@@ -136,7 +135,7 @@ When the frame has an index, its name works as a key, as a column name does:
 
 ```ruby
 by_label = sales.copy.set_index("shop").group_by("shop")
-by_label.max("visitors").to_a   # => [341, 186, 402]
+by_label["visitors"].max.to_a   # => [341, 186, 402]
 ```
 
 ### Rows whose key is missing
@@ -290,7 +289,7 @@ p df.filter { |f| f["shop"].eq("north") }.select("date", "revenue", "change", "r
 `filter` on a grouped frame keeps the rows of the groups that pass a test. The block receives the grouped frame and returns one value per group, built from group summaries:
 
 ```ruby
-well_rated = sales.group_by("shop").filter { |g| g.mean("rating") >= 4.0 }
+well_rated = sales.group_by("shop").filter { |g| g["rating"].mean >= 4.0 }
 well_rated["shop"].to_a.uniq   # => ["north", "south"]
 
 complete = sales.group_by("shop").filter { |g| g["visitors"].count_not_masked.eq(8) }

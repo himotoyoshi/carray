@@ -96,7 +96,7 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
 
   def test_filter_names_the_type_the_block_gave
     grp = CAFrame.new("g" => CA_INT32([1, 1, 2]), "v" => CA_FLOAT64([1, 2, 3])).group_by("g")
-    err = assert_raise(ArgumentError) { grp.filter { |x| x.mean("v") } }
+    err = assert_raise(ArgumentError) { grp.filter { |x| x["v"].mean } }
     assert_match(/\(got a float64 CArray\)/, err.message)
   end
 
@@ -357,14 +357,19 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     assert_equal 2, g.mean.nrow
   end
 
-  # Named columns come back as df[...] gives them: one CArray, or an Array.
+  # Named columns give the frame of those columns, one row per group; with
+  # keep_rows they come back as df[...] gives them: one CArray, or an Array.
   def test_reductions_take_column_names
     g = @df.group_by("station")
-    assert_equal [20.55, 27.65, 15.0], g.mean("temp").to_a.map { |v| v.round(2) }
+    r = g.mean("temp")
+    assert_equal ["temp"], r.column_names
+    assert_equal g.mean.index.to_a, r.index.to_a
+    assert_equal [20.55, 27.65, 15.0], r["temp"].to_a.map { |v| v.round(2) }
     assert_equal [22.1, 30.0, 22.1, 30.0, 15.0], g.max("temp", keep_rows: true).to_a
-    hi, wind = g.max("temp", "wind")
-    assert_equal [22.1, 30.0, 15.0], hi.to_a
-    assert_equal [3, 2], wind.shape
+    r = g.max("temp", "wind")
+    assert_equal %w[temp wind], r.column_names
+    assert_equal [22.1, 30.0, 15.0], r["temp"].to_a
+    assert_equal [3, 2], r["wind"].shape
     assert_equal [1.55, -2.35, -1.55, 2.35, 0.0],
                  (@df["temp"] - g.mean("temp", keep_rows: true)).to_a.map { |v| v.round(2) }
     assert_raise(KeyError) { g.mean("nope") }

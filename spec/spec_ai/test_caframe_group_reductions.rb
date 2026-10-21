@@ -71,17 +71,18 @@ class TestCAFrameGroupReductions < Test::Unit::TestCase
 
   def test_named_columns_and_keep_rows
     grp = frame.group_by("station")
-    assert_equal [10.0, 20.0], grp.median("temp").to_a
-    temp, n = grp.first("temp", "n")
-    assert_equal [10.0, 20.0], temp.to_a
-    assert_equal [3, 1], n.to_a
+    assert_equal [10.0, 20.0], grp.median("temp")["temp"].to_a
+    r = grp.first("temp", "n")
+    assert_equal %w[temp n], r.column_names
+    assert_equal [10.0, 20.0], r["temp"].to_a
+    assert_equal [3, 1], r["n"].to_a
     assert_equal [3, 1, 3, 1, 3, UNDEF], grp.count("temp", keep_rows: true).to_a
   end
 
   def test_keywords
     grp = frame.group_by("station")
-    assert_equal [1.3333333333, UNDEF], grp.variance("temp", min_count: 3).to_a.map { |v| v.is_a?(Float) ? v.round(10) : v }
-    assert_equal [10.0, -1.0], grp.median("temp", min_count: 2, fill_value: -1.0).to_a
+    assert_equal [1.3333333333, UNDEF], grp.variance("temp", min_count: 3)["temp"].to_a.map { |v| v.is_a?(Float) ? v.round(10) : v }
+    assert_equal [10.0, -1.0], grp.median("temp", min_count: 2, fill_value: -1.0)["temp"].to_a
     assert_raise(ArgumentError) { grp.first("temp", min_count: 1) }
     assert_raise(CArray::DataTypeError) { grp.all("temp") }   # a float column has no all
   end
@@ -94,7 +95,7 @@ class TestCAFrameGroupReductions < Test::Unit::TestCase
     df = CAFrame.new("k" => CA_INT32([1, 1, 2, 2]), "c" => c.categorize,
                      "f" => CA_FLOAT64([1, 2, 3, 4]))
     grp = df.group_by("k")
-    assert_equal [1, 2], grp.count("c").to_a
+    assert_equal [1, 2], grp.count("c")["c"].to_a
     assert_equal %w[c f], grp.count.column_names
     assert_equal [1, 1, 1, 2],
                  df.windows(on: "f", before: 1, exclude: nil).count("c").to_a

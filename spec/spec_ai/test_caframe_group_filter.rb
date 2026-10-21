@@ -20,7 +20,7 @@ class TestCAFrameGroupFilter < Test::Unit::TestCase
     grp = frame.group_by("station")             # tokyo, osaka, nagoya
     kept = grp.filter { |g| g["temp"].count_not_masked >= 2 }
     assert_equal %w[tokyo tokyo tokyo], kept["station"].to_a
-    kept = grp.filter { |g| g.mean("temp") > 15.0 }
+    kept = grp.filter { |g| g["temp"].mean > 15.0 }
     assert_equal %w[osaka nagoya], kept["station"].to_a
     assert_equal [20.0, 30.0], kept["temp"].to_a
   end
@@ -43,7 +43,7 @@ class TestCAFrameGroupFilter < Test::Unit::TestCase
 
   def test_a_view_of_the_frame
     df = frame
-    kept = df.group_by("station").filter { |g| g.mean("temp") > 15.0 }
+    kept = df.group_by("station").filter { |g| g["temp"].mean > 15.0 }
     kept["temp"][0] = 99.0
     assert_equal 99.0, df["temp"][1]
   end
@@ -77,9 +77,9 @@ class TestCAFrameGroupFilter < Test::Unit::TestCase
     df  = frame.set_index("station")
     grp = df.group_by("station")
     assert_equal %w[tokyo osaka nagoya], grp.labels
-    assert_equal [11.5, 20.0, 30.0], grp.mean("temp").to_a
+    assert_equal [11.5, 20.0, 30.0], grp.mean("temp")["temp"].to_a
     assert_equal %w[tokyo osaka nagoya], grp.mean.index.to_a
-    assert_equal %w[osaka nagoya], grp.filter { |g| g.mean("temp") > 15.0 }.index.to_a
+    assert_equal %w[osaka nagoya], grp.filter { |g| g["temp"].mean > 15.0 }.index.to_a
     assert_equal [false, false, true, false, true, false], df.is_duplicate("station").to_a
     assert_raise(KeyError) { df.group_by("nope") }
   end

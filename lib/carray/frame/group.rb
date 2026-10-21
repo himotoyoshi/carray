@@ -754,7 +754,7 @@ class GroupedFrame
   # per row:
   #
   #   grp.filter { |g| g["temp"].count_not_masked >= 20 }   # stations with 20 readings
-  #   grp.filter { |g| g.mean("temp") > 15.0 }
+  #   grp.filter { |g| g["temp"].mean > 15.0 }
   #
   # The rows of a chosen group are kept in the frame's order, as a sub-frame
   # sharing the frame's columns. A group whose value is UNDEF is
@@ -790,7 +790,7 @@ class GroupedFrame
   # rows; adding or dropping a column changes the new frame only.
   #
   #   def warm_stations (grp)
-  #     grp.filter { |g| g.mean("temp") > 15.0 }   # the rows of some groups
+  #     grp.filter { |g| g["temp"].mean > 15.0 }   # the rows of some groups
   #   end
   #   grp.to_frame                                  # all of its rows
   #
@@ -832,9 +832,9 @@ class GroupedFrame
     CArray.object(@labels.size) { |i| @labels[i] }
   end
 
-  # A key column is the index here, not a result column.  Named columns
-  # come back as df[...] returns them, each on the frame's rows with
-  # +keep_rows+.
+  # A key column is the index here, not a result column.  Named columns give
+  # the frame of those columns only, one row per group; with +keep_rows+
+  # they come back as df[...] returns them, each on the frame's rows.
   private def reduce_columns(reduction, names, keep_rows, **keywords)
     keywords = keywords.compact
     fills = keywords.delete(:fill_value)
@@ -845,14 +845,18 @@ class GroupedFrame
               "#{reduction}: fill_value names no column #{unknown.map(&:inspect).join(', ')}"
       end
     end
+    named = {}
     out = over_named_columns(reduction, names, @key_names) do |col, name|
       fill = fills.is_a?(Hash) ? fills[name] : fills
       kw = fill.nil? ? keywords : keywords.merge(fill_value: fill)
       col = group_reduce(col, reduction, **kw)
-      keep_rows && !names.empty? ? spread_to_rows(col) : col
+      named[name] = keep_rows && !names.empty? ? spread_to_rows(col) : col
     end
-    return out unless names.empty?
-    result_frame(out, keep_rows)
+    return result_frame(out, keep_rows) if names.empty?
+    # Named columns on the frame's rows are columns of the frame, as df[...]
+    # returns them; one value per group needs the group labels beside it.
+    return out if keep_rows
+    result_frame(named, false)
   end
 
   # One row per group, indexed by the labels; or, with +keep_rows+, the

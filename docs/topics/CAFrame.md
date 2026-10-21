@@ -1062,11 +1062,12 @@ Each answers as the core reduction of the same name does over the group's rows; 
 df.group_by("station").mean       # => frame of per-station means
 ```
 
-Given column names, they reduce only those and return them as `df[...]` returns columns: one name gives the `CArray`, several an `Array` of them. A named column whose type lacks the reduction raises `CArray::DataTypeError`, as the transforms below and the windowed reductions do.
+Given column names, they reduce only those, and the result is the frame of those columns, one row per group, labelled as above. For the values alone, take the column (`["temp"]`), or reduce the column's group iterator, `grp["temp"].mean`, which answers a `CArray` of one value per group in the order of `labels`. A named column whose type lacks the reduction raises `CArray::DataTypeError`, as the transforms below and the windowed reductions do.
 
 ```ruby
-df.group_by("station").mean("temp")          # => CArray, one value per group
-hi, lo = df.group_by("station").max("temp", "rh")
+df.group_by("station").mean("temp")          # => frame of the temp column, one row per station
+df.group_by("station").max("temp", "rh")     # => frame of the two columns
+df.group_by("station")["temp"].mean          # => CArray, one value per group
 ```
 
 The reductions of the first row of the table take `min_count:` and `fill_value:`, as a CArray reduction does: a group with fewer than `min_count` present values is `UNDEF`, and `fill_value` fills the `UNDEF` cells:
@@ -1196,7 +1197,7 @@ df["total"] = grp.cumsum("rain")                  # running total per station
 | `order(descending:, method:, kind:)` | its rank among its group's rows (int64, `0` the smallest), as `CArray#order` |
 | `cumsum` `cumprod` `cummax` `cummin` `cumcount` | the running value of its group up to and including it |
 
-- They are called as the reductions are: given names, one name gives the `CArray` and several an `Array` of them; without names they give a frame of every column whose type has the operation (the keys left out), on the frame's rows and index.
+- Their answers lie on the frame's rows, so given names, one name gives the `CArray` and several an `Array` of them, as `df[...]` returns columns (as `keep_rows: true` returns a reduction); without names they give a frame of every column whose type has the operation (the keys left out), on the frame's rows and index.
 - **"Back" means earlier rows of the frame.** Rows that are not in time order give the previous row, not the previous time: sort first, with `sort_by_key("time")`.
 - `lag` takes its step as `n:`, since the positional arguments are column names.
 - **A lag by a distance of the key.** `before: "1 hour"` gives each row the value of the row of its group whose key is one hour earlier; `after:` looks the same distance ahead. The key is the index, or the column `on:` names: a time (the distance is a duration, `"1 hour"` or a `CATimedelta` value), a duration, or a number (the distance is a number). The key must match exactly, so a station with a reading missing at that time gets `UNDEF` rather than an older reading — use [`join_asof`](#join_asof--the-nearest-key) for the nearest one. The rows need not be in time order. A key that repeats within a group is refused, since the row at a key would not be one row; a row whose key is masked, NaN or infinite gets `UNDEF`. A time is moved on the finer of its unit and the distance's, so an hour before a date is not rounded onto the date. `n:` and a distance cannot be given together.
@@ -1212,7 +1213,7 @@ df["total"] = grp.cumsum("rain")                  # running total per station
 ```ruby
 grp = df.group_by("station")
 grp.filter { |g| g["temp"].count_not_masked >= 20 }   # stations with at least 20 readings
-grp.filter { |g| g.mean("temp") > 15.0 }              # the warmer stations
+grp.filter { |g| g["temp"].mean > 15.0 }              # the warmer stations
 df.resample("time", "1 hour").filter { |g| g["temp"].count_not_masked == 6 }   # complete hours
 ```
 

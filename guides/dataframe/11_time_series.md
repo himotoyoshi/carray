@@ -134,7 +134,7 @@ orders["time"].floor(unit: :h).to_a.map(&:to_s).first(3)
 `resample(time_column, unit)` groups rows into periods of time. It returns a grouped frame, so every summary of chapter 10 applies:
 
 ```ruby
-p orders.resample("time", "1 hour").sum("qty").to_a   # sold per hour
+p orders.resample("time", "1 hour")["qty"].sum.to_a   # sold per hour
 p orders.drop("item").resample("time", "1 hour").sum
 # [3.0, 1.0, 5.0, 3.0, 1.0]
 # #<CAFrame nrow=5 columns=[qty:float64] index="time">
@@ -206,7 +206,7 @@ p orders.drop("item").resample("time", "1 hour", fill: true).sum
 By default a period is named by its start, and holds the times at or after it: the 08:00 row covers 08:00 up to, but not including, 09:00. With `label: :right` a period is named by its end, and holds the times up to and including it — the usual convention for a figure that describes the period before a time, such as "orders in the two hours up to 12:00":
 
 ```ruby
-p orders.resample("time", "2 hours", label: :right).count("qty").to_a
+p orders.resample("time", "2 hours", label: :right)["qty"].count_not_masked.to_a
 # [3, 2, 2, 1]
 ```
 

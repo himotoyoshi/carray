@@ -3,8 +3,10 @@
 # A frame-wide verb over the columns -- a group reduction, a group transform,
 # a windowed reduction -- answers in one shape (CAFrame::ColumnVerbs):
 # without names, a frame of every column whose type has it, the key columns
-# left out; with names, the CArray (one) or the Array (several) as df[...]
-# returns columns, and a named column whose type lacks it refused with
+# left out; with names, a verb whose answers lie on the frame's rows gives
+# the CArray (one) or the Array (several) as df[...] returns columns, a
+# group reduction (one row per group) the frame of those columns with the
+# group labels; a named column whose type lacks it is refused with
 # CArray::DataTypeError.  An N-D column (each row a profile) is computed
 # along the rows and keeps its trailing shape.
 #
@@ -49,6 +51,14 @@ class TestFrameColumnVerbs < Test::Unit::TestCase
 
   def test_with_names_as_df_returns_columns
     VERBS.each do |label, verb|
+      if label.start_with?("group") && label != "group cumsum"
+        one = verb.(frame, "p")
+        assert_kind_of CAFrame, one, label
+        assert_equal ["p"], one.column_names, label
+        assert_equal [2, 2], one["p"].shape, label
+        assert_equal %w[v p], verb.(frame, "v", "p").column_names, label
+        next
+      end
       one = verb.(frame, "p")
       assert_kind_of CArray, one, label
       assert_equal 2, one.ndim, label
