@@ -459,6 +459,32 @@ class GroupedFrame
     @labels.size
   end
 
+  # The number of rows in each group, as a frame of one column "size",
+  # labelled as a reduction's result is. A row whose key is masked is in no
+  # group, so the sizes need not add up to the frame's nrow.
+  #
+  # @return [CAFrame]
+  def size
+    refuse_changed_rows("size")
+    return result_frame({ "size" => @cat.category_sizes.int64 }, false)
+  end
+
+  # Each group's label (an Array of the key values for several keys) and its
+  # rows as a sub-frame sharing the frame's columns, in the order of
+  # +labels+. Without a block, an Enumerator.
+  #
+  #   df.group_by("station").each { |station, rows| puts station, rows.nrow }
+  #
+  # @yieldparam label [Object, Array] the group's key value(s).
+  # @yieldparam rows [CAFrame] the group's rows.
+  # @return [GroupedFrame] self
+  def each
+    return enum_for(:each) { ngroup } unless block_given?
+    refuse_changed_rows("each")
+    ngroup.times { |k| yield @labels[k], @frame[group_address(k)] }
+    return self
+  end
+
   # Group key values (one per group), as an Array.
   def labels
     @labels.dup

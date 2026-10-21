@@ -783,6 +783,16 @@ class CAFrame
     @columns.size
   end
 
+  # [nrow, ncol]. The index is not a column, so it is not counted.
+  def shape
+    return [@nrow, @columns.size]
+  end
+
+  # Whether the frame has no rows.
+  def empty?
+    return @nrow == 0
+  end
+
   # Number of rows (axis-0 length N).
   attr_reader :nrow
 

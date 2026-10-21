@@ -345,6 +345,8 @@ They are `sum` `mean` `min` `max` `prod` `accumulate` `median` `variance` `stdde
 |---|---|
 | `nrow` | number of rows `N` (normally the length of the columns; see [A frame with only an index](#a-frame-with-only-an-index) for the exception) |
 | `ncol` | number of columns |
+| `shape` | `[nrow, ncol]` (the index is not counted) |
+| `empty?` | whether the frame has no rows |
 | `column_names` | `Array<String>` of column names, in column order |
 | `data_types` | `Hash` of `name => data_type` (a Symbol), or the Face's class for a Face column (`CATime`, `CAString`, ...) |
 | `columns` | `Array<CArray>` of the stored columns themselves, in column order |
@@ -1165,6 +1167,15 @@ The block runs once per group in Ruby, so with many groups `table` is far slower
 The values the block returns — and those a Proc reduction of `aggregate` returns — become columns typed as [`from_records`](#caframefrom_records) types a record's values: Integers an `int64` column, numbers a `float64` one, Strings a text column (`CAString`), time elements a `CATime` / `CATimedelta` column, arrays of one shape an N-D column, anything else (`true` / `false`, Ruby `Time`) an `object` column. `nil` and `UNDEF` are missing. Arrays become an N-D column only when every group gives one of the same shape, so a list whose length varies from group to group is an `object` column.
 
 The columns are the names any group's Hash has, in the order they first appear. A group whose Hash lacks a name is `UNDEF` in that column, as `from_records` reads a record that lacks a key.
+
+### Going through the groups — `each`, `size`
+
+`each` yields each group's label and its rows as a sub-frame sharing the frame's columns, in the order of `labels` (an Array of the key values for several keys); without a block it gives an Enumerator. `size` gives the number of rows in each group, as a frame of one column `"size"` labelled as a reduction's result is. A row whose key is masked is in no group, so neither sees it.
+
+```ruby
+df.group_by("station").each { |station, rows| puts "#{station}: #{rows.nrow}" }
+df.group_by("station").size     # => frame of the column "size", one row per station
+```
 
 ### One column — the group iterator
 
