@@ -705,6 +705,12 @@ class GroupedFrame
     cols = {}
     spec.each do |out_name, (in_name, reduction, *args)|
       out = @frame.__send__(:column_name_arg, out_name, "aggregate")
+      if in_name.is_a?(Symbol)
+        raise ArgumentError,
+              "aggregate: each entry is result name => [column, reduction] " \
+              "(got #{out_name.inspect} => #{spec[out_name].inspect}); " \
+              "as in aggregate(\"mean_#{out_name}\" => [#{out_name.inspect}, :mean])"
+      end
       @frame.__send__(:column_key, in_name, "aggregate")
       options = args.last.is_a?(Hash) ? args.pop : {}
       cols[out] =

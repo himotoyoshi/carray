@@ -121,6 +121,18 @@ class TestCAFrameArgumentForms < Test::Unit::TestCase
     assert_no_match(/eq and ne/, e.message)
   end
 
+  def test_csv_text_given_as_a_path
+    e = assert_raise(Errno::ENOENT) { CAFrame.from_csv("a,b\n1,2\n") }
+    assert_match(/StringIO\.new\(text\)/, e.message)
+    assert_equal %w[a b], CAFrame.from_csv(StringIO.new("a,b\n1,2\n")).column_names
+  end
+
+  def test_aggregate_with_reductions_in_the_column_place
+    grp = frame.group_by("g")
+    e = assert_raise(ArgumentError) { grp.aggregate("a" => [:sum, :mean]) }
+    assert_match(/result name => \[column, reduction\]/, e.message)
+  end
+
   def test_sort_by_descending
     df = frame
     assert_equal %w[dd ccc bb a], df.sort_by(descending: true) { |f| f["s"] }["s"].to_a

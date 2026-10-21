@@ -136,6 +136,12 @@ class CAFrame
       raise ArgumentError, "from_csv: the reading block takes the reader as its " \
                            "parameter, as in from_csv(path) { |r| r.skip 2; r.header; r.data }"
     end
+    # A String is a path, always. One with a line break in it that names no
+    # file is likely CSV text; the missing file says how to give text.
+    if source.is_a?(String) && source.include?("\n") && !File.exist?(source)
+      raise Errno::ENOENT, "#{source.inspect}; a String is a path, so to read CSV text " \
+                           "give it as an IO: from_csv(StringIO.new(text))"
+    end
     missing = missing_tokens(missing) if missing
     types = csv_types(types)
     # With types:, the body is read into CAConstString columns, so a column
