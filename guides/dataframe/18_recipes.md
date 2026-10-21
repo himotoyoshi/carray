@@ -61,19 +61,20 @@ p expected.join(partial, on: ["shop", "date"], how: :anti)
 
 ## The best day of each shop
 
-Sort by the figure, largest first, and keep the first row of each shop:
+`nlargest` on the shops' groups gives each shop's largest rows, the shops in the order they first appear:
 
 ```ruby
-ranked = sales.sort_by_key("revenue", descending: true)
-best = ranked[ranked.is_duplicate("shop").not]
+best = sales.group_by("shop").nlargest(1, "revenue")
 p best.select("shop", "date", "revenue")
 # #<CAFrame nrow=3 columns=[shop:CAString, date:CATime[D], revenue:float64]>
 # shop     date        revenue
 # -------  ----------  -------
 # north    2024-03-10  4112.58
-# central  2024-03-09   3939.6
 # south    2024-03-10  2785.04
+# central  2024-03-09   3939.6
 ```
+
+`nlargest(3, "revenue")` gives each shop's three best days, largest first. A missing figure is never among the largest.
 
 ## Change from the previous day, per shop
 

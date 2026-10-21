@@ -1264,6 +1264,14 @@ df["total"] = grp.cumsum("rain")                  # running total per station
 - **Filling gaps per group.** `grp.fill("temp", :ffill)` fills the masked cells of a column in place from the earlier rows of the same group (`:bfill` from the later ones), as [`fill`](#masking-and-filling-cells) does for the whole column. A fill never reaches across into another group, so a station's first rows stay masked when it has nothing to carry, and a row whose key is masked is left as it is. `:linear` interpolates between the group's present values against the index (against the row position within the group when there is none), reading each group in the order of the index as `fill` does; a cell outside the group's present values stays masked. A constant fills every masked cell, as `fill` does.
 - An N-D column runs along the rows, keeping its trailing shape. A row whose key is masked belongs to no group, so its cells are `UNDEF`. They work for `resample` as well, within each time bin.
 
+### The largest rows of each group — `nlargest`, `nsmallest`
+
+`grp.nlargest(n, *keys)` gives the `n` rows of each group with the largest values of the keys, and `nsmallest` the smallest, as a sub-frame: the groups in the order of `labels`, each group's rows ordered as [`CAFrame#nlargest`](#sort_by_key--reorder-rows-by-key-columns) orders them (several keys break ties in turn; a NaN or masked key loses to every value). A group with fewer than `n` rows gives all of them, and a row whose group key is masked is in no group.
+
+```ruby
+df.group_by("station").nlargest(3, "temp")    # each station's three warmest rows
+```
+
 ### Keeping whole groups — `filter`
 
 `filter` on a grouped frame keeps the rows of the groups its block chooses. The block receives the grouped frame and returns a boolean `CArray` with **one value per group**, built from the group reductions, as `CAFrame#filter`'s block returns one value per row:
