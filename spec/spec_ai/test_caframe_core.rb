@@ -79,7 +79,7 @@ class TestCAFrameConstruction < Test::Unit::TestCase
     err = assert_raise(TypeError) { CAFrame.new({ a: CA_INT32([1, 2]) }) }
     assert_equal "CAFrame.new: a column name is a String (got :a)", err.message
     df = CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_INT32([3, 4]), "s" => CA_OBJECT(["x_y", "z_w"]))
-    %w[select drop].each do |verb|
+    %w[select drop describe].each do |verb|
       err = assert_raise(TypeError, verb) { df.public_send(verb, :a) }
       assert_match(/\A#{verb}: a column name is a String \(got :a\); a Symbol names a kind of column/, err.message)
     end
@@ -96,7 +96,6 @@ class TestCAFrameConstruction < Test::Unit::TestCase
       "split_column" => -> { df.split_column("s", "_", into: [:x, :y]) },
       "contrast_columns" => -> { df.contrast_columns(:s) },
       "verify"      => -> { df.verify(x: ->(f) { f["a"] > 0 }) },
-      "describe"    => -> { df.describe(:a) },
       "mean"        => -> { df.group_by("s").mean(:a) },
       "aggregate"   => -> { df.group_by("s").aggregate(x: ["a", :sum]) },
     }.each do |verb, call|

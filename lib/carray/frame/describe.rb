@@ -30,10 +30,12 @@ class CAFrame
   # column with no present cell has UNDEF statistics. The index is not a
   # column and is not summarized.
   #
-  # @param names [Array<String>] the columns to summarize; default all.
+  # @param names [Array<String, Range, Regexp, Symbol>] the columns to
+  #   summarize, picked as +select+ picks them (a Symbol is a kind of column,
+  #   such as :numeric); default all.
   # @return [CAFrame] a new frame with one row per column.
   def describe(*names)
-    names = names.empty? ? column_names : column_keys(names, "describe")
+    names = names.empty? ? column_names : names_selected(names, "describe")
     rows = names.map { |name| describe_column(self[name]) }
     stats = %w[type count masked unique min max mean stddev]
     cols = stats.to_h do |stat|

@@ -53,6 +53,12 @@ class TestCAFrameSelectKinds < Test::Unit::TestCase
     assert_equal :float64, df.select(:numeric, :boolean).drop(:cmplx128).to_ca.data_type
   end
 
+  def test_describe_picks_columns_as_select_does
+    df = frame
+    assert_equal %w[i f z], df.describe(:numeric).index.to_a
+    assert_equal %w[t s o], df.describe("t".."o").index.to_a
+  end
+
   def test_refusals
     df = frame
     assert_raise(ArgumentError) { df.select(:uint8) }                 # no such column

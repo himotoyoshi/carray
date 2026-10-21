@@ -325,7 +325,7 @@ time     CATime       3       0       3  2024-01-01  2024-01-03  2024-01-02  1D
   - text, categorical and record columns get the counts only.
 - A column with no present cell has `UNDEF` statistics. The index is not a column and is not summarized.
 
-`describe("temp", "rh")` summarizes only the named columns.
+`describe("temp", "rh")` summarizes only the named columns; the columns are picked as [`select`](#a-frame-of-some-columns--select) picks them, so `describe(:numeric)` summarizes the number columns.
 
 ### One reduction of every column — `df.mean`, `df.max`, ...
 
