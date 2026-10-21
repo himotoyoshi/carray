@@ -36,6 +36,15 @@ puts summary.to_csv
 - A field containing the separator, a quote or a line break is quoted, with quotes doubled.
 - Times are written year first (`2024-03-04`, `2024-03-04T08:12:00Z`), which `from_csv` reads back as times.
 - A yes/no (boolean) column is written as `1` and `0`; read it back with `types: { "name" => :boolean }`.
+- Numbers are written in full, so `from_csv` reads back the same values. `precision:` rounds every floating-point cell to that many decimal places for a tidier file:
+
+```ruby
+puts summary.to_csv(precision: 2)
+# shop,visitors,revenue
+# north,233.75,2874.37
+# south,129.86,1911.58
+# central,334.38,3159.0
+```
 
 ```ruby
 puts sales.head(3).to_csv(sep: ";", header: false)

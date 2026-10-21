@@ -206,6 +206,8 @@ df.to_csv("out.csv", encoding: "CP932")   # for Excel in Japanese
 
 The CSV is built in UTF-8, so a String cell in another encoding is transcoded. A cell that is not text raises naming the cell too: bytes that are not valid in their encoding (`Encoding::InvalidByteSequenceError`), and bytes with no encoding, ASCII-8BIT (`Encoding::CompatibilityError`; give them one with `force_encoding`). Rows are counted from 0, as `df[i]` is.
 
+`precision:` writes each float cell rounded to that many decimal places, as `to_table` shows it (each part of a complex cell); NaN and infinities are written as they are. Without it a float is written in full, so `from_csv` reads back the same value: `df.to_csv("out.csv", precision: 2)`.
+
 `missing:` writes a masked cell as a given String instead of an empty field, for a reader that expects a sentinel. It takes the same forms as on `from_csv` — one String, or a Hash with `default:` and per-column overrides (the index goes by its axis name), where `""` is the empty field — so the same argument reads the file back with the mask in place:
 
 ```ruby

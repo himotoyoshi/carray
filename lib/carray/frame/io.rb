@@ -353,8 +353,18 @@ class CAFrame
   # +from_csv(attrs:)+ with the same keys reads them back, as Strings.
   #
   #   df.to_csv("out.csv", attrs: [:units, :long_name])
+  #
+  # +precision:+ writes each float cell rounded to that many decimal places,
+  # as +to_table+ shows it (a complex cell each part); NaN and infinities are
+  # written as they are. Without it a float is written in full, so that
+  # from_csv reads back the same value.
+  #
+  #   df.to_csv("out.csv", precision: 2)
   def to_csv(path = nil, sep: ",", quote: '"', header: true, index: true,
-             encoding: nil, missing: nil, attrs: [])
+             encoding: nil, missing: nil, attrs: [], precision: nil)
+    unless precision.nil? || (precision.is_a?(Integer) && precision >= 0)
+      raise ArgumentError, "to_csv: precision: is a number of decimal places, 0 or more (got #{precision.inspect})"
+    end
     default, per_column = CAFrame.send(:split_missing, missing, "to_csv")
     [default, *per_column.values].each do |text|
       next if text.nil? || text.is_a?(String)
@@ -388,12 +398,12 @@ class CAFrame
     written   = []
     if index && @index
       names     << @axis_name
-      formatted << format_csv_column(@index)
+      formatted << format_csv_column(@index, precision)
       written   << @index
     end
     @columns.each do |name, col|
       names     << name
-      formatted << format_csv_column(col)
+      formatted << format_csv_column(col, precision)
       written   << col
     end
     attr_rows = attr_keys.map do |key|
@@ -635,7 +645,7 @@ class CAFrame
     end
   end
 
-  private def format_csv_column(col)
+  private def format_csv_column(col, precision = nil)
     # A float32 value goes out as its own shortest decimal ("0.1"), which
     # from_csv reads back as the same value, not as the double it widens
     # to ("0.10000000149011612"); cmplx64 has that in each part.
@@ -652,6 +662,10 @@ class CAFrame
         e
       elsif e.respond_to?(:iso8601)
         e.iso8601
+      elsif precision && e.is_a?(Float)
+        e.finite? ? e.round(precision).to_s : e.to_s
+      elsif precision && e.is_a?(Complex) && e.real.is_a?(Float)
+        Complex(*[e.real, e.imaginary].map { |x| x.finite? ? x.round(precision) : x }).to_s
       else
         e.to_s
       end
