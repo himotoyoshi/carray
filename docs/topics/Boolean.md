@@ -448,8 +448,9 @@ x.ne(0)               # arbitrary numeric → boolean
 | `b.min` returns a boolean | No — `min`/`max`/`sum`/… return **Integer** (`u64`). `all`/`any`/`none` return boolean. |
 | `b + b` stays boolean | No — arithmetic promotes to `int64`. `& | ^` stay boolean. |
 | `CA_INT([2,0]).boolean` | Raises — cast is strict 0/1. Use `x.ne(0)` / `x > 0`. |
-| `inspect` shows `1`/`0` but `b[i]` is `true` | Both are correct; they are different views (§1). |
 | `true & UNDEF` | Silently `true` (Ruby semantics). Do Kleene on arrays, not scalar `UNDEF`. |
+| `a && b` / `a \|\| b` to combine conditions | Ruby's own operators look only at whether `a` exists, so `a && b` is `b` whole: the first condition is dropped without a word. Use `a & b` / `a \| b`. |
+| `&` and `.and` are the same | Not where a cell is masked: `&` / `\|` are three-valued (§9; `false & U` is `false`, so `(false & U).not` is `true`); `.and` / `.or` are two-valued (`false.and(U)` is `U`). They agree wherever both sides are known. |
 | `count(1.0)` on boolean | Raises — only `true`/`false`/`1`/`0` are accepted. |
 
 ## See also
