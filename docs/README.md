@@ -30,6 +30,7 @@ Indexing and building arrays — the everyday operations.
 
 | Doc | Tag | What it is |
 |---|---|---|
+| [NumPy and CArray](topics/NumPyEquivalents.md) | Reference | The CArray name for a NumPy function, with notes where the two behave differently |
 | [Indexer decision tree](topics/Indexer_decision_tree.md) | Reference | Every kind of `[]` index key and how it is classified |
 | [Element access (`elem_*`)](topics/ElementAccess.md) | Guide | The fastest access to one cell when you hold its per-axis index |
 | [Conditional selection](topics/ConditionalSelection.md) | Guide | `then_else` / `replace_where` / `conditional` / `CArray.select` — pick per cell |
