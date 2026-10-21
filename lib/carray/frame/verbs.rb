@@ -56,7 +56,7 @@ class CAFrame
   def drop(*names)
     cols = @columns.dup
     names_selected(names, "drop").each do |key|
-      raise KeyError, "no column #{key.inspect}" unless cols.key?(key)
+      refuse_missing_column(key) unless cols.key?(key)
       cols.delete(key)
     end
     rebuild(cols)
@@ -118,7 +118,7 @@ class CAFrame
   def transform (*names)
     raise ArgumentError, "transform needs a block that computes each column" unless block_given?
     keys = names.empty? ? @columns.keys : names_selected(names, "transform")
-    keys.each { |key| raise KeyError, "no column #{key.inspect}" unless @columns.key?(key) }
+    keys.each { |key| refuse_missing_column(key) unless @columns.key?(key) }
     cols = @columns.dup
     computed = keys.map do |key|
       out = yield(@columns[key], key)
@@ -797,7 +797,7 @@ class CAFrame
     method_or_value = method_or_value.first
     refuse_if_frozen
     key = column_key(name, "fill")
-    raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
+    refuse_missing_column(key) unless @columns.key?(key)
     col = @columns[key]
     # An N-D column is filled down the rows: each position on its trailing
     # axes is a series of its own.
@@ -826,7 +826,7 @@ class CAFrame
     raise ArgumentError, "#{verb}: the Hash names no column" if map.empty?
     refuse_if_frozen
     keys = column_keys(map.keys, verb)
-    keys.each { |key| raise KeyError, "no column #{key.inspect}" unless @columns.key?(key) }
+    keys.each { |key| refuse_missing_column(key) unless @columns.key?(key) }
     map.each_value do |how|
       next unless how.is_a?(Symbol) && !%i[ffill bfill linear].include?(how)
       raise ArgumentError,

@@ -384,7 +384,7 @@ class CAFrame
   # Remove a column.  +drop+ is the same edit as a new frame (§3.8); this is
   # the in-place form, which is all an assignment can be.
   private def delete_column(key)
-    raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
+    refuse_missing_column(key) unless @columns.key?(key)
     @columns.delete(key)
     @nrow = 0 if @columns.empty? && @index.nil?
     self
@@ -475,7 +475,7 @@ class CAFrame
     raise ArgumentError, "select requires at least one column name" if names.empty?
     cols = {}
     names_selected(names, "select").each do |key|
-      raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
+      refuse_missing_column(key) unless @columns.key?(key)
       cols[key] = @columns[key]
     end
     rebuild(cols)
@@ -631,7 +631,7 @@ class CAFrame
   private def set_index_in_place(name)
     refuse_if_frozen
     key = column_key(name, "set_index")
-    raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
+    refuse_missing_column(key) unless @columns.key?(key)
     idx = @columns[key]
     unless idx.ndim == 1
       raise ArgumentError, "index must be a 1-D column (got ndim #{idx.ndim})"

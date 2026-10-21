@@ -602,6 +602,15 @@ class TestCAFrameFilterAndGather < Test::Unit::TestCase
     assert_equal 'no column "nope"', e.message
   end
 
+  def test_every_verb_points_at_the_index_by_its_name
+    df = @df.set_index("station")
+    [-> { df.select("station") }, -> { df.drop("station") }, -> { df.fill("station", 0) },
+     -> { df.transform("station") { |c| c } }, -> { df.set_index("station") }].each do |call|
+      e = assert_raise(KeyError) { call.() }
+      assert_match(/it is the index, read it with df\.index/, e.message)
+    end
+  end
+
   def test_filter_carries_index
     df = @df.set_index("station")
     sub = df.filter { |f| f["temp"] > 20 }
