@@ -676,6 +676,7 @@ A new frame is a new table over the same columns, not a copy: the columns it did
 | verb | returns | a write to a shared cell afterwards |
 |---|---|---|
 | `append` / `drop` / `rename` / `set_index` / `reset_index` | a new frame | reaches this frame |
+| `transform` | a new frame | reaches this frame, except in the columns the block replaced (unless it returned a view of them) |
 | `cast` / `promote` / `parse_to_time` / `to_time` | a new frame | reaches this frame, except in the converted columns (new arrays) |
 | `mask_eq` / `fill` | `self` | — (the stored column itself is edited, so every frame sharing it sees the change) |
 
@@ -713,6 +714,20 @@ These act on **this** frame only. (Ruby returns the right-hand side as the value
 - **`df["c"] = UNDEF` does reach other frames**, because it masks the stored column in place rather than replacing it.
 - A `CAFrame` right-hand side is refused (take a column from it, or splice rows with [`df[rows] = other`](#masking-deleting-and-splicing-rows)).
 - When the frame has an index, its axis name is not a column name: assigning to it raises and points at `set_index` / `reset_index`.
+
+### The same computation on several columns — `transform`
+
+`transform` returns a new frame in which each column is replaced by what the block computes from it, keeping the names, the index and the frame's attributes; this frame is left as it is. Without names every column is given to the block; names pick the columns as [`select`](#a-frame-of-some-columns--select) does (a name, a Range of names, a Regexp), and the others are kept:
+
+```ruby
+df.transform { |col| col.round(1) }
+df.transform("tmax".."tmin") { |col| (col - col.mean) / col.stddev }
+df.transform(/^t/) { |col, name| ... }               # the name is the second argument
+```
+
+- The block returns a CArray or an Array of one value per row. A single value — a reduction's — is refused: one number is not a column. To give every row its column's summary, use a reduction with `keep_rows: true` (`df.mean("temp", keep_rows: true)`).
+- What the block returns becomes the column as it is, so a view stays a view and a write to a cell reaches what it was made from; `copy` cuts that.
+- The blocks run before the frame is built, so a refusal leaves nothing half-made.
 
 ### Changing a column's type
 

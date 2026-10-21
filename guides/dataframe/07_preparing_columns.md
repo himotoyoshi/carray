@@ -84,6 +84,23 @@ renamed.column_names   # => ["date", "shop", "customers", "takings", "rating"]
 
 `drop` and `rename` return new frames that hold the same columns; the data is not copied. `df["name"] = nil` removes a column from the frame itself.
 
+## The same computation on several columns — `transform`
+
+`transform` gives a new frame in which each column is replaced by what a block computes from it. Name the columns as `select` takes them; the others, the index and the names stay as they are:
+
+```ruby
+z = sales.transform("visitors", "revenue") { |col| (col - col.mean) / col.stddev }
+p z.select("shop", "visitors", "revenue").head(3)
+# #<CAFrame nrow=3 columns=[shop:CAString, visitors:float64, revenue:float64]>
+# shop      visitors    revenue
+# -------  ---------  ---------
+# north    -0.566192  -0.623293
+# south    -1.459686  -1.524686
+# central   0.748374   0.508647
+```
+
+The block can use anything a column can do, and also receives the column's name as a second argument. It must return one value per row: a summary such as `col.mean` is refused, since one number is not a column. To give every row its column's summary, use `sales.mean("revenue", keep_rows: true)` (chapter 10).
+
 ## Changing a column's type
 
 ### `cast`

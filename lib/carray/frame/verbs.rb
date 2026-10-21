@@ -91,6 +91,55 @@ class CAFrame
     rebuild(rebuilt)
   end
 
+  # A new frame with each column replaced by what the block computes from it,
+  # the names, the index and the attributes kept; this frame is left as it
+  # is. Without names every column is given to the block; names pick the
+  # columns as +select+ does (a name, a Range of names, a Regexp), and the
+  # others are kept as they are. The block receives the column and its name
+  # and returns a CArray (or an Array) of one value per row. A single value,
+  # such as a reduction's, is refused: to give every row its column's mean,
+  # use +mean(name, keep_rows: true)+.
+  #
+  #   df.transform { |col| col.round(1) }
+  #   df.transform("tmax".."tmin") { |col| (col - col.mean) / col.stddev }
+  #   df.transform(/^t/) { |col, name| ... }
+  #
+  # What the block returns becomes the column as it is: a view stays a view
+  # of what it was made from, so a write to a cell reaches it (+copy+ cuts
+  # that).
+  #
+  # @param names [Array<String, Range, Regexp>] the columns; default all.
+  # @yieldparam col [CArray] a column.
+  # @yieldparam name [String] its name.
+  # @yieldreturn [CArray, Array] one value per row.
+  # @return [CAFrame]
+  # @raise [ArgumentError] without a block, or when the block gives a single
+  #   value or a column of another length.
+  def transform (*names)
+    raise ArgumentError, "transform needs a block that computes each column" unless block_given?
+    keys = names.empty? ? @columns.keys : names_selected(names, "transform")
+    keys.each { |key| raise KeyError, "no column #{key.inspect}" unless @columns.key?(key) }
+    cols = @columns.dup
+    computed = keys.map do |key|
+      out = yield(@columns[key], key)
+      unless out.is_a?(CArray) || out.is_a?(Array)
+        raise ArgumentError,
+              "transform: the block gave #{out.class} for column #{key.inspect}, not a column; " \
+              "return one value per row (to give every row a summary, use " \
+              "a reduction with keep_rows: true)"
+      end
+      out = coerce_column(out)
+      unless out.ndim >= 1 && out.shape[0] == @nrow
+        raise ArgumentError,
+              "transform: the block gave #{out.ndim >= 1 ? out.shape[0] : "no"} rows for " \
+              "column #{key.inspect}; the frame has #{@nrow}"
+      end
+      [key, out]
+    end
+    computed.each { |key, out| cols[key] = out }
+    return rebuild(cols)
+  end
+
   # Split a text column at +sep+ into the columns named by +into:+,
   # returning a new frame where they take the column's place:
   #

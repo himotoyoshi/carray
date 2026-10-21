@@ -46,6 +46,7 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     :stack_columns    => ->(df, _) { df.stack_columns(["k", "v"], into: "kv") },
     :unstack_column   => ->(df, _) { df.unstack_column("w") },
     :copy             => ->(df, _) { df.copy },
+    :transform        => ->(df, _) { df.transform("v") { |c| c * 2 } },
     :cast             => ->(df, _) { df.cast("k" => :float64) },
     :promote          => ->(df, _) { df.promote(:object) },
     :set_index        => ->(df, _) { df.set_index("k") },
