@@ -337,7 +337,7 @@ df.max("tmax", "tmin")                   # => one row, the two maxima
 df["temp"] - df.mean("temp", keep_rows: true)   # the anomaly on each row
 ```
 
-They are `sum` `mean` `min` `max` `prod` `accumulate` `median` `variance` `stddev` `variancep` `stddevp` (with `min_count:` and `fill_value:`) and `first` `last` `nunique` `count` `all` `any`; all take `keep_rows:`. A frame with no rows still gives its one row: a sum of nothing is 0, a mean `UNDEF`. For one column's value as a Ruby value, reduce the column: `df["temp"].mean`.
+They are `sum` `mean` `min` `max` `prod` `accumulate` `median` `variance` `stddev` `variancep` `stddevp` (with `min_count:` and `fill_value:`) and `first` `last` `nunique` `count` `all` `any`; all take `keep_rows:`. The values a grouped frame computes down each group's rows also work on the frame, down all its rows, one value per row: `order` and the running `cumsum` `cumprod` `cummax` `cummin` `cumcount` (`df["total"] = df.cumsum("rain")`), as `lag` does. A frame with no rows still gives its one row: a sum of nothing is 0, a mean `UNDEF`. For one column's value as a Ruby value, reduce the column: `df["temp"].mean`.
 
 ### Size, names and types
 

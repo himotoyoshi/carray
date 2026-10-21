@@ -30,6 +30,7 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | check every column's type, missing count and range | `describe` | 4 |
 | pick the columns of a kind (numbers, text, times) | `select(:numeric)`, `drop(:string)` | 5 |
 | one summary of every column, as one row | `df.mean`, `df.max("x", "y")` | 4 |
+| running totals or ranks down the rows | `df.cumsum("x")`, `df.order("x")` | 15 |
 | the same computation on several columns | `transform("a".."c") { \|col\| ... }` | 7 |
 | know the size, the column names, the types | `nrow`, `column_names`, `data_types` | 4 |
 | see the distinct values of a column and their counts | `value_counts` | 4 |

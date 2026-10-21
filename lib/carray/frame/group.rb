@@ -291,13 +291,46 @@ class CAFrame
                :first, :last, :nunique, :count, :all, :any], :reduce_all_rows)
 
   private def reduce_all_rows (reduction, *names, **keywords)
-    cat = CACategorical.from_codes(CArray.uint8(@nrow).fill(0), ["all"])
-    # key-labels: no key; the one group's label is dropped below
-    out = GroupedFrame.new(self, cat, "all", [], index: CA_OBJECT(["all"]))
-                      .public_send(reduction, *names, **keywords)
+    out = all_rows_group.public_send(reduction, *names, **keywords)
     return out if keywords[:keep_rows]
     # One row of the whole frame: no group to label it.
     return CAFrame.new(out.column_names.to_h { |name| [name, out[name]] })
+  end
+
+  # Values computed down the rows, one per row, as +GroupedFrame+ computes
+  # them within each group, with every row in one group: each row's rank
+  # (+order+, int64, 0 the smallest) and the running values up to and
+  # including it. Given names, one name gives the CArray and several an
+  # Array of them; without names, a frame of every column whose type has the
+  # operation, on the frame's rows and index.
+  #
+  #   df["total"] = df.cumsum("rain")
+  #   df["rank"]  = df.order("temp", descending: true)
+  #
+  # @!method order(*names, descending: false, method: :ordinal, kind: :quick)
+  #   @return [CAFrame, CArray, Array<CArray>]
+  # @!method cumsum(*names)
+  #   @return [CAFrame, CArray, Array<CArray>]
+  # @!method cumprod(*names)
+  #   @return [CAFrame, CArray, Array<CArray>]
+  # @!method cummax(*names)
+  #   @return [CAFrame, CArray, Array<CArray>]
+  # @!method cummin(*names)
+  #   @return [CAFrame, CArray, Array<CArray>]
+  # @!method cumcount(*names)
+  #   @return [CAFrame, CArray, Array<CArray>]
+  CArray.send(:define_named_methods, self,
+              [:order, :cumsum, :cumprod, :cummax, :cummin, :cumcount], :run_down_all_rows)
+
+  private def run_down_all_rows (operation, *names, **keywords)
+    return all_rows_group.public_send(operation, *names, **keywords)
+  end
+
+  # The frame's rows as one group, for the verbs a grouped frame has.
+  private def all_rows_group
+    cat = CACategorical.from_codes(CArray.uint8(@nrow).fill(0), ["all"])
+    # key-labels: no key; the one group's label is dropped by the callers
+    return GroupedFrame.new(self, cat, "all", [], index: CA_OBJECT(["all"]))
   end
 
   # The values of the columns moved along the rows: +n:+ rows back (a
