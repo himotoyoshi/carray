@@ -17,7 +17,8 @@ class TestCAFrameSelectKinds < Test::Unit::TestCase
                 "b"  => CA_BOOLEAN([true, false]),
                 "c"  => CA_OBJECT(%w[a b]).categorize,
                 "fx" => CArray.fixlen_string(%w[ab cd]),
-                "cs" => CArray.const_string(%w[p q]))
+                "cs" => CArray.const_string(%w[p q]),
+                "d"  => CArray.time(%w[2024-01-03 2024-01-05]) - CArray.time(%w[2024-01-01 2024-01-02]))
   end
 
   def test_kinds
@@ -25,6 +26,7 @@ class TestCAFrameSelectKinds < Test::Unit::TestCase
     assert_equal %w[i f z], df.select(:numeric).column_names
     assert_equal %w[s o fx cs], df.select(:string).column_names
     assert_equal %w[t], df.select(:time).column_names
+    assert_equal %w[d], df.select(:timedelta).column_names
     assert_equal %w[c], df.select(:categorical).column_names
   end
 
@@ -46,7 +48,7 @@ class TestCAFrameSelectKinds < Test::Unit::TestCase
   def test_with_names_drop_and_transform
     df = frame
     assert_equal %w[t i f z], df.select("t", :numeric).column_names
-    assert_equal %w[t oi i f z b c], df.drop(:string).column_names
+    assert_equal %w[t oi i f z b c d], df.drop(:string).column_names
     out = df.transform(:numeric) { |col| col * 2 }
     assert_equal [2, 4], out["i"].to_a
     assert_equal %w[a b], out["s"].to_a

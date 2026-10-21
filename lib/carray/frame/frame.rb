@@ -419,6 +419,7 @@ class CAFrame
   #   :string       text: CAString, CAConstString, CAFixlenString, or an
   #                 object column whose present cells are all Strings
   #   :time         CATime
+  #   :timedelta    CATimedelta
   #   :categorical  CACategorical
   # or a data type as cast names it (:float64, :int32, :boolean, ...), which
   # picks the columns of that type that are not a Face.
@@ -428,6 +429,7 @@ class CAFrame
       when :numeric     then ->(col) { col.numeric? }
       when :string      then ->(col) { string_kind_column?(col) }
       when :time        then ->(col) { col.is_a?(CATime) }
+      when :timedelta   then ->(col) { col.is_a?(CATimedelta) }
       when :categorical then ->(col) { col.is_a?(CACategorical) }
       else
         # A Symbol that is neither is a column name written as a Symbol.
@@ -436,7 +438,7 @@ class CAFrame
                rescue ArgumentError, TypeError, CArray::DataTypeError
                  CAFrame.__send__(:column_key, kind, verb,
                                   hint: "a Symbol names a kind of column (:numeric, :string, " \
-                                        ":time, :categorical) or a data type")
+                                        ":time, :timedelta, :categorical) or a data type")
                end
         ->(col) { !col.face? && CArray.data_type_name(col.data_type) == name }
       end

@@ -507,7 +507,7 @@ df.select(/^t/)                      # the columns whose names match
 df.select(:numeric)                  # the columns of a kind
 ```
 
-A Symbol picks the columns of a kind — `:numeric` (integers, floats and complex numbers, as `CArray#numeric?` says), `:string` (text columns: `CAString`, `CAConstString`, `CAFixlenString`, or an object column whose present cells are all Strings), `:time` (`CATime`) or `:categorical` — or of a data type as `cast` names it (`:float64`, `:int32`, `:boolean`, …; a Face column is not counted as its storage type). Kinds, names, Ranges and Regexps mix, and `drop` and `transform` take them too:
+A Symbol picks the columns of a kind — `:numeric` (integers, floats and complex numbers, as `CArray#numeric?` says), `:string` (text columns: `CAString`, `CAConstString`, `CAFixlenString`, or an object column whose present cells are all Strings), `:time` (`CATime`), `:timedelta` (`CATimedelta`) or `:categorical` — or of a data type as `cast` names it (`:float64`, `:int32`, `:boolean`, …; a Face column is not counted as its storage type). Kinds, names, Ranges and Regexps mix, and `drop` and `transform` take them too:
 
 ```ruby
 df.select(:numeric).to_ca.mean(axis: 1)           # a row mean across the numeric columns
