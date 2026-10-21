@@ -126,11 +126,13 @@ class CAFrame
   # +filter+: where +sort_by_key+ takes plain column names, the block form lets
   # you build any key with CArray ops -- a descending key is its dense
   # descending rank, derived or composite keys are ordinary column math.
-  # +masked_position:+ places masked key rows first or last (default last).
+  # +descending: true+ sorts every key from largest to smallest, as
+  # +sort_by_key+ takes it; +masked_position:+ places masked key rows first or
+  # last (default last).
   #
   #   df.sort_by { |f| (f["temp"] - target).abs }   # nearest-to-target first
-  #   df.sort_by { |f| f["temp"].order(descending: true, method: :dense) }
-  def sort_by(masked_position: :last)
+  #   df.sort_by(descending: true) { |f| f["name"].length }
+  def sort_by(descending: false, masked_position: :last)
     raise ArgumentError, "sort_by requires a block" unless block_given?
     keys = yield(self)
     keys = [keys] unless keys.is_a?(Array)
@@ -144,6 +146,7 @@ class CAFrame
               "sort_by key #{i} must be a 1-D column of length #{nrow} (got shape #{k.shape.inspect})"
       end
     end
+    keys = keys.map { |k| k.order(descending: true, method: :dense) } if descending
     select_rows(CArray.sort_addr(*keys, masked_position: masked_position))
   end
 

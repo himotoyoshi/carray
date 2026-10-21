@@ -498,7 +498,7 @@ df.filter { |f| f.index.is_masked }   # every row with no label
 
 ### A frame of some columns — `select`
 
-`select` picks columns and returns a **sub-frame** holding them — the same CArrays the original frame holds. Where `df["a", "b"]` returns the columns as CArrays, `df.select("a", "b")` keeps a frame:
+`select` picks columns and returns a **sub-frame** holding them — the same CArrays the original frame holds. Where `df["a", "b"]` returns the columns as CArrays, `df.select("a", "b")` keeps a frame (an Array of names, `select(["a", "b"])`, is taken too, as by every verb that takes names this way; `df[["a", "b"]]` is not, since a Ruby Array in `df[]` would be CArray's `[start, count]`):
 
 ```ruby
 sub = df.select("station", "temp")   # => CAFrame with two columns
@@ -646,7 +646,7 @@ df.sort_by { |f| (f["temp"] - target).abs }                          # nearest t
 df.sort_by { |f| f["temp"].order(descending: true, method: :dense) } # a descending key
 ```
 
-`sort_by` also takes `masked_position:`. For a descending key, use `col.order(descending: true, method: :dense)` as above; it works for any type, where negating a value does not, and it keeps ties as ties when several keys are combined. (`sort_by_key` builds its descending keys the same way.)
+`sort_by` also takes `masked_position:`, and `descending: true` to sort every key from largest to smallest (`df.sort_by(descending: true) { |f| f["name"].length }`). For one key descending among several, use `col.order(descending: true, method: :dense)` as above; it works for any type, where negating a value does not, and it keeps ties as ties when several keys are combined. (`sort_by_key` builds its descending keys the same way.)
 
 ### Repeated rows — `is_duplicate`
 
@@ -932,7 +932,12 @@ df.fill("temp", :bfill)     # back-fill: carry the next present value
 df.fill("temp", :linear)    # linear interpolation between present values
 df.fill("temp" => :linear, "rain" => 0.0)   # several columns, each its own way
 df.fill("temp", 0.0)        # a constant
+df.fill("temp", "rain", :ffill)             # several columns, one way
+df.fill(:numeric, 0.0)                      # the columns as select picks them
+df.fill(:ffill)                             # every column with a masked cell
 ```
+
+The method or value comes last; the columns before it are given as `select` takes them. Alone, it fills every column that has a masked cell, as `strip_mask` does. However many columns are named, each is checked before any is filled. A `GroupedFrame`'s `fill` takes the same forms, leaving the key columns out.
 
 - **`:ffill` / `:bfill`** carry the nearest present value; leading cells (for `:ffill`) or trailing cells (for `:bfill`) with nothing to carry stay masked. Works for any column type.
 - **`:linear`** interpolates a numeric column **against the frame's index** when one is set (a time index gives interpolation in time), and against the row position when there is no index. The index need not be in order: the present values are read as one series in the order of the index, as `windows(on:)` and `join_asof` read it. So a frame with several stations stacked one after another interpolates across the stations by time; to keep them apart, interpolate within each station with `df.group_by("station").fill("temp", :linear)` (see [Values within a group](#values-within-a-group--lag-order-running-values)). Present values at the same index keep their row order. A row whose index is masked, NaN or infinite has no place on the line: its value is not used, and a missing value there stays missing. With an index that is neither numeric nor a time (station names, say), it raises rather than falling back to the row position; to interpolate by position there, use `df["temp"].unmask(method: :linear)` on the column directly. Cells outside the range of present values stay masked; a column with fewer than two present cells is left unchanged.

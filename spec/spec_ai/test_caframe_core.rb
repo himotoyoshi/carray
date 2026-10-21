@@ -79,8 +79,8 @@ class TestCAFrameConstruction < Test::Unit::TestCase
     err = assert_raise(TypeError) { CAFrame.new({ a: CA_INT32([1, 2]) }) }
     assert_equal "CAFrame.new: a column name is a String (got :a)", err.message
     df = CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_INT32([3, 4]), "s" => CA_OBJECT(["x_y", "z_w"]))
-    %w[select drop describe].each do |verb|
-      err = assert_raise(TypeError, verb) { df.public_send(verb, :a) }
+    { "select" => [:a], "drop" => [:a], "describe" => [:a], "fill" => [:a, 0] }.each do |verb, args|
+      err = assert_raise(TypeError, verb) { df.public_send(verb, *args) }
       assert_match(/\A#{verb}: a column name is a String \(got :a\); a Symbol names a kind of column/, err.message)
     end
     {
@@ -88,7 +88,6 @@ class TestCAFrameConstruction < Test::Unit::TestCase
       "append"      => -> { df.append(:c, CA_INT32([1, 2])) },
       "sort_by_key" => -> { df.sort_by_key([:a, :desc]) },
       "set_index"   => -> { df.copy.set_index(:a) },
-      "fill"        => -> { df.fill(:a, 0) },
       "cast"        => -> { df.cast(:a, :float64) },
       "pivot"       => -> { df.pivot(index: :a, columns: "b", values: "a") },
       "melt"        => -> { df.melt(id: :a, value_columns: ["b"]) },

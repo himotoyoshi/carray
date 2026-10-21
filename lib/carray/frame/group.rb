@@ -915,23 +915,23 @@ class GroupedFrame
   #   df.group_by("station").fill("temp", :ffill)
   #   df.group_by("station").fill("temp", :linear)
   #   df.group_by("station").fill("temp" => :linear, "rain" => 0.0)
+  #   df.group_by("station").fill("temp", "rain", :linear)
+  #   df.group_by("station").fill(:ffill)    # every column with a masked cell
   #
   # +:ffill+ and +:bfill+ follow the row order: sort the frame first
   # (+sort_by_key("time")+) when its rows are not in time order. +:linear+
   # reads each group in the order of the index, as +CAFrame#fill+ does.
   #
-  # @param name [String] the column.
-  # @param method_or_value [Symbol, Object] +:ffill+, +:bfill+, +:linear+, or
-  #   a constant.
+  # @param args [Array] the columns, as +CAFrame#fill+ takes them, then
+  #   +:ffill+, +:bfill+, +:linear+, or a constant; or one Hash of them.
   # @return [GroupedFrame] self
   # @raise [ArgumentError] for another Symbol, or for +:linear+ on a column
   #   or index +CAFrame#fill+ cannot interpolate.
-  def fill (name, *method_or_value)
-    if name.is_a?(Hash)
-      unless method_or_value.empty?
-        raise ArgumentError, "fill: give a column and a method or value, or one Hash of them"
-      end
-      @frame.__send__(:fill_by_map, name, "fill") do |frame, key, how|
+  def fill (*args)
+    plan = @frame.__send__(:fill_arguments, args, @key_names)
+    return self if plan.nil?
+    if plan.is_a?(Hash)
+      @frame.__send__(:fill_by_map, plan, "fill") do |frame, key, how|
         grouped = if frame.equal?(@frame)
                     self
                   else
@@ -943,11 +943,7 @@ class GroupedFrame
       end
       return self
     end
-    unless method_or_value.size == 1
-      raise ArgumentError,
-            "fill: give a column and a method or value (or a Hash of them); got #{method_or_value.size + 1} arguments"
-    end
-    method_or_value = method_or_value.first
+    name, method_or_value = plan
     refuse_changed_rows("fill")
     case method_or_value
     when :ffill, :bfill

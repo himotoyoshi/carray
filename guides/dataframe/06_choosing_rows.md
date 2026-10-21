@@ -252,7 +252,7 @@ p sales.sort_by { |f| (f["revenue"] - target).abs }.head(3)
 # 2024-03-07  central       322  3060.93     4.0
 ```
 
-The block can return an Array of keys, which then work as `sort_by_key`'s several keys do. For a key in descending order, use `order(descending: true)` on it, which works for any type of column:
+The block can return an Array of keys, which then work as `sort_by_key`'s several keys do. `sort_by(descending: true)` sorts every key from largest to smallest. For one key in descending order among several, use `order(descending: true)` on it, which works for any type of column:
 
 ```ruby
 by_shop = sales.sort_by { |f| [f["shop"], f["visitors"].order(descending: true, method: :dense)] }

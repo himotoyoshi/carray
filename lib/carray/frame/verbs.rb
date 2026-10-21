@@ -784,22 +784,23 @@ class CAFrame
   # (memo §13.4), so any fill on it raises — rebind a filled copy instead:
   # `df.append(name, df[name].strip_mask(method: :forward))`.
   #
-  # A Hash fills several columns, each its own way, checked before any is
-  # filled:
+  # Several columns, or every one, are filled the same way: the method or
+  # value comes last, after the columns as +select+ takes them; alone, it
+  # fills every column that has a masked cell, as +strip_mask+ does. A Hash
+  # fills several columns, each its own way. Every column is checked before
+  # any is filled:
   #
+  #   fill("temp", "wind", :ffill)
+  #   fill(:numeric, 0)
+  #   fill(:ffill)                          # every column with a masked cell
   #   fill("temp" => :linear, "wind" => 0.0)
-  def fill(name, *method_or_value)
-    if name.is_a?(Hash)
-      unless method_or_value.empty?
-        raise ArgumentError, "fill: give a column and a method or value, or one Hash of them"
-      end
-      return fill_by_map(name, "fill") { |frame, key, how| frame.fill(key, how) }
+  def fill(*args)
+    plan = fill_arguments(args)
+    return self if plan.nil?
+    if plan.is_a?(Hash)
+      return fill_by_map(plan, "fill") { |frame, key, how| frame.fill(key, how) }
     end
-    unless method_or_value.size == 1
-      raise ArgumentError,
-            "fill: give a column and a method or value (or a Hash of them); got #{method_or_value.size + 1} arguments"
-    end
-    method_or_value = method_or_value.first
+    name, method_or_value = plan
     refuse_if_frozen
     key = column_key(name, "fill")
     refuse_missing_column(key) unless @columns.key?(key)
@@ -930,6 +931,32 @@ class CAFrame
   # written only when every one has passed: a refusal leaves them all as
   # they were. A read-only column is given to the block as it is, to refuse
   # as a single fill does before anything is written.
+  # What fill's arguments ask for: [name, how] for one column, or a Hash of
+  # name => how for several (the columns named before the method or value,
+  # or, with none named, every column with a masked cell, +key_names+ left
+  # out; nil when there is none).
+  private def fill_arguments (args, key_names = [])
+    return args.first if args.size == 1 && args.first.is_a?(Hash)
+    if args.empty? || args.first.is_a?(Hash)
+      raise ArgumentError,
+            "fill: give the columns and a method or value, a method or value alone, " \
+            "or one Hash of them"
+    end
+    *names, how = args
+    if names.empty?
+      if how.is_a?(String)
+        raise ArgumentError,
+              "fill: give a method or value after the column #{how.inspect}; " \
+              "a String alone is a column name"
+      end
+      map = @columns.select { |key, col| !key_names.include?(key) && col.any_masked? }
+                    .keys.to_h { |key| [key, how] }
+      return map.empty? ? nil : map
+    end
+    return [names.first, how] if names.size == 1 && names.first.is_a?(String)
+    return names_selected(names, "fill").to_h { |key| [key, how] }
+  end
+
   private def fill_by_map (map, verb)
     raise ArgumentError, "#{verb}: the Hash names no column" if map.empty?
     refuse_if_frozen

@@ -182,10 +182,28 @@ class CAFrame
               "CArray df[] key must be boolean or integer (got #{key.data_type})"
       end
     when Symbol
-      raise ArgumentError, "df[symbol] is reserved for predicate keys"
+      raise ArgumentError,
+            "df[symbol] is reserved for predicate keys; a column name is a String " \
+            "(df[#{key.to_s.inspect}])"
+    when Array
+      refuse_array_key(key)
     else
       raise ArgumentError, "unsupported df[] key: #{key.class}"
     end
+  end
+
+  # A Ruby Array is no df[] key: CArray reads one as [start, count], not as
+  # positions. Says what to write for what the Array holds.
+  private def refuse_array_key(key)
+    hint = if !key.empty? && key.all? { |k| k.is_a?(String) }
+             "for columns, df[#{key.map(&:inspect).join(', ')}] or " \
+             "df.select(#{key.map(&:inspect).join(', ')})"
+           elsif !key.empty? && key.all? { |k| k == true || k == false }
+             "for rows, a boolean CArray: df[CA_BOOLEAN(#{key.inspect})]"
+           else
+             "for rows, an integer CArray: df[CA_INT64(#{key.inspect})]"
+           end
+    raise ArgumentError, "df[] takes no Ruby Array; #{hint}"
   end
 
   # --- df[...] = value : row-level assignment ---------------------------
@@ -408,6 +426,7 @@ class CAFrame
       case a
       when Range, Regexp then columns_selected(a, verb)
       when Symbol        then columns_of_kind(a, verb)
+      when Array         then names_selected(a, verb)
       else                    [a]
       end
     end

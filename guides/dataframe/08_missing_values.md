@@ -199,6 +199,8 @@ df.group_by("shop").fill("visitors", :ffill)
 df["visitors"][7]   # => 102
 ```
 
+Several columns are filled the same way by naming them before the method — `fill("visitors", "rating", :ffill)` — and a method alone fills every column that has a missing cell: `df.group_by("shop").fill(:ffill)`.
+
 The south shop's missing count for 6 March took the south shop's 5 March figure, not the value in the row above it. Linear interpolation in time is shown in chapter 11.
 
 ### A filled copy of a column
