@@ -1682,6 +1682,13 @@ owned = df.to_ca.copy       # an independent matrix
 
 `CArray.tabulate(df.columns)` builds an independent matrix directly.
 
+The matrix is the way to compute **across the columns of each row**: a summary along axis 1 has one value per row, so it goes straight back into the frame. `select(:numeric)` picks the columns a matrix can hold. For a computation down each column, keeping the names and the index, use [`transform`](#the-same-computation-on-several-columns--transform).
+
+```ruby
+df["mean"] = df.select("tmax", "tmin").to_ca.mean(axis: 1)
+df["total"] = df.select(:numeric).to_ca.sum(axis: 1, min_count: 3)
+```
+
 ---
 
 ## View, copy and sharing
