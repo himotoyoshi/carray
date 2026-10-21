@@ -30,6 +30,7 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
   CARRIES = {
     :[]               => ->(df, _) { df[0..1] },
     :filter           => ->(df, _) { df.filter { |f| f["v"] > 2 } },
+    :drop_masked      => ->(df, _) { df.drop_masked },
     :head             => ->(df, _) { df.head(2) },
     :tail             => ->(df, _) { df.tail(2) },
     :sort_by          => ->(df, _) { df.sort_by { |f| f["v"] } },

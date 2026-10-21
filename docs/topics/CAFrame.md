@@ -922,7 +922,7 @@ What each form does:
 - **`= nil`** keeps the remaining rows in order and shrinks the index with them.
 - **`= other`** works like Ruby's `Array#[]=` splice: `other` may have **any number of rows**, so the number of rows changes. Its **set of columns must match exactly**. When the frame has an index, `other` must have one too (its rows need labels), and the indexes are woven together. Each column, and the index, keeps the attributes this frame's had; those of `other` are not taken.
 
-To drop rows **without** changing the frame in place, take a filtered sub-frame instead — `df[mask]` or `filter` return a new frame and leave this one as it is.
+To drop rows **without** changing the frame in place, take a filtered sub-frame instead — `df[mask]` or `filter` return a new frame and leave this one as it is. `df.drop_masked` keeps the rows with no masked cell in any column, and `df.drop_masked("tmax", "tmin")` those with no masked cell in the columns named (a masked cell of an N-D column counts for its row; the index counts only when named by the row axis name; a NaN is a value, not a masked cell).
 
 > **What happens to shared storage.** In short: after a delete or a splice, the rows that remain still share storage with the original columns; `copy` gives an independent frame. In detail:
 >
@@ -2007,6 +2007,7 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | the change since a station's previous reading | [`group_by(...).lag`](#values-within-a-group--lag-order-running-values) |
 | the change over the past hour at each station | [`group_by(...).lag(name, before: "1 hour")`](#values-within-a-group--lag-order-running-values) |
 | a rank or a running total within each station | [`group_by(...).order` / `cumsum`](#values-within-a-group--lag-order-running-values) |
+| drop the rows with a missing value | [`drop_masked`](#masking-deleting-and-splicing-rows) |
 | fill each station's gaps from its own earlier readings | [`group_by(...).fill(name, :ffill)`](#values-within-a-group--lag-order-running-values) |
 | interpolate each station's gaps in time | [`group_by(...).fill(name, :linear)`](#values-within-a-group--lag-order-running-values) |
 

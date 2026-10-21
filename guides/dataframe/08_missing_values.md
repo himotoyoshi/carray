@@ -219,15 +219,14 @@ s["v_filled"].to_a   # => [1.0, 2.0, 3.0, 4.0, UNDEF]
 
 ## Removing rows with missing values
 
-Choose the rows that have the values you need:
+`drop_masked` keeps the rows that have a value in every column you name, or in every column when you name none:
 
 ```ruby
-complete = sales.filter { |f| f["visitors"].is_not_masked & f["revenue"].is_not_masked }
-complete.nrow   # => 22
-
-any_missing = sales.columns.map(&:is_masked).inject(:|)
-sales[any_missing.not].nrow   # => 21
+sales.drop_masked("visitors", "revenue").nrow   # => 22
+sales.drop_masked.nrow                          # => 21
 ```
+
+The result shares the frame's columns, as `filter` does. A `NaN` is a value, not a missing one, so its row stays; mark it as missing first (above) to drop it as well.
 
 Before removing rows, consider whether you need to. Summaries already leave missing values out, and removing a row because one column is missing also removes the values its other columns had.
 

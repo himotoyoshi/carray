@@ -90,9 +90,10 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | fill gaps with the previous or next value | `fill(name, :ffill)`, `:bfill` | 8 |
 | fill gaps within each group only | `group_by(...).fill(...)` | 8, 10 |
 | interpolate gaps along dates | `set_index` then `fill(name, :linear)` | 9, 11 |
+| interpolate gaps within each group | `group_by(...).fill(name, :linear)` | 10, 11 |
 | keep the original and add a filled copy | `strip_mask` | 8 |
 | refuse a summary with too few values | `min_count:` | 8, 10 |
-| drop rows with missing values | `filter { \|f\| f["x"].is_not_masked }` | 8 |
+| drop rows with missing values | `drop_masked`, `drop_masked("x", "y")` | 8 |
 
 ## Labels
 

@@ -445,6 +445,36 @@ class CAFrame
     select_rows(mask, keep_masked: keep_masked)
   end
 
+  # Keep the rows that have no masked cell in the named columns (every
+  # column when none is named), as a sub-frame of views, as +filter+ returns.
+  # A cell of an N-D column masks its row. The index is a column here only
+  # when named, by the row axis name. A NaN is a value, not a masked cell:
+  # mask it first (+df["x"][:is_invalid] = UNDEF+) to drop its row too.
+  #
+  #   df.drop_masked                    # rows complete in every column
+  #   df.drop_masked("tmax", "tmin")    # rows with both temperatures
+  #
+  # @param names [Array<String>] the columns to look at.
+  # @return [CAFrame]
+  # @raise [KeyError] for a name that is no column.
+  def drop_masked (*names)
+    keys = names.empty? ? @columns.keys : column_keys(names, "drop_masked")
+    holes = CArray.boolean(@nrow).fill(false)
+    keys.each do |key|
+      col = if @columns.key?(key)
+              @columns[key]
+            elsif @index && key == @axis_name
+              @index
+            else
+              refuse_missing_column(key)
+            end
+      masked = col.is_masked
+      masked = masked.any(axis: (1...masked.ndim).to_a) if masked.ndim > 1
+      holes |= masked
+    end
+    return select_rows(holes.not)
+  end
+
   # Judge every row against named rules, and return the verdicts as a frame:
   #
   #   report = df.verify(
