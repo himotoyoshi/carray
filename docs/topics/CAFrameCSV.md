@@ -14,10 +14,10 @@ File.open("obs.csv") { |io| CAFrame.from_csv(io) }
 
 A String is always read as a **path**, never as CSV text. Guessing between the two by looking for a newline is the kind of guess that is right until it is not, and `StringIO` says which one you meant. An IO is read from wherever it is and left open — the caller opened it, so the caller closes it. One reader drives both forms, so a path and the same bytes in memory cannot come to be read differently; `encoding:` is the exception, since it is an open mode and an IO is already open (there the IO's own encoding governs, and a BOM is the caller's).
 
-The header row supplies column names (Strings). Every column is read **raw as a `CAString` of the cell strings** unless you ask for types. Pass `types:` to cast named columns on the way in, `types: :infer` to cast the columns that read as numbers, or call [`cast`](CAFrame.md#8-column-verbs) later. Cells that fail to parse become `UNDEF` automatically (**parse-mask**):
+The header row supplies column names (Strings). Each column is given the type every one of its present cells can be read as (the rules are below), and stays **a `CAString` of the cell strings** otherwise. Pass `types:` to name the types of some columns on the way in (the rest are still inferred), `types: :text` to read every column raw as text, or call [`cast`](CAFrame.md#8-column-verbs) later. Cells that fail to parse become `UNDEF` automatically (**parse-mask**):
 
 ```ruby
-df = CAFrame.from_csv("obs.csv")
+df = CAFrame.from_csv("obs.csv", types: :text)
 df["temp"].class          # => CAString   (raw strings)
 df["temp"].data_type      # => :object
 
@@ -48,27 +48,27 @@ df = df.split_column("code", "-", into: ["kind", "num"])   # "A-12" -> "A", "12"
 
 A cell is split into at most as many pieces as there are names, so with more separators the rest stays in the last column (`"B-7-x"` gives `"B"`, `"7-x"`), and with fewer the columns it does not reach are `UNDEF`; a masked cell is `UNDEF` in all of them. `sep` is a String or a Regexp as `String#split` takes it (write a group as `(?:...)`, since a capturing group adds pieces).
 
-Read without `types:`, all the columns of a file are views over one object array, so the `CAString` of each column holds no copy of its own. Read with `types:`, the file is read without making a String per cell: a column cast to a number never holds Strings, and each column left as text is a `CAString` of its own. `to_const_string` packs a column of read-only text into one buffer, which is lighter for a large column that is no longer edited.
+Read with `types: :text`, all the columns of a file are views over one object array, so the `CAString` of each column holds no copy of its own. Read otherwise, the file is read without making a String per cell: a column cast to a number never holds Strings, and each column left as text is a `CAString` of its own. `to_const_string` packs a column of read-only text into one buffer, which is lighter for a large column that is no longer edited.
 
-`types: :infer` casts a column to `:int64` when every cell that is not missing is an integer that fits, to `:float64` when every such cell is a number, to `:boolean` when every such cell is `true` or `false` (in any case), to `:time` when every such cell is a year-first date or time (`"2024-01-01"`, `"2024/1/2 3:04"`, `"2024-01-01T12:00:00.5Z"`), and leaves it as text otherwise. A column of `0` and `1` is inferred as `:int64`: it could equally be counts, so say which with `types: { "flag" => :boolean }`, or with `cast("flag" => :boolean)` on the integer column. A number with a leading zero (`"007"`) is a code and keeps its column as text, and so does an integer too long for `:int64` (an identifier), which a float would round. A day-first or month-first date (`"01/02/2024"`) is not read as time, since which one it is cannot be told; cast it with `parse_to_time` and a format. `df.infer_types` returns the same decision as a map, so it can be checked, written into the code, or adjusted:
+The inference casts a column to `:int64` when every cell that is not missing is an integer that fits, to `:float64` when every such cell is a number, to `:boolean` when every such cell is `true` or `false` (in any case), to `:time` when every such cell is a year-first date or time (`"2024-01-01"`, `"2024/1/2 3:04"`, `"2024-01-01T12:00:00.5Z"`), and leaves it as text otherwise. A column of `0` and `1` is inferred as `:int64`: it could equally be counts, so say which with `types: { "flag" => :boolean }`, or with `cast("flag" => :boolean)` on the integer column. A number with a leading zero (`"007"`) is a code and keeps its column as text, and so does an integer too long for `:int64` (an identifier), which a float would round. A day-first or month-first date (`"01/02/2024"`) is not read as time, since which one it is cannot be told; cast it with `parse_to_time` and a format. `df.infer_types` returns the same decision as a map, so it can be checked, written into the code, or adjusted:
 
 ```ruby
-df = CAFrame.from_csv("obs.csv")
+df = CAFrame.from_csv("obs.csv", types: :text)
 df.infer_types        # => { "time" => :time, "temp" => :float64, "count" => :int64 }
 df.cast(df.infer_types.merge("count" => :int32))
 ```
 
-**Mostly one rule, with exceptions.** `default:` in the map sets every column the map does not name — `:infer` to infer them, or a type to cast them all — and a named column takes its own entry instead. `nil` leaves a column as the text it was read as, which is how to keep a column out of inference:
+**Mostly one rule, with exceptions.** `default:` in the map sets every column the map does not name — `:infer` to infer them (what `from_csv` does without `default:`), `:text` to keep them text, or a type to cast them all — and a named column takes its own entry instead. `nil` leaves a column as the text it was read as, which is how to keep a column out of inference:
 
 ```ruby
-CAFrame.from_csv("obs.csv", types: { default: :infer, "count" => :int32, "id" => nil })
+CAFrame.from_csv("obs.csv", types: { "count" => :int32, "id" => nil })
 # infer the rest; count is int32; id stays text even though it reads as a number
 
 CAFrame.from_csv("obs.csv", types: { default: :float64, ["station", "note"] => nil })
 # every column float64 except station and note
 ```
 
-`types: :infer` is `types: { default: :infer }`. A map without `default:` casts only what it names, as before. `default:` is a Symbol and column names are Strings, so they cannot collide; any other Symbol key raises. `from_records` takes the same `types:`, and so does `cast` itself: `types:` is handed to `df.cast(types)`, so `df.cast(:infer)` and `df.cast(default: :infer, "id" => nil)` do the same to a frame already read.
+`from_csv` infers by default, so its map without `default:` is the same as one with `default: :infer`; `types: :infer` is that too. `cast` and `from_records`, which take the same map, cast only what a map without `default:` names. `default:` is a Symbol and column names are Strings, so they cannot collide; any other Symbol key raises. `from_records` takes the same `types:`, and so does `cast` itself: `types:` is handed to `df.cast(types)`, so `df.cast(:infer)` and `df.cast(default: :infer, "id" => nil)` do the same to a frame already read.
 
 **A file's own spelling of missing.** An unquoted empty field, and a cell a short row never reached, are `UNDEF` without asking. Files that write missing some other way — a `-999` sentinel, `///`, `NA` — say so with `missing:`. A field whose text is one of the tokens becomes `UNDEF` **before** `types:` casts, so the sentinel never reaches the column as a number:
 

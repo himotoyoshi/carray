@@ -21,7 +21,7 @@ Both are printed in full in chapter 1, so you can follow the examples without th
 
 ```ruby norun
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## Reading order

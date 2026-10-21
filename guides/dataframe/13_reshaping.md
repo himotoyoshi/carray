@@ -4,7 +4,7 @@ The same figures can be laid out two ways. `sales` is **long**: one row per shop
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## Long to wide — `pivot`

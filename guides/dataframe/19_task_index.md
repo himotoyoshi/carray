@@ -12,7 +12,8 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | read parsed JSON (an Array of objects) | `CAFrame.from_records` | 2 |
 | read a CSV file | `CAFrame.from_csv` | 3 |
 | read CSV text I already have in a String | `CAFrame.from_csv(StringIO.new(text))` | 3 |
-| have the column types worked out | `from_csv(types: :infer)` | 3 |
+| have the column types worked out | `from_csv` (by default) | 3 |
+| read every column as text | `from_csv(types: :text)` | 3 |
 | see the types that would be chosen, before converting | `infer_types` | 3 |
 | treat `-1`, `NA` or another code as missing | `from_csv(missing: [...])` | 3 |
 | be told about cells that cannot be read | `from_csv(on_error: :warn)` | 3 |

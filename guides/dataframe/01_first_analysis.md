@@ -48,20 +48,12 @@ west,West Park,large,2024-04-01,200
 
 ## Reading the file
 
-`CAFrame.from_csv` reads a CSV. Asked nothing more, it reads every column as text, which is always safe: nothing is converted, so nothing is lost.
+`CAFrame.from_csv` reads a CSV and gives each column the type every one of its cells can be read as:
 
 ```ruby
 require "carray"
 
-raw = CAFrame.from_csv("sales.csv")
-raw.data_types
-# => {"date" => CAString, "shop" => CAString, "visitors" => CAString, "revenue" => CAString, "rating" => CAString}
-```
-
-`types: :infer` asks CAFrame to give each column the type every one of its cells can be read as:
-
-```ruby
-sales = CAFrame.from_csv("sales.csv", types: :infer)
+sales = CAFrame.from_csv("sales.csv")
 sales.data_types
 # => {"date" => CATime, "shop" => CAString, "visitors" => :int64, "revenue" => :float64, "rating" => CAString}
 ```
@@ -71,7 +63,7 @@ The dates became a time column, the visitor counts integers and the revenue floa
 Both are ways this file writes "no value". Tell `from_csv` about them with `missing:`, and those cells are read as missing before the columns are typed:
 
 ```ruby
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
 sales.data_types
 # => {"date" => CATime, "shop" => CAString, "visitors" => :int64, "revenue" => :float64, "rating" => :float64}
 ```
@@ -220,7 +212,7 @@ p sales.head(6)
 The shop table gives each shop its floor area. `join` adds those columns to the summary, matching rows by the shop key. The summary's index is first turned back into a column with `reset_index`, so it can serve as the key:
 
 ```ruby
-shops = CAFrame.from_csv("shops.csv", types: :infer)
+shops = CAFrame.from_csv("shops.csv")
 report = summary.reset_index.join(shops.select("shop", "name", "floor_m2"), on: "shop")
 report["revenue_per_m2"] = (report["revenue"] / report["floor_m2"]).round(2)
 p report

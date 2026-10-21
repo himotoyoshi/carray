@@ -963,7 +963,7 @@ end
 class TestCAFrameJoinEmptyFrame < Test::Unit::TestCase
   def setup
     @full  = CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_FLOAT64([1.5, 2.5]))
-    @empty = CAFrame.from_csv(StringIO.new("a,b\n"))
+    @empty = CAFrame.from_csv(StringIO.new("a,b\n"), types: :text)
   end
 
   def test_an_empty_frame_of_other_types_joins_in_either_place

@@ -184,7 +184,7 @@ Symbol keys work as well as String keys; they become String column names.
 ## From a CSV file — `from_csv`
 
 ```ruby
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
 sales.nrow   # => 24
 ```
 
@@ -206,7 +206,7 @@ df.nrow   # => 4
 A frame can carry a few facts about the table as a whole — a title, where the data came from — as attributes. They are kept with the frame and do not take part in any computation.
 
 ```ruby
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
 sales.set_attr(:title, "daily figures by shop")
 sales.set_attr(:source, "sales.csv")
 sales.attr(:title)    # => "daily figures by shop"

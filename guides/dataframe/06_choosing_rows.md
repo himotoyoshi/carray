@@ -4,7 +4,7 @@ Most questions about a table start by narrowing it down — the weekend days, on
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## `filter` — rows where a condition holds
@@ -152,7 +152,7 @@ sales.filter { |f| f["rating"].is_masked }["shop"].to_a   # => ["north"]
 When you have expectations about the data — counts are not negative, ratings run from 1 to 5 — `verify` checks every row against each of them and returns one column of verdicts per rule. Here the file is read without telling it about the `-1` code, as you might the first time:
 
 ```ruby
-unchecked = CAFrame.from_csv("sales.csv", types: :infer, missing: ["n/a"])
+unchecked = CAFrame.from_csv("sales.csv", missing: ["n/a"])
 report = unchecked.verify(
   "visitors not negative" => ->(f) { f["visitors"] >= 0 },
   "rating from 1 to 5"    => ->(f) { f["rating"].is_between(1, 5) },

@@ -14,7 +14,7 @@ class TestCAFrameTypesDefault < Test::Unit::TestCase
   CSV
 
   def frame(**opts)
-    CAFrame.from_csv(StringIO.new(CSV_TEXT), **opts)
+    CAFrame.from_csv(StringIO.new(CSV_TEXT), types: :text, **opts)
   end
 
   def test_infer_with_a_column_set_by_hand
@@ -55,11 +55,15 @@ class TestCAFrameTypesDefault < Test::Unit::TestCase
     assert_equal :float64, df["temp"].data_type
   end
 
-  def test_a_map_without_default_still_casts_only_what_it_names
+  # from_csv infers by default, so a map without default: infers the columns
+  # it does not name; cast's map casts only what it names.
+  def test_a_map_without_default_infers_the_rest_in_from_csv
     df = frame(types: { "temp" => :float64, "id" => nil })
     assert_equal :float64, df["temp"].data_type
-    assert_equal :object, df["count"].data_type
+    assert_equal :int64, df["count"].data_type
     assert_equal :object, df["id"].data_type
+    df = frame.cast("temp" => :float64)
+    assert_equal :object, df["count"].data_type
   end
 
   def test_on_error_applies_to_the_default_too

@@ -18,7 +18,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
 
   def test_headers_become_string_column_names
     with_csv("time,station,temp\n2024,tokyo,22.1\n") do |path|
-      df = CAFrame.from_csv(path)
+      df = CAFrame.from_csv(path, types: :text)
       assert_equal ["time", "station", "temp"], df.column_names
       assert_equal 1, df.nrow
     end
@@ -26,7 +26,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
 
   def test_columns_read_raw_as_strings
     with_csv("temp\n22.1\n25.3\n") do |path|
-      df = CAFrame.from_csv(path)
+      df = CAFrame.from_csv(path, types: :text)
       assert_equal :object, df["temp"].data_type
       assert_equal ["22.1", "25.3"], df["temp"].to_a
     end
@@ -46,7 +46,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
 
   def test_rfc_spacing_preserved_by_default
     with_csv("a,b\nx , y\n") do |path|
-      df = CAFrame.from_csv(path)
+      df = CAFrame.from_csv(path, types: :text)
       assert_equal ["x "], df["a"].to_a
       assert_equal [" y"], df["b"].to_a
     end
@@ -54,7 +54,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
 
   def test_strip_trims_unquoted_fields
     with_csv("a,b\n x , y \n") do |path|
-      df = CAFrame.from_csv(path, strip: true)
+      df = CAFrame.from_csv(path, strip: true, types: :text)
       assert_equal ["x"], df["a"].to_a
       assert_equal ["y"], df["b"].to_a
     end
@@ -62,7 +62,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
 
   def test_quoted_embedded_separator_newline_and_escape
     with_csv(%Q{x,note\n1,"a,b"\n2,"l1\nl2"\n3,"he said ""hi"""\n}) do |path|
-      df = CAFrame.from_csv(path)
+      df = CAFrame.from_csv(path, types: :text)
       assert_equal 3, df.nrow
       assert_equal ["a,b", "l1\nl2", %q{he said "hi"}], df["note"].to_a
     end
@@ -70,7 +70,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
 
   def test_empty_unquoted_is_missing_quoted_is_empty_string
     with_csv(%Q{a,b\np,\np,""\n}) do |path|
-      df = CAFrame.from_csv(path)
+      df = CAFrame.from_csv(path, types: :text)
       assert_equal [UNDEF, ""], df["b"].to_a
       assert_equal [true, false], df["b"].mask.to_a
     end
@@ -81,7 +81,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
   #  with them carries UNDEF.
   def test_missing_is_undef_with_and_without_a_cast
     with_csv("a,b\n1,x\n,y\n3,\n") do |path|
-      plain = CAFrame.from_csv(path)
+      plain = CAFrame.from_csv(path, types: :text)
       typed = CAFrame.from_csv(path, types: { "a" => :int32 })
       assert_equal [false, true, false], plain["a"].mask.to_a
       assert_equal [false, true, false], typed["a"].mask.to_a
@@ -113,7 +113,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
   def test_a_mask_round_trips_through_a_single_column_csv
     s = CA_OBJECT(["a", "b", "c"]); s[1] = UNDEF
     df = CAFrame.new("s" => s)
-    back = CAFrame.from_csv(StringIO.new(df.to_csv(index: false)))
+    back = CAFrame.from_csv(StringIO.new(df.to_csv(index: false)), types: :text)
     assert_equal 3, back.nrow
     assert_equal [false, true, false], back["s"].mask.to_a
     assert_equal [UNDEF, "a", "c"].size, back.nrow
@@ -123,44 +123,44 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
   def test_a_mask_round_trips_through_an_index_only_csv
     idx = CA_OBJECT(["x", "y", "z"]); idx[1] = UNDEF
     df = CAFrame.new({}, index: idx, axis_name: "id")
-    back = CAFrame.from_csv(StringIO.new(df.to_csv))
+    back = CAFrame.from_csv(StringIO.new(df.to_csv), types: :text)
     assert_equal 3, back.nrow
     assert_equal [false, true, false], back["id"].mask.to_a
   end
 
   def test_a_blank_line_between_records_is_still_skipped_with_two_columns
-    back = CAFrame.from_csv(StringIO.new("a,b\n1,2\n\n3,4\n"))
+    back = CAFrame.from_csv(StringIO.new("a,b\n1,2\n\n3,4\n"), types: :text)
     assert_equal 2, back.nrow
   end
 
   def test_a_blank_line_before_the_header_is_still_skipped
-    back = CAFrame.from_csv(StringIO.new("\ns\na\n"))
+    back = CAFrame.from_csv(StringIO.new("\ns\na\n"), types: :text)
     assert_equal ["s"], back.column_names
     assert_equal 1, back.nrow
   end
 
   def test_ragged_short_row_padded_long_row_raises
     with_csv("a,b,c\n1,2\n1,2,3\n") do |path|
-      df = CAFrame.from_csv(path)
+      df = CAFrame.from_csv(path, types: :text)
       assert_equal 2, df.nrow
       assert_equal [UNDEF, "3"], df["c"].to_a
     end
     with_csv("a,b\n1,2,3\n") do |path|
-      err = assert_raise(CAFrame::CSVParser::MalformedCSV) { CAFrame.from_csv(path) }
+      err = assert_raise(CAFrame::CSVParser::MalformedCSV) { CAFrame.from_csv(path, types: :text) }
       assert_equal 2, err.lineno
     end
   end
 
   def test_bom_stripped_from_first_header
     with_csv("\xEF\xBB\xBFname,x\nv,1\n") do |path|
-      df = CAFrame.from_csv(path)
+      df = CAFrame.from_csv(path, types: :text)
       assert_equal ["name", "x"], df.column_names
     end
   end
 
   def test_columns_are_views_over_backing_array
     with_csv("a,b\n1,2\n3,4\n") do |path|
-      df = CAFrame.from_csv(path)
+      df = CAFrame.from_csv(path, types: :text)
       assert_kind_of CAString, df["a"]
       assert_kind_of CABlock, df["a"].send(:face_storage)
     end
@@ -169,7 +169,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
   def test_injected_parser
     with_csv("ignored\n") do |path|
       fake = ->(_p) { [["a", "b"], [["1", "2"], ["3", "4"]]] }
-      df = CAFrame.from_csv(path, parser: fake)
+      df = CAFrame.from_csv(path, parser: fake, types: :text)
       assert_equal ["a", "b"], df.column_names
       assert_equal ["1", "3"], df["a"].to_a
     end
@@ -177,7 +177,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
 
   def test_dsl_skip_header_units_body
     with_csv("# note1\n# note2\nstation,temp\nname,degC\nTokyo,28.5\nOsaka,29.8\n") do |path|
-      df = CAFrame.from_csv(path) do |r|
+      df = CAFrame.from_csv(path, types: :text) do |r|
         r.skip 2
         r.header
         r.skip 1
@@ -191,7 +191,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
 
   def test_dsl_column_names_headerless
     with_csv("Tokyo,28.5\nOsaka,29.8\n") do |path|
-      df = CAFrame.from_csv(path) { it.column_names "station", "temp"; it.data }
+      df = CAFrame.from_csv(path, types: :text) { it.column_names "station", "temp"; it.data }
       assert_equal ["station", "temp"], df.column_names
       assert_equal ["Tokyo", "Osaka"], df["station"].to_a
     end
@@ -200,7 +200,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
   def test_dsl_header_name_returns_secondary_header
     with_csv("station,temp\nname,degC\nTokyo,28.5\n") do |path|
       units = nil
-      df = CAFrame.from_csv(path) do |csv|
+      df = CAFrame.from_csv(path, types: :text) do |csv|
         csv.header
         units = csv.header(:units)
         csv.data
@@ -228,7 +228,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
 
   def test_dsl_named_header_follows_the_columns_selected
     csv = "a,b,c\nu1,u2,u3\n1,2,3\n"
-    df = CAFrame.from_csv(StringIO.new(csv)) do |r|
+    df = CAFrame.from_csv(StringIO.new(csv), types: :text) do |r|
       r.header
       r.header(:units)
       r.columns("c", "a")
@@ -240,26 +240,26 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
   end
 
   def test_dsl_named_header_without_column_names
-    df = CAFrame.from_csv(StringIO.new("m,s\n1,2\n")) { |r| r.header(:units); r.data }
+    df = CAFrame.from_csv(StringIO.new("m,s\n1,2\n"), types: :text) { |r| r.header(:units); r.data }
     assert_equal "s", df["c1"].attr(:units)
   end
 
   def test_dsl_named_header_shorter_than_the_columns
-    df = CAFrame.from_csv(StringIO.new("a,b\nm\n1,2\n")) { |r| r.header; r.header(:units); r.data }
+    df = CAFrame.from_csv(StringIO.new("a,b\nm\n1,2\n"), types: :text) { |r| r.header; r.header(:units); r.data }
     assert_equal "m", df["a"].attr(:units)
     assert_nil df["b"].attr(:units)
   end
 
   def test_dsl_named_header_longer_than_the_columns_is_refused
     err = assert_raise(ArgumentError) do
-      CAFrame.from_csv(StringIO.new("a,b\nm,s,x\n1,2\n")) { |r| r.header; r.header(:units); r.data }
+      CAFrame.from_csv(StringIO.new("a,b\nm,s,x\n1,2\n"), types: :text) { |r| r.header; r.header(:units); r.data }
     end
     assert_match(/header\(:units\) on line 2 has 3 fields for the 2 columns/, err.message)
   end
 
   def test_dsl_named_header_read_twice_is_refused
     assert_raise(ArgumentError) do
-      CAFrame.from_csv(StringIO.new("a\nm\ns\n1\n")) { |r| r.header; r.header(:u); r.header(:u); r.data }
+      CAFrame.from_csv(StringIO.new("a\nm\ns\n1\n"), types: :text) { |r| r.header; r.header(:u); r.header(:u); r.data }
     end
   end
 
@@ -280,13 +280,13 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
   def test_attrs_round_trip_one_column_without_the_attribute
     df = CAFrame.new("x" => CA_INT32([7, 8, 9]))
     back = CAFrame.from_csv(StringIO.new(df.to_csv(attrs: [:units, :long])),
-                            attrs: [:units, :long])
+                            attrs: [:units, :long], types: :text)
     assert_equal ["7", "8", "9"], back["x"].to_a
     assert_equal({}, back["x"].attrs)
   end
 
   def test_attrs_round_trip_a_frame_without_columns
-    back = CAFrame.from_csv(StringIO.new(CAFrame.new.to_csv(attrs: [:units])), attrs: [:units])
+    back = CAFrame.from_csv(StringIO.new(CAFrame.new.to_csv(attrs: [:units])), attrs: [:units], types: :text)
     assert_equal [0, []], [back.nrow, back.column_names]
   end
 
@@ -311,14 +311,14 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
     assert_raise(ArgumentError) { df.to_csv(header: false, attrs: [:units]) }
     assert_raise(ArgumentError) { df.to_csv(attrs: [:a]) }
     csv = "x\nm\n1\n"
-    assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(csv), header: false, attrs: [:u]) }
-    assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(csv), attrs: [:u], data: 1) }
-    assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(csv), attrs: [:u]) { |r| r.data } }
+    assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(csv), header: false, attrs: [:u], types: :text) }
+    assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(csv), attrs: [:u], data: 1, types: :text) }
+    assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(csv), attrs: [:u], types: :text) { |r| r.data } }
   end
 
   def test_dsl_generated_names_when_headerless
     with_csv("1,2,3\n4,5,6\n") do |path|
-      df = CAFrame.from_csv(path) { |r| r.data }
+      df = CAFrame.from_csv(path, types: :text) { |r| r.data }
       assert_equal ["c0", "c1", "c2"], df.column_names
       assert_equal ["1", "4"], df["c0"].to_a
     end
@@ -352,7 +352,7 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
   end
 
   def test_reads_a_stringio
-    df = CAFrame.from_csv(StringIO.new(TEXT))
+    df = CAFrame.from_csv(StringIO.new(TEXT), types: :text)
     assert_equal ["a", "b", "c"], df.column_names
     assert_equal [["1", "2", "3"], ["4", UNDEF, "6"]], df.to_ca.to_a
   end
@@ -361,7 +361,7 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
     with_csv(TEXT) do |path|
       File.open(path) do |io|
         assert_equal [["1", "2", "3"], ["4", UNDEF, "6"]],
-                     CAFrame.from_csv(io).to_ca.to_a
+                     CAFrame.from_csv(io, types: :text).to_ca.to_a
       end
     end
   end
@@ -370,8 +370,8 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
   #  come to be read differently.
   def test_a_path_and_an_io_agree
     with_csv(TEXT) do |path|
-      assert_equal CAFrame.from_csv(path).to_ca.to_a,
-                   CAFrame.from_csv(StringIO.new(TEXT)).to_ca.to_a
+      assert_equal CAFrame.from_csv(path, types: :text).to_ca.to_a,
+                   CAFrame.from_csv(StringIO.new(TEXT), types: :text).to_ca.to_a
     end
   end
 
@@ -380,7 +380,7 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
     with_csv(TEXT) do |path|
       io = File.open(path)
       begin
-        CAFrame.from_csv(io)
+        CAFrame.from_csv(io, types: :text)
         assert_equal false, io.closed?
       ensure
         io.close
@@ -389,14 +389,14 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
   end
 
   def test_the_reading_control_block_works_over_an_io
-    df = CAFrame.from_csv(StringIO.new("preamble\n1,2\n3,4\n")) { |r| r.skip 1; r.data }
+    df = CAFrame.from_csv(StringIO.new("preamble\n1,2\n3,4\n"), types: :text) { |r| r.skip 1; r.data }
     assert_equal ["c0", "c1"], df.column_names
     assert_equal [["1", "2"], ["3", "4"]], df.to_ca.to_a
   end
 
   def test_keywords_work_over_an_io
     assert_equal ["a", "b"],
-                 CAFrame.from_csv(StringIO.new("a;b\n1;2\n"), sep: ";").column_names
+                 CAFrame.from_csv(StringIO.new("a;b\n1;2\n"), sep: ";", types: :text).column_names
     assert_equal :int32,
                  CAFrame.from_csv(StringIO.new(TEXT), types: { "a" => :int32 })["a"].data_type
     #  a blank cell is still UNDEF, not a filled-in number
@@ -407,7 +407,7 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
   #  A String is a path, always.  Guessing between a path and CSV text by
   #  looking for a newline is right until it is not.
   def test_a_string_is_a_path_not_content
-    assert_raise(Errno::ENOENT) { CAFrame.from_csv("a,b\n1,2\n") }
+    assert_raise(Errno::ENOENT) { CAFrame.from_csv("a,b\n1,2\n", types: :text) }
   end
 
   def test_an_injected_parser_is_handed_the_source
@@ -441,7 +441,7 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
 
   def test_encoding_reads_and_transcodes_a_cp932_file
     with_bytes(CP932_TEXT) do |path|
-      df = CAFrame.from_csv(path, encoding: "CP932:UTF-8")
+      df = CAFrame.from_csv(path, encoding: "CP932:UTF-8", types: :text)
       assert_equal ["地点", "備考"], df.column_names
       assert_equal ["①髙橋㈱"], df["備考"].to_a
     end
@@ -449,7 +449,7 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
 
   def test_a_file_in_another_encoding_names_the_option
     with_bytes(CP932_TEXT) do |path|
-      e = assert_raise(ArgumentError) { CAFrame.from_csv(path) }
+      e = assert_raise(ArgumentError) { CAFrame.from_csv(path, types: :text) }
       assert_match(/invalid byte sequence/, e.message)
       assert_match(/encoding: "<file encoding>:UTF-8"/, e.message)
     end
@@ -458,14 +458,14 @@ class TestCAFrameFromCsvSource < Test::Unit::TestCase
   def test_a_failed_transcode_keeps_its_class_and_names_the_option
     with_bytes(CP932_TEXT) do |path|
       e = assert_raise(Encoding::UndefinedConversionError) do
-        CAFrame.from_csv(path, encoding: "Shift_JIS:UTF-8")
+        CAFrame.from_csv(path, encoding: "Shift_JIS:UTF-8", types: :text)
       end
       assert_match(/"Shift_JIS:UTF-8"/, e.message)
     end
   end
 
   def test_an_io_in_another_encoding_names_how_to_open_it
-    e = assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(CP932_TEXT.dup.force_encoding("UTF-8"))) }
+    e = assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(CP932_TEXT.dup.force_encoding("UTF-8")), types: :text) }
     assert_match(/File\.open\(path, "r:<file encoding>:UTF-8"\)/, e.message)
   end
 end

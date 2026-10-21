@@ -13,7 +13,7 @@ When the analysis is done, the results go somewhere: a CSV file for a spreadshee
 require "carray"
 require "json"
 require "stringio"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
 summary = sales.select("shop", "visitors", "revenue").group_by("shop").mean
 ```
 
@@ -34,7 +34,7 @@ puts summary.to_csv
 - A missing cell is written as an empty field. `from_csv` reads an empty field back as missing, so the gaps survive the round trip.
 - An empty string, which is a value and not a gap, is written `""` to keep the two apart.
 - A field containing the separator, a quote or a line break is quoted, with quotes doubled.
-- Times are written year first (`2024-03-04`, `2024-03-04T08:12:00Z`), which `from_csv(types: :infer)` reads back as times.
+- Times are written year first (`2024-03-04`, `2024-03-04T08:12:00Z`), which `from_csv` reads back as times.
 - A yes/no (boolean) column is written as `1` and `0`; read it back with `types: { "name" => :boolean }`.
 
 ```ruby

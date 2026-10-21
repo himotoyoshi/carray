@@ -4,7 +4,7 @@ A frame is a set of named arrays. You have seen that `df["name"]` gives a column
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## A column is an array

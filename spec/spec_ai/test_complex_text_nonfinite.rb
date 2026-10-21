@@ -43,7 +43,7 @@ class TestComplexTextNonfinite < Test::Unit::TestCase
     df = CAFrame.new("c" => CA_CMPLX128(VALUES))
     text = df.to_csv
     assert_same_values CAFrame.from_csv(StringIO.new(text), types: { "c" => :cmplx128 })["c"].to_a
-    assert_same_values CAFrame.from_csv(StringIO.new(text))["c"].to_type(:cmplx128).to_a
+    assert_same_values CAFrame.from_csv(StringIO.new(text), types: :text)["c"].to_type(:cmplx128).to_a
   end
 
   def test_not_complex_text_stays_unreadable

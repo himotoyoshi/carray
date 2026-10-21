@@ -12,8 +12,8 @@ Data you need often sits in more than one table: daily figures in one, the shops
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
-shops = CAFrame.from_csv("shops.csv", types: :infer)
+sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
+shops = CAFrame.from_csv("shops.csv")
 ```
 
 ## Matching rows by a key — `join`

@@ -245,15 +245,15 @@ df = CAFrame.from_records(records,
 
 ### `CAFrame.from_csv`
 
-Read a CSV from a path or from an open IO. The header row gives the column names, and every column is read as text (a `CAString`) unless you ask for types:
+Read a CSV from a path or from an open IO. The header row gives the column names, and each column is given the type every one of its present cells can be read as — integer, float, boolean, or a time written year first — and stays text (a `CAString`) otherwise:
 
 ```ruby
-df = CAFrame.from_csv("obs.csv")                                    # every column as text
-df = CAFrame.from_csv("obs.csv", types: { "temp" => :float64 })     # temp read as float64
-df = CAFrame.from_csv("obs.csv", types: :infer)                     # each column's type inferred
+df = CAFrame.from_csv("obs.csv")                                    # each column's type inferred
+df = CAFrame.from_csv("obs.csv", types: { "temp" => :float64 })     # temp read as float64, the rest inferred
+df = CAFrame.from_csv("obs.csv", types: :text)                      # every column as text
 ```
 
-With `types: :infer`, each text column is given the type every one of its present cells can be read as — integer, float, boolean, or a time written year first — and stays text otherwise (the rules are under [`infer_types`](#finding-the-types--infer_types)). A time column read this way is already a `CATime`, so it goes straight to `set_index`; `parse_to_time` is for a column still held as text.
+The inference (the rules are under [`infer_types`](#finding-the-types--infer_types)). A time column read this way is already a `CATime`, so it goes straight to `set_index`; `parse_to_time` is for a column still held as text.
 
 An empty cell, or one that cannot be read as the type asked for, becomes `UNDEF` — in an integer column too, which stays integer. The other options — missing-value tokens, encodings, header and data lines, reading only some columns — are described in [Reading and writing CSV](CAFrameCSV.md#reading-csv-caframefrom_csv).
 
@@ -1968,7 +1968,7 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | make a frame from arrays I already have | [`CAFrame.new`](#caframenew) |
 | view an array I already have as a table, without copying | [`CArray#to_frame`](#carrayto_frame) |
 | read parsed JSON (an Array of objects) | [`CAFrame.from_records`](#caframefrom_records) |
-| read a CSV, with types guessed from the text | [`CAFrame.from_csv(types: :infer)`](#caframefrom_csv) |
+| read a CSV, with types guessed from the text | [`CAFrame.from_csv`](#caframefrom_csv) |
 | see what types the text columns could be, before converting | [`infer_types`](#finding-the-types--infer_types) |
 | glance at a frame | [`p df`](#printing--p-puts-to_table) |
 | check every column just read: types, counts, masked cells, ranges | [`describe`](#checking-a-frame-just-read--describe) |

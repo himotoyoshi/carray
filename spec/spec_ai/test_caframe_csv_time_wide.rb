@@ -10,7 +10,7 @@ require "carray"
 class TestCAFrameCSVTimeWide < Test::Unit::TestCase
 
   def read (text, **opts)
-    CAFrame.from_csv(StringIO.new(text), **opts)
+    CAFrame.from_csv(StringIO.new(text), types: :text, **opts)
   end
 
   def round_trip (t)

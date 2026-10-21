@@ -8,9 +8,9 @@ The examples use the daily `sales` frame and a small log of orders from a café'
 require "carray"
 require "stringio"
 
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
 
-orders = CAFrame.from_csv(StringIO.new(<<~CSV), types: :infer)
+orders = CAFrame.from_csv(StringIO.new(<<~CSV))
   time,item,qty
   2024-03-04 08:12,coffee,2
   2024-03-04 08:47,tea,1
@@ -22,7 +22,7 @@ orders = CAFrame.from_csv(StringIO.new(<<~CSV), types: :infer)
   2024-03-04 16:03,cake,1
 CSV
 
-prices = CAFrame.from_csv(StringIO.new(<<~CSV), types: :infer)
+prices = CAFrame.from_csv(StringIO.new(<<~CSV))
   since,item,price
   2024-03-01 00:00,coffee,3.20
   2024-03-01 00:00,tea,2.80
@@ -66,7 +66,7 @@ orders["time"].hour.to_a   # => [8, 8, 9, 11, 11, 14, 14, 16]
 
 | your times are… | turn them into a time column with |
 |---|---|
-| written year first: `2024-03-04`, `2024-03-04 08:12` | `from_csv(types: :infer)` or `types: { "time" => :time }` when reading |
+| written year first: `2024-03-04`, `2024-03-04 08:12` | `from_csv` (inferred) or `types: { "time" => :time }` when reading |
 | text in another layout: `04/03/2024`, `Mar 4, 2024` | `parse_to_time(name, format)` |
 | numbers counted from a starting date: seconds since 1970, a spreadsheet's day numbers | `to_time(name, unit:, epoch:)` |
 

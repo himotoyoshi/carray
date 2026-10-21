@@ -27,21 +27,42 @@ The examples in this chapter use small texts in `StringIO`, so you can see the w
 
 ## Column types
 
-### Everything as text, until you say otherwise
+### Types worked out from the text
 
-The first line gives the column names. Without further options every column is read as text, as a `CAString` — an array of strings:
+The first line gives the column names. Each column is given the type that every one of its present cells can be read as:
 
 ```ruby
-df = CAFrame.from_csv("sales.csv")
+sales = CAFrame.from_csv("sales.csv")
+sales.data_types
+# => {"date" => CATime, "shop" => CAString, "visitors" => :int64, "revenue" => :float64, "rating" => CAString}
+```
+
+A column gets a type only when every one of its present cells fits that type:
+
+- **Integers** become `:int64` when every cell is a whole number that fits.
+- **Numbers** become `:float64` when every cell is a number.
+- **`true` / `false`** in any case become `:boolean`. A column of only `0` and `1` is read as integers, since it could equally be counts; say `:boolean` if it is a yes/no column.
+- **Times** become `:time` when every cell is a date or time written year first: `2024-03-04`, `2024/3/4 9:30`, `2024-03-04T12:00:00Z`.
+- **Everything else stays text**, as a `CAString` — an array of strings. In particular:
+  - a number with a leading zero (`007`), which is usually a code;
+  - an integer too long for `int64`, which is usually an identifier;
+  - a date written day-first or month-first (`04/03/2024`), since which one it is cannot be told from the text.
+
+One unreadable cell keeps a whole column as text. That is what happened to `rating` above: the `n/a` in it is not a number. Telling `from_csv` how the file writes missing values (next section) usually settles it.
+
+### Everything as text — `types: :text`
+
+`types: :text` reads every column as text. Nothing is converted, so nothing is lost or misread; you can convert columns yourself afterwards (chapter 7):
+
+```ruby
+df = CAFrame.from_csv("sales.csv", types: :text)
 df["revenue"].class   # => CAString
 df["revenue"][0]      # => "2121.39"
 ```
 
-Text is always a safe reading: nothing is converted, so nothing is lost or misread. From here you can convert columns yourself (chapter 7), or ask `from_csv` to do it while reading.
-
 ### Naming the types — `types:`
 
-Give a Hash of column name to type:
+Give a Hash of column name to type. The columns it names take those types, and the others are worked out as above:
 
 ```ruby
 text = <<~CSV
@@ -81,32 +102,9 @@ df.data_types["revenue"]   # => :float64
 
 Numbers are read as decimal numbers: `"010"` is ten, and `"0x1F"` or `"1_000"` are not numbers. A value that does not fit the type — `"300"` as `:int8` — is unreadable, not wrapped around.
 
-### Letting CAFrame decide — `types: :infer`
+### Exceptions to the worked-out types
 
-`types: :infer` gives each text column the type that every one of its present cells can be read as:
-
-```ruby
-sales = CAFrame.from_csv("sales.csv", types: :infer)
-sales.data_types
-# => {"date" => CATime, "shop" => CAString, "visitors" => :int64, "revenue" => :float64, "rating" => CAString}
-```
-
-A column gets a type only when every one of its present cells fits that type:
-
-- **Integers** become `:int64` when every cell is a whole number that fits.
-- **Numbers** become `:float64` when every cell is a number.
-- **`true` / `false`** in any case become `:boolean`. A column of only `0` and `1` is read as integers, since it could equally be counts; say `:boolean` if it is a yes/no column.
-- **Times** become `:time` when every cell is a date or time written year first: `2024-03-04`, `2024/3/4 9:30`, `2024-03-04T12:00:00Z`.
-- **Everything else stays text.** In particular:
-  - a number with a leading zero (`007`), which is usually a code;
-  - an integer too long for `int64`, which is usually an identifier;
-  - a date written day-first or month-first (`04/03/2024`), since which one it is cannot be told from the text.
-
-One unreadable cell keeps a whole column as text. That is what happened to `rating` above: the `n/a` in it is not a number. Telling `from_csv` how the file writes missing values (next section) usually settles it.
-
-### Mostly inferred, with exceptions
-
-Inside a Hash, `default:` sets the type of every column the Hash does not name. `default: :infer` infers them, and `nil` keeps a named column as text:
+In the Hash, `nil` keeps a named column as text, and `default:` sets the type of every column the Hash does not name — a type, or `:text` to keep them all text:
 
 ```ruby
 text = <<~CSV
@@ -115,7 +113,7 @@ text = <<~CSV
   0013,tea,25,2.80
 CSV
 df = CAFrame.from_csv(StringIO.new(text),
-                      types: { default: :infer, "stock" => :int16, "item" => :categorical })
+                      types: { "stock" => :int16, "item" => :categorical })
 df.data_types
 # => {"sku" => CAString, "item" => CACategorical, "stock" => :int16, "price" => :float64}
 ```
@@ -127,7 +125,7 @@ df.data_types
 When you would rather see the decision before it is made, read the file as text and ask:
 
 ```ruby
-raw = CAFrame.from_csv("sales.csv")
+raw = CAFrame.from_csv("sales.csv", types: :text)
 raw.infer_types
 # => {"date" => :time, "visitors" => :int64, "revenue" => :float64}
 ```
@@ -148,7 +146,7 @@ A column missing from the Hash, like `rating` here, could not be read as one typ
 An empty field is always missing. Many files also use a code for it: `-1`, `NA`, `n/a`, `-999`. List them with `missing:`, and those fields are read as missing **before** the columns are typed, so the code never reaches a column as a number:
 
 ```ruby
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
 sales["visitors"].count_masked   # => 1
 sales["rating"].data_type        # => :float64
 ```
@@ -163,7 +161,7 @@ text = <<~CSV
   -1,250.0,-
   7,-1,82
 CSV
-df = CAFrame.from_csv(StringIO.new(text), types: :infer,
+df = CAFrame.from_csv(StringIO.new(text),
                       missing: { default: "-1", "score" => ["-1", "-"], "account" => [] })
 df["account"].to_a   # => [-1, 7]
 df["balance"].to_a   # => [250.0, UNDEF]
@@ -326,8 +324,7 @@ If you already have a parser you trust for a particular source, pass it as `pars
 
 ```ruby
 require "csv"
-df = CAFrame.from_csv("sales.csv", parser: ->(path) { rows = CSV.read(path); [rows.shift, rows] },
-                      types: :infer)
+df = CAFrame.from_csv("sales.csv", parser: ->(path) { rows = CSV.read(path); [rows.shift, rows] })
 df.nrow   # => 24
 ```
 
@@ -341,7 +338,7 @@ The parser then owns the reading, so `sep:`, `quote:`, `strip:` and `encoding:` 
 - A text column that you will no longer edit can be packed with `to_const_string`, which stores all its strings in one buffer:
 
 ```ruby
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
 sales["shop"] = sales["shop"].to_const_string
 sales["shop"].class   # => CAConstString
 ```
@@ -350,7 +347,8 @@ sales["shop"].class   # => CAConstString
 
 | the file… | option |
 |---|---|
-| has numbers, dates, yes/no columns | `types:` / `types: :infer` |
+| has numbers, dates, yes/no columns | worked out by default; `types:` to name them |
+| should be read as text, unconverted | `types: :text` |
 | writes missing values with a code | `missing:` |
 | may contain mistakes you want to hear about | `on_error: :warn` / `:raise` |
 | has title or unit lines, or no header | `header:` / `data:` / `column_names:` / `attrs:` |

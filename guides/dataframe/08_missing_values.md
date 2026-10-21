@@ -4,7 +4,7 @@ Real tables have gaps: a counter that failed, a field left empty, a value that c
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## What a missing value is
@@ -121,7 +121,7 @@ Both work on group summaries as well, which is where they are most useful.
 If a column uses a code such as `-1` and you did not tell `from_csv` about it, `mask_eq` makes those cells missing:
 
 ```ruby
-raw = CAFrame.from_csv("sales.csv", types: :infer)
+raw = CAFrame.from_csv("sales.csv")
 raw["visitors"].min           # => -1
 raw.mask_eq("visitors", -1)
 raw["visitors"].min           # => 95

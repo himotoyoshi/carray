@@ -13,7 +13,7 @@ class TestFrameCsvBoolean < Test::Unit::TestCase
     Dir.mktmpdir do |d|
       path = File.join(d, "a.csv")
       File.write(path, text)
-      CAFrame.from_csv(path, **kw)
+      CAFrame.from_csv(path, types: :text, **kw)
     end
   end
 

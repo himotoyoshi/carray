@@ -32,15 +32,15 @@ class TestCAFrameColumnNames < Test::Unit::TestCase
       CA_INT32([[1, 2], [3, 4]]).to_frame(:x, "y")
     }
     assert_refused("from_csv: columns: a column name is a String (got :c)") {
-      CAFrame.from_csv(StringIO.new("a,c\n1,2\n"), columns: ["a", :c])
+      CAFrame.from_csv(StringIO.new("a,c\n1,2\n"), columns: ["a", :c], types: :text)
     }
     assert_refused("from_csv: columns: a column name is a String (got :x); " \
                    "given for \"a\"") {
-      CAFrame.from_csv(StringIO.new("a,c\n1,2\n"), columns: { "a" => :x })
+      CAFrame.from_csv(StringIO.new("a,c\n1,2\n"), columns: { "a" => :x }, types: :text)
     }
     assert_refused("from_csv: missing: a column name is a String (got :a); " \
                    ":default is the only Symbol key") {
-      CAFrame.from_csv(StringIO.new("a,c\n1,2\n"), missing: { a: "-999" })
+      CAFrame.from_csv(StringIO.new("a,c\n1,2\n"), missing: { a: "-999" }, types: :text)
     }
     assert_refused("types: a column name is a String (got :a); " \
                    ":default is the only Symbol key") {
@@ -55,7 +55,7 @@ class TestCAFrameColumnNames < Test::Unit::TestCase
     df = CAFrame.new({ "a" => CA_INT32([1, 2]) }, axis_name: "row")
     assert_equal "row", df.axis_name
     assert_equal CA_FLOAT64, df.copy.cast(default: :float64)["a"].data_type
-    got = CAFrame.from_csv(StringIO.new("a,c\n-999,2\n"), missing: { default: "-999" })
+    got = CAFrame.from_csv(StringIO.new("a,c\n-999,2\n"), missing: { default: "-999" }, types: :text)
     assert_equal 1, got["a"].count_masked
   end
 end

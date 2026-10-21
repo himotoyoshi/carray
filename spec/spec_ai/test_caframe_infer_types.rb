@@ -14,7 +14,7 @@ class TestCAFrameInferTypes < Test::Unit::TestCase
   CSV
 
   def frame(text = CSV_TEXT, **opts)
-    CAFrame.from_csv(StringIO.new(text), **opts)
+    CAFrame.from_csv(StringIO.new(text), types: :text, **opts)
   end
 
   def infer(cells)
@@ -99,7 +99,7 @@ class TestCAFrameCastTime < Test::Unit::TestCase
   CSV
 
   def frame
-    CAFrame.from_csv(StringIO.new(CSV_TEXT))
+    CAFrame.from_csv(StringIO.new(CSV_TEXT), types: :text)
   end
 
   def strings(col)

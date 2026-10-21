@@ -9,10 +9,17 @@ class CAFrame
   # over one object array (§4.2). Casting is a separate step: +types:+ takes
   # anything +cast+ takes as a map -- { "temp" => :float64 }, :infer, or a
   # map with +default:+ -- and casts the frame with it on load, which is the
-  # same as calling +cast+ afterwards. Broken cells become UNDEF
-  # automatically (parse-mask, §6-2).
+  # same as calling +cast+ afterwards. The default is :infer, which gives
+  # each column the type all of its cells read as (see +infer_types+);
+  # +types: :text+ leaves every column text. A Hash names the types of some
+  # columns and infers the rest, unless its +default:+ says otherwise
+  # (+default: :text+ keeps the rest text); +nil+ for a column keeps it
+  # text. Broken cells become UNDEF automatically (parse-mask, §6-2).
   #
-  #   CAFrame.from_csv("obs.csv", types: :infer)
+  #   CAFrame.from_csv("obs.csv")                    # types inferred
+  #   CAFrame.from_csv("obs.csv", types: :text)      # every column text
+  #   CAFrame.from_csv("obs.csv", types: { "code" => :int32, "id" => nil })
+  #   CAFrame.from_csv("obs.csv", types: { default: :text, "temp" => :float64 })
   #   CAFrame.from_csv("obs.csv", types: { default: :infer, "code" => :int32, "id" => nil })
   #   CAFrame.from_csv("obs.csv", types: { default: :float64, "station" => nil })
   #   CAFrame.from_csv("obs.csv", types: { "station" => :categorical })
@@ -104,13 +111,13 @@ class CAFrame
   # +:default+ the columns it does not name keep only the empty field. As in
   # +to_csv+, "" means the empty field, so a quoted "" is still a value.
   #
-  # Without +types:+, the columns are handed to the frame as CABlock views
-  # over one backing object array (§3.6 view-by-default). With +types:+, the
+  # With +types: :text+, the columns are handed to the frame as CABlock views
+  # over one backing object array (§3.6 view-by-default). Otherwise, the
   # body is read without making a String per cell: a column cast to a number
   # is read from the text directly, and a column left as text becomes its own
   # CAString. Casting a column materializes it, and +copy+ gives an
   # independent frame.
-  def self.from_csv(source, types: nil, on_error: :mask, missing: nil,
+  def self.from_csv(source, types: :infer, on_error: :mask, missing: nil,
                     header: nil, data: nil, column_names: nil, columns: nil,
                     attrs: nil, sep: ",", quote: '"', strip: false,
                     encoding: "bom|utf-8", parser: nil, &block)
@@ -130,9 +137,10 @@ class CAFrame
                            "parameter, as in from_csv(path) { |r| r.skip 2; r.header; r.data }"
     end
     missing = missing_tokens(missing) if missing
+    types = csv_types(types)
     # With types:, the body is read into CAConstString columns, so a column
     # cast to a number never becomes Strings; the text columns left over
-    # become CAString below. Without types: every column stays text, so the
+    # become CAString below. With types: :text every column stays text, so the
     # body goes straight to Strings. missing: masks text in place, which
     # wants the Strings first, so it takes that path too.
     read_text_as_const_string = !types.nil? && missing.nil?
@@ -165,6 +173,19 @@ class CAFrame
     end
     frame
   end
+
+  # from_csv's types: as the cast map it stands for: inference unless said
+  # otherwise. :text reads every column as text (no cast); a Hash without
+  # default: infers the columns it does not name, and default: :text keeps
+  # them text.
+  def self.csv_types(types)
+    return nil if types == :text
+    return types unless types.is_a?(Hash)
+    return { default: :infer }.merge(types) unless types.key?(:default)
+    return types.merge(default: nil) if types[:default] == :text
+    return types
+  end
+  private_class_method :csv_types
 
   # A text column from_csv reads is a CAString, whichever way the body was
   # read: the string operations (strip!, gsub!, ...) write through to it.

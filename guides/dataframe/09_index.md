@@ -4,7 +4,7 @@ A frame can have an **index**: an array of labels, one per row — a date, a nam
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
 north = sales.filter { |f| f["shop"].eq("north") }.drop("shop").copy
 ```
 

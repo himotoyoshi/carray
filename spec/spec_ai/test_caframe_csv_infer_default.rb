@@ -1,0 +1,44 @@
+# frozen_string_literal: true
+
+require "test/unit"
+require "stringio"
+require "carray"
+
+# from_csv infers the column types by default; types: :text keeps every
+# column text.
+class TestCAFrameCSVInferDefault < Test::Unit::TestCase
+  CSV_TEXT = "date,station,t,n,code\n2024-01-01,A,1.5,3,007\n2024-01-02,B,,4,010\n"
+
+  def test_types_are_inferred_by_default
+    df = CAFrame.from_csv(StringIO.new(CSV_TEXT))
+    assert_equal({ "date" => CATime, "station" => CAString, "t" => :float64,
+                   "n" => :int64, "code" => CAString }, df.data_types)
+    assert_equal [1.5, UNDEF], df["t"].to_a
+    assert_equal %w[007 010], df["code"].to_a                 # a code keeps its zeros
+  end
+
+  def test_the_default_is_the_same_as_infer
+    a = CAFrame.from_csv(StringIO.new(CSV_TEXT))
+    b = CAFrame.from_csv(StringIO.new(CSV_TEXT), types: :infer)
+    assert_equal b.data_types, a.data_types
+  end
+
+  def test_text_keeps_every_column_text
+    df = CAFrame.from_csv(StringIO.new(CSV_TEXT), types: :text)
+    assert_equal [CAString] * 5, df.data_types.values
+    assert_equal ["1.5", UNDEF], df["t"].to_a
+  end
+
+  def test_a_map_names_some_columns_and_infers_the_rest
+    df = CAFrame.from_csv(StringIO.new(CSV_TEXT), types: { "n" => :float64, "station" => nil })
+    assert_equal :float64, df.data_types["n"]
+    assert_equal :float64, df.data_types["t"]
+    assert_equal CATime, df.data_types["date"]
+  end
+
+  def test_default_text_keeps_the_rest_text
+    df = CAFrame.from_csv(StringIO.new(CSV_TEXT), types: { default: :text, "n" => :float64 })
+    assert_equal :float64, df.data_types["n"]
+    assert_equal [CAString] * 4, df.data_types.values_at("date", "station", "t", "code")
+  end
+end

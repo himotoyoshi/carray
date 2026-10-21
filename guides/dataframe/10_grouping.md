@@ -4,7 +4,7 @@
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## Grouping rows — `group_by`
@@ -101,7 +101,7 @@ The south shop has seven counted days, so with `min_count: 8` it has no average.
 Several key names group by their combination. Here the shop table (chapter 12) adds each shop's size, and a computed column says whether the day is a weekend:
 
 ```ruby
-shops = CAFrame.from_csv("shops.csv", types: :infer)
+shops = CAFrame.from_csv("shops.csv")
 df = sales.join(shops.select("shop", "size"), on: "shop")
 df["day_type"] = df["date"].weekday.is_in([0, 6]).then_else("weekend", "weekday")
 p df.select("size", "day_type", "visitors", "revenue").group_by("size", "day_type").mean
