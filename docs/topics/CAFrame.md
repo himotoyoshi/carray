@@ -741,13 +741,14 @@ df.transform(/^t/) { |col, name| ... }               # the name is the second ar
 ### Changing a column's type
 
 ```ruby
+# each returns a new frame; keep it
 df = df.cast("temp", :float64)                      # one column
-df.cast("temp" => :float64, "rh" => :int32)         # map form: several columns
-df.cast(["u", "v"] => :float64)                     # one type shared by several
-df.cast(:infer)                                     # the types infer_types finds
-df.cast(default: :float64, "station" => nil)        # the rest float64, station as is
-df.promote                                          # every column to one common type
-df.promote(:object)                                 # ...to the widest type of all
+df = df.cast("temp" => :float64, "rh" => :int32)    # map form: several columns
+df = df.cast(["u", "v"] => :float64)                # one type shared by several
+df = df.cast(:infer)                                # the types infer_types finds
+df = df.cast(default: :float64, "station" => nil)   # the rest float64, station as is
+df = df.promote                                     # every column to one common type
+df = df.promote(:object)                            # ...to the widest type of all
 ```
 
 **`cast`** returns a new frame in which each named column is replaced by a new one of the target type; this frame, and any frame sharing the old column, keeps the old one. What it does depends on the column and the target:
@@ -771,7 +772,7 @@ df.promote(:object)                                 # ...to the widest type of a
 Blank, `nil` and masked cells are missing values, not errors, under every policy.
 
 ```ruby
-df.cast("rh" => :int32, on_error: :raise)
+df = df.cast("rh" => :int32, on_error: :raise)
 # CAFrame::UnreadableColumn: column "rh", row 41 "1.5" cannot be read as int32
 ```
 
