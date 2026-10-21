@@ -100,8 +100,9 @@ class CAFrame
     end
     on, ron = ons.first, ron.first
     exact, rexact_names = by.nil? ? [[], []] : join_key_pairs(by, "join_asof", "by:")
-    if exact.include?(on)
-      raise ArgumentError, "join_asof: #{on.inspect} is the on: key; by: names the others"
+    if exact.include?(on) || rexact_names.include?(ron)
+      name = exact.include?(on) ? on : ron
+      raise ArgumentError, "join_asof: #{name.inspect} is the on: key; by: names the others"
     end
     plan = join_name_plan(other, [on, *exact], [ron, *rexact_names], suffixes)
     lkey = key_column(on, "join_asof")
@@ -119,7 +120,7 @@ class CAFrame
              _, lcode, rcode, k = join_codes(lexact, rexact)
              join_asof_by(lkey, rkey, lcode, rcode, k, direction, tolerance)
            end
-    join_by_addr(other, [ron, *rexact_names], addr, plan)
+    join_by_addr(other, [on, *exact], [ron, *rexact_names], addr, plan)
   end
 
   # Conform every column to an externally supplied reference key set (the
@@ -448,9 +449,14 @@ class CAFrame
     cols[name] = col
   end
 
-  private def join_by_addr(other, rnames, addr, plan)
+  # The left key columns keep their names, as in join_pairs; a right column
+  # of the same name takes the right suffix.
+  private def join_by_addr(other, names, rnames, addr, plan)
     cols = {}
-    column_names.each { |name| put_join_column(cols, join_name(name, plan[:lsuf], plan), self[name]) }
+    column_names.each do |name|
+      name_out = names.include?(name) ? name : join_name(name, plan[:lsuf], plan)
+      put_join_column(cols, name_out, self[name])
+    end
     other.column_names.each do |name|
       next if rnames.include?(name)
       put_join_column(cols, join_name(name, plan[:rsuf], plan), project_rows(other[name], addr))

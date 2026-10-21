@@ -50,6 +50,19 @@ class TestCAFrameJoinKeyNames < Test::Unit::TestCase
     assert_equal [10.0, 20.0, UNDEF], out["v"].to_a
   end
 
+  def test_join_asof_keeps_the_left_key_name_when_the_right_has_a_column_of_it
+    l = CAFrame.new("time" => CA_FLOAT64([1, 2]), "v" => CA_FLOAT64([1, 2]))
+    r = CAFrame.new("tt" => CA_FLOAT64([0.5, 1.5]), "time" => CA_FLOAT64([9, 9]), "w" => CA_FLOAT64([3, 4]))
+    assert_equal %w[time v time_right w], l.join_asof(r, on: { "time" => "tt" }).column_names
+    assert_equal %w[time v time_right w], l.join(r, on: { "time" => "tt" }).column_names
+  end
+
+  def test_join_asof_refuses_the_right_on_key_in_by
+    l = CAFrame.new("time" => CA_FLOAT64([1]), "s" => CA_OBJECT(%w[A]))
+    r = CAFrame.new("tt" => CA_FLOAT64([1]), "code" => CA_OBJECT(%w[A]))
+    assert_raise(ArgumentError) { l.join_asof(r, on: { "time" => "tt" }, by: { "s" => "tt" }) }
+  end
+
   def test_refusals
     assert_raise(KeyError) { left.join(right, on: { "station" => "nope" }) }
     assert_raise(TypeError) { left.join(right, on: { station: "code" }) }
