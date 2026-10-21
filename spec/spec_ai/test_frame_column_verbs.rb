@@ -63,8 +63,9 @@ class TestFrameColumnVerbs < Test::Unit::TestCase
       assert_kind_of CArray, one, label
       assert_equal 2, one.ndim, label
       two = verb.(frame, "v", "p")
-      assert_kind_of Array, two, label
-      assert_equal 2, two.size, label
+      assert_kind_of CAFrame, two, label
+      assert_equal %w[v p], two.column_names, label
+      assert_equal frame.nrow, two.nrow, label
     end
   end
 
