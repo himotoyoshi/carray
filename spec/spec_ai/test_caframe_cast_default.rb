@@ -146,7 +146,7 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
   def test_option_name_names_the_option
     df = frame
     err = assert_raise(ArgumentError) { df.cast("bad", option_name: :types) }
-    assert_match(/\Atypes: takes a map of column types or :infer/, err.message)
+    assert_match(/\Atypes: takes a map of column types, :infer or :string/, err.message)
     err = assert_raise(KeyError) { df.cast({ "nope" => :int32 }, option_name: :types) }
     assert_match(/\Atypes: /, err.message)
     err = assert_raise(TypeError) { df.cast({ defualt: :infer }, option_name: :types) }
@@ -155,7 +155,7 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
 
   def test_from_csv_errors_name_types
     err = assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(CSV_TEXT), types: "bad") }
-    assert_match(/\Atypes: takes a map of column types or :infer/, err.message)
+    assert_match(/\Atypes: takes a map of column types, :infer or :string/, err.message)
     err = assert_raise(KeyError) do
       CAFrame.from_csv(StringIO.new(CSV_TEXT), types: { "nope" => :int32 })
     end

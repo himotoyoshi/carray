@@ -758,6 +758,7 @@ df.promote(:object)                                 # ...to the widest type of a
   - A cell that does not read, or a value the type cannot hold (`"300"` into `:int8`), becomes `UNDEF`.
   - A Ruby number in an object column follows the same rule: an Integer that fits, or a Float, Rational or BigDecimal with no fractional part, is kept, and `2.5` becomes `UNDEF` rather than being truncated — so `"2.5"` and `2.5` in one column agree.
 - **Text to `:time`.** `cast(name => :time)` parses a text column into a `CATime` column, as [`parse_to_time`](#time-columns) without a format does.
+- **To `:string`.** A text column stays as it is, and an object column of Strings becomes a `CAString`. A number or time column is refused, as `CArray.string` refuses it: write numbers as text with `format`. In `from_csv`, whose columns are read as text, `:string` keeps a column text.
 - **To `:categorical`.** `cast(name => :categorical)` turns a column into a [`CACategorical`](../objects/CACategorical.md) of its values, the labels in the order they first appear, as `categorize` does. A column of few distinct values held once each: `from_csv(path, types: { "station" => :categorical })` reads it without making a String per cell.
 - **A number to a number**, and other targets, go through `to_type`, an ordinary conversion.
 

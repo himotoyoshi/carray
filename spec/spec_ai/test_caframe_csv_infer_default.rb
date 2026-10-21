@@ -48,3 +48,25 @@ class TestCAFrameCSVInferDefault < Test::Unit::TestCase
     assert_equal [CAString] * 4, df.data_types.values_at("date", "station", "t", "code")
   end
 end
+
+# :string in a type map means the same for cast, from_records and from_csv.
+class TestCAFrameCastString < Test::Unit::TestCase
+  def test_cast
+    df = CAFrame.new("o" => CA_OBJECT(%w[x y]), "s" => CArray.string(%w[a b]), "n" => CA_FLOAT64([1, 2]))
+    assert_equal CAString, df.cast("o" => :string).data_types["o"]
+    assert_same df["s"], df.cast("s" => :string)["s"]
+    e = assert_raise(CArray::DataTypeError) { df.cast("n" => :string) }
+    assert_match(/column "n".*format/, e.message)
+  end
+
+  def test_from_records
+    assert_equal CAString, CAFrame.from_records([{ "a" => "x" }], types: { "a" => :string }).data_types["a"]
+    assert_equal CAString, CAFrame.from_records([{ "a" => "x" }], types: :string).data_types["a"]
+    assert_raise(CArray::DataTypeError) { CAFrame.from_records([{ "a" => "x", "b" => 1 }], types: :string) }
+  end
+
+  def test_from_csv_default_string
+    df = CAFrame.from_csv(StringIO.new("a,b\n007,2\n"), types: { default: :string, "b" => :int32 })
+    assert_equal({ "a" => CAString, "b" => :int32 }, df.data_types)
+  end
+end

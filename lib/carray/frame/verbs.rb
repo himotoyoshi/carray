@@ -527,8 +527,9 @@ class CAFrame
             "on_error: must be :mask, :warn or :raise (got #{on_error.inspect})"
     end
     name_or_map = { default: :infer } if name_or_map == :infer && type.nil?
+    name_or_map = { default: :string } if name_or_map == :string && type.nil?
     if option_name && !name_or_map.is_a?(Hash)
-      raise ArgumentError, "#{label} takes a map of column types or :infer " \
+      raise ArgumentError, "#{label} takes a map of column types, :infer or :string " \
                            "(got #{name_or_map.inspect})"
     end
     types =
@@ -882,6 +883,17 @@ class CAFrame
     key = name.to_s
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
     return cast_time_column(key, col, on_error) if type == :time
+    # Text stays text, an object column of Strings becomes a CAString, and
+    # anything else is refused as CArray.string refuses it (a number is
+    # written as text with #format).
+    if type == :string
+      return col if col.is_a?(CArray::StringOperationMixin)
+      begin
+        return CArray.string(col)
+      rescue CArray::DataTypeError, TypeError => e
+        raise e.class, "column #{key.inspect} cannot be cast to :string: #{e.message}"
+      end
+    end
     if type == :categorical
       return col.is_a?(CACategorical) ? col : col.categorize
     end

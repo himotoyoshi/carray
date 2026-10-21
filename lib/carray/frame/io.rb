@@ -178,11 +178,9 @@ class CAFrame
   # otherwise. :string reads every column as text (no cast); a Hash without
   # default: infers the columns it does not name, default: :string keeps
   # them text, and :string (or nil) for a column keeps that one text.
-  # A column named with :string is kept text, as nil keeps it.
   def self.csv_types(types)
     return nil if types == :string
     return types unless types.is_a?(Hash)
-    types = types.to_h { |key, type| [key, type == :string ? nil : type] }
     return { default: :infer }.merge(types) unless types.key?(:default)
     return types
   end
