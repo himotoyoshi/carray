@@ -111,7 +111,12 @@ class CAFrame
     raise ArgumentError, "#{verb}: the count must be 0 or more (got #{n})" if n < 0
     raise ArgumentError, "#{verb}: give at least one key column" if keys.empty?
     keys.each { |k| column_key(k, verb) }
-    return sort_by_key(*keys, descending: descending).head(n)
+    begin
+      return sort_by_key(*keys, descending: descending).head(n)
+    rescue ArgumentError, KeyError, TypeError, CArray::DataTypeError => e
+      # The sort is this verb's own, so its refusal names this verb.
+      raise e.class, e.message.sub(/\Asort_by_key:/, "#{verb}:"), e.backtrace
+    end
   end
 
   # Sort rows by key columns the block builds (memo §4.3 escape). The block

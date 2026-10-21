@@ -51,5 +51,10 @@ class TestCAFrameNLargest < Test::Unit::TestCase
     assert_raise(TypeError) { frame.nlargest(2, :v) }
     assert_raise(KeyError) { frame.nlargest(2, "nope") }
     assert_equal 0, frame.nlargest(0, "v").nrow
+    e = assert_raise(KeyError) { frame.nlargest(1, "nope") }
+    assert_match(/\Anlargest:/, e.message)
+    df = CAFrame.new("c" => CA_OBJECT(%w[a b]).categorize)
+    e = assert_raise(ArgumentError) { df.nsmallest(1, "c") }
+    assert_match(/\Ansmallest: the column "c" cannot be sorted/, e.message)
   end
 end
