@@ -710,20 +710,24 @@ class GroupedFrame
   # fills those columns only. +keep_rows: true+ gives each row its group's value
   # instead of one row per group, as for +aggregate+.
   #
-  # Given column names, they reduce those columns only and return them as
-  # +df[...]+ does: one name gives the CArray, several an Array of them.
+  # Given column names, they reduce those columns only, and the result is
+  # the frame of those columns, one row per group, labelled as above; with
+  # +keep_rows: true+ they come back as +df[...]+ returns them, one CArray
+  # (or an Array of them) on the frame's rows. For a group's values alone,
+  # reduce the column's group iterator: +grp["temp"].mean+.
   #
   #   grp.mean                                   # a frame, one row per group
-  #   grp.mean("temp")                           # CArray, one value per group
+  #   grp.mean("temp")                           # a frame of temp, one row per group
   #   df["temp"] - grp.mean("temp", keep_rows: true)   # anomaly from the group mean
   #
   # @!method sum(*names, min_count: nil, fill_value: nil, keep_rows: false)
   #   Returns a frame of the per-group sum of every column whose type has a
   #   sum, an N-D one per group along the rows. Other columns are left out.
   #   @return [CAFrame, CArray, Array<CArray>] a frame with one row per
-  #     group, indexed by the group labels, or with keep_rows: true the
-  #     frame's rows and index; given names, the CArray (one) or the Array of
-  #     them (several).
+  #     group, indexed by the group labels (of the named columns when names
+  #     are given), or with keep_rows: true the frame's rows and index; given
+  #     names and keep_rows: true, the CArray (one) or the Array of them
+  #     (several).
   # @!method mean(*names, min_count: nil, fill_value: nil, keep_rows: false)
   #   Returns a frame of the per-group mean of every column whose type has
   #   a mean, as {#sum} does.

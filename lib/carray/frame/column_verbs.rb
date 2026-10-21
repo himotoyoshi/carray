@@ -3,15 +3,22 @@
 class CAFrame
 
   # The one rule of a frame-wide verb over the frame's columns -- the group
-  # reductions and transforms, the windowed reductions -- kept in one place
-  # so that every verb answers in the same shape:
+  # reductions and transforms, the windowed reductions, and the frame's own
+  # reductions and running values -- kept in one place: which columns a verb
+  # computes, and what a named column without the operation does.
   #
-  # - given names, the CArray (one) or the Array of them (several), as
-  #   +df[...]+ returns columns; a named column whose type has no such
-  #   operation is refused with CArray::DataTypeError, as the core refuses
-  #   it, since it was asked for;
+  # - given names, those columns, as the CArray (one) or the Array of them
+  #   (several); a named column whose type has no such operation is refused
+  #   with CArray::DataTypeError, as the core refuses it, since it was asked
+  #   for;
   # - given none, every column whose type has it, the key columns left out,
-  #   as a Hash of name to result that the caller makes a frame of.
+  #   as a Hash of name to result.
+  #
+  # The caller decides the shape of the answer from these: a verb whose
+  # answers lie on the frame's rows (a transform, a window at the rows,
+  # +keep_rows:+) hands named columns back as they are, as +df[...]+ returns
+  # columns, while a verb with one row per group, per point or for the
+  # whole frame makes a frame of them, labelled by its rows.
   #
   # Whether a type has the operation is asked of the core on two copies of
   # the column's first row (two blank cells of its kind when it has no

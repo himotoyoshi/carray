@@ -742,11 +742,6 @@ class CAFrame
                 attrs: @attrs)
   end
 
-  # +dup+ / +clone+ share the column data -- that is the CArray dup contract
-  # (§3.6) -- but must not share the columns Hash itself: Ruby's shallow copy
-  # hands over the same Hash object, so a membership edit (+append+ / +drop+ /
-  # a +cast+ rebind) on the copy would show up in the original, which is the
-  # one thing per-frame membership (§12-B) says never happens.
   # Whether +other+ is a frame holding the same table: the same column names
   # in the same order, each column equal as CArray#== has it (data type,
   # shape, the present values and where the cells are masked), and the same
@@ -776,6 +771,11 @@ class CAFrame
   end
   private_class_method :key_text
 
+  # +dup+ / +clone+ share the column data -- that is the CArray dup contract
+  # (§3.6) -- but must not share the columns Hash itself: Ruby's shallow copy
+  # hands over the same Hash object, so a membership edit (+append+ / +drop+ /
+  # a +cast+ rebind) on the copy would show up in the original, which is the
+  # one thing per-frame membership (§12-B) says never happens.
   private def initialize_copy(other)
     super
     @columns = @columns.dup
@@ -1162,8 +1162,6 @@ class CAFrame
     CAFrame.new(cols, axis_name: @axis_name, index: new_index, attrs: @attrs)
   end
 
-  # A column name given as an argument: a String, as the frame's column
-  # keys are. Symbols are the frame's options and types, never names.
   # df["name"] for a name that is no column. The index is not a column, so
   # its name is refused too, pointing at df.index.
   private def refuse_missing_column(key)
@@ -1175,6 +1173,8 @@ class CAFrame
     raise KeyError, "no column #{key.inspect}"
   end
 
+  # A column name given as an argument: a String, as the frame's column
+  # keys are. Symbols are the frame's options and types, never names.
   private def column_key(name, verb)
     CAFrame.__send__(:column_key, name, verb)
   end
