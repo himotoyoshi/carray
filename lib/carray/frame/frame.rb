@@ -693,6 +693,35 @@ class CAFrame
   # hands over the same Hash object, so a membership edit (+append+ / +drop+ /
   # a +cast+ rebind) on the copy would show up in the original, which is the
   # one thing per-frame membership (§12-B) says never happens.
+  # Whether +other+ is a frame holding the same table: the same column names
+  # in the same order, each column equal as CArray#== has it (data type,
+  # shape, the present values and where the cells are masked), and the same
+  # index and row axis name. Attributes are not compared.
+  #
+  # @param other [Object]
+  # @return [Boolean]
+  def == (other)
+    return true if equal?(other)
+    return false unless other.is_a?(CAFrame)
+    return false unless column_names == other.column_names && @axis_name == other.axis_name
+    return false unless @nrow == other.nrow
+    if @index.nil? || other.index.nil?
+      return false unless @index.nil? && other.index.nil?
+    else
+      return false unless @index == other.index
+    end
+    return @columns.all? { |name, col| col.shape == other[name].shape && col == other[name] }
+  end
+
+  # A key value as an error message shows it: a String quoted, an element of
+  # a Face (a time, say) as it reads.
+  def self.key_text (value)
+    return value.inspect if value.is_a?(String) || value.is_a?(Numeric) || value.nil?
+    return value.to_s if value.class.name.to_s.end_with?("::Element")
+    return value.inspect
+  end
+  private_class_method :key_text
+
   private def initialize_copy(other)
     super
     @columns = @columns.dup

@@ -99,7 +99,7 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
 
   # Public methods that return no frame made from this one.
   NOT_A_FRAME = %i[
-    []= at axis_name column_names columns data_types each_row index
+    == []= at axis_name column_names columns data_types each_row index
     infer_time_format infer_types inspect is_duplicate ncol nrow shape empty? pivot_grid protected?
     to_ca to_csv to_records to_s to_table
     attr set_attr set_attrs delete_attr attrs has_attr?

@@ -165,8 +165,8 @@ class CAFrame
         # names-check: two rows for one cell of the grid
         first = cell.to_a.tally.find { |_, count| count > 1 }.first
         raise ArgumentError,
-              "pivot: more than one row for #{index}=#{rlab[first / nc].inspect}, " \
-              "#{columns}=#{clab[first % nc].inspect}; pass aggregate: to combine them"
+              "pivot: more than one row for #{index}=#{CAFrame.__send__(:key_text, rlab[first / nc])}, " \
+              "#{columns}=#{CAFrame.__send__(:key_text, clab[first % nc])}; pass aggregate: to combine them"
       end
       source[cell] = CArray.int64(nrow).seq[placed]
     end
@@ -369,7 +369,7 @@ class CAFrame
   # given as a CArray has no name and is written "key").
   private def group_key_desc(keys, label)
     values = keys.size == 1 ? [label] : label
-    keys.zip(values).map { |k, v| "#{k.is_a?(String) ? k : "key"}=#{v.inspect}" }.join(", ")
+    keys.zip(values).map { |k, v| "#{k.is_a?(String) ? k : "key"}=#{CAFrame.__send__(:key_text, v)}" }.join(", ")
   end
 
   private def stack_rows_on(frame, keys, on)
