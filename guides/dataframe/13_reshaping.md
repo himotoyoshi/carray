@@ -101,6 +101,6 @@ p long.head(4)
 - `var_name:` and `value_name:` name the two new columns (`"variable"` and `"value"` by default).
 - If the table has an index, it is kept as an id column.
 
-The result's value column is a view of the stacked columns: no data is copied, and writing to the long table writes to the wide one. Use `copy` for a table of its own. Number columns of different types — counts and amounts, say — meet at their common type and stay a view; text or time columns stacked with numbers raise, so `cast` those to one type first.
+The result's value column is a view of the stacked columns: no data is copied, and writing to the long table writes to the wide one. Use `copy` for a table of its own. Number columns of different types — counts and amounts, say — meet at their common type and stay a view, when that type holds every value exactly; a value it would change, or text or time columns stacked with numbers, raise, so `cast` those to one type first.
 
 `melt` then `pivot` on the same columns gives back the wide table's values.

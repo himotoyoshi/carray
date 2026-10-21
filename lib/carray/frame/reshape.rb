@@ -199,6 +199,60 @@ class CAFrame
     groups.public_send(plan[:aggregate])
   end
 
+  # The bits of each integer type and whether it is signed; the significand
+  # bits of each floating type (a complex type by its parts).
+  INTEGER_BITS = {
+    "int8" => [8, true], "int16" => [16, true], "int32" => [32, true], "int64" => [64, true],
+    "uint8" => [8, false], "uint16" => [16, false], "uint32" => [32, false], "uint64" => [64, false],
+  }.freeze
+  SIGNIFICAND_BITS = { "float32" => 24, "float64" => 53, "cmplx64" => 24, "cmplx128" => 53 }.freeze
+  Ractor.make_shareable(INTEGER_BITS)
+  Ractor.make_shareable(SIGNIFICAND_BITS)
+  private_constant :INTEGER_BITS, :SIGNIFICAND_BITS
+
+  # Whether every value of data type +from+ is exactly a value of +to+, for
+  # numbers and booleans: a boolean in any number, an integer in a wide
+  # enough integer (a signed one never in an unsigned) or in a float whose
+  # significand holds it, a float in a wider float or complex.
+  def self.holds_every_value (from, to)
+    f = CArray.data_type_name(from)
+    t = CArray.data_type_name(to)
+    return true if f == t || f == "boolean"
+    if (fbits, fsigned = INTEGER_BITS[f])
+      if (tbits, tsigned = INTEGER_BITS[t])
+        return fsigned ? (tsigned && tbits >= fbits) : (tsigned ? tbits > fbits : tbits >= fbits)
+      end
+      significand = SIGNIFICAND_BITS[t]
+      return !significand.nil? && (fsigned ? fbits - 1 : fbits) <= significand
+    end
+    fs = SIGNIFICAND_BITS[f]
+    ts = SIGNIFICAND_BITS[t]
+    return false if fs.nil? || ts.nil? || ts < fs
+    return !(f.start_with?("cmplx") && t.start_with?("float"))
+  end
+  private_class_method :holds_every_value
+
+  # Whether every present value of +col+ is exactly a value of data type
+  # +to+: by the types when they decide it, else -- for an integer column --
+  # by the values, against the range of an integer type or the significand
+  # of a float. A column with no present value fits.
+  def self.values_fit (col, to)
+    return true if holds_every_value(col.data_type, to)
+    return false unless INTEGER_BITS[CArray.data_type_name(col.data_type)]
+    lo = col.min
+    return true if UNDEF.equal?(lo)
+    hi = col.max
+    tname = CArray.data_type_name(to)
+    if (tbits, tsigned = INTEGER_BITS[tname])
+      low  = tsigned ? -(2**(tbits - 1)) : 0
+      high = tsigned ? 2**(tbits - 1) - 1 : 2**tbits - 1
+      return lo >= low && hi <= high
+    end
+    significand = SIGNIFICAND_BITS[tname]
+    return !significand.nil? && lo >= -(2**significand) && hi <= 2**significand
+  end
+  private_class_method :values_fit
+
   # Gather a wide frame into a long one.  The +value_columns+ are stacked one
   # after another into a single +value_name+ column, a +var_name+ column says
   # which of them each row came from (a text column), and every +id+ column
@@ -238,12 +292,16 @@ class CAFrame
       # Numbers of different types meet at their common type, each through a
       # view of its own column (as_type), so the value column still reads
       # and writes the columns it was made from.
-      unless pieces.all? { |c| !c.face? && (c.numeric? || c.data_type == :boolean) }
-        raise ArgumentError,
-              "melt: value columns differ in data type (#{vars.zip(pieces.map(&:data_type)).to_h}); " \
-              "cast them to one type first"
+      common = nil
+      if pieces.all? { |c| !c.face? && (c.numeric? || c.data_type == :boolean) }
+        common = CArray.result_type(*pieces)
+        common = nil unless pieces.all? { |c| CAFrame.__send__(:values_fit, c, common) }
       end
-      common = CArray.result_type(*pieces)
+      if common.nil?
+        raise ArgumentError,
+              "melt: value columns differ in data type (#{vars.zip(pieces.map(&:data_type)).to_h}) " \
+              "and no type holds all their values; cast them to one type first"
+      end
       pieces = pieces.map { |c| c.data_type == common ? c : c.as_type(common) }
     end
     shapes = pieces.map { |c| c.shape.drop(1) }.uniq

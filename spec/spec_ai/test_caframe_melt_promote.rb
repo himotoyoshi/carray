@@ -33,6 +33,20 @@ class TestCAFrameMeltPromote < Test::Unit::TestCase
     assert_equal :int64, df.melt["value"].data_type
   end
 
+  def test_a_type_that_would_change_a_value_is_refused
+    df = CAFrame.new("a" => CA_UINT64([1, 2]), "b" => CA_INT64([-1, 2]))   # -1 has no uint64
+    assert_raise(ArgumentError) { df.melt }
+    df = CAFrame.new("a" => CA_FLOAT64([1.5]), "b" => CA_INT64([2**60]))   # beyond float64's significand
+    assert_raise(ArgumentError) { df.melt }
+    df = CAFrame.new("a" => CA_FLOAT32([1.5]), "b" => CA_INT64([2**30]))
+    assert_raise(ArgumentError) { df.melt }
+  end
+
+  def test_the_values_decide_for_integers
+    assert_equal [1, 2, 1, 2], CAFrame.new("a" => CA_UINT64([1, 2]), "b" => CA_INT64([1, 2])).melt["value"].to_a
+    assert_equal :float32, CAFrame.new("a" => CA_FLOAT32([1.5]), "b" => CA_INT64([3])).melt["value"].data_type
+  end
+
   def test_numbers_with_text_or_time_raise
     df = frame.append("s", CArray.string(%w[x y]))
     assert_raise(ArgumentError) { df.melt(id: ["k"]) }
