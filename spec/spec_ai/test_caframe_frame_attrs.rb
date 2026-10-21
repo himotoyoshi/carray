@@ -93,6 +93,7 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     :prod          => ->(df, _) { df.prod },
     :accumulate    => ->(df, _) { df.accumulate },
     :median        => ->(df, _) { df.median },
+    :percentile    => ->(df, _) { df.percentile(50) },
     :variance      => ->(df, _) { df.variance },
     :stddev        => ->(df, _) { df.stddev },
     :variancep     => ->(df, _) { df.variancep },
