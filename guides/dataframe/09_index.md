@@ -10,10 +10,10 @@ north = sales.filter { |f| f["shop"].eq("north") }.drop("shop").copy
 
 ## Making a column the index — `set_index`
 
-`set_index` moves a column into the index. It changes the frame and returns it:
+`set_index` gives a new frame with a column moved into the index; the frame you called it on keeps the column. Keep the result:
 
 ```ruby
-north.set_index("date")
+north = north.set_index("date")
 p north
 # #<CAFrame nrow=8 columns=[visitors:int64, revenue:float64, rating:float64] index="date">
 # date        visitors  revenue  rating
@@ -42,8 +42,10 @@ The index's name is the frame's **axis name** — the name of its row axis. `set
 
 ```ruby
 north.reset_index.column_names   # => ["date", "visitors", "revenue", "rating"]
-north.set_index("date")
+north.index.class                # => CATime  -- north itself still has its index
 ```
+
+Both give a new frame over the same columns, not a copy: writing a cell through either frame changes the other (chapter 16). Use `copy` for a frame of its own.
 
 A frame can also be built with an index (chapter 2):
 
@@ -121,8 +123,7 @@ While a frame has an index, a column cannot have the index's name: `north.append
 `set_index` on a frame that already has one puts the old index back as a column first, so no labels are lost:
 
 ```ruby
-df = sales.copy.set_index("shop")
-df.set_index("date")
+df = sales.set_index("shop").set_index("date")
 df.column_names   # => ["shop", "visitors", "revenue", "rating"]
 ```
 
@@ -133,7 +134,7 @@ df.column_names   # => ["shop", "visitors", "revenue", "rating"]
 An index may hold the same label more than once — `sales` indexed by `shop` has eight rows for each. Everything works except `at`, which needs one row per label:
 
 ```ruby
-by_shop = sales.copy.set_index("shop")
+by_shop = sales.set_index("shop")
 by_shop.at("north")   # raises ArgumentError
 by_shop.filter { |f| f.index.eq("north") }.nrow   # => 8
 ```

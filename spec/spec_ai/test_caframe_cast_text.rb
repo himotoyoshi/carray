@@ -64,7 +64,7 @@ class TestCAFrameCastText < Test::Unit::TestCase
 
   def test_a_column_casts_to_categorical
     df = CAFrame.new("s" => CArray.string(["x", "y", "x", ""]), "n" => CA_INT32([3, 1, 3, 1]))
-    df.cast("s" => :categorical, "n" => :categorical)
+    df = df.cast("s" => :categorical, "n" => :categorical)
     assert_kind_of CACategorical, df["s"]
     assert_equal ["x", "y", ""], df["s"].labels
     assert_equal ["x", "y", "x", ""], df["s"].to_a

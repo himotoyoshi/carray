@@ -1,9 +1,11 @@
 # CAFrame column verbs (memo §11.4, §12-A, §13.2).
 #
-# Each verb touches this frame's own columns Hash (per-frame, §12-B) and
-# returns self so calls chain. Column data is still shared with any parent
-# (view-frame), but membership — which columns this frame names — is local:
-# append/drop/rename here never change a parent's column set.
+# A verb that changes which columns the frame has, their names or their
+# types returns a new frame and leaves this one as it is; a verb that edits
+# cells (fill, mask_eq) edits them in place and returns self. The new frame
+# shares the columns it did not replace, so a write to a cell through it
+# reaches this frame too: only the table (names, index, column types) is its
+# own.
 
 class CAFrame
   # Add (or replace) a column, returning a new frame — the column set changes,
@@ -427,8 +429,9 @@ class CAFrame
   #
   # A name that is not a column raises KeyError, and a Symbol key other than
   # +:default+ raises TypeError; both before any column is read. Every
-  # column is read before any is rebound, so a raise leaves the frame as it
-  # was. Returns self so calls chain.
+  # column is read before any is converted. Returns a new frame holding the
+  # converted columns; this frame keeps its own, and the columns not named are
+  # shared by the two.
   #
   # +on_error:+ says what to do with a text cell that holds something but
   # does not read as the number type ("x", "1.5" for an integer, "300" for
@@ -447,7 +450,11 @@ class CAFrame
   # be a Hash or :infer:
   #
   #   frame.cast(types, on_error: on_error, option_name: :types)
-  def cast(name_or_map = nil, type = nil, on_error: :mask, option_name: nil, **map)
+  def cast(...)
+    return dup.__send__(:cast_in_place, ...)
+  end
+
+  private def cast_in_place(name_or_map = nil, type = nil, on_error: :mask, option_name: nil, **map)
     refuse_if_frozen
     label = option_name ? "#{option_name}:" : "cast"
     # A brace-less map (cast("temp" => :float64, on_error: :warn)) arrives as
@@ -565,9 +572,8 @@ class CAFrame
   # Bring every column to one common data type and rebind them (memo §11.4).
   # The frame-level counterpart of +CArray.promote_list+: where +cast+ forces
   # named columns to a type, +promote+ widens the whole table until it has a
-  # single type. Returns self so calls chain (§3.8 -- a type-interpretation
-  # change), and like +cast+ it allocates fresh columns, so a parent frame
-  # sharing the old ones is untouched. The index is not a column and is left
+  # single type. Returns a new frame; like +cast+ it allocates fresh columns,
+  # so this frame keeps its own. The index is not a column and is left
   # alone.
   #
   #   df.promote             # the common type CArray.result_type would pick
@@ -585,14 +591,19 @@ class CAFrame
   # and therefore always accepted -- it is the way a frame mixing text,
   # Face-typed and numeric columns becomes a single-type table (and so the
   # way +to_ca+ can hand back a matrix for it).
-  def promote(type = nil)
+  def promote(...)
+    return dup.__send__(:promote_in_place, ...)
+  end
+
+  private def promote_in_place(type = nil)
     refuse_if_frozen
     return self if @columns.empty?
     type.nil? ? promote_to_common : promote_to_type(type)
     self
   end
 
-  # Parse a string column into a time column and rebind it (memo §11.2).
+  # A new frame with a string column parsed into a time column (memo §11.2);
+  # this frame keeps the text column.
   # The column must be string-bearing (an object CArray of Strings, or a
   # CAString / CAConstString / CAFixlenString) — this is the "text -> time"
   # mode, distinct from the integer-serial mode of +to_time+.
@@ -614,7 +625,11 @@ class CAFrame
   #   df.parse_to_time("time").set_index("time")
   #   df.parse_to_time("date", "%d/%m/%Y")
   #   df.parse_to_time("date", :infer)
-  def parse_to_time(name, format = nil, unit: nil, on_error: :mask)
+  def parse_to_time(...)
+    return dup.__send__(:parse_to_time_in_place, ...)
+  end
+
+  private def parse_to_time_in_place(name, format = nil, unit: nil, on_error: :mask)
     refuse_if_frozen
     unless CAST_ON_ERROR.include?(on_error)
       raise ArgumentError,
@@ -650,8 +665,8 @@ class CAFrame
     inferred_time_format(key, col)&.first&.format
   end
 
-  # Reinterpret an integer column as time serial counts and rebind it (memo
-  # §11.2). This is the "serial -> time" mode: each value is a count of
+  # A new frame with an integer column read as time serial counts (memo
+  # §11.2); this frame keeps the integer column. This is the "serial -> time" mode: each value is a count of
   # +unit+ resolution since +epoch+ (default the Unix epoch, 1970-01-01 UTC).
   # +epoch+ takes any time literal (String / Time / Integer), so a column
   # measured from another origin — a netCDF "hours since 1990-01-01" axis, an
@@ -671,7 +686,11 @@ class CAFrame
   #   df.to_time("time", unit: :h, epoch: "1990-01-01").set_index("time")
   #   df.to_time("time", CATime::Grid.parse("hours since 1990-01-01"))
   #   df.to_time("time", CATime::Grid.parse("days since 1980-01-01 12:00"))
-  def to_time(name, grid = nil, unit: :s, epoch: nil)
+  def to_time(...)
+    return dup.__send__(:to_time_in_place, ...)
+  end
+
+  private def to_time_in_place(name, grid = nil, unit: :s, epoch: nil)
     refuse_if_frozen
     key = column_key(name, "to_time")
     col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }

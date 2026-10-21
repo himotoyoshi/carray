@@ -59,7 +59,7 @@ class TestCAFrameDecimalCast < Test::Unit::TestCase
 
   def test_on_error_warn_reports_once_per_column
     df = CAFrame.new("a" => CA_OBJECT(["x", "1", "300", "y", "z", "1.5"]))
-    _out, err = capture_output { df.cast("a" => :int8, on_error: :warn) }
+    _out, err = capture_output { df = df.cast("a" => :int8, on_error: :warn) }
     assert_equal 1, err.lines.size
     assert_match(/column "a": 5 cells cannot be read as int8 and are UNDEF/, err)
     assert_match(/row 0 "x", row 2 "300", row 3 "y", \.\.\./, err)
@@ -71,7 +71,7 @@ class TestCAFrameDecimalCast < Test::Unit::TestCase
     col = CA_OBJECT(["1", "", "  ", nil, "5"])
     col[4] = UNDEF
     df = CAFrame.new("a" => col)
-    assert_nothing_raised { df.cast("a" => :int32, on_error: :raise) }
+    assert_nothing_raised { df = df.cast("a" => :int32, on_error: :raise) }
     assert_equal [1, UNDEF, UNDEF, UNDEF, UNDEF], df["a"].to_a
   end
 
@@ -122,7 +122,7 @@ class TestCAFrameDecimalCast < Test::Unit::TestCase
   # with no fractional part, is kept; anything else is UNDEF.
   def test_non_string_cells
     df = CAFrame.new("a" => CA_OBJECT([1, 2.0, 2.5, 300, nil, "3"]))
-    df.cast("a" => :int8)
+    df = df.cast("a" => :int8)
     assert_equal [1, 2, UNDEF, UNDEF, UNDEF, 3], df["a"].to_a
   end
 
@@ -130,7 +130,7 @@ class TestCAFrameDecimalCast < Test::Unit::TestCase
   def test_view_column
     base = CA_OBJECT([["1", "010"], ["2", "0x1F"]])
     df = CAFrame.new("a" => base[nil, 1])
-    df.cast("a" => :int32)
+    df = df.cast("a" => :int32)
     assert_equal [10, UNDEF], df["a"].to_a
   end
 

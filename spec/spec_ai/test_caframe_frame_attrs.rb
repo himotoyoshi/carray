@@ -46,18 +46,18 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     :stack_columns    => ->(df, _) { df.stack_columns(["k", "v"], into: "kv") },
     :unstack_column   => ->(df, _) { df.unstack_column("w") },
     :copy             => ->(df, _) { df.copy },
+    :cast             => ->(df, _) { df.cast("k" => :float64) },
+    :promote          => ->(df, _) { df.promote(:object) },
+    :set_index        => ->(df, _) { df.set_index("k") },
+    :reset_index      => ->(df, _) { df.set_index("k").reset_index },
+    :parse_to_time    => ->(df, _) { df.parse_to_time("t") },
+    :to_time          => ->(df, _) { df.cast("k" => :int64).to_time("k") },
   }.freeze
 
   # Verbs that change the frame itself and return it.
   RETURNS_SELF = {
-    :cast          => ->(df) { df.cast("k" => :float64) },
-    :promote       => ->(df) { df.promote(:float64) rescue df.promote(:object) },
     :mask_eq       => ->(df) { df.mask_eq("k", 2) },
     :fill          => ->(df) { df.fill("v", 0.0) },
-    :set_index     => ->(df) { df.set_index("k") },
-    :reset_index   => ->(df) { df.set_index("k").reset_index },
-    :parse_to_time => ->(df) { df.parse_to_time("t") },
-    :to_time       => ->(df) { df.cast("k" => :int64).to_time("k") },
     :protect       => ->(df) { df.protect },
   }.freeze
 

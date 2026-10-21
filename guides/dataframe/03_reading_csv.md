@@ -133,7 +133,7 @@ raw.infer_types
 The result is a Hash `cast` takes directly, so you can adjust it and apply it — or copy it into your program, so the types no longer depend on what this particular file happened to contain:
 
 ```ruby
-raw.cast(raw.infer_types.merge("visitors" => :int32))
+raw = raw.cast(raw.infer_types.merge("visitors" => :int32))
 raw.data_types["visitors"]   # => :int32
 ```
 

@@ -18,8 +18,7 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
   end
 
   def test_infer
-    df = frame
-    assert_same df, df.cast(:infer)
+    df = frame.cast(:infer)
     assert_equal :float64, df["temp"].data_type
     assert_equal :int64, df["count"].data_type
     assert_equal :int64, df["id"].data_type
@@ -30,13 +29,13 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
   def test_infer_matches_infer_types
     a = frame.cast(:infer)
     b = frame
-    b.cast(b.infer_types)
+    b = b.cast(b.infer_types)
     assert_equal b.data_types, a.data_types
   end
 
   def test_infer_takes_on_error
     df = frame
-    df.cast(:infer, on_error: :warn)
+    df = df.cast(:infer, on_error: :warn)
     assert_equal :float64, df["temp"].data_type
   end
 
@@ -61,7 +60,7 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
 
   def test_default_type_alone
     df = CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_INT16([3, 4]))
-    df.cast(default: :float64)
+    df = df.cast(default: :float64)
     assert_equal [:float64, :float64], df.column_names.map { |n| df[n].data_type }
   end
 

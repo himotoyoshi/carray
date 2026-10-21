@@ -37,7 +37,7 @@ Number types are read as decimal numbers (`"010"` is ten), and `on_error:` (`:ma
 df["station"].strip!                         # trim every cell, in place
 df["code"].gsub!("-", "")
 df["num"] = df["code"].extract(/(\d+)/, '\1') # a new text column
-df.cast("num", :int32)                       # then read it as numbers
+df = df.cast("num", :int32)                  # then read it as numbers
 ```
 
 `extract(regexp, replace)` replaces each cell's match as `String#sub` does, so `'\1'` is the part the first group captured. It masks a cell its pattern does not match, so the cell stays `UNDEF` through the `cast` instead of turning into 0; a match of the empty string is `""`. To make several columns of one, use `split_column`, which puts the new columns in the old one's place and returns a new frame:
@@ -55,7 +55,7 @@ The inference casts a column to `:int64` when every cell that is not missing is 
 ```ruby
 df = CAFrame.from_csv("obs.csv", types: :text)
 df.infer_types        # => { "time" => :time, "temp" => :float64, "count" => :int64 }
-df.cast(df.infer_types.merge("count" => :int32))
+df = df.cast(df.infer_types.merge("count" => :int32))
 ```
 
 **Mostly one rule, with exceptions.** `default:` in the map sets every column the map does not name — `:infer` to infer them (what `from_csv` does without `default:`), `:text` to keep them text, or a type to cast them all — and a named column takes its own entry instead. `nil` leaves a column as the text it was read as, which is how to keep a column out of inference:

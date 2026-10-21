@@ -640,8 +640,7 @@ class TestCAFrameDatetimeVerbs < Test::Unit::TestCase
       "CAConstString"  => CArray.const_string(%w[2024-06-15 2024-06-16]),
       "CAFixlenString" => CArray.fixlen_string(%w[2024-06-15 2024-06-16]),
     }.each do |label, col|
-      df = CAFrame.new("t" => col)
-      assert_same df, df.parse_to_time("t", unit: :D)
+      df = CAFrame.new("t" => col).parse_to_time("t", unit: :D)
       assert_kind_of CATime, df["t"]
       assert_equal "2024-06-15", df["t"][0].to_s   # :D scalar prints date-only (unit-aware)
     end
@@ -664,7 +663,7 @@ class TestCAFrameDatetimeVerbs < Test::Unit::TestCase
 
   def test_to_time_integer_unix_epoch
     df = CAFrame.new("t" => CA_INT64([0, 86_400]))
-    df.to_time("t", unit: :s)
+    df = df.to_time("t", unit: :s)
     assert_equal ["1970-01-01T00:00:00Z", "1970-01-02T00:00:00Z"],
                  df["t"].to_a.map(&:to_s)
   end
@@ -672,7 +671,7 @@ class TestCAFrameDatetimeVerbs < Test::Unit::TestCase
   def test_to_time_custom_epoch
     # netCDF-style "hours since 1990-01-01"
     df = CAFrame.new("t" => CA_INT64([0, 24, 48]))
-    df.to_time("t", unit: :h, epoch: "1990-01-01")
+    df = df.to_time("t", unit: :h, epoch: "1990-01-01")
     assert_equal ["1990-01-01T00:00:00Z", "1990-01-02T00:00:00Z",
                   "1990-01-03T00:00:00Z"], df["t"].to_a.map(&:to_s)
   end
@@ -680,12 +679,12 @@ class TestCAFrameDatetimeVerbs < Test::Unit::TestCase
   def test_to_time_takes_a_grid
     # the same netCDF axis, with the units attribute passed as one value
     df = CAFrame.new("t" => CA_INT64([0, 24, 48]))
-    assert_same df, df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
+    df = df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
     assert_equal ["1990-01-01T00:00:00Z", "1990-01-02T00:00:00Z",
                   "1990-01-03T00:00:00Z"], df["t"].to_a.map(&:to_s)
     # `unit:` takes a grid too, for a call site that already spells the keyword
     df = CAFrame.new("t" => CA_INT64([0, 1]))
-    df.to_time("t", unit: CATime::Grid.parse("12 hours since 2017-11-30 09:00"))
+    df = df.to_time("t", unit: CATime::Grid.parse("12 hours since 2017-11-30 09:00"))
     assert_equal ["2017-11-30T09:00:00Z", "2017-11-30T21:00:00Z"],
                  df["t"].to_a.map(&:to_s)
   end
@@ -693,12 +692,12 @@ class TestCAFrameDatetimeVerbs < Test::Unit::TestCase
   def test_to_time_grid_keeps_an_epoch_phase_the_keyword_form_drops
     values = CA_INT64([0, 1, 2])
     grid   = CAFrame.new("t" => values.copy)
-    grid.to_time("t", CATime::Grid.parse("days since 1980-01-01 12:00"))
+    grid = grid.to_time("t", CATime::Grid.parse("days since 1980-01-01 12:00"))
     assert_equal ["1980-01-01 12:00", "1980-01-02 12:00", "1980-01-03 12:00"],
                  grid["t"].strftime("%Y-%m-%d %H:%M").to_a
     # the keyword epoch is read on the unit grid, so the time of day is lost
     keyword = CAFrame.new("t" => values.copy)
-    keyword.to_time("t", unit: :D, epoch: "1980-01-01 12:00")
+    keyword = keyword.to_time("t", unit: :D, epoch: "1980-01-01 12:00")
     assert_equal ["1980-01-01 00:00", "1980-01-02 00:00", "1980-01-03 00:00"],
                  keyword["t"].strftime("%Y-%m-%d %H:%M").to_a
   end
@@ -710,7 +709,7 @@ class TestCAFrameDatetimeVerbs < Test::Unit::TestCase
 
   def test_to_time_whole_float_accepted
     df = CAFrame.new("t" => CA_FLOAT64([1.0, 2.0]))
-    df.to_time("t", unit: :D, epoch: "1899-12-30") # Excel serial date
+    df = df.to_time("t", unit: :D, epoch: "1899-12-30") # Excel serial date
     assert_equal ["1899-12-31", "1900-01-01"],   # :D scalars print date-only
                  df["t"].to_a.map(&:to_s)
   end
@@ -730,14 +729,14 @@ class TestCAFrameDatetimeVerbs < Test::Unit::TestCase
   def test_to_time_preserves_mask
     t = CA_INT64([0, 24, 48]); t[1] = UNDEF
     df = CAFrame.new("t" => t)
-    df.to_time("t", unit: :h)
+    df = df.to_time("t", unit: :h)
     assert_equal [false, true, false], df["t"].is_masked.to_a
   end
 
   def test_parse_preserves_mask_and_masks_unparseable
     # unparseable ("bad") and nil cells stay missing (parse-mask), not epoch
     df = CAFrame.new("t" => CA_OBJECT(["2024-01-01", "bad", "2024-01-03", nil]))
-    df.parse_to_time("t", unit: :D)
+    df = df.parse_to_time("t", unit: :D)
     assert_equal [false, true, false, true], df["t"].is_masked.to_a
     assert_equal 1, df["t"].day[0]
   end
@@ -824,28 +823,30 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
   end
 
   def test_cast_rebinds_column
-    @df.cast("a", :float64)
+    @df = @df.cast("a", :float64)
     assert_equal :float64, @df["a"].data_type
     assert_equal [1.0, 2.0, 3.0], @df["a"].to_a
   end
 
   def test_cast_string_column_parse_mask
     df = CAFrame.new("s" => CA_OBJECT(["1.5", "xx", "3"]))
-    df.cast("s", :float64)
+    df = df.cast("s", :float64)
     assert_equal 1.5, df["s"][0]
     assert_equal UNDEF, df["s"][1]
     assert_equal 3.0, df["s"][2]
   end
 
   def test_cast_map_form
+    a_was = @df["a"].data_type
     r = @df.cast("a" => :float64, "b" => :int32)
-    assert_same @df, r
-    assert_equal :float64, @df["a"].data_type
-    assert_equal :int32, @df["b"].data_type
+    assert_not_same @df, r
+    assert_equal :float64, r["a"].data_type
+    assert_equal :int32, r["b"].data_type
+    assert_equal a_was, @df["a"].data_type   # this frame keeps its own
   end
 
   def test_cast_array_key_shares_one_type
-    @df.cast(["a", "b"] => :float64)
+    @df = @df.cast(["a", "b"] => :float64)
     assert_equal :float64, @df["a"].data_type
     assert_equal :float64, @df["b"].data_type
   end
@@ -874,28 +875,29 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
 
   def test_promote_without_target_picks_the_common_type
     df = CAFrame.new("x" => CA_FLOAT64([1, 2]), "y" => CA_INT32([3, 4]))
-    assert_same df, df.promote
-    assert_equal({ "x" => :float64, "y" => :float64 }, df.data_types)
+    assert_equal({ "x" => :float64, "y" => :float64 }, df.promote.data_types)
+    assert_equal({ "x" => :float64, "y" => :int32 }, df.data_types)
   end
 
   def test_promote_makes_to_ca_writable
     df = CAFrame.new("x" => CA_FLOAT64([1, 2]), "y" => CA_INT32([3, 4]))
     assert_raise(RuntimeError) { df.to_ca(writable: true) }   # cast lane
-    m = df.promote.to_ca(writable: true)
+    pr = df.promote
+    m = pr.to_ca(writable: true)
     m[0, 1] = 9.0
-    assert_equal [9.0, 4.0], df["y"].to_a
+    assert_equal [9.0, 4.0], pr["y"].to_a
   end
 
   def test_promote_leaves_a_uniform_frame_alone
     x = CA_FLOAT64([1, 2])
     df = CAFrame.new("x" => x, "y" => CA_FLOAT64([3, 4]))
-    df.promote
+    df = df.promote
     assert_same x, df["x"]
   end
 
   def test_promote_to_an_explicit_widening_type
     df = CAFrame.new("x" => CA_INT8([1, 2]), "y" => CA_INT32([3, 4]))
-    df.promote(:float64)
+    df = df.promote(:float64)
     assert_equal({ "x" => :float64, "y" => :float64 }, df.data_types)
   end
 
@@ -918,7 +920,7 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
     df = CAFrame.new("s" => CArray.const_string(["ab", "cde"]),
                      "c" => CA_OBJECT(["p", "q"]).categorize,
                      "x" => CA_FLOAT64([1, 2]))
-    df.promote(:object)
+    df = df.promote(:object)
     assert_equal ["ab", "cde"], df["s"].to_a      # not the storage bytes
     assert_equal ["p", "q"], df["c"].to_a         # labels, not codes
     assert_equal [["ab", "p", 1.0], ["cde", "q", 2.0]], df.to_ca.to_a
@@ -927,7 +929,7 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
   def test_promote_keeps_a_uniformly_face_typed_frame_as_is
     t = CArray.time([0, 1], unit: :s)
     df = CAFrame.new("a" => t, "b" => t.copy)
-    df.promote
+    df = df.promote
     assert_kind_of CATime, df["a"]
     assert_kind_of CATime, df.to_ca
   end
@@ -964,7 +966,7 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
   def test_promote_to_a_numeric_type_uses_a_face_columns_declaration
     df = CAFrame.new("price" => ScaledInt.new(CA_INT64([12345, 13020])),
                      "qty"   => CA_FLOAT64([2, 1]))
-    df.promote(:float64)
+    df = df.promote(:float64)
     assert_equal({ "price" => :float64, "qty" => :float64 }, df.data_types)
     assert_equal [[123.45, 2.0], [130.20, 1.0]], df.to_ca.to_a
   end
@@ -982,13 +984,12 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
 
   def test_promote_of_an_empty_frame_is_a_no_op
     df = CAFrame.new
-    assert_same df, df.promote
-    assert_equal 0, df.ncol
+    assert_equal 0, df.promote.ncol
   end
 
   def test_cast_to_object_uses_a_face_columns_surface
     df = CAFrame.new("s" => CArray.const_string(["ab", "cde"]))
-    df.cast("s", :object)
+    df = df.cast("s", :object)
     assert_equal ["ab", "cde"], df["s"].to_a
   end
 
@@ -1001,7 +1002,7 @@ class TestCAFrameColumnVerbs < Test::Unit::TestCase
   def test_dup_does_not_share_the_columns_hash
     df = CAFrame.new("x" => CA_FLOAT64([1, 2]))
     other = df.dup
-    other.cast("x", :int32)
+    other = other.cast("x", :int32)
     assert_equal :float64, df["x"].data_type
     assert_equal :int32, other["x"].data_type
   end

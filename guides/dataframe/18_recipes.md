@@ -194,7 +194,7 @@ Split the table by shop, put each shop on the full list of days, interpolate alo
 days = CArray.time_range("2024-03-04", "2024-03-11", unit: :D)
 filled = ["north", "south", "central"].map { |s|
   part = sales.filter { |f| f["shop"].eq(s) }.drop("shop").align("date", days)
-  part.set_index("date").cast("visitors" => :float64).fill("visitors", :linear)
+  part = part.set_index("date").cast("visitors" => :float64).fill("visitors", :linear)
   part.append("shop", CArray.string(part.nrow) { s })
 }
 all = CAFrame.concatenate(filled)

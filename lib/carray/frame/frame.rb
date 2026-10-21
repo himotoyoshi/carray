@@ -131,7 +131,7 @@ class CAFrame
             "axis_name #{@axis_name.inspect} collides with a column of the same name"
     end
 
-    cast(types, on_error: on_error, option_name: :types) unless types.nil?
+    cast_in_place(types, on_error: on_error, option_name: :types) unless types.nil?
   end
 
   # --- df[...] : key type decides the axis (memo §13.2) ------------------
@@ -567,10 +567,14 @@ class CAFrame
     CAFrame.new(verdicts, axis_name: @axis_name, index: @index)
   end
 
-  # Move a column to the index and name the row axis after it (memo §3).
-  # An index-role change: the data is unchanged, so this mutates self and
-  # returns it (memo §3.8). Any existing index is replaced.
+  # A new frame with a column moved to the index and the row axis named
+  # after it (memo §3); this frame is left as it is, and the two share their
+  # columns. Any existing index is replaced, going back to being a column.
   def set_index(name)
+    return dup.__send__(:set_index_in_place, name)
+  end
+
+  private def set_index_in_place(name)
     refuse_if_frozen
     key = column_key(name, "set_index")
     raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
@@ -596,10 +600,14 @@ class CAFrame
     self
   end
 
-  # Drop the index back into an ordinary column (the inverse of set_index).
-  # Also an index-role change, so it mutates self (memo §3.8). The former
-  # index becomes the first column, named after the row axis.
+  # A new frame with the index back as an ordinary column (the inverse of
+  # set_index); this frame is left as it is. The former index becomes the
+  # first column, named after the row axis.
   def reset_index
+    return dup.__send__(:reset_index_in_place)
+  end
+
+  private def reset_index_in_place
     refuse_if_frozen
     return self unless @index
     @columns   = { @axis_name => @index }.merge(@columns)

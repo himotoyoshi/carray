@@ -42,7 +42,7 @@ class TestCAFrameCSVTypedRead < Test::Unit::TestCase
   # The same input read without types:, cast afterwards.
   def read_then_cast(text, types)
     df = CAFrame.from_csv(StringIO.new(text), types: :text)
-    df.cast(types == :infer ? df.infer_types : types)
+    df = df.cast(types == :infer ? df.infer_types : types)
     describe(df)
   rescue StandardError => e
     [:error, e.class, e.message]

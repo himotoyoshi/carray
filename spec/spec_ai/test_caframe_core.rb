@@ -891,9 +891,9 @@ class TestCAFrameAxisNameRoundTrip < Test::Unit::TestCase
 
   def test_reset_index_restores_the_name_the_frame_had_before
     df = frame("obs")
-    df.set_index("t")
+    df = df.set_index("t")
     assert_equal "t", df.axis_name
-    df.reset_index
+    df = df.reset_index
     assert_equal "obs", df.axis_name
     assert_equal ["t", "v"], df.column_names
   end
@@ -910,9 +910,9 @@ class TestCAFrameAxisNameRoundTrip < Test::Unit::TestCase
   def test_a_second_set_index_does_not_replace_the_remembered_name
     df = CAFrame.new({ "a" => CA_INT32([1, 2]), "b" => CA_INT32([7, 8]),
                        "v" => CA_FLOAT64([1, 2]) }, axis_name: "obs")
-    df.set_index("a")
-    df.set_index("b")
-    df.reset_index
+    df = df.set_index("a")
+    df = df.set_index("b")
+    df = df.reset_index
     assert_equal "obs", df.axis_name
   end
 
@@ -921,7 +921,7 @@ class TestCAFrameAxisNameRoundTrip < Test::Unit::TestCase
   def test_a_frame_born_with_an_index_resets_to_the_default
     df = CAFrame.new({ "v" => CA_FLOAT64([1, 2]) },
                      index: CA_INT32([9, 8]), axis_name: "obs")
-    df.reset_index
+    df = df.reset_index
     assert_equal CAFrame::DEFAULT_AXIS_NAME, df.axis_name
     assert_equal ["obs", "v"], df.column_names
   end
@@ -930,7 +930,7 @@ class TestCAFrameAxisNameRoundTrip < Test::Unit::TestCase
     df = frame("obs")
     df.set_index("t").reset_index
     assert_equal "obs", df.axis_name
-    df.reset_index
+    df = df.reset_index
     assert_equal "obs", df.axis_name
   end
 end
@@ -946,7 +946,7 @@ class TestCAFrameReindexKeepsTheOldIndex < Test::Unit::TestCase
 
   def test_the_replaced_index_comes_back_as_a_column
     df = frame.set_index("a")
-    df.set_index("b")
+    df = df.set_index("b")
     assert_equal [7, 8], df.index.to_a
     assert_equal "b", df.axis_name
     assert_includes df.column_names, "a"
@@ -956,10 +956,10 @@ class TestCAFrameReindexKeepsTheOldIndex < Test::Unit::TestCase
   # Where it lands is the same place reset_index puts it: the front.
   def test_reindexing_equals_reset_then_set
     direct = frame.set_index("a")
-    direct.set_index("b")
+    direct = direct.set_index("b")
     composed = frame.set_index("a")
-    composed.reset_index
-    composed.set_index("b")
+    composed = composed.reset_index
+    composed = composed.set_index("b")
     assert_equal composed.column_names, direct.column_names
     assert_equal composed.axis_name, direct.axis_name
     assert_equal composed.index.to_a, direct.index.to_a
@@ -967,7 +967,7 @@ class TestCAFrameReindexKeepsTheOldIndex < Test::Unit::TestCase
 
   def test_reindexing_does_not_change_the_row_count_or_lose_data
     df = frame.set_index("a")
-    df.set_index("b")
+    df = df.set_index("b")
     assert_equal 2, df.nrow
     assert_equal ["a", "v"], df.column_names
     assert_equal [10.0, 20.0], df["v"].to_a
@@ -976,8 +976,8 @@ class TestCAFrameReindexKeepsTheOldIndex < Test::Unit::TestCase
   # The remembered name is still the one held before any index was set.
   def test_reindexing_then_resetting_restores_the_original_axis_name
     df = frame.set_index("a")
-    df.set_index("b")
-    df.reset_index
+    df = df.set_index("b")
+    df = df.reset_index
     assert_equal "obs", df.axis_name
     assert_equal ["b", "a", "v"], df.column_names
   end

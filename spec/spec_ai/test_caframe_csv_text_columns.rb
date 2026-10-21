@@ -36,7 +36,7 @@ class TestCAFrameCSVTextColumns < Test::Unit::TestCase
   def test_extract_then_cast
     df = frame
     df["num"] = df["code"].extract(/(\d+)/, '\1')
-    df.cast("num", :int32)
+    df = df.cast("num", :int32)
     assert_equal [12, 7, UNDEF], df["num"].to_a
   end
 

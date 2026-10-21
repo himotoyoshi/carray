@@ -166,7 +166,7 @@ class CAFrame
 
     frame = build_frame(names, rows)
     mask_missing_tokens(frame, missing) if missing
-    frame.cast(types, on_error: on_error, option_name: :types) unless types.nil?
+    frame.__send__(:cast_in_place, types, on_error: on_error, option_name: :types) unless types.nil?
     convert_const_string_columns_to_castring(frame)
     column_attrs&.each_with_index do |attrs, j|
       frame[frame.column_names[j]].set_attrs(attrs) unless attrs.empty?

@@ -1351,7 +1351,7 @@ class TestCAFrameJoinSemiAnti < Test::Unit::TestCase
 
   def test_shares_columns_and_index_as_filter
     df = CAFrame.new("k" => CA_INT64([1, 2, 3]), "v" => CA_INT32([4, 5, 6]))
-    df.set_index("k")
+    df = df.set_index("k")
     s = df.join(CAFrame.new("k" => CA_INT64([2, 3])), on: "k", how: :semi)
     assert_equal [2, 3], s.index.to_a
     s["v"][0] = 50

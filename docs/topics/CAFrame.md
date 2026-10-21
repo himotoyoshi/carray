@@ -38,7 +38,7 @@ The chapters follow the order in which a frame is usually used: read it, look at
 ```ruby
 df = CAFrame.from_csv("obs.csv", types: { "temp" => :float64 })  # Building a frame
 puts df.describe.to_table                                        # Looking at a frame
-df.parse_to_time("time").set_index("time")                       # Editing columns, The index
+df = df.parse_to_time("time").set_index("time")                  # Editing columns, The index
 warm  = df.filter { |f| f["temp"] > 20 }                         # Selecting rows
 daily = df.resample("time", "1 day").mean                        # Grouping rows
 means = df.group_by("station").mean.reset_index
@@ -664,30 +664,28 @@ df[df.is_duplicate(except: :none).not]     # only the rows that appear once
 
 ### New frame or `self`?
 
-The column verbs split by **what they change**, and that alone decides whether a call returns a new frame or changes `self`:
+The verbs split by **what they change**:
 
-- Verbs that make the table a **different table** — a different set of columns (`append`, `drop`), different names (`rename`) — return a **new frame** that shares the columns. Chain or reassign: `df = df.append(...).drop(...)`.
-- Verbs that **edit a column of the same table** — its mask (`mask_eq`, `fill`), its type (`cast`, `promote`, `parse_to_time`, `to_time`) — and the verbs that choose which column is the index (`set_index` / `reset_index`) return **`self`**.
+- Verbs that change **the table** — which columns it has (`append`, `drop`), their names (`rename`), their types (`cast`, `promote`, `parse_to_time`, `to_time`), or which column is the index (`set_index` / `reset_index`) — return a **new frame** and leave this one as it is. Chain or reassign: `df = df.cast("temp", :float64).set_index("time")`.
+- Verbs that **edit cells** — `mask_eq` and `fill` — edit the stored column in place and return **`self`**.
 
-Whether an edit reaches other frames that share the column depends on the verb:
+A new frame is a new table over the same columns, not a copy: the columns it did not replace are **shared** with this frame, so a write to a cell through either frame reaches the other (and every view of the column). Only the table itself — names, index, the column a type change made — is the new frame's own. **To cut the connection, use `copy`.**
 
-| verb | returns | reaches frames sharing the column |
+| verb | returns | a write to a shared cell afterwards |
 |---|---|---|
-| `append` / `drop` / `rename` | a new frame | — (this frame is unchanged) |
-| `mask_eq` / `fill` | `self` | yes — the stored column is edited |
-| `cast` / `promote` / `parse_to_time` / `to_time` | `self` | no — a new column is bound in its place |
-| `set_index` / `reset_index` | `self` | — (no cell changes) |
-
-`copy` first when an edit must not reach other frames.
+| `append` / `drop` / `rename` / `set_index` / `reset_index` | a new frame | reaches this frame |
+| `cast` / `promote` / `parse_to_time` / `to_time` | a new frame | reaches this frame, except in the converted columns (new arrays) |
+| `mask_eq` / `fill` | `self` | — (the stored column itself is edited, so every frame sharing it sees the change) |
 
 ```ruby
-# the set of columns or their names change -> new frame (keep the result):
+# the table changes -> new frame (keep the result):
 df = df.append("tempF", df["temp"] * 9 / 5.0 + 32) # add a derived column at the end
 df = df.drop("raw", "scratch")                      # remove columns (data untouched)
 df = df.rename("temp" => "temperature")             # rename, keeping the order
+df = df.cast("temp", :float64)                      # change a column's type
+hourly = df.set_index("time")                       # df keeps its "time" column
 
-# edit a column of the same table -> self (changes df in place):
-df.cast("temp", :float64)                           # change a column's type
+# edit cells -> self (changes the stored column):
 df.mask_eq("flag", -999)                            # mask cells equal to a sentinel
 df.fill("temp", :linear)                            # fill masked cells
 ```
@@ -717,7 +715,7 @@ These act on **this** frame only. (Ruby returns the right-hand side as the value
 ### Changing a column's type
 
 ```ruby
-df.cast("temp", :float64)                           # one column
+df = df.cast("temp", :float64)                      # one column
 df.cast("temp" => :float64, "rh" => :int32)         # map form: several columns
 df.cast(["u", "v"] => :float64)                     # one type shared by several
 df.cast(:infer)                                     # the types infer_types finds
@@ -726,7 +724,7 @@ df.promote                                          # every column to one common
 df.promote(:object)                                 # ...to the widest type of all
 ```
 
-**`cast`** binds a new column of the target type in place of the old one, so the change does not reach frames sharing the old column. What it does depends on the column and the target:
+**`cast`** returns a new frame in which each named column is replaced by a new one of the target type; this frame, and any frame sharing the old column, keeps the old one. What it does depends on the column and the target:
 
 - **Text to a number.** A text (object) column, or a string column (`CArray.string`, `CArray.const_string`), is read as decimal numbers: digits with an optional sign, decimal point and exponent (and `nan` / `inf` for floats), surrounding spaces ignored.
   - A cell is data, not a Ruby literal: `"010"` is ten, and `"0x1F"` / `"1_000"` are not numbers.
@@ -741,7 +739,7 @@ df.promote(:object)                                 # ...to the widest type of a
 
 - `:mask` (the default) makes it `UNDEF`;
 - `:warn` does the same and warns once per column, with the count and the first few cells;
-- `:raise` raises `CAFrame::UnreadableColumn` naming the column, the row and the cell, and rebinds no column.
+- `:raise` raises `CAFrame::UnreadableColumn` naming the column, the row and the cell.
 
 Blank, `nil` and masked cells are missing values, not errors, under every policy.
 
@@ -754,7 +752,7 @@ df.cast("rh" => :int32, on_error: :raise)
 
 - Without an argument the type is the one `CArray.result_type` picks — the same choice [`to_ca`](#a-matrix--to_ca) makes — so `df.promote` means "make this frame stackable into one matrix". A frame that is already of one type is left alone.
 - With an argument, the type must be a **widening** for every column. A narrowing target raises and points at `cast`, the verb for a lossy change. `:object` is the widest type and always accepted, which is how a frame mixing text, Face and numeric columns becomes one type.
-- Like `cast`, it binds new columns, so the change does not reach frames sharing the old ones.
+- Like `cast`, it returns a new frame with new columns; this frame keeps the old ones.
 
 **Face columns.** A Face column ([`CATime`](CATime.md), [`CACategorical`](../objects/CACategorical.md), [`CAConstString`](../objects/CAConstString.md)) decides its own conversions, and `cast` / `promote` leave the decision to it: `:object` gives its **surface** values (labels, not codes; `CATime::Element`, not serials), and a numeric target gives whatever the Face declares in `#to_numeric` — a fixed-point column becomes its scaled values, while a Face that declares nothing raises and says so (a time is not a number). The storage underneath is always reachable through `df["name"].parent`. Because the Face decides, the widening rule above applies to plain columns only.
 
@@ -764,8 +762,8 @@ df.cast("rh" => :int32, on_error: :raise)
 
 ```ruby
 df.infer_types   # => { "time" => :time, "temp" => :float64, "n" => :int64, "flag" => :boolean }
-df.cast(df.infer_types)                           # the same as cast(:infer)
-df.cast(df.infer_types.merge("code" => :int32))   # with one type of your own
+df = df.cast(df.infer_types)                      # the same as cast(:infer)
+df = df.cast(df.infer_types.merge("code" => :int32))   # with one type of your own
 ```
 
 - Only text columns are looked at (object columns, `CAString`, `CAConstString`); a column that already has a type is not listed.
@@ -784,7 +782,7 @@ df.cast(df.infer_types.merge("code" => :int32))   # with one type of your own
 
 ```ruby
 df = df.split_column("code", "-", into: ["kind", "num"])   # "A-12" -> "A", "12"
-df.cast("num" => :int32)                                  # the pieces are text
+df = df.cast("num" => :int32)                             # the pieces are text
 ```
 
 - It returns a new frame. The new columns take the place of the old one, which leaves the frame.
@@ -811,7 +809,7 @@ df.contrast_columns("weather", full: true)   # every category kept
 
 ### Time columns
 
-Two verbs turn a column into a [time](CATime.md) column, one per kind of input. Each rebinds the column and returns `self`; make it the index with `set_index` afterward.
+Two verbs turn a column into a [time](CATime.md) column, one per kind of input. Each returns a new frame with the column converted, and this frame keeps the old column; make it the index with `set_index` afterward.
 
 | the column holds… | verb |
 |---|---|
@@ -820,17 +818,17 @@ Two verbs turn a column into a [time](CATime.md) column, one per kind of input. 
 
 ```ruby
 # text -> time
-df.parse_to_time("time").set_index("time")      # written year first
-df.parse_to_time("time", "%d/%m/%Y")            # an explicit strptime format
-df.parse_to_time("time", :infer)                # find the one format it is in
-df.parse_to_time("time", :mixed)                # guess at each cell (slow)
+df = df.parse_to_time("time").set_index("time") # written year first
+df = df.parse_to_time("time", "%d/%m/%Y")       # an explicit strptime format
+df = df.parse_to_time("time", :infer)           # find the one format it is in
+df = df.parse_to_time("time", :mixed)           # guess at each cell (slow)
 
 # counts since an epoch -> time
-df.to_time("t", unit: :h, epoch: "1990-01-01")  # netCDF "hours since 1990-01-01"
-df.to_time("t", unit: :day, epoch: "1899-12-30").set_index("t")  # Excel serial date
+df = df.to_time("t", unit: :h, epoch: "1990-01-01")  # netCDF "hours since 1990-01-01"
+df = df.to_time("t", unit: :day, epoch: "1899-12-30").set_index("t")  # Excel serial date
 
 # the same pair as one value -- a netCDF units attribute goes straight in
-df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
+df = df.to_time("t", CATime::Grid.parse("hours since 1990-01-01"))
 ```
 
 #### Text — `parse_to_time`
@@ -860,12 +858,12 @@ A date in another order is not read, because whether `"01/02/2024"` is January o
 ```ruby
 df.infer_time_format("date")   # => "%d/%m/%Y"
 
-begin
-  df.parse_to_time("date", :infer)
-rescue CAFrame::AmbiguousTimeFormat => e
-  e.formats                    # => ["%d/%m/%Y", "%m/%d/%Y"]
-  df.parse_to_time("date", "%d/%m/%Y")
-end
+df = begin
+       df.parse_to_time("date", :infer)
+     rescue CAFrame::AmbiguousTimeFormat => e
+       e.formats               # => ["%d/%m/%Y", "%m/%d/%Y"]
+       df.parse_to_time("date", "%d/%m/%Y")
+     end
 ```
 
 **`:mixed`** is for text that is not written in one format, which is broken as data for a machine to read. It guesses at each cell on its own, as `Time.parse` does, so it can read a cell wrongly without saying so: `"01/02/24"` is read as 24 February 2001. It is also much slower.
@@ -970,18 +968,21 @@ The index is not a column: `df["time"]` does not reach it (it raises `KeyError`,
 ### `set_index` / `reset_index`
 
 ```ruby
-df.set_index("time")       # move the column "time" to the index (changes df)
-df.reset_index             # move the index back to a column at the front (changes df)
-df.index                   # the index CArray (or nil)
-df.axis_name               # the row-axis name
+hourly = df.set_index("time")   # a new frame with the column "time" moved to the index
+flat   = hourly.reset_index     # a new frame with the index back as the first column
+hourly.index                    # the index CArray (or nil)
+hourly.axis_name                # the row-axis name
 ```
+
+Both return a new frame and leave the receiver as it is (`df` above keeps its `"time"` column). The new frame shares the columns, so a write to a cell through it reaches `df`; `copy` cuts that.
 
 `set_index` renames the row axis after the column it moves, since that is the name the index then appears under. `reset_index` is its inverse, and puts the earlier name back:
 
 ```ruby
 df = CAFrame.new({ "t" => …, "v" => … }, axis_name: "obs")
-df.set_index("t").axis_name    # => "t"
-df.reset_index.axis_name       # => "obs"
+indexed = df.set_index("t")
+indexed.axis_name               # => "t"
+indexed.reset_index.axis_name   # => "obs"
 ```
 
 A frame **built** with an index (`CAFrame.new(..., index:)`) had no axis name before it, so there is nothing to put back and `reset_index` leaves the default `"row"`. A frame derived from an indexed one — a row slice, `filter`, `copy` — behaves the same way.
@@ -989,8 +990,8 @@ A frame **built** with an index (`CAFrame.new(..., index:)`) had no axis name be
 **Re-indexing.** `set_index` on a frame that **already has an index** replaces it, and the old index goes back to being a column at the front, just as `reset_index` would put it. So re-indexing loses no column: `set_index("b")` on a frame indexed by `"a"` is the same as `reset_index` followed by `set_index("b")`:
 
 ```ruby
-df.set_index("a")
-df.set_index("b")
+df = df.set_index("a")
+df = df.set_index("b")
 df.column_names     # => ["a", "v"]   -- "a" is a column again, not lost
 df.reset_index      # => axis_name "obs" again, column_names ["b", "a", "v"]
 ```
@@ -1733,7 +1734,8 @@ There are two levels. `freeze` fixes the frame's structure — its columns, rows
 |---|---|---|
 | add, remove or rebind a column (`df["c"] = ...`) | raises `FrozenError` | raises `FrozenError` |
 | assign to rows (`df[sel] = ...`) | raises `FrozenError` | raises `FrozenError` |
-| in-place verbs (`fill`, `mask_eq`, `cast`, `set_index`, ...) | raises `FrozenError` | raises `FrozenError` |
+| in-place verbs (`fill`, `mask_eq`) | raises `FrozenError` | raises `FrozenError` |
+| verbs that give a new frame (`cast`, `set_index`, ...) | allowed; the new frame is not frozen | allowed; the new frame is not frozen, and the columns it shares stay read-only |
 | write a cell or a mask through a column (`df["temp"][0] = v`) | writes | raises |
 | set an attribute on a column (`df["temp"].set_attr(...)`) | writes | writes — `protect` guards the values, not the metadata |
 

@@ -60,7 +60,8 @@ Copy when you are about to change a part and want the original as it was, when y
 
 | operation | shares |
 |---|---|
-| `append`, `drop`, `rename` | every column |
+| `append`, `drop`, `rename`, `set_index`, `reset_index` | every column |
+| `cast`, `promote`, `parse_to_time`, `to_time` | every column but the converted ones, which are new |
 | `paste` | the columns of both frames |
 | `join(how: :left)`, `join(how: :inner)`, `join_asof` | this frame's columns; the other frame's are copied |
 | `split_column`, `contrast_columns` | the columns not split |
@@ -80,14 +81,13 @@ Copy when you are about to change a part and want the original as it was, when y
 
 ## Methods that change a frame
 
-Some methods change the frame you call them on. Whether the change also reaches other frames sharing the same columns depends on what they change:
+Methods that change the table — `cast`, `set_index` and the others in the first table above — give a new frame and leave the one you called them on as it is. A few methods change the frame you call them on. Whether the change also reaches other frames sharing the same columns depends on what they change:
 
 | method | reaches frames sharing the column? |
 |---|---|
 | writing a cell, `fill`, `mask_eq`, `df["c"] = UNDEF`, `df[rows] = UNDEF` | yes: the stored cells change |
-| `cast`, `promote`, `parse_to_time`, `to_time` | no: the frame gets a new column, and the others keep the old one |
 | `df["c"] = column` | no: the name now refers to a different column |
-| `df["c"] = nil`, `set_index`, `reset_index` | no: only this frame's set of columns changes |
+| `df["c"] = nil` | no: only this frame's set of columns changes |
 
 For example, filling a column fills it for every frame that shares it:
 
@@ -97,12 +97,13 @@ part.group_by("shop").fill("visitors", :ffill)
 sales["visitors"][7]   # => 102
 ```
 
-while converting it does not:
+while converting it gives a new frame with a new column, and neither `part` nor `sales` changes:
 
 ```ruby
-part.cast("visitors", :float64)
-part["visitors"].data_type    # => :float64
-sales["visitors"].data_type   # => :int64
+floats = part.cast("visitors", :float64)
+floats["visitors"].data_type   # => :float64
+part["visitors"].data_type     # => :int64
+sales["visitors"].data_type    # => :int64
 ```
 
 ## Protecting a frame
@@ -113,7 +114,8 @@ When a frame should not change — a reference table that several parts are take
 |---|---|---|
 | add, remove or replace a column | refused | refused |
 | delete, mask or replace rows | refused | refused |
-| methods that change the frame (`fill`, `cast`, `set_index`, …) | refused | refused |
+| methods that change the frame (`fill`, `mask_eq`) | refused | refused |
+| methods that give a new frame (`cast`, `set_index`, …) | allowed; the new frame is not frozen | allowed; the new frame is not frozen, and the columns it shares stay read-only |
 | write a cell through a column | **allowed** | refused |
 
 `freeze` fixes the frame's structure, as `Array#freeze` fixes an Array's elements but not the objects in it. `protect` also makes every cell refuse writes:

@@ -72,11 +72,11 @@ orders["time"].hour.to_a   # => [8, 8, 9, 11, 11, 14, 14, 16]
 
 #### Text — `parse_to_time`
 
-`parse_to_time` converts a text column, changing the frame:
+`parse_to_time` gives a new frame with a text column converted:
 
 ```ruby
 d = CAFrame.new("day" => CArray.string(["04/03/2024", "15/03/2024", "01/04/2024"]))
-d.parse_to_time("day", "%d/%m/%Y")
+d = d.parse_to_time("day", "%d/%m/%Y")
 d["day"].to_a.map(&:to_s)   # => ["2024-03-04", "2024-03-15", "2024-04-01"]
 ```
 
@@ -108,11 +108,11 @@ Some systems store a time as a count: seconds since 1970, hours since some date,
 
 ```ruby
 x = CAFrame.new("t" => CA_INT64([1709510400, 1709514000]))
-x.to_time("t", unit: :s)
+x = x.to_time("t", unit: :s)
 x["t"].to_a.map(&:to_s)   # => ["2024-03-04T00:00:00Z", "2024-03-04T01:00:00Z"]
 
 sheet = CAFrame.new("day" => CA_INT64([45355, 45356]))
-sheet.to_time("day", unit: :D, epoch: "1899-12-30")   # spreadsheet day numbers
+sheet = sheet.to_time("day", unit: :D, epoch: "1899-12-30")   # spreadsheet day numbers
 sheet["day"].to_a.map(&:to_s)   # => ["2024-03-04", "2024-03-05"]
 ```
 
@@ -284,8 +284,7 @@ p full
 `CArray.time_range` makes every day from the first to the last; `"1 hour"` or `"15 minutes"` make other grids. Once the gaps are rows, they can be filled. With the dates as the index, `:linear` interpolates in time:
 
 ```ruby
-full.set_index("date")
-full.cast("revenue" => :float64).fill("revenue", :linear)
+full = full.set_index("date").cast("revenue" => :float64).fill("revenue", :linear)
 full.at("2024-03-07")["revenue"].round(2)   # => 2804.26
 ```
 

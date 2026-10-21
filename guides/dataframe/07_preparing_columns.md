@@ -9,22 +9,24 @@ sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
 
 ## Does it change the frame, or return a new one?
 
-The methods that change a frame's columns fall into two groups, and which group a method is in decides how you call it:
+The methods fall into two groups, and which group a method is in decides how you call it:
 
-- **A different set of columns** — `append`, `drop`, `rename`, `split_column`, `contrast_columns` — gives a **new frame**. The frame you called it on is unchanged, so keep the result: `df = df.append(...)`.
-- **The same columns, edited** — `cast`, `promote`, `fill`, `mask_eq`, `set_index` — changes the frame itself and returns it, so calls can be chained.
+- **The table changes** — which columns it has, their names, their types, or which one is the index: `append`, `drop`, `rename`, `split_column`, `contrast_columns`, `cast`, `promote`, `parse_to_time`, `to_time`, `set_index`, `reset_index`. These give a **new frame**. The frame you called it on is unchanged, so keep the result: `df = df.cast(...)`.
+- **Cells change** — `fill` and `mask_eq` write into the column itself, change the frame, and return it.
 
 ```ruby
 df = sales.copy
 df.append("per_visitor", df["revenue"] / df["visitors"]).ncol   # => 6
 df.ncol                                                         # => 5
-df.cast("visitors", :float64)
-df["visitors"].data_type                                        # => :float64
+df.cast("visitors", :float64)["visitors"].data_type             # => :float64
+df["visitors"].data_type                                        # => :int64
 ```
 
-`append` left `df` with its five columns; `cast` changed `df` itself.
+Neither `append` nor `cast` changed `df`; keep what they return.
 
-`df["name"] = column` also changes the frame itself; it is the quickest way to add a column to a frame you are working on.
+A new frame is a new table over the same columns, not a copy. The columns it did not replace are shared, so writing a cell through the new frame changes `df` too (chapter 16). To have a frame of its own, use `copy`.
+
+`df["name"] = column` changes the frame itself; it is the quickest way to add a column to a frame you are working on.
 
 ## Adding columns
 
@@ -37,16 +39,11 @@ sales["per_visitor"] = sales["revenue"] / sales["visitors"]
 sales["per_visitor"][0].round(2)   # => 11.66
 ```
 
-A new name adds a column at the end; an existing name replaces that column. The right-hand side must be a CArray or a Ruby Array with one value per row. A single value raises an error:
+A new name adds a column at the end; an existing name replaces that column. The right-hand side is a CArray or a Ruby Array with one value per row, or a single value, which every row then holds:
 
 ```ruby
-sales["promotion"] = 0   # raises ArgumentError: column must be a CArray or Array (got Integer)
-```
-
-To fill a column with one value, make the column:
-
-```ruby
-sales["promotion"] = CArray.int8(sales.nrow) { 0 }
+sales["promotion"] = 0
+sales["promotion"].to_a.first(3)   # => [0, 0, 0]
 ```
 
 ### Columns computed from other columns
@@ -95,9 +92,9 @@ renamed.column_names   # => ["date", "shop", "customers", "takings", "rating"]
 
 ```ruby
 df = sales.copy
-df.cast("visitors", :float64)                         # one column
-df.cast("revenue" => :float32, "rating" => :float32)  # several
-df.cast(["revenue", "rating"] => :float64)            # one type for several
+df = df.cast("visitors", :float64)                         # one column
+df = df.cast("revenue" => :float32, "rating" => :float32)  # several
+df = df.cast(["revenue", "rating"] => :float64)            # one type for several
 df.data_types
 # => {"date" => CATime, "shop" => CAString, "visitors" => :float64, "revenue" => :float64, "rating" => :float64}
 ```
@@ -106,7 +103,7 @@ df.data_types
 
 ```ruby
 raw = CAFrame.from_csv("sales.csv", types: :text)
-raw.cast("revenue" => :float64, "visitors" => :int32)
+raw = raw.cast("revenue" => :float64, "visitors" => :int32)
 raw["visitors"].to_a.first(8)   # => [182, 95, 310, 175, 102, 295, 190, -1]
 ```
 
@@ -119,7 +116,7 @@ raw.cast("rating" => :float64, on_error: :raise)   # raises CAFrame::UnreadableC
 
 `cast(:infer)` converts the text columns to the types `infer_types` finds, as `from_csv` does when reading.
 
-A converted column replaces the old one in this frame. A frame that shared the old column — one you made earlier with `select`, say — keeps the old one.
+In the frame `cast` returns, a converted column is a new column; the frame you called it on, and any frame that shared the old column, keep the old one.
 
 ### Categorical columns
 
@@ -166,7 +163,7 @@ The non-`!` forms (`strip`, `upcase`, `sub`, `gsub`, …) return a new column. P
 
 ```ruby
 df["num"] = df["code"].extract(/-(\d+)/, '\1')
-df.cast("num", :int32)
+df = df.cast("num", :int32)
 df["num"].to_a   # => [12, 7, 3]
 ```
 

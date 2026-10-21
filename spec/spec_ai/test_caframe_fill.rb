@@ -152,7 +152,7 @@ class TestCAFrameFill < Test::Unit::TestCase
     big = 2**53
     df = CAFrame.new({ "t" => CA_FLOAT64([0.0, 1.0, 3.0]), "x" => CA_INT64([big + 1, 0, big + 5]) })
     df["x"][1] = UNDEF
-    df.set_index("t")
+    df = df.set_index("t")
     df.fill("x", :linear)
     assert_equal [big + 1, big + 2, big + 5], df["x"].to_a
   end

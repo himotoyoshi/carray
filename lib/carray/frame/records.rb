@@ -41,7 +41,7 @@ class CAFrame
     end
 
     frame = new(cols)
-    frame.cast(types, on_error: on_error, option_name: :types) unless types.nil?
+    frame.__send__(:cast_in_place, types, on_error: on_error, option_name: :types) unless types.nil?
     frame
   end
 

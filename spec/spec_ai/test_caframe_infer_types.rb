@@ -136,8 +136,8 @@ class TestCAFrameCastTime < Test::Unit::TestCase
   def test_on_error
     e = assert_raise(CAFrame::UnreadableColumn) { frame.cast("bad" => :time, on_error: :raise) }
     assert_match(/column "bad", row 1 "2024-13-01" cannot be read as time/, e.message)
-    df = frame
-    _out, err = capture_output { df.cast("bad" => :time, on_error: :warn) }
+    df = nil
+    _out, err = capture_output { df = frame.cast("bad" => :time, on_error: :warn) }
     assert_match(/2 cells cannot be read as time/, err)
     assert_equal ["2024-01-01", "UNDEF", "UNDEF"], strings(df["bad"])
   end
@@ -154,7 +154,7 @@ class TestCAFrameCastTime < Test::Unit::TestCase
 
   def times(cells, *args, **opts)
     df = CAFrame.new("t" => CA_OBJECT(cells))
-    df.parse_to_time("t", *args, **opts)
+    df = df.parse_to_time("t", *args, **opts)
     strings(df["t"])
   end
 
@@ -220,7 +220,7 @@ class TestCAFrameInferTimeFormat < Test::Unit::TestCase
 
   def times(cells, **opts)
     df = frame(cells)
-    df.parse_to_time("t", :infer, **opts)
+    df = df.parse_to_time("t", :infer, **opts)
     df["t"].to_a.map(&:to_s)
   end
 
