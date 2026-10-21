@@ -1650,6 +1650,7 @@ long["value"].to_a      # => [10.0, 20.0, 30.0, 11.0, 21.0, 31.0]
 | you want… | use |
 |---|---|
 | Ruby values, e.g. for JSON | `to_records` |
+| rows as Ruby Arrays, for a library that takes rows | `to_a` |
 | a CSV file or String | `to_csv` |
 | one numeric matrix for array work | `to_ca` |
 
@@ -1675,6 +1676,15 @@ A record carries only Ruby values, so this is what a round trip keeps:
 | the columns of a frame with no rows | not kept — `to_records` gives `[]`, which has no names in it |
 
 When the types matter, read back with `types:` or `cast` afterwards; to keep the types and the index together, use `to_csv` / `from_csv` with `types:`.
+
+### Rows as Arrays — `to_a`
+
+```ruby
+df.to_a                                   # => [[v11, v12, ...], [v21, v22, ...], ...]
+df.strip_mask("temp" => Float::NAN).to_a  # masked cells decided first
+```
+
+`to_a` gives the rows as an `Array` of Arrays, one value per column in column order. A cell is what the column's own `to_a` gives: **a masked cell stays `UNDEF`**, a time column's cell is its element, and an N-D column's cell an Array. The index is left out (`reset_index` first to have it as the first column). Unlike `to_records`, nothing is normalized: decide what masked cells should be before handing the rows over, with [`strip_mask`](#masking-and-filling-cells) or [`drop_masked`](#masking-deleting-and-splicing-rows). A library that calls `to_a` on what it is given — a machine-learning library that takes a table of rows, say — then reads the frame as it is.
 
 **`nil` and `UNDEF` become the same thing on the way out.** In memory they are distinct — a masked cell is `UNDEF`, and an object column can hold a genuine Ruby `nil` as a value. Neither `to_records` nor `to_csv` keeps them apart: both write either one as missing, and both read missing back as `UNDEF`. So a `nil` held as a value in an object column comes back masked.
 

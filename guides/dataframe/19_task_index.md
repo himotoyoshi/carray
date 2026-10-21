@@ -188,4 +188,5 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | a CSV file | `to_csv(path)` | 17 |
 | CSV with another separator or a missing-value code | `to_csv(sep:, missing:)` | 17 |
 | JSON | `JSON.generate(df.to_records)` | 17 |
+| rows as Ruby Arrays | `df.to_a` | 17 |
 | a text table for a report | `to_table(rows: nil)` | 17 |

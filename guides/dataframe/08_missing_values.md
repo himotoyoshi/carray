@@ -247,7 +247,7 @@ Before removing rows, consider whether you need to. Summaries already leave miss
 - **CSV**: a missing cell is written as an empty field, which `from_csv` reads back as missing. `missing: "NA"` writes a code instead (chapter 17).
 - **Ruby values** (`to_records`, for JSON): a missing cell becomes `nil`, and `from_records` reads `nil` back as missing.
 - **One row** (`df[i]`, `each_row`): a missing cell is `UNDEF`.
-- **Arrays** (`to_a`): a missing cell is `UNDEF`.
+- **Arrays** (`to_a`, of a column or of the frame): a missing cell is `UNDEF`. Before handing rows to another library, fill the gaps with `strip_mask` or leave the rows out with `drop_masked`.
 
 ## In the CArray User's Guide
 

@@ -6,6 +6,7 @@ When the analysis is done, the results go somewhere: a CSV file for a spreadshee
 |---|---|
 | a CSV file, or CSV text | `to_csv` |
 | Ruby Hashes and Arrays, for JSON | `to_records` |
+| rows as Ruby Arrays | `to_a` |
 | a table as text, to read | `to_table` |
 | one numeric matrix | `to_ca` (chapter 15) |
 
@@ -116,6 +117,19 @@ puts JSON.generate(records)
 | the index | comes back as an ordinary first column; call `set_index` again |
 
 When the types matter, give `types:` when reading back, or use CSV with `types:`.
+
+## Rows as Arrays — `to_a`
+
+`to_a` gives the rows as an Array of Arrays, one value per column, without the column names and without the index. A missing cell stays `UNDEF`, so decide first what it should be — fill it with `strip_mask`, or leave the row out with `drop_masked` (chapter 8):
+
+```ruby
+sales.select("visitors", "revenue")[6..7].to_a
+# => [[190, 2285.32], [UNDEF, 1479.8]]
+sales.select("visitors", "revenue")[6..7].drop_masked.to_a
+# => [[190, 2285.32]]
+```
+
+A library that takes a table as rows and calls `to_a` on what it is given can be handed the frame directly.
 
 ## A table as text — `to_table`
 

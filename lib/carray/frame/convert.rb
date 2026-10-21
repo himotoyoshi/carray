@@ -26,6 +26,25 @@ class CAFrame
     each_row.map { |row| row.transform_values { |v| record_value(v) } }
   end
 
+  # The rows as an Array of Arrays, one value per column in column order --
+  # the table as plain Ruby data, for a library that takes rows (anything
+  # that calls +to_a+ on what it is given). A cell is what the column's own
+  # +to_a+ gives: a masked cell is +UNDEF+, a time column's cell its element,
+  # and an N-D column's cell an Array. The index is a row label, not a value,
+  # and is left out; +reset_index+ first to have it as the first column.
+  #
+  # Masked cells are not turned into anything: decide what they should be
+  # before handing the rows over, with +strip_mask+ or +drop_masked+.
+  #
+  #   df.drop_masked.to_a
+  #   df.strip_mask("temp" => Float::NAN).to_a
+  #
+  # @return [Array<Array>]
+  def to_a
+    return Array.new(@nrow) { [] } if @columns.empty?
+    return @columns.values.map(&:to_a).transpose
+  end
+
   # Hand the frame over as a CArray with the minimum work (memo §11.9): a
   # 2-D **view** of shape (nrow, ncol), one per column in column
   # order (§12-C). Nothing is materialised — the result is a +CAStack+ over
