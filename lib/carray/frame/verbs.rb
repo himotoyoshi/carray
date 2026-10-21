@@ -787,7 +787,7 @@ class CAFrame
       unless method_or_value.empty?
         raise ArgumentError, "fill: give a column and a method or value, or one Hash of them"
       end
-      return fill_by_map(name, "fill") { |key, how| fill(key, how) }
+      return fill_by_map(name, "fill") { |frame, key, how| frame.fill(key, how) }
     end
     unless method_or_value.size == 1
       raise ArgumentError,
@@ -815,10 +815,15 @@ class CAFrame
     self
   end
 
-  # A fill Hash, name => method or value, checked (names, methods) before
-  # any column is filled; each pair is then given to the block.
+  # A fill Hash, name => method or value. Each column is filled first on a
+  # copy, in a frame holding the copy, by the block (frame, name, how) -- so
+  # every check a single fill makes applies -- and the stored columns are
+  # written only when every one has passed: a refusal leaves them all as
+  # they were. A read-only column is given to the block as it is, to refuse
+  # as a single fill does before anything is written.
   private def fill_by_map (map, verb)
     raise ArgumentError, "#{verb}: the Hash names no column" if map.empty?
+    refuse_if_frozen
     keys = column_keys(map.keys, verb)
     keys.each { |key| raise KeyError, "no column #{key.inspect}" unless @columns.key?(key) }
     map.each_value do |how|
@@ -826,7 +831,15 @@ class CAFrame
       raise ArgumentError,
             "#{verb}: unknown method #{how.inspect} (:ffill | :bfill | :linear, or a constant fill value)"
     end
-    keys.zip(map.values) { |key, how| yield key, how }
+    pairs = keys.zip(map.values)
+    pairs.each { |key, how| yield self, key, how if @columns[key].read_only? }
+    filled = pairs.map do |key, how|
+      next if @columns[key].read_only?
+      probe = rebuild(@columns.merge(key => @columns[key].copy))
+      yield probe, key, how
+      [key, probe[key]]
+    end
+    filled.compact.each { |key, col| @columns[key][] = col }
     return self
   end
 

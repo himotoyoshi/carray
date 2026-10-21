@@ -32,6 +32,21 @@ class TestCAFrameFillMapRenameBlock < Test::Unit::TestCase
     assert_raise(ArgumentError) { df.fill({ "t" => 0.0 }, 1.0) }
   end
 
+  def test_fill_a_hash_writes_nothing_when_a_column_is_refused
+    df = frame.append("s", CA_OBJECT(["x", nil, "z", "w"]))
+    df["s"][1] = UNDEF
+    assert_raise(ArgumentError) { df.fill("t" => 0.0, "s" => :linear) }   # s is text
+    assert_equal 1, df["t"].count_masked
+    assert_raise(ArgumentError) { df.group_by("k").fill("t" => :ffill, "s" => :linear) }
+    assert_equal 1, df["t"].count_masked
+    ro = CAFrame.new("v" => CA_FLOAT64([1, 0]), "u" => CA_FLOAT64([0, 2]))
+    ro["v"][1] = UNDEF
+    ro["u"][0] = UNDEF
+    part = ro.protect.select("v", "u")
+    assert_raise(RuntimeError) { part.fill("v" => 0.0, "u" => 0.0) }
+    assert_equal [1.0, UNDEF], ro["v"].to_a
+  end
+
   def test_grouped_fill_a_hash
     df = frame
     df.group_by("k").fill("t" => :ffill, "w" => :bfill)

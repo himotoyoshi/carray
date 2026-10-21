@@ -895,7 +895,15 @@ class GroupedFrame
       unless method_or_value.empty?
         raise ArgumentError, "fill: give a column and a method or value, or one Hash of them"
       end
-      @frame.__send__(:fill_by_map, name, "fill") { |key, how| fill(key, how) }
+      @frame.__send__(:fill_by_map, name, "fill") do |frame, key, how|
+        grouped = if frame.equal?(@frame)
+                    self
+                  else
+                    GroupedFrame.new(frame, @cat, @axis_name, @key_names, index: @index,
+                                     label_columns: @label_columns)
+                  end
+        grouped.fill(key, how)
+      end
       return self
     end
     unless method_or_value.size == 1
