@@ -546,7 +546,7 @@ df.filter { |f| f["temp"] > 24 }
 df.filter { |f| (f["temp"] > 24) & (f["rh"] < 50) }   # & / | combine conditions
 ```
 
-> **`&` and `|`, never `&&` and `||`.** `&&`, `||` and `!` are Ruby's own operators and look only at whether the array on their left exists, not at its cells. `a && b` therefore hands back `b` whole: `df.filter { |f| f["temp"] > 24 && f["rh"] < 50 }` raises nothing and keeps the rows where `rh < 50`, whatever the temperature. Write `(f["temp"] > 24) & (f["rh"] < 50)`, `.not` for negation, and `eq` for equality (`==` compares two arrays as a whole).
+> **`&` and `|`, never `&&` and `||`.** `&&`, `||` and `!` are Ruby's own operators and look only at whether the array on their left exists, not at its cells. `a && b` therefore hands back `b` whole: `df.filter { |f| f["temp"] > 24 && f["rh"] < 50 }` raises nothing and keeps the rows where `rh < 50`, whatever the temperature. Write `(f["temp"] > 24) & (f["rh"] < 50)`, `.not` for negation, and `eq` for equality (`==` compares two arrays as a whole). The methods `.and` / `.or` also combine conditions; they leave a row undetermined when either side is masked, where `&` / `|` settle it from the known side, so the two differ only under `keep_masked: true`.
 
 The block lets you refer to columns without binding a variable first, and the result is a sub-frame, so filters chain into `group_by`, `join` and the rest. A selector already in hand is given directly instead of a block, `df.filter(mask)` (one or the other, not both); unlike `df[mask]`, it takes `keep_masked:` as well.
 

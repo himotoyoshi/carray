@@ -61,6 +61,14 @@ sales.filter { |f| (f["visitors"] > 300) & f["shop"].eq("north") }.nrow    # => 
 sales.filter { |f| f["visitors"] > 300 && f["shop"].eq("north") }.nrow     # => 8, every north row
 ```
 
+The methods `.and` and `.or` combine conditions too, and need no parentheses around a comparison on their left:
+
+```ruby
+sales.filter { |f| (f["visitors"] > 300).and(f["shop"].eq("north")) }.nrow   # => 2
+```
+
+They differ from `&` and `|` only where a cell is missing. `&` and `|` settle a row from the side that is known — a row that fails one condition fails, whatever the other — while `.and` and `.or` leave the row undetermined when either side is missing. `filter` drops undetermined rows, so the rows it keeps are the same; the difference shows with `keep_masked: true`, which carries the undetermined rows forward.
+
 `is_between` also takes a Range, and `exclude:` leaves out one end or both:
 
 ```ruby

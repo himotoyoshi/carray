@@ -433,9 +433,10 @@ class CAFrame
   # the frame (+df.filter { |f| f["temp"] > 0 }+), from +f["col"]+ /
   # +f.index+. Give one or the other, not both.
   #
-  # Combine conditions with +&+ / +|+ and negate with +.not+. Ruby's +&&+ /
-  # +||+ look only at whether the left array exists, so +a && b+ is +b+ and
-  # the first condition is silently dropped.
+  # Combine conditions with +&+ / +|+ (or +.and+ / +.or+, which leave a row
+  # undetermined when either side is masked) and negate with +.not+. Ruby's
+  # +&&+ / +||+ look only at whether the left array exists, so +a && b+ is +b+
+  # and the first condition is silently dropped.
   #
   # A masked (UNDEF) selector cell means the row's membership is *genuinely
   # undetermined* (e.g. the predicate read a masked input). By default such
