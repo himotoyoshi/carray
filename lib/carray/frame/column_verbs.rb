@@ -7,18 +7,19 @@ class CAFrame
   # reductions and running values -- kept in one place: which columns a verb
   # computes, and what a named column without the operation does.
   #
-  # - given names, those columns, as the CArray (one) or the Array of them
-  #   (several); a named column whose type has no such operation is refused
-  #   with CArray::DataTypeError, as the core refuses it, since it was asked
-  #   for;
+  # - given names, those columns, as the CArray (one) or a Hash of name to
+  #   result (several); a named column whose type has no such operation is
+  #   refused with CArray::DataTypeError, as the core refuses it, since it
+  #   was asked for;
   # - given none, every column whose type has it, the key columns left out,
   #   as a Hash of name to result.
   #
   # The caller decides the shape of the answer from these: a verb whose
   # answers lie on the frame's rows (a transform, a window at the rows,
-  # +keep_rows:+) hands named columns back as they are, as +df[...]+ returns
-  # columns, while a verb with one row per group, per point or for the
-  # whole frame makes a frame of them, labelled by its rows.
+  # +keep_rows:+) hands one named column back as it is, as +df[name]+
+  # returns it, and several as a frame on the frame's rows, while a verb
+  # with one row per group, per point or for the whole frame makes a frame
+  # of them, labelled by its rows.
   #
   # Whether a type has the operation is asked of the core on two copies of
   # the column's first row (two blank cells of its kind when it has no
@@ -54,7 +55,7 @@ class CAFrame
         end
         yield(col, key)
       end
-      results.size == 1 ? results.first : results
+      results.size == 1 ? results.first : keys.zip(results).to_h
     end
 
     # count with no value counts the present cells, which every type has;

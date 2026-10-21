@@ -79,8 +79,9 @@ class WindowedFrame
 
   # The windowed reductions.  Without names, a frame of every column whose
   # type has the reduction (the on: and by: columns left out), on the
-  # frame's rows and index; given names, the CArray (one) or the Array of
-  # them (several), as +df[...]+ returns columns.  With +at:+ the answers
+  # frame's rows and index; given names, the CArray (one), as +df[name]+
+  # returns a column, or a frame of those columns (several) on the frame's
+  # rows and index.  With +at:+ the answers
   # are one per point, not per row, so names or none, the result is a frame
   # with the points as its index, as a group reduction's result is labelled
   # by the groups.
@@ -110,7 +111,7 @@ class WindowedFrame
       named[name] = @plan.for_value(col).public_send(reduction, **keywords)
     end
     out = named if @at && !names.empty?
-    return out unless names.empty? || @at
+    return out if out.is_a?(CArray) && !@at
     if @at
       # Each result has an index of its own, as a group's result has.
       key = @frame.__send__(:key_column, @key_names.first, "windows")

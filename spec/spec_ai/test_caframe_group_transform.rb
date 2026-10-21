@@ -64,7 +64,10 @@ class TestCAFrameGroupTransform < Test::Unit::TestCase
 
   def test_several_names
     grp = frame.group_by("station")
-    temp, wind = grp.lag("temp", "wind")
+    out = grp.lag("temp", "wind")
+    assert_kind_of CAFrame, out
+    assert_equal %w[temp wind], out.column_names
+    temp, wind = out["temp"], out["wind"]
     assert_equal grp.lag("temp").to_a, temp.to_a
     assert_equal [6, 2], wind.shape
     assert_equal [0.0, 1.0], wind[2, nil].to_a

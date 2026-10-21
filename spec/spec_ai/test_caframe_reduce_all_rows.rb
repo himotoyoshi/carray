@@ -71,6 +71,27 @@ class TestCAFrameReduceAllRows < Test::Unit::TestCase
     assert_raise(ArgumentError) { frame.first("v", min_count: 1) }
   end
 
+  # Values on the rows: one name gives the CArray, several a frame of them
+  # on the frame's rows and index.
+  def test_several_names_on_the_rows_give_a_frame
+    df = frame
+    out = df.mean("v", "n", keep_rows: true)
+    assert_kind_of CAFrame, out
+    assert_equal %w[v n], out.column_names
+    assert_equal [10, 11, 12, 13], out.index.to_a
+    assert_equal [2.5] * 4, out["n"].to_a
+    g = CAFrame.new({ "g" => CA_OBJECT(%w[a b a b]), "v" => CA_FLOAT64([1, 2, 3, 4]),
+                      "w" => CA_FLOAT64([5, 6, 7, 8]) }, index: CA_INT32([7, 8, 9, 10]))
+    out = g.group_by("g").mean("v", "w", keep_rows: true)
+    assert_equal [7, 8, 9, 10], out.index.to_a
+    assert_equal [2.0, 3.0, 2.0, 3.0], out["v"].to_a
+    out = g.windows(on: "v", before: 1, exclude: nil).sum("v", "w")
+    assert_kind_of CAFrame, out
+    assert_equal [7, 8, 9, 10], out.index.to_a
+    assert_equal [5.0, 11.0, 13.0, 15.0], out["w"].to_a
+    assert_kind_of CArray, g.windows(on: "v", before: 1).sum("w")
+  end
+
   # A column named twice is refused, as select refuses it.
   def test_a_column_named_twice
     df = frame

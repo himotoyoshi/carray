@@ -326,32 +326,32 @@ class CAFrame
       named[name] = result
     end
     return CAFrame.new(named) unless keep_rows
-    return out unless names.empty?
+    return out if out.is_a?(CArray)
     return CAFrame.new(named, axis_name: @axis_name, index: @index)
   end
 
   # Values computed down the rows, one per row, as +GroupedFrame+ computes
   # them within each group, with every row in one group: each row's rank
   # (+order+, int64, 0 the smallest) and the running values up to and
-  # including it. Given names, one name gives the CArray and several an
-  # Array of them; without names, a frame of every column whose type has the
-  # operation, on the frame's rows and index.
+  # including it. Given names, one name gives the CArray and several a frame
+  # of those columns; without names, a frame of every column whose type has
+  # the operation. A frame is on the frame's rows and index.
   #
   #   df["total"] = df.cumsum("rain")
   #   df["rank"]  = df.order("temp", descending: true)
   #
   # @!method order(*names, descending: false, method: :ordinal, kind: :quick)
-  #   @return [CAFrame, CArray, Array<CArray>]
+  #   @return [CAFrame, CArray]
   # @!method cumsum(*names)
-  #   @return [CAFrame, CArray, Array<CArray>]
+  #   @return [CAFrame, CArray]
   # @!method cumprod(*names)
-  #   @return [CAFrame, CArray, Array<CArray>]
+  #   @return [CAFrame, CArray]
   # @!method cummax(*names)
-  #   @return [CAFrame, CArray, Array<CArray>]
+  #   @return [CAFrame, CArray]
   # @!method cummin(*names)
-  #   @return [CAFrame, CArray, Array<CArray>]
+  #   @return [CAFrame, CArray]
   # @!method cumcount(*names)
-  #   @return [CAFrame, CArray, Array<CArray>]
+  #   @return [CAFrame, CArray]
   CArray.send(:define_named_methods, self,
               [:order, :cumsum, :cumprod, :cummax, :cummin, :cumcount], :run_down_all_rows)
 
@@ -361,7 +361,7 @@ class CAFrame
     out = ColumnWalk.new(self).over(operation, names, [], [], keywords) do |col, _|
       col.public_send(operation, **(col.ndim > 1 ? keywords.merge(axis: 0) : keywords))
     end
-    return out unless names.empty?
+    return out if out.is_a?(CArray)
     return CAFrame.new(out, axis_name: @axis_name, index: @index)
   end
 
@@ -394,9 +394,9 @@ class CAFrame
   #   df.lag("temp", n: 1)               # the previous row
   #
   # +GroupedFrame#lag+ does the same within each group. Given names, one
-  # name gives the CArray and several an Array of them; without names, a
-  # frame of every column (the +on:+ column left out) on the frame's rows
-  # and index. A result shows the column's attributes, as +CArray#lag+'s
+  # name gives the CArray and several a frame of those columns; without
+  # names, a frame of every column (the +on:+ column left out). A frame is
+  # on the frame's rows and index. A result shows the column's attributes, as +CArray#lag+'s
   # does.
   #
   # @param names [Array<String>] the columns.
@@ -405,7 +405,7 @@ class CAFrame
   # @param after [String, CATimedelta::Element, Numeric] the distance ahead.
   # @param on [String] the key column, with +before:+ or +after:+ (default the
   #   index).
-  # @return [CArray, Array<CArray>, CAFrame]
+  # @return [CArray, CAFrame]
   # @raise [ArgumentError] when +n:+, +before:+ and +after:+ are combined,
   #   when +on:+ comes without a distance, when there is no key, or when the
   #   key repeats (the row at a key would not be one row).
@@ -423,7 +423,7 @@ class CAFrame
         col[addr, *([nil] * (col.ndim - 1))].copy
       end
     end
-    return cols unless names.empty?
+    return cols if cols.is_a?(CArray)
     CAFrame.new(cols, axis_name: @axis_name, index: @index)
   end
 
@@ -712,9 +712,9 @@ class GroupedFrame
   #
   # Given column names, they reduce those columns only, and the result is
   # the frame of those columns, one row per group, labelled as above; with
-  # +keep_rows: true+ they come back as +df[...]+ returns them, one CArray
-  # (or an Array of them) on the frame's rows. For a group's values alone,
-  # reduce the column's group iterator: +grp["temp"].mean+.
+  # +keep_rows: true+ one comes back as +df[name]+ returns it, a CArray on
+  # the frame's rows, and several as a frame on those rows. For a group's
+  # values alone, reduce the column's group iterator: +grp["temp"].mean+.
   #
   #   grp.mean                                   # a frame, one row per group
   #   grp.mean("temp")                           # a frame of temp, one row per group
@@ -723,11 +723,11 @@ class GroupedFrame
   # @!method sum(*names, min_count: nil, fill_value: nil, keep_rows: false)
   #   Returns a frame of the per-group sum of every column whose type has a
   #   sum, an N-D one per group along the rows. Other columns are left out.
-  #   @return [CAFrame, CArray, Array<CArray>] a frame with one row per
+  #   @return [CAFrame, CArray] a frame with one row per
   #     group, indexed by the group labels (of the named columns when names
   #     are given), or with keep_rows: true the frame's rows and index; given
-  #     names and keep_rows: true, the CArray (one) or the Array of them
-  #     (several).
+  #     names and keep_rows: true, the CArray (one) or a frame of them on the
+  #     frame's rows (several).
   # @!method mean(*names, min_count: nil, fill_value: nil, keep_rows: false)
   #   Returns a frame of the per-group mean of every column whose type has
   #   a mean, as {#sum} does.
@@ -810,8 +810,8 @@ class GroupedFrame
   # group's rows, a running statistic. A row in no group is UNDEF. Without
   # names they give a frame of every column whose type has the operation
   # (the key columns left out), on the frame's rows and index; given names,
-  # the CArray (one) or the Array of them (several), as +df[...]+ returns
-  # columns. An N-D column runs along the rows.
+  # the CArray (one), as +df[name]+ returns a column, or a frame of those
+  # columns (several) on the frame's rows and index. An N-D column runs along the rows.
   #
   #   df["dtemp"] = df["temp"] - grp.lag("temp")   # change since the station's previous row
   #   grp.order("temp", descending: true)          # rank within the station
@@ -826,26 +826,26 @@ class GroupedFrame
   #   +before:+ (or +after:+) instead, the value of the group's row whose key
   #   (the index, or the column +on:+ names) is that distance earlier (or
   #   later), as +CAFrame#lag+ gives it.
-  #   @return [CAFrame, CArray, Array<CArray>]
+  #   @return [CAFrame, CArray]
   # @!method order(*names, descending: false, method: :ordinal, kind: :quick)
   #   Returns each row's rank among its group's rows (int64, 0 the
   #   smallest), as +CArray#order+ ranks them.
-  #   @return [CAFrame, CArray, Array<CArray>]
+  #   @return [CAFrame, CArray]
   # @!method cumsum(*names)
   #   Returns the running sum within each group, as +CArray#cumsum+.
-  #   @return [CAFrame, CArray, Array<CArray>]
+  #   @return [CAFrame, CArray]
   # @!method cumprod(*names)
   #   Returns the running product within each group.
-  #   @return [CAFrame, CArray, Array<CArray>]
+  #   @return [CAFrame, CArray]
   # @!method cummax(*names)
   #   Returns the running maximum within each group.
-  #   @return [CAFrame, CArray, Array<CArray>]
+  #   @return [CAFrame, CArray]
   # @!method cummin(*names)
   #   Returns the running minimum within each group.
-  #   @return [CAFrame, CArray, Array<CArray>]
+  #   @return [CAFrame, CArray]
   # @!method cumcount(*names)
   #   Returns the running count of present values within each group (int64).
-  #   @return [CAFrame, CArray, Array<CArray>]
+  #   @return [CAFrame, CArray]
   def lag (*names, n: nil, before: nil, after: nil, on: nil)
     distance = @frame.__send__(:lag_distance, "lag", n, before, after, on)
     return transform_columns(:lag, names, [n.nil? ? 1 : n], {}) if distance.nil?
@@ -854,7 +854,7 @@ class GroupedFrame
     out = over_named_columns(:lag, names, @key_names | [distance.first], [1], {}) do |col|
       col[addr, *([nil] * (col.ndim - 1))].copy
     end
-    return out unless names.empty?
+    return out if out.is_a?(CArray)
     CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index)
   end
 
@@ -1063,7 +1063,7 @@ class GroupedFrame
     out = over_named_columns(op, names, @key_names, args, keywords) do |col|
       group_transform(col, op, args, keywords)
     end
-    return out unless names.empty?
+    return out if out.is_a?(CArray)
     CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index)
   end
 
@@ -1101,9 +1101,13 @@ class GroupedFrame
       named[name] = keep_rows && !names.empty? ? spread_to_rows(col) : col
     end
     return result_frame(out, keep_rows) if names.empty?
-    # Named columns on the frame's rows are columns of the frame, as df[...]
-    # returns them; one value per group needs the group labels beside it.
-    return out if keep_rows
+    # One named column on the frame's rows comes back as df[name] returns it,
+    # several as a frame on those rows; one value per group needs the group
+    # labels beside it.
+    if keep_rows
+      return out if out.is_a?(CArray)
+      return CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index)
+    end
     result_frame(named, false)
   end
 

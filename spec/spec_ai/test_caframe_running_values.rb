@@ -20,7 +20,10 @@ class TestCAFrameRunningValues < Test::Unit::TestCase
     assert_equal [1, 2, 2, 3, 4], df.cumcount("v").to_a
     assert_equal [1, 2, 6, 24, 120], df.cumprod("n").to_a
     assert_equal [1, 2, UNDEF, 3, 0], df.order("v", descending: true).to_a
-    a, b = df.cummin("v", "n")
+    out = df.cummin("v", "n")
+    assert_kind_of CAFrame, out
+    assert_equal df.index.to_a, out.index.to_a if df.index
+    a, b = out["v"], out["n"]
     assert_equal [3.0, 1.0, 1.0, 1.0, 1.0], a.to_a
     assert_equal [1, 1, 1, 1, 1], b.to_a
   end

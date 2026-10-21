@@ -1248,6 +1248,7 @@ df["rain_share"] = df["rain"] / grp.sum("rain", keep_rows: true)
 ```
 
 - The columns and their types are those of the same call without `keep_rows:`; only the rows differ. An N-D column keeps its trailing shape.
+- Given one name, the result is that column's `CArray`, ready to be combined with the frame's columns as above; given several, a frame of them on the frame's rows and index.
 - A row whose key is masked belongs to no group, so its cells are `UNDEF`.
 - It works for `resample` as well: each row gets the result of its time bin.
 
@@ -1270,7 +1271,7 @@ df["total"] = grp.cumsum("rain")                  # running total per station
 | `order(descending:, method:, kind:)` | its rank among its group's rows (int64, `0` the smallest), as `CArray#order` |
 | `cumsum` `cumprod` `cummax` `cummin` `cumcount` | the running value of its group up to and including it |
 
-- Their answers lie on the frame's rows, so given names, one name gives the `CArray` and several an `Array` of them, as `df[...]` returns columns (as `keep_rows: true` returns a reduction); without names they give a frame of every column whose type has the operation (the keys left out), on the frame's rows and index.
+- Their answers lie on the frame's rows, so given one name they give the `CArray`, as `df[name]` returns a column, and given several a frame of those columns on the frame's rows and index (as `keep_rows: true` returns a reduction); without names they give a frame of every column whose type has the operation (the keys left out), on the frame's rows and index.
 - **"Back" means earlier rows of the frame.** Rows that are not in time order give the previous row, not the previous time: sort first, with `sort_by_key("time")`.
 - `lag` takes its step as `n:`, since the positional arguments are column names.
 - **A lag by a distance of the key.** `before: "1 hour"` gives each row the value of the row of its group whose key is one hour earlier; `after:` looks the same distance ahead. The key is the index, or the column `on:` names: a time (the distance is a duration, `"1 hour"` or a `CATimedelta` value), a duration, or a number (the distance is a number). The key must match exactly, so a station with a reading missing at that time gets `UNDEF` rather than an older reading — use [`join_asof`](#join_asof--the-nearest-key) for the nearest one. The rows need not be in time order. A key that repeats within a group is refused, since the row at a key would not be one row; a row whose key is masked, NaN or infinite gets `UNDEF`. A time is moved on the finer of its unit and the distance's, so an hour before a date is not rounded onto the date. `n:` and a distance cannot be given together.
@@ -1374,6 +1375,8 @@ To check that each window is what you meant, `first_key` / `last_key` give the k
 w = df.windows(on: "time", before: "1 hour", interval: "10 minutes")
 w.mean("rain").mask_where(w.is_complete.not)    # UNDEF where an observation is missing
 ```
+
+As with `keep_rows:`, one name gives that column's `CArray` on the rows (`w.mean("rain")`), and several a frame of them on the frame's rows and index.
 
 `at:` places the windows at given points of the key instead of at the rows, for windows on a grid that may overlap (a three-hour window every hour). Every answer is then one per point, and a reduction — given column names or not — is a frame with a row per point, the points as its index and the `on:` column's name as its row axis name, as a group reduction is labelled by its groups:
 
