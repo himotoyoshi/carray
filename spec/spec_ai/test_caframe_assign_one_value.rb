@@ -21,6 +21,16 @@ class TestCAFrameAssignOneValue < Test::Unit::TestCase
     assert_equal [1, 1, 1], df["n"].to_a
   end
 
+  def test_a_frame_with_no_rows_gets_the_same_type
+    df = frame
+    none = df.filter(df["v"] > 10)
+    none["n"] = 7
+    none["s"] = "degC"
+    assert_equal :int64, none.data_types["n"]
+    assert_equal CAString, none.data_types["s"]
+    assert_equal 0, none["n"].elements
+  end
+
   def test_replaces_an_existing_column
     df  = frame
     old = df["v"]

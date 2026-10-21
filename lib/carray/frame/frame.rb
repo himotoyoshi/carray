@@ -339,7 +339,10 @@ class CAFrame
               "df[#{key.inspect}] = #{value.inspect}: the frame has no rows to repeat " \
               "the value on yet; give a column (a CArray or an Array)"
       end
-      rebind_column(key, CAFrame.__send__(:build_record_column, Array.new(@nrow, value), @nrow))
+      # Typed from the one value, so a frame with no rows gets the type a
+      # frame with rows gets.
+      one = CAFrame.__send__(:build_record_column, [value], 1)
+      rebind_column(key, one[CArray.int64(@nrow).fill(0), *([nil] * (one.ndim - 1))].copy)
     else
       rebind_column(key, value)
     end
