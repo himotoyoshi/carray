@@ -92,6 +92,20 @@ class WindowedFrame
   CArray.send(:define_named_methods, self,
               [:first, :last, :nunique, :count, :all, :any], :window_value)
 
+  # Each window's +p+-th percentile (0 to 100), as +median+ gives the 50th.
+  # The percentage comes first, then the names.
+  #
+  #   w.percentile(90, "rain")
+  #
+  # @param p [Numeric] the percentage.
+  # @param names [Array<String>] the columns; default every column that has
+  #   a percentile.
+  # @return [CAFrame, CArray] as the other windowed reductions return.
+  def percentile (p, *names, min_count: nil, fill_value: nil)
+    CAFrame.__send__(:check_percentage, p)
+    window_reduce(:percentile, names, [p], min_count: min_count, fill_value: fill_value)
+  end
+
   private
 
   def window_reduction (reduction, *names, min_count: nil, fill_value: nil)
@@ -104,11 +118,11 @@ class WindowedFrame
 
   # An N-D column (each row a profile) is reduced along the rows, each
   # window keeping the trailing shape, as a group reduces it.
-  def window_reduce (reduction, names, **keywords)
+  def window_reduce (reduction, names, args = [], **keywords)
     keywords = keywords.compact
     named = {}
-    out = over_named_columns(reduction, names, @key_names) do |col, name|
-      named[name] = @plan.for_value(col).public_send(reduction, **keywords)
+    out = over_named_columns(reduction, names, @key_names, args) do |col, name|
+      named[name] = @plan.for_value(col).public_send(reduction, *args, **keywords)
     end
     out = named if @at && !names.empty?
     return out if out.is_a?(CArray) && !@at

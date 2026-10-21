@@ -62,6 +62,7 @@ by_shop["rating"].mean.to_a.map { |v| v.round(2) }   # => [4.2, 4.6, 3.76]
 |---|---|
 | `sum` `prod` | the total, the product |
 | `mean` `median` | the average, the middle value |
+| `percentile` | the value a given percentage of the values lie below: `percentile(90, "revenue")`, the percentage first |
 | `min` `max` | the smallest, the largest |
 | `variance` `stddev` | the spread (sample), and `variancep` `stddevp` (population) |
 | `count` | the number of values present |

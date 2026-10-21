@@ -118,7 +118,7 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | different summaries for different columns, with names | `aggregate` | 10 |
 | a result per group that uses several columns | `aggregate { \|g\| ... }` | 10 |
 | any Ruby computation on each group's rows | `table { \|g\| ... }` | 10 |
-| a percentile or median per group | `grouped["x"].percentile(90)` | 10 |
+| a percentile or median per group | `grouped.percentile(90, "x")` | 10 |
 | a group's figure on every row | `keep_rows: true` | 10 |
 | each value's share of its group | `x / grouped.sum("x", keep_rows: true)` | 10 |
 | the previous value within each group | `lag` | 10, 11 |

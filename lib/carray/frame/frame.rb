@@ -1217,6 +1217,20 @@ class CAFrame
   end
   private_class_method :refuse_repeated_names
 
+  # percentile(p, *names): the percentage comes first. A name there is the
+  # order of median's arguments carried over, said so; a percentage out of
+  # range is refused by the core here, before any column is asked whether
+  # it has a percentile.
+  def self.check_percentage(p)
+    unless p.is_a?(Numeric)
+      raise ArgumentError,
+            "percentile: give the percentage first, then the column names " \
+            "(got #{p.inspect}; percentile(90, \"x\"))"
+    end
+    CArray.float64(1).percentile(p)
+  end
+  private_class_method :check_percentage
+
   # The labels an index is made of from a key -- a group's first values,
   # the resample bins, the sorted pivot keys -- as the key column shows
   # them: +labels+, already of the key's data type, Face and unit, given

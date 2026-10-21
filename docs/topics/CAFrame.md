@@ -337,7 +337,7 @@ df.max("tmax", "tmin")                   # => one row, the two maxima
 df["temp"] - df.mean("temp", keep_rows: true)   # the anomaly on each row
 ```
 
-They are `sum` `mean` `min` `max` `prod` `accumulate` `median` `variance` `stddev` `variancep` `stddevp` (with `min_count:` and `fill_value:`) and `first` `last` `nunique` `count` `all` `any`; all take `keep_rows:`. The values a grouped frame computes down each group's rows also work on the frame, down all its rows, one value per row: `order` and the running `cumsum` `cumprod` `cummax` `cummin` `cumcount` (`df["total"] = df.cumsum("rain")`), as `lag` does. A frame with no rows still gives its one row: a sum of nothing is 0, a mean `UNDEF`. For one column's value as a Ruby value, reduce the column: `df["temp"].mean`.
+They are `sum` `mean` `min` `max` `prod` `accumulate` `median` `variance` `stddev` `variancep` `stddevp` and `percentile` (with `min_count:` and `fill_value:`; `percentile` takes the percentage first, `df.percentile(90, "rain")`) and `first` `last` `nunique` `count` `all` `any`; all take `keep_rows:`. The values a grouped frame computes down each group's rows also work on the frame, down all its rows, one value per row: `order` and the running `cumsum` `cumprod` `cummax` `cummin` `cumcount` (`df["total"] = df.cumsum("rain")`), as `lag` does. A frame with no rows still gives its one row: a sum of nothing is 0, a mean `UNDEF`. For one column's value as a Ruby value, reduce the column: `df["temp"].mean`.
 
 ### Size, names and types
 
@@ -1117,7 +1117,7 @@ The other reductions are called the same way:
 
 | reductions | take `min_count:` / `fill_value:` |
 |---|---|
-| `sum` `mean` `min` `max` `prod` `accumulate` `median` `variance` `stddev` `variancep` `stddevp` | yes |
+| `sum` `mean` `min` `max` `prod` `accumulate` `median` `variance` `stddev` `variancep` `stddevp`, and `percentile` with the percentage first (`grp.percentile(90, "temp")`) | yes |
 | `first` `last` (the first / last present value in row order) · `nunique` · `count` (present values) · `all` `any` (boolean columns) | no, as the core ones take none |
 
 Each answers as the core reduction of the same name does over the group's rows; a time column has a `median` and a `stddev` (a duration) but no `variance` or `prod`.
@@ -1376,7 +1376,7 @@ w = df.windows(on: "time", before: "1 hour", interval: "10 minutes")
 w.mean("rain").mask_where(w.is_complete.not)    # UNDEF where an observation is missing
 ```
 
-As with `keep_rows:`, one name gives that column's `CArray` on the rows (`w.mean("rain")`), and several a frame of them on the frame's rows and index.
+As with `keep_rows:`, one name gives that column's `CArray` on the rows (`w.mean("rain")`), and several a frame of them on the frame's rows and index. The reductions are those of a group, `percentile` among them (`w.percentile(90, "rain")`).
 
 `at:` places the windows at given points of the key instead of at the rows, for windows on a grid that may overlap (a three-hour window every hour). Every answer is then one per point, and a reduction — given column names or not — is a frame with a row per point, the points as its index and the `on:` column's name as its row axis name, as a group reduction is labelled by its groups:
 

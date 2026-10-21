@@ -292,7 +292,24 @@ class CAFrame
   CArray.send(:define_named_methods, self,
               [:first, :last, :nunique, :count, :all, :any], :reduce_all_rows_to_a_value)
 
-  private def reduce_all_rows (reduction, *names, min_count: nil, fill_value: nil, keep_rows: false)
+  # Each column's +p+-th percentile (0 to 100) over all the rows, as a frame
+  # of one row, as {#median} gives the 50th. The percentage comes first, then
+  # the names.
+  #
+  #   df.percentile(90, "revenue")
+  #
+  # @param p [Numeric] the percentage.
+  # @param names [Array<String>] the columns; default every column that has
+  #   a percentile.
+  # @return [CAFrame, CArray] one row; with +keep_rows: true+ the frame's
+  #   rows, one name giving the CArray.
+  def percentile (p, *names, min_count: nil, fill_value: nil, keep_rows: false)
+    CAFrame.__send__(:check_percentage, p)
+    reduce_all_rows(:percentile, *names, min_count: min_count, fill_value: fill_value,
+                    keep_rows: keep_rows, args: [p])
+  end
+
+  private def reduce_all_rows (reduction, *names, min_count: nil, fill_value: nil, keep_rows: false, args: [])
     if fill_value.is_a?(Hash)
       unknown = fill_value.keys - column_names
       unless unknown.empty?
@@ -300,7 +317,7 @@ class CAFrame
               "#{reduction}: fill_value names no column #{unknown.map(&:inspect).join(', ')}"
       end
     end
-    return reduce_down_the_rows(reduction, names, keep_rows) do |name|
+    return reduce_down_the_rows(reduction, names, keep_rows, args) do |name|
       fill = fill_value.is_a?(Hash) ? fill_value[name] : fill_value
       { min_count: min_count, fill_value: fill }.compact
     end
@@ -315,11 +332,11 @@ class CAFrame
   # it keeps its type as the column's reduction keeps it. The block gives a
   # column's keywords. A frame of one row with no index; with +keep_rows+,
   # each row holding the result, as a group's +keep_rows+ gives it.
-  private def reduce_down_the_rows (reduction, names, keep_rows)
+  private def reduce_down_the_rows (reduction, names, keep_rows, args = [])
     meth  = reduction == :count ? :count_not_masked : reduction
     named = {}
-    out = ColumnWalk.new(self).over(reduction, names) do |col, name|
-      result = col.public_send(meth, axis: 0, keep_axis: true, **yield(name))
+    out = ColumnWalk.new(self).over(reduction, names, [], args) do |col, name|
+      result = col.public_send(meth, *args, axis: 0, keep_axis: true, **yield(name))
       if keep_rows
         result = result[CArray.int64(@nrow).fill(0), *([nil] * (result.ndim - 1))].copy
       end
@@ -771,6 +788,21 @@ class GroupedFrame
     reduce_columns(red, names, keep_rows, min_count: min_count, fill_value: fill_value)
   end
 
+  # Each group's +p+-th percentile (0 to 100), as {#median} gives the 50th
+  # and {#sum} gives its sums. The percentage comes first, then the names.
+  #
+  #   grp.percentile(90, "revenue")
+  #
+  # @param p [Numeric] the percentage.
+  # @param names [Array<String>] the columns; default every column that has
+  #   a percentile.
+  # @return [CAFrame, CArray] one row per group, as {#sum} returns.
+  def percentile (p, *names, min_count: nil, fill_value: nil, keep_rows: false)
+    CAFrame.__send__(:check_percentage, p)
+    refuse_changed_rows(:percentile)
+    reduce_columns(:percentile, names, keep_rows, args: [p], min_count: min_count, fill_value: fill_value)
+  end
+
   # The same convenience for the reductions that take no min_count: or
   # fill_value:, as the core ones take none: a value of the group (first,
   # last), a count (nunique, count) or a boolean fold (all, any).
@@ -1083,7 +1115,7 @@ class GroupedFrame
   # A key column is the index here, not a result column.  Named columns give
   # the frame of those columns only, one row per group; with +keep_rows+
   # they come back as df[...] returns them, each on the frame's rows.
-  private def reduce_columns(reduction, names, keep_rows, **keywords)
+  private def reduce_columns(reduction, names, keep_rows, args: [], **keywords)
     keywords = keywords.compact
     fills = keywords.delete(:fill_value)
     if fills.is_a?(Hash)
@@ -1094,10 +1126,10 @@ class GroupedFrame
       end
     end
     named = {}
-    out = over_named_columns(reduction, names, @key_names) do |col, name|
+    out = over_named_columns(reduction, names, @key_names, args) do |col, name|
       fill = fills.is_a?(Hash) ? fills[name] : fills
       kw = fill.nil? ? keywords : keywords.merge(fill_value: fill)
-      col = group_reduce(col, reduction, **kw)
+      col = group_reduce(col, reduction, *args, **kw)
       named[name] = keep_rows && !names.empty? ? spread_to_rows(col) : col
     end
     return result_frame(out, keep_rows) if names.empty?
