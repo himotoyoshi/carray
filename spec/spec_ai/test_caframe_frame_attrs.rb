@@ -70,6 +70,7 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     :paste         => ->(df, _) { df.paste(CAFrame.new("q" => CA_INT32([1, 2, 3, 4]))) },
     :align         => ->(df, _) { df.align("k", CA_INT64([1, 2])) },
     :describe      => ->(df, _) { df.describe },
+    :value_counts  => ->(df, _) { df.value_counts("g") },
     :verify        => ->(df, _) { df.verify("positive" => ->(f) { f["v"] > 0 }) },
     :group_by      => ->(df, _) { df.group_by("g").aggregate("n" => ["v", :count]) },
     :melt          => ->(df, _) { df.select("k", "v").melt(id: ["k"]) },

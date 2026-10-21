@@ -140,6 +140,18 @@ counts.to_a   # => [8, 8, 8]
 
 Eight days from each shop: the table has no missing rows.
 
+The frame's own `value_counts` gives the same as a table, the most frequent first, and counts combinations when you name several columns:
+
+```ruby
+p sales.value_counts("shop")
+# #<CAFrame nrow=3 columns=[count:int64] index="shop">
+# shop     count
+# -------  -----
+# north        8
+# south        8
+# central      8
+```
+
 The same summaries work on the frame, giving one row with a value for each column you name, or for every column that has the summary when you name none:
 
 ```ruby

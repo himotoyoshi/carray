@@ -300,6 +300,15 @@ puts df.to_table(rows: 40) # explicit cap, split evenly around the elided middle
 
 In the table, numeric columns are right-aligned and everything else left-aligned, and **a masked cell shows as `_`** (the marker CArray's own inspect uses). `to_table` is text to be looked at, not read back — for a file, use [`to_csv`](#csv--to_csv).
 
+### How often each value occurs — `value_counts`
+
+`value_counts(*names)` counts the rows holding each value of a column, or each combination of values of several (every column when none is named), as a frame: the values are its index (one column) or its first columns (several), and the counts a column `"count"` (`name:` names it otherwise). `sort:` orders the rows by `:count`, the most frequent first (the default; ties in the order the values first appear), by `:value`, or not at all (`false`). A row with a masked value is not counted. It is `group_by(*names).size` sorted by the counts.
+
+```ruby
+df.value_counts("station")
+df.value_counts("station", "weather", sort: :value)
+```
+
 ### Checking a frame just read — `describe`
 
 `describe` summarizes the columns, **one row per column**, as a new frame indexed by column name — so a wide table stays readable, and the result is an ordinary frame to filter or print:

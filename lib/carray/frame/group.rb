@@ -9,6 +9,43 @@
 require "carray/distance_limit"
 
 class CAFrame
+  # How many rows hold each value of a column, or each combination of the
+  # values of several (every column by default), as a frame: the values as
+  # its index (one column) or its first columns (several), and their counts
+  # in a column +name:+ ("count"). +sort:+ orders the rows by +:count+, the
+  # most first (the default; ties in the order the values first appear), by
+  # +:value+, or not at all (+false+, the order the values first appear). A
+  # row with a masked value is not counted, as +group_by+ leaves it out.
+  #
+  #   df.value_counts("station")
+  #   df.value_counts("station", "weather", sort: :value)
+  #
+  # The columns are given as +select+ takes them. +group_by(...).size+ is the
+  # same count in the order of the groups.
+  #
+  # @return [CAFrame]
+  # @raise [ArgumentError] for another +sort:+, or a +name:+ a key has.
+  def value_counts (*names, sort: :count, name: "count")
+    unless [:count, :value, false].include?(sort)
+      raise ArgumentError, "value_counts: sort: is :count, :value or false (got #{sort.inspect})"
+    end
+    keys = names.empty? ? column_names : names_selected(names, "value_counts")
+    name = column_name_arg(name, "value_counts")
+    if keys.include?(name)
+      raise ArgumentError,
+            "value_counts: a counted column is named #{name.inspect}; name the count " \
+            "otherwise, as in value_counts(..., name: \"n\")"
+    end
+    out = group_by(*keys).size(name: name)
+    case sort
+    when :count then out.sort_by_key(name, descending: true)
+    when :value then out.sort_by_key(*keys)
+    else             out
+    end
+  rescue ArgumentError, KeyError, TypeError, CArray::DataTypeError => e
+    raise e.class, e.message.sub(/\A(group_by|size|sort_by_key):/, "value_counts:"), e.backtrace
+  end
+
   # Group rows by one or more keys. Each key is a column name (String) or an
   # external length-N CArray. Returns a GroupedFrame.
   #
