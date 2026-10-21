@@ -1352,7 +1352,7 @@ w = df.windows(on: "time", before: "1 hour", interval: "10 minutes")
 w.mean("rain").mask_where(w.is_complete.not)    # UNDEF where an observation is missing
 ```
 
-`at:` places the windows at given points of the key instead of at the rows, for windows on a grid that may overlap (a three-hour window every hour). Every answer is then one per point, and the frame of reductions has a row per point, the points as its index and the `on:` column's name as its row axis name:
+`at:` places the windows at given points of the key instead of at the rows, for windows on a grid that may overlap (a three-hour window every hour). Every answer is then one per point, and a reduction — given column names or not — is a frame with a row per point, the points as its index and the `on:` column's name as its row axis name, as a group reduction is labelled by its groups:
 
 ```ruby
 hours = CArray.time_range("2024-01-01 00:00", "2024-01-01 23:00", unit: "1 hour")

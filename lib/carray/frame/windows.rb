@@ -80,7 +80,10 @@ class WindowedFrame
   # The windowed reductions.  Without names, a frame of every column whose
   # type has the reduction (the on: and by: columns left out), on the
   # frame's rows and index; given names, the CArray (one) or the Array of
-  # them (several), as +df[...]+ returns columns.
+  # them (several), as +df[...]+ returns columns.  With +at:+ the answers
+  # are one per point, not per row, so names or none, the result is a frame
+  # with the points as its index, as a group reduction's result is labelled
+  # by the groups.
   CArray.send(:define_named_methods, self,
               [:sum, :mean, :min, :max, :prod, :accumulate, :median,
                :variance, :stddev, :variancep, :stddevp], :window_reduction)
@@ -102,10 +105,12 @@ class WindowedFrame
   # window keeping the trailing shape, as a group reduces it.
   def window_reduce (reduction, names, **keywords)
     keywords = keywords.compact
-    out = over_named_columns(reduction, names, @key_names) do |col|
-      @plan.for_value(col).public_send(reduction, **keywords)
+    named = {}
+    out = over_named_columns(reduction, names, @key_names) do |col, name|
+      named[name] = @plan.for_value(col).public_send(reduction, **keywords)
     end
-    return out unless names.empty?
+    out = named if @at && !names.empty?
+    return out unless names.empty? || @at
     if @at
       # Each result has an index of its own, as a group's result has.
       key = @frame.__send__(:key_column, @key_names.first, "windows")
