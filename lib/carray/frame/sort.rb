@@ -75,6 +75,45 @@ class CAFrame
     false
   end
 
+  # The +n+ rows with the largest values of the key columns, largest first,
+  # as a view-frame: +sort_by_key(*keys, descending: true).head(n)+. Several
+  # keys break ties in turn, as +sort_by_key+ takes them; rows that tie on
+  # every key keep their order. A NaN and a masked key lose to every value,
+  # as +CArray#nlargest+ has them, so they come only when fewer than +n+
+  # rows have a value.
+  #
+  #   df.nlargest(3, "revenue")
+  #   df.nsmallest(2, "rank", "time")
+  #
+  # @param n [Integer] how many rows, 0 or more.
+  # @param keys [Array<String>] the key columns (or the index axis name).
+  # @return [CAFrame]
+  # @raise [ArgumentError] when +n+ is negative or no key is given.
+  def nlargest (n, *keys)
+    return largest_or_smallest("nlargest", n, keys, true)
+  end
+
+  # The +n+ rows with the smallest values of the key columns, smallest first,
+  # as +nlargest+ gives the largest.
+  #
+  # @param n [Integer] how many rows, 0 or more.
+  # @param keys [Array<String>] the key columns (or the index axis name).
+  # @return [CAFrame]
+  # @raise [ArgumentError] when +n+ is negative or no key is given.
+  def nsmallest (n, *keys)
+    return largest_or_smallest("nsmallest", n, keys, false)
+  end
+
+  private def largest_or_smallest (verb, n, keys, descending)
+    unless n.is_a?(Integer)
+      raise TypeError, "#{verb}: the count is an Integer (got #{n.inspect})"
+    end
+    raise ArgumentError, "#{verb}: the count must be 0 or more (got #{n})" if n < 0
+    raise ArgumentError, "#{verb}: give at least one key column" if keys.empty?
+    keys.each { |k| column_key(k, verb) }
+    return sort_by_key(*keys, descending: descending).head(n)
+  end
+
   # Sort rows by key columns the block builds (memo §4.3 escape). The block
   # receives the frame and returns a key CArray, or an Array of them for a
   # multi-key lexicographic sort; rows are sorted ascending by +CArray.sort_addr+

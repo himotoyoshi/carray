@@ -35,6 +35,8 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     :tail             => ->(df, _) { df.tail(2) },
     :sort_by          => ->(df, _) { df.sort_by { |f| f["v"] } },
     :sort_by_key      => ->(df, _) { df.sort_by_key("k") },
+    :nlargest         => ->(df, _) { df.nlargest(2, "k") },
+    :nsmallest        => ->(df, _) { df.nsmallest(2, "k") },
     :select           => ->(df, _) { df.select("k", "v") },
     :append           => ->(df, _) { df.append("x", CA_INT32([1, 2, 3, 4])) },
     :drop             => ->(df, _) { df.drop("v") },

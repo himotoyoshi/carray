@@ -246,12 +246,14 @@ by_shop["visitors"][0..2].to_a   # => [402, 388, 355]
 
 ### The top rows
 
-Sorting and then taking the first rows gives the largest or smallest few:
+`nlargest(n, key)` gives the `n` rows with the largest values of a key, largest first, and `nsmallest` the smallest — the same as sorting and taking the first rows:
 
 ```ruby
-top3 = sales.sort_by_key("revenue", descending: true).head(3)
+top3 = sales.nlargest(3, "revenue")
 top3["shop"].to_a   # => ["north", "north", "central"]
 ```
+
+A missing value or a NaN is never among the largest or the smallest; it comes only when fewer than `n` rows have a value.
 
 A sorted frame shares its cells with the original, in the new order, as other row selections do.
 

@@ -611,6 +611,8 @@ df.sort_by_key("temp", masked_position: :first)    # masked rows first
 df.sort_by_key("time")                             # by the index (its axis name)
 ```
 
+`nlargest(n, *keys)` gives the `n` rows with the largest values of the keys, largest first — `sort_by_key(*keys, descending: true).head(n)` — and `nsmallest(n, *keys)` the `n` smallest. A NaN or masked key loses to every value, as in `CArray#nlargest`, so it comes only when fewer than `n` rows have a value.
+
 - Each key is a **column name** (or the index's axis name), or a **`[name, :asc | :desc]`** pair. `order:` is the direction for bare-name keys (default `:asc`).
 - **`masked_position:`** sends rows whose key is masked to the `:last` (default) or `:first` end, whichever the direction.
 - **NaN** comes after the numbers in both ascending and descending order, and before the masked cells when `masked_position:` is `:last`. To place it with the masked cells, mask it first (`df["temp"][:is_nan] = UNDEF`).
