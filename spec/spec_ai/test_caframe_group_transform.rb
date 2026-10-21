@@ -134,10 +134,42 @@ class TestCAFrameGroupTransform < Test::Unit::TestCase
     df.group_by("station").fill("temp", 0.0)        # as CAFrame#fill: every masked cell
     assert_equal 0.0, df["temp"][5]
     grp = df.group_by("station")
-    assert_raise(ArgumentError) { grp.fill("temp", :linear) }
+    assert_raise(ArgumentError) { grp.fill("station", :linear) }   # not a number
     assert_raise(ArgumentError) { grp.fill("temp", :zero) }
     assert_raise(KeyError) { grp.fill("nope", :ffill) }
     assert_raise(FrozenError) { frame.freeze.group_by("station").fill("temp", :ffill) }
+  end
+
+  # fill(name, :linear) interpolates within each group, against the index.
+  def test_fill_linear_against_the_index
+    df = frame
+    df["temp"][2] = UNDEF          # tokyo: 10 at x 0, _ at x 1, 9 at x 4
+    df["temp"][3] = UNDEF          # osaka: 20 at x 0, _ at x 1, nothing after
+    df["temp"][5] = UNDEF          # its key is masked: in no group
+    df  = df.append("x", CA_FLOAT64([0, 0, 1, 1, 4, 4])).set_index("x")
+    grp = df.group_by("station")
+    assert_same grp, grp.fill("temp", :linear)
+    assert_equal [10.0, 20.0, 9.75, UNDEF, 9.0, UNDEF], df["temp"].to_a
+  end
+
+  def test_fill_linear_by_row_position_without_an_index
+    df = frame
+    df["temp"][2] = UNDEF
+    df.group_by("station").fill("temp", :linear)
+    # tokyo's rows 0, 2, 4 are its positions 0, 1, 2: halfway between 10 and 9
+    assert_equal [10.0, 20.0, 9.5, 22.0, 9.0, 30.0], df["temp"].to_a
+  end
+
+  def test_fill_linear_reads_each_group_in_index_order
+    t = CArray.time(["2024-01-01 03:00", "2024-01-01 00:00", "2024-01-01 01:00",
+                     "2024-01-01 00:00", "2024-01-01 02:00"])
+    v = CA_FLOAT64([3.0, 0.0, 0.0, 100.0, 0.0])
+    v[2] = UNDEF
+    df = CAFrame.new({ "s" => CA_OBJECT(%w[a a a b a]), "v" => v },
+                     axis_name: "time", index: t)
+    df.group_by("s").fill("v", :linear)
+    # a: 0 at 00:00, _ at 01:00, 0 at 02:00, 3 at 03:00; b never enters
+    assert_equal [3.0, 0.0, 0.0, 100.0, 0.0], df["v"].to_a
   end
 
   def test_resample_groups

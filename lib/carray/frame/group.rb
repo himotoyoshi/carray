@@ -573,21 +573,27 @@ class GroupedFrame
   # Fill the masked cells of a column from the rows of the same group, in
   # place, as +CAFrame#fill+ does for the whole column: +:ffill+ carries the
   # group's last present value forward in row order, +:bfill+ its next one
-  # back. A fill never reaches across into another group, so a cell with
-  # nothing to carry in its group stays masked, and a row whose key is
-  # masked (in no group) is left as it is. A constant fills every masked
-  # cell, as +CAFrame#fill+ does. Returns self.
+  # back, and +:linear+ interpolates between the group's present values
+  # against the frame's index (against the row position within the group
+  # when the frame has no index). A fill never reaches across into another
+  # group, so a cell with nothing to carry or interpolate from in its group
+  # stays masked, and a row whose key is masked (in no group) is left as it
+  # is. A constant fills every masked cell, as +CAFrame#fill+ does. Returns
+  # self.
   #
   #   df.group_by("station").fill("temp", :ffill)
+  #   df.group_by("station").fill("temp", :linear)
   #
-  # Sort the frame first (+sort_by_key("time")+) when its rows are not in
-  # time order.
+  # +:ffill+ and +:bfill+ follow the row order: sort the frame first
+  # (+sort_by_key("time")+) when its rows are not in time order. +:linear+
+  # reads each group in the order of the index, as +CAFrame#fill+ does.
   #
   # @param name [String] the column.
-  # @param method_or_value [Symbol, Object] +:ffill+, +:bfill+, or a constant.
+  # @param method_or_value [Symbol, Object] +:ffill+, +:bfill+, +:linear+, or
+  #   a constant.
   # @return [GroupedFrame] self
-  # @raise [ArgumentError] for +:linear+, which within groups is not
-  #   provided, or another Symbol.
+  # @raise [ArgumentError] for another Symbol, or for +:linear+ on a column
+  #   or index +CAFrame#fill+ cannot interpolate.
   def fill (name, method_or_value)
     refuse_changed_rows("fill")
     case method_or_value
@@ -600,10 +606,12 @@ class GroupedFrame
       target = col.is_masked
       col[target] = held[target] if target.any
     when :linear
-      raise ArgumentError,
-            "fill(#{name.inspect}, :linear): an interpolation within each group " \
-            "is not provided; use :ffill or :bfill, or interpolate one group at a " \
-            "time with CAFrame#fill"
+      @frame.__send__(:refuse_if_frozen)
+      key = @frame.__send__(:column_key, name, "fill")
+      # Each group's rows as a frame of views, so its fill writes through.
+      ngroup.times do |k|
+        @frame.__send__(:select_rows, group_address(k)).fill(key, :linear)
+      end
     when Symbol
       raise ArgumentError,
             "fill: unknown method #{method_or_value.inspect} " \
