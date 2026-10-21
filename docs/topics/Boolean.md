@@ -17,6 +17,17 @@ all work as on any other array. This document focuses on the parts that are
 *easy to get wrong* — chiefly the three different ways a boolean cell is shown,
 and how masking turns `&` / `|` into three-valued (Kleene) logic.
 
+> **Two spellings of AND / OR, two rules for a masked cell** (§9):
+>
+> | | `&` / `\|` | `.and` / `.or` |
+> |---|---|---|
+> | rule | three-valued (Kleene): the known side settles it when it can | two-valued: a masked side makes the result masked |
+> | `false` AND unknown | `false` | unknown |
+> | `true` OR unknown | `true` | unknown |
+> | `NOT (false AND unknown)` | `true` | unknown |
+>
+> They agree wherever both sides are known.
+
 ---
 
 ## 1. Two representations, one boundary
@@ -320,6 +331,30 @@ a & bF   # => [0, 0, 0, 0]        U&false = false  (mask cleared)
 
 This holds identically on the **lazy** path (`a.lazy | b`) — eager and lazy give
 the same result.
+
+### `.and` / `.or` are two-valued
+
+`.and` and `.or` are the same operations with the other rule: a masked cell on
+either side makes the result masked, even where the known side alone would
+settle it.
+
+```ruby
+a.and(bF)   # => [U, U, 0, 0]     U.and(false) = U  (the mask stays)
+a.or(bT)    # => [U, U, 1, 1]     U.or(true)   = U
+```
+
+The difference carries through what follows. With `a = [false, true]` and `b`
+unknown, `(a & b).not` is `[true, U]` — the first cell is settled, since
+`false AND anything` is false — while `a.and(b).not` is `[U, U]`.
+
+Choose by the question you ask:
+
+- `&` / `|` when an answer that the known side settles should stand: a day
+  that is not hot is not "hot and humid", whatever its missing humidity was.
+- `.and` / `.or` when an answer should be given only where both inputs are
+  known — the element-wise form of keeping only complete records. On a
+  `CAFrame`, `df.drop_masked("tmax", "rh")` followed by `&` asks the same
+  question for whole rows, and says so by name.
 
 ### `^`, `~`, `not` propagate the mask
 
