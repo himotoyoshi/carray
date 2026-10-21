@@ -1080,7 +1080,8 @@ class GroupedFrame
     chosen = yield(self)
     unless chosen.is_a?(CArray) && chosen.data_type == :boolean
       raise ArgumentError,
-            "filter block must return a boolean CArray (got #{chosen.is_a?(CArray) ? "a #{CArray::Inspector.type_label(chosen)} CArray" : chosen.class})"
+            "filter block must return a boolean CArray (got #{chosen.is_a?(CArray) ? "a #{CArray::Inspector.type_label(chosen)} CArray" : chosen.class})" +
+            CAFrame.__send__(:equality_hint, chosen)
     end
     unless chosen.shape == [ngroup]
       raise ArgumentError,

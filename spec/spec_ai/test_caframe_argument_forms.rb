@@ -107,6 +107,20 @@ class TestCAFrameArgumentForms < Test::Unit::TestCase
     assert_raise(TypeError) { grp.tail("1") }
   end
 
+  # == in a condition compares whole arrays and gives true or false; the
+  # refusal says to use eq.
+  def test_a_condition_written_with_equals
+    df = frame
+    e = assert_raise(ArgumentError) { df.filter { |f| f["g"] == "x" } }
+    assert_match(/eq and ne compare cell by cell/, e.message)
+    e = assert_raise(ArgumentError) { df.group_by("g").filter { |g| g.mean("a")["a"] == 1 } }
+    assert_match(/eq and ne/, e.message)
+    e = assert_raise(ArgumentError) { df.verify("x" => ->(f) { f["g"] != "x" }) }
+    assert_match(/eq and ne/, e.message)
+    e = assert_raise(ArgumentError) { df.filter { |f| f["g"].to_a } }
+    assert_no_match(/eq and ne/, e.message)
+  end
+
   def test_sort_by_descending
     df = frame
     assert_equal %w[dd ccc bb a], df.sort_by(descending: true) { |f| f["s"] }["s"].to_a

@@ -545,7 +545,8 @@ class CAFrame
     end
     unless mask.is_a?(CArray) && mask.data_type == :boolean
       raise ArgumentError,
-            "#{given} a boolean CArray (got #{mask.is_a?(CArray) ? "a #{CArray::Inspector.type_label(mask)} CArray" : mask.class})"
+            "#{given} a boolean CArray (got #{mask.is_a?(CArray) ? "a #{CArray::Inspector.type_label(mask)} CArray" : mask.class})" +
+            CAFrame.__send__(:equality_hint, mask)
     end
     unless mask.shape == [@nrow]
       raise ArgumentError,
@@ -628,7 +629,8 @@ class CAFrame
       unless verdict.is_a?(CArray) && verdict.data_type == :boolean
         raise ArgumentError,
               "verify: rule #{key.inspect} must return a boolean CArray (got " \
-              "#{verdict.is_a?(CArray) ? "a #{verdict.data_type} CArray" : verdict.class})"
+              "#{verdict.is_a?(CArray) ? "a #{verdict.data_type} CArray" : verdict.class})" +
+              CAFrame.__send__(:equality_hint, verdict)
       end
       unless verdict.shape[0] == @nrow
         raise ArgumentError,
@@ -1235,6 +1237,15 @@ class CAFrame
     raise ArgumentError, message
   end
   private_class_method :refuse_repeated_names
+
+  # A condition that gave true or false rather than a boolean CArray has, as
+  # likely as not, compared two arrays whole with == or !=.
+  def self.equality_hint(value)
+    return "" unless value == true || value == false
+    "; == and != compare whole arrays, eq and ne compare cell by cell " \
+      "(f[\"x\"].eq(\"a\"))"
+  end
+  private_class_method :equality_hint
 
   # percentile(p, *names): the percentage comes first. A name there is the
   # order of median's arguments carried over, said so; a percentage out of
