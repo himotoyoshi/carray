@@ -398,9 +398,10 @@ class CAFrame
     rebuild(cols)
   end
 
-  # Filter rows with a block that receives the frame and returns a boolean
-  # column (memo §15). The block builds the mask from +f["col"]+ / +f.index+.
-  # Keep the rows where the block's boolean selector is true.
+  # Keep the rows where a boolean selector is true. The selector is given
+  # directly (+df.filter(df["temp"] > 0)+), or built by a block that receives
+  # the frame (+df.filter { |f| f["temp"] > 0 }+), from +f["col"]+ /
+  # +f.index+. Give one or the other, not both.
   #
   # A masked (UNDEF) selector cell means the row's membership is *genuinely
   # undetermined* (e.g. the predicate read a masked input). By default such
@@ -416,11 +417,26 @@ class CAFrame
   # result, which a view cannot do without masking the parent's rows. That holds
   # whether or not the selector actually carries a masked cell, so the same call
   # site does not switch between sharing and copying with the data.
-  def filter(keep_masked: false)
-    mask = yield(self)
+  def filter(*selector, keep_masked: false)
+    if selector.size > 1
+      raise ArgumentError, "filter takes one selector (got #{selector.size})"
+    end
+    if selector.empty?
+      unless block_given?
+        raise ArgumentError, "filter needs a boolean selector or a block"
+      end
+      mask = yield(self)
+      given = "filter block must return"
+    else
+      if block_given?
+        raise ArgumentError, "filter takes a selector or a block, not both"
+      end
+      mask = selector.first
+      given = "filter selector must be"
+    end
     unless mask.is_a?(CArray) && mask.data_type == :boolean
       raise ArgumentError,
-            "filter block must return a boolean CArray (got #{mask.is_a?(CArray) ? "a #{CArray::Inspector.type_label(mask)} CArray" : mask.class})"
+            "#{given} a boolean CArray (got #{mask.is_a?(CArray) ? "a #{CArray::Inspector.type_label(mask)} CArray" : mask.class})"
     end
     unless mask.shape == [@nrow]
       raise ArgumentError,

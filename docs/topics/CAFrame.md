@@ -530,7 +530,7 @@ df.filter { |f| f["temp"] > 24 }
 df.filter { |f| (f["temp"] > 24) & (f["rh"] < 50) }   # & / | combine conditions
 ```
 
-The block lets you refer to columns without binding a variable first, and the result is a sub-frame, so filters chain into `group_by`, `join` and the rest.
+The block lets you refer to columns without binding a variable first, and the result is a sub-frame, so filters chain into `group_by`, `join` and the rest. A selector already in hand is given directly instead of a block, `df.filter(mask)` (one or the other, not both); unlike `df[mask]`, it takes `keep_masked:` as well.
 
 Column names are written as `f["..."]` strings, **not** bare identifiers: a frame allows any column name (`"temp.max"`, names with spaces, names that collide with method names), which a `method_missing` DSL cannot support.
 

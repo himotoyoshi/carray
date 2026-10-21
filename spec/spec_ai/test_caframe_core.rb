@@ -577,6 +577,20 @@ class TestCAFrameFilterAndGather < Test::Unit::TestCase
     assert_raise(ArgumentError) { @df[CA_FLOAT64([1.0, 2.0])] }
   end
 
+  def test_filter_takes_a_selector_directly
+    sub = @df.filter((@df["temp"] > 20) & (@df["rh"] < 50))
+    assert_equal ["tokyo"], sub["station"].to_a
+  end
+
+  def test_filter_refuses_a_selector_and_a_block_together_or_neither
+    mask = @df["temp"] > 20
+    assert_raise(ArgumentError) { @df.filter(mask) { |f| f["temp"] > 0 } }
+    assert_raise(ArgumentError) { @df.filter(mask, mask) }
+    e = assert_raise(ArgumentError) { @df.filter }
+    assert_match(/selector or a block/, e.message)
+    assert_raise(ArgumentError) { @df.filter(@df["temp"]) }   # not boolean
+  end
+
   def test_filter_carries_index
     df = @df.set_index("station")
     sub = df.filter { |f| f["temp"] > 20 }
@@ -611,6 +625,12 @@ class TestCAFrameFilterKeepMasked < Test::Unit::TestCase
     # true rows keep their values; the undetermined row's cells are masked
     assert_equal [20, nil, 40], sub["a"].to_a.map { |v| v == UNDEF ? nil : v }
     assert_equal [false, true, false], sub["a"].mask.to_a
+    assert_equal [false, true, false], sub["b"].mask.to_a
+  end
+
+  def test_keep_masked_with_a_selector_given_directly
+    sub = @df.filter(@df["a"] > 15, keep_masked: true)
+    assert_equal 3, sub.nrow
     assert_equal [false, true, false], sub["b"].mask.to_a
   end
 
