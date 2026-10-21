@@ -41,8 +41,12 @@ class CAFrame
   #
   # +on:+ may name several columns, as an Array: rows then match when every
   # key column matches, and a row with any key cell masked matches nothing.
+  # When the key has different names on the two sides, give a Hash of this
+  # frame's name to +other+'s; the key column keeps this frame's name, and
+  # +other+'s key column is not added.
   #
   #   obs.join(fcst, on: ["station", "date"])
+  #   obs.join(stations, on: { "station" => "code" })
   #
   # Two modes filter this frame's rows by +other+ instead of pairing them:
   #
@@ -62,14 +66,14 @@ class CAFrame
     if (how == :semi || how == :anti) && !suffixes.equal?(DEFAULT_JOIN_SUFFIXES)
       raise ArgumentError, "join: how: #{how.inspect} adds no column of the other frame, so suffixes: does not apply"
     end
-    names = join_key_names(on, "join", "on:")
+    names, rnames = join_key_pairs(on, "join", "on:")
     lkeys = names.map { |name| key_column(name, "join") }
-    rkeys = names.map { |name| other.__send__(:key_column, name, "join") }
+    rkeys = rnames.map { |name| other.__send__(:key_column, name, "join") }
     join_check_key_widths(names, lkeys, rkeys, "join")
     return join_filter(lkeys, rkeys, how) if how == :semi || how == :anti
 
-    plan = join_name_plan(other, names, suffixes)
-    join_pairs(other, names, lkeys, rkeys, how, plan)
+    plan = join_name_plan(other, names, rnames, suffixes)
+    join_pairs(other, names, rnames, lkeys, rkeys, how, plan)
   end
 
   # As-of (nearest-key) left join for irregular series (memo §11.7). Each
@@ -85,17 +89,23 @@ class CAFrame
   # +by:+ names columns that must match exactly, one name or an Array: each
   # left row is matched to the nearest row among the rows of +other+ with
   # the same +by+ values.  A row with a masked +by+ cell matches nothing.
+  # +on:+ and +by:+ take a Hash of this frame's name to +other+'s for a key
+  # named differently on the two sides, as +join+'s +on:+ does.
   #
   #   obs.join_asof(radar, on: "time", by: "station", tolerance: "10 minutes")
   def join_asof(other, on:, by: nil, direction: :floor, tolerance: nil, suffixes: DEFAULT_JOIN_SUFFIXES)
-    on    = column_key(on, "join_asof")
-    exact = by.nil? ? [] : join_key_names(by, "join_asof", "by:")
+    ons, ron = join_key_pairs(on, "join_asof", "on:")
+    if ons.size != 1
+      raise ArgumentError, "join_asof: on: names one key column (got #{ons.size}); by: names the others"
+    end
+    on, ron = ons.first, ron.first
+    exact, rexact_names = by.nil? ? [[], []] : join_key_pairs(by, "join_asof", "by:")
     if exact.include?(on)
       raise ArgumentError, "join_asof: #{on.inspect} is the on: key; by: names the others"
     end
-    plan = join_name_plan(other, [on, *exact], suffixes)
+    plan = join_name_plan(other, [on, *exact], [ron, *rexact_names], suffixes)
     lkey = key_column(on, "join_asof")
-    rkey = other.__send__(:key_column, on, "join_asof")
+    rkey = other.__send__(:key_column, ron, "join_asof")
     [lkey, rkey].each do |key|
       key.__send__(:nearest_refuse_bytes, key, "join_asof: the on: key #{on.inspect}",
                    "join on it exactly with join")
@@ -104,12 +114,12 @@ class CAFrame
              lkey.locate_nearest_addr(rkey, direction: direction, tolerance: tolerance)
            else
              lexact = exact.map { |name| key_column(name, "join_asof") }
-             rexact = exact.map { |name| other.__send__(:key_column, name, "join_asof") }
+             rexact = rexact_names.map { |name| other.__send__(:key_column, name, "join_asof") }
              join_check_key_widths(exact, lexact, rexact, "join_asof")
              _, lcode, rcode, k = join_codes(lexact, rexact)
              join_asof_by(lkey, rkey, lcode, rcode, k, direction, tolerance)
            end
-    join_by_addr(other, [on, *exact], addr, plan)
+    join_by_addr(other, [ron, *rexact_names], addr, plan)
   end
 
   # Conform every column to an externally supplied reference key set (the
@@ -259,12 +269,21 @@ class CAFrame
     end
   end
 
-  # The key column names of a join: one name, or an Array of names.
-  private def join_key_names(on, verb, option)
-    names = on.is_a?(Array) ? on : [on]
-    raise ArgumentError, "#{verb}: #{option} names no key column" if names.empty?
-    CAFrame.__send__(:refuse_repeated_names, names.map { |name| column_key(name, verb) },
-                     verb, "#{option} names")
+  # The key column names of a join, this frame's and the other's: one name
+  # or an Array of names (the same on both sides), or a Hash of this frame's
+  # name to the other's.
+  private def join_key_pairs(on, verb, option)
+    pairs = case on
+            when Hash  then on.to_a
+            when Array then on.map { |name| [name, name] }
+            else            [[on, on]]
+            end
+    raise ArgumentError, "#{verb}: #{option} names no key column" if pairs.empty?
+    lnames = pairs.map { |name, _| column_key(name, verb) }
+    rnames = pairs.map { |_, name| column_key(name, verb) }
+    CAFrame.__send__(:refuse_repeated_names, lnames, verb, "#{option} names")
+    CAFrame.__send__(:refuse_repeated_names, rnames, verb, "#{option} names")
+    return [lnames, rnames]
   end
 
   # Codes for the rows of both sides of a join on +lkeys+ / +rkeys+ (one
@@ -396,9 +415,11 @@ class CAFrame
   # The left index keeps its name as the result's row axis, so a right
   # column of that name collides with it as with a left column: it takes
   # the right suffix, and there is no left column to take the left one.
-  private def join_name_plan(other, names, suffixes)
+  # The names of +other+'s columns that the join adds (its key columns
+  # +rnames+ are not added) and that this frame already has collide.
+  private def join_name_plan(other, names, rnames, suffixes)
     taken = @index ? column_names | [@axis_name] : column_names
-    collisions = (taken & other.column_names) - names
+    collisions = taken & (other.column_names - rnames)
     return { collisions: [], lsuf: nil, rsuf: nil } if collisions.empty?
 
     if suffixes == false
@@ -427,11 +448,11 @@ class CAFrame
     cols[name] = col
   end
 
-  private def join_by_addr(other, names, addr, plan)
+  private def join_by_addr(other, rnames, addr, plan)
     cols = {}
     column_names.each { |name| put_join_column(cols, join_name(name, plan[:lsuf], plan), self[name]) }
     other.column_names.each do |name|
-      next if names.include?(name)
+      next if rnames.include?(name)
       put_join_column(cols, join_name(name, plan[:rsuf], plan), project_rows(other[name], addr))
     end
     CAFrame.new(cols, axis_name: @axis_name, index: @index)
@@ -439,7 +460,7 @@ class CAFrame
 
   # The rows of a key join: li / ri are the left / right row of each result
   # row, UNDEF on the side a row has no match on.
-  private def join_pairs(other, names, lkeys, rkeys, how, plan)
+  private def join_pairs(other, names, rnames, lkeys, rkeys, how, plan)
     parts, lcode, rcode, k = join_codes(lkeys, rkeys)
     extra = nil
     if how == :right
@@ -476,7 +497,7 @@ class CAFrame
       put_join_column(cols, name, col)
     end
     other.column_names.each do |name|
-      next if names.include?(name)
+      next if rnames.include?(name)
       put_join_column(cols, join_name(name, plan[:rsuf], plan), project_rows(other[name], ri))
     end
     # A key that is the left index is the result's index, as a key column

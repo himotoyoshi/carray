@@ -141,6 +141,7 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | I want to… | use | chapter |
 |---|---|---|
 | add columns from another table by a key | `join` | 12 |
+| join on a key named differently in the other table | `join(other, on: { "shop" => "code" })` | 12 |
 | keep only rows found in both tables | `join(how: :inner)` | 12 |
 | keep rows whose key is, or is not, in another table | `join(how: :semi)`, `:anti` | 12 |
 | make sure every member of a list has a row | `align` | 12 |

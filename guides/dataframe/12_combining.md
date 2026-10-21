@@ -81,6 +81,16 @@ Give an Array of names to match on several columns at once; a row matches when e
 orders.join(targets, on: ["shop", "date"])
 ```
 
+### Keys with different names
+
+When the key has another name in the other table, give a Hash of this table's name to the other's. The key keeps this table's name, and the other table's key column is not added:
+
+```ruby
+codes = shops.rename("shop" => "code")
+sales.join(codes.select("code", "size"), on: { "shop" => "code" }).column_names
+# => ["date", "shop", "visitors", "revenue", "rating", "size"]
+```
+
 ### How keys are compared
 
 Keys are compared by value, so the two key columns need not be of the same type:

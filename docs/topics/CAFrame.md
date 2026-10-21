@@ -1354,7 +1354,10 @@ How the rows of the frames are put together decides the verb:
 obs.join(meta, on: "station")                    # left join (default)
 obs.join(meta, on: "station", how: :inner)       # :inner / :outer / :right
 obs.join(fcst, on: ["station", "date"])          # several key columns
+obs.join(meta, on: { "station" => "code" })      # a key named differently on the two sides
 ```
+
+When the key has another name in the other frame, `on:` takes a Hash of this frame's name to the other's (several pairs for several key columns). The key column keeps this frame's name and the other frame's key column is not added; a column of the other frame that has the same name as this frame's key gets the right suffix. `join_asof` takes the same Hash in `on:` and `by:`.
 
 Rows are matched as SQL joins match them: each pair of a left row and a right row with the same key gives one result row. A key held by 2 left rows and 3 right rows gives 6 rows. A masked key matches nothing, like a NULL key in SQL.
 
