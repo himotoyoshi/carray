@@ -114,6 +114,8 @@ The index sits beside the columns, and the methods that work on columns leave it
 - `drop` does not remove it, and `select` does not need to name it.
 - Arithmetic between columns ignores it. Columns of the same frame line up because they are the same rows, not because of their labels.
 
+Where a method takes a **key** rather than columns — `group_by`, `sort_by_key`, `join(on:)`, `pivot(index:)`, `resample`, `windows(on:)` — the index's name does reach the index, as a column's name reaches the column. So a key reads the index and a column does not: after `group_by("shop").sum`, `sort_by_key("shop")` works and `select("shop")` raises, pointing at `df.index`.
+
 It goes everywhere the rows go: `filter`, `head`, sorting, `copy` and the other row selections carry each row's label with it. A row Hash includes it under the axis name, and `to_csv` writes it as the first column.
 
 While a frame has an index, a column cannot have the index's name: `north.append("date", …)` raises, because `"date"` already names the row axis.
@@ -128,6 +130,13 @@ df.column_names   # => ["shop", "visitors", "revenue", "rating"]
 ```
 
 `reset_index` restores the axis name the frame had before `set_index`.
+
+`rename` renames the index as it renames a column:
+
+```ruby
+summary = sales.group_by("shop").sum("revenue")
+summary.rename("shop" => "store").axis_name   # => "store"
+```
 
 ## Indexes that repeat
 

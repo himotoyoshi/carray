@@ -66,29 +66,34 @@ class CAFrame
   # Column order is preserved (memo §13.2 "column order = insertion order");
   # columns are shared by reference. The new names are given as a Hash of
   # old name => new name, or by a block that receives each column's name and
-  # returns its new one. Names may be exchanged; two columns may not end up
-  # with one name.
+  # returns its new one. The index has a name too, and is renamed the same
+  # way. Names may be exchanged; two columns, or a column and the index, may
+  # not end up with one name.
   #
   #   df.rename("temp" => "T")
   #   df.rename { |name| name.upcase }
+  #   df.group_by("shop").sum.rename("shop" => "store")   # the index
   def rename(mapping = nil)
+    index_name = @index ? @axis_name : nil
     if block_given?
       raise ArgumentError, "rename: give a Hash or a block, not both" unless mapping.nil?
-      mapping = @columns.keys.to_h { |name| [name, yield(name)] }
+      mapping = (@columns.keys + [index_name].compact).to_h { |name| [name, yield(name)] }
     end
     raise ArgumentError, "rename: give a Hash of old name => new name, or a block" if mapping.nil?
     norm = {}
     mapping.each do |old, new|
       o = column_key(old, "rename")
       n = column_name_arg(new, "rename")
-      raise KeyError, "no column #{o.inspect}" unless @columns.key?(o)
+      refuse_missing_column(o, "rename") unless @columns.key?(o) || o == index_name
       norm[o] = n
     end
-    CAFrame.__send__(:refuse_repeated_names, @columns.keys.map { |k| norm[k] || k },
-                     "rename", "the columns would be named")
+    names = @columns.keys.map { |k| norm[k] || k }
+    names << (norm[index_name] || index_name) if index_name
+    CAFrame.__send__(:refuse_repeated_names, names, "rename", "the columns and index would be named")
     rebuilt = {}
     @columns.each { |k, v| rebuilt[norm[k] || k] = v }
-    rebuild(rebuilt)
+    return rebuild(rebuilt) unless index_name && norm.key?(index_name)
+    CAFrame.new(rebuilt, axis_name: norm[index_name], index: @index, attrs: @attrs)
   end
 
   # A new frame with each column replaced by what the block computes from it,
@@ -160,7 +165,7 @@ class CAFrame
   #   fewer than two columns or one twice, or names a column already there.
   def split_column(name, sep, into:)
     key = column_key(name, "split_column")
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     unless string_column?(col) && col.ndim == 1
       raise ArgumentError, "split_column: #{key.inspect} is not a one-dimensional text column"
     end
@@ -221,7 +226,7 @@ class CAFrame
   #   already a column; and as CACategorical#contrast raises.
   def contrast_columns(name, scheme = :dummy, base: nil, full: false, into: nil)
     key = column_key(name, "contrast_columns")
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     unless col.ndim == 1
       raise ArgumentError, "contrast_columns: #{key.inspect} is not a one-dimensional column"
     end
@@ -352,7 +357,7 @@ class CAFrame
   # @return [CAFrame] a new frame; the other columns are shared.
   def unstack_column(name, into: nil)
     key = column_key(name, "unstack_column")
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     if col.ndim < 2
       raise ArgumentError, "unstack_column: #{key.inspect} is one-dimensional; there is nothing to unstack"
     end
@@ -412,15 +417,15 @@ class CAFrame
               unless from.is_a?(String) && to.is_a?(String)
                 raise ArgumentError, "#{verb}: a Range of column names takes two names (got #{selection.inspect})"
               end
-              i = keys.index(from) or raise KeyError, "#{verb}: no column #{from.inspect}"
-              j = keys.index(to)   or raise KeyError, "#{verb}: no column #{to.inspect}"
+              i = keys.index(from) or refuse_missing_column(from, verb)
+              j = keys.index(to)   or refuse_missing_column(to, verb)
               if j < i
                 raise ArgumentError, "#{verb}: #{to.inspect} comes before #{from.inspect} in the frame"
               end
               keys[i..(selection.exclude_end? ? j - 1 : j)]
             when Array
               selection.map { |n| column_key(n, verb) }.each do |n|
-                raise KeyError, "#{verb}: no column #{n.inspect}" unless @columns.key?(n)
+                refuse_missing_column(n, verb) unless @columns.key?(n)
               end
             when Regexp
               keys.grep(selection)
@@ -568,7 +573,7 @@ class CAFrame
       end
     end
     named.each_key do |name|
-      raise KeyError, "#{label} names no column #{name.inspect}" unless @columns.key?(name)
+      refuse_missing_column(name, label.chomp(":")) unless @columns.key?(name)
     end
     rest = @columns.keys - named.keys
     types =
@@ -686,7 +691,7 @@ class CAFrame
             "on_error: must be :mask, :warn or :raise (got #{on_error.inspect})"
     end
     key = column_key(name, "parse_to_time")
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     unless string_column?(col)
       raise ArgumentError,
             "parse_to_time needs a string column (object / CAString / " \
@@ -708,7 +713,7 @@ class CAFrame
   #   df.infer_time_format("date")   # => "%d/%m/%Y"
   def infer_time_format(name)
     key = column_key(name, "infer_time_format")
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     unless string_column?(col)
       raise ArgumentError, "column #{key.inspect} is #{col.data_type}, not text"
     end
@@ -743,7 +748,7 @@ class CAFrame
   private def to_time_in_place(name, grid = nil, unit: :s, epoch: nil)
     refuse_if_frozen
     key = column_key(name, "to_time")
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     raw = integer_serial_column(col, key)
     grid = unit if unit.is_a?(CATime::Grid)
     if grid.is_a?(CATime::Grid)
@@ -984,7 +989,7 @@ class CAFrame
   # are not numbers). Other targets go through to_type.
   private def cast_column(name, type, on_error)
     key = name.to_s
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     return cast_time_column(key, col, on_error) if type == :time
     # Text stays text, an object column of Strings becomes a CAString, and
     # anything else is refused as CArray.string refuses it (a number is

@@ -395,7 +395,7 @@ class CAFrame
   # counterpart, and like it the write goes through to the stored column and
   # is visible through every alias.
   private def mask_column(key)
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     col[] = UNDEF
     self
   end
@@ -1165,14 +1165,16 @@ class CAFrame
   end
 
   # df["name"] for a name that is no column. The index is not a column, so
-  # its name is refused too, pointing at df.index.
-  private def refuse_missing_column(key)
+  # its name is refused too, pointing at df.index. +verb+, when given, leads
+  # the message.
+  private def refuse_missing_column(key, verb = nil)
+    lead = verb ? "#{verb}: " : ""
     if @index && key == @axis_name
       raise KeyError,
-            "no column #{key.inspect}: it is the index, read it with df.index " \
+            "#{lead}no column #{key.inspect}: it is the index, read it with df.index " \
             "(reset_index makes it a column again)"
     end
-    raise KeyError, "no column #{key.inspect}"
+    raise KeyError, "#{lead}no column #{key.inspect}"
   end
 
   # A column name given as an argument: a String, as the frame's column

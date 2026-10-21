@@ -50,7 +50,7 @@ class TestCAFrameConstruction < Test::Unit::TestCase
 
   def test_types_names_an_unknown_column
     err = assert_raise(KeyError) { CAFrame.new({ "r" => [1.5] }, types: { "q" => :float32 }) }
-    assert_equal 'types: names no column "q"', err.message
+    assert_equal 'types: no column "q"', err.message
   end
 
   # A cast column is a new array: the CArray given for it is no longer the

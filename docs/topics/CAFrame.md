@@ -706,7 +706,7 @@ df.fill("temp", :linear)                            # fill masked cells
 
 - **`append(name, col)`** returns a new frame with the column added at the end, or replacing an existing column of that name in place. With `before: "temp"` or `after: "station"` it goes next to that column instead, and an existing column of that name is moved there: `df.append("id", ids, before: df.column_names.first)` puts it leftmost. Its length must be `N`. Only a frame with **no columns and no index** takes `N` from the column appended to it; a frame of zero rows that still has a column or an index requires length 0 (see [A frame with only an index](#a-frame-with-only-an-index)).
 - **`drop(*names)`** returns a new frame without those columns. The data is not touched. As in `select`, a name may be given as a Range of names or a Regexp.
-- **`rename(old => new, ...)`** returns a new frame with the columns renamed, in the same order. A block gives each column's new name from its old one (`df.rename { |name| name.upcase }`). Names may be exchanged (`rename("a" => "b", "b" => "a")`); two columns ending up with one name raise.
+- **`rename(old => new, ...)`** returns a new frame with the columns renamed, in the same order. A block gives each column's new name from its old one (`df.rename { |name| name.upcase }`). The index's name is renamed the same way (`summary.rename("shop" => "store")`), and a block is given it too. Names may be exchanged (`rename("a" => "b", "b" => "a")`); two columns, or a column and the index, ending up with one name raise.
 
 The same changes can be made to the frame itself with `df["name"] =`:
 
@@ -1004,7 +1004,7 @@ The index is an array of **row labels** — times, station names, ids — kept b
 - interpolating in time with [`fill(name, :linear)`](#masking-and-filling-cells);
 - labelling the rows of a grouped result — [`group_by`](#grouping-rows) and [`resample`](#time-bins--resample) make the group key the index.
 
-The index is not a column: `df["time"]` does not reach it (it raises `KeyError`, which points at `df.index`), and `drop` does not remove it. Its name is the frame's **`axis_name`**, the name of the row axis (`"row"` by default); it is the key the index appears under in a row `Hash`, and the first column `to_csv` writes. Because of that, while the frame has an index, its axis name cannot also be a column name: building such a frame, or `append` of a column with that name, raises `ArgumentError`.
+The index is not a column: `df["time"]` does not reach it (it raises `KeyError`, which points at `df.index`), and `drop` does not remove it. The rule for its name is **a key reads the index, a column does not**: where a verb takes a key — `group_by`, `sort_by_key`, `join(on:)`, `pivot(index:)`, `resample`, `windows(on:)` — the index's name names the index, as a column's name names the column; where it takes columns to read or change — `df[...]`, `select`, `drop`, `melt(id:)`, `fill`, `cast`, the reductions — the index's name is refused, pointing at `df.index`, and `reset_index` makes it a column for them. `rename` takes it too, and renames the index (`summary.rename("shop" => "store")`). Its name is the frame's **`axis_name`**, the name of the row axis (`"row"` by default); it is the key the index appears under in a row `Hash`, and the first column `to_csv` writes. Because of that, while the frame has an index, its axis name cannot also be a column name: building such a frame, or `append` of a column with that name, raises `ArgumentError`.
 
 ### `set_index` / `reset_index`
 

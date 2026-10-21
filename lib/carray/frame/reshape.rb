@@ -388,7 +388,7 @@ class CAFrame
     end
     if on
       on = column_name_arg(on, "stack_rows")
-      raise KeyError, "stack_rows: no column #{on.inspect}" unless frame.column_names.include?(on)
+      frame.__send__(:refuse_missing_column, on, "stack_rows") unless frame.column_names.include?(on)
       return stack_rows_on(frame, keys, on)
     end
     grouped = frame.group_by(*keys)

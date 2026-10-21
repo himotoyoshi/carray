@@ -92,7 +92,7 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
   def test_an_unknown_column_raises_keyerror_naming_cast
     df = frame
     err = assert_raise(KeyError) { df.cast(default: :infer, "nope" => :int32) }
-    assert_match(/\Acast /, err.message)
+    assert_match(/\Acast: /, err.message)
     assert_match(/"nope"/, err.message)
     assert_equal :object, df["temp"].data_type
   end
