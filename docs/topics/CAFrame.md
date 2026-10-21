@@ -327,6 +327,18 @@ time     CATime       3       0       3  2024-01-01  2024-01-03  2024-01-02  1D
 
 `describe("temp", "rh")` summarizes only the named columns.
 
+### One reduction of every column — `df.mean`, `df.max`, ...
+
+The reductions of a [grouped frame](#the-same-reduction-for-every-column) also work on the frame itself, with every row in one group: the result is a frame of **one row**, with no index. Given names, it holds those columns; without, every column whose type has the reduction. A column keeps its type where the reduction keeps it, so the earliest time of a time column is a time.
+
+```ruby
+df.mean                                  # => one row, the mean of every numeric column
+df.max("tmax", "tmin")                   # => one row, the two maxima
+df["temp"] - df.mean("temp", keep_rows: true)   # the anomaly on each row
+```
+
+They are `sum` `mean` `min` `max` `prod` `accumulate` `median` `variance` `stddev` `variancep` `stddevp` (with `min_count:` and `fill_value:`) and `first` `last` `nunique` `count` `all` `any`; all take `keep_rows:`. A frame with no rows still gives its one row: a sum of nothing is 0, a mean `UNDEF`. For one column's value as a Ruby value, reduce the column: `df["temp"].mean`.
+
 ### Size, names and types
 
 | reader | returns |

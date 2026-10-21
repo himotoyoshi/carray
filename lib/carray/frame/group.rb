@@ -237,6 +237,69 @@ class CAFrame
     col
   end
 
+  # Each column reduced over all the rows, as a frame of one row: the
+  # reductions of +GroupedFrame+ with every row in one group. Given names, the
+  # frame of those columns; without, of every column whose type has the
+  # reduction. A column keeps its type where the reduction keeps it (the
+  # earliest time of a time column is a time), and +min_count:+ /
+  # +fill_value:+ / +keep_rows:+ work as they do for a group. A frame with no
+  # rows still gives its one row: a sum of nothing is 0, a mean UNDEF.
+  #
+  #   df.mean                     # => one row, the mean of every numeric column
+  #   df.max("tmax", "tmin")      # => one row, the two maxima
+  #   df["tmax"] - df.mean("tmax", keep_rows: true)   # the anomaly on each row
+  #
+  # For one column's value as a Ruby value, reduce the column: +df["tmax"].mean+.
+  #
+  # @!method sum(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   @return [CAFrame] one row.
+  # @!method mean(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   @return [CAFrame] one row.
+  # @!method min(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   @return [CAFrame] one row.
+  # @!method max(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   @return [CAFrame] one row.
+  # @!method prod(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   @return [CAFrame] one row.
+  # @!method accumulate(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   @return [CAFrame] one row.
+  # @!method median(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   @return [CAFrame] one row.
+  # @!method variance(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   @return [CAFrame] one row.
+  # @!method stddev(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   @return [CAFrame] one row.
+  # @!method variancep(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   @return [CAFrame] one row.
+  # @!method stddevp(*names, min_count: nil, fill_value: nil, keep_rows: false)
+  #   @return [CAFrame] one row.
+  # @!method first(*names, keep_rows: false)
+  #   @return [CAFrame] one row: each column's first present value.
+  # @!method last(*names, keep_rows: false)
+  #   @return [CAFrame] one row: each column's last present value.
+  # @!method nunique(*names, keep_rows: false)
+  #   @return [CAFrame] one row: each column's number of distinct present values.
+  # @!method count(*names, keep_rows: false)
+  #   @return [CAFrame] one row: each column's number of present values.
+  # @!method all(*names, keep_rows: false)
+  #   @return [CAFrame] one row, for the boolean columns.
+  # @!method any(*names, keep_rows: false)
+  #   @return [CAFrame] one row, for the boolean columns.
+  CArray.send(:define_named_methods, self,
+              [:sum, :mean, :min, :max, :prod, :accumulate, :median,
+               :variance, :stddev, :variancep, :stddevp,
+               :first, :last, :nunique, :count, :all, :any], :reduce_all_rows)
+
+  private def reduce_all_rows (reduction, *names, **keywords)
+    cat = CACategorical.from_codes(CArray.uint8(@nrow).fill(0), ["all"])
+    # key-labels: no key; the one group's label is dropped below
+    out = GroupedFrame.new(self, cat, "all", [], index: CA_OBJECT(["all"]))
+                      .public_send(reduction, *names, **keywords)
+    return out if keywords[:keep_rows]
+    # One row of the whole frame: no group to label it.
+    return CAFrame.new(out.column_names.to_h { |name| [name, out[name]] })
+  end
+
   # The values of the columns moved along the rows: +n:+ rows back (a
   # negative +n+ looks ahead), or the value at an exact distance of the key
   # -- +before: "1 hour"+ gives each row the value of the row whose key is

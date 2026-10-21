@@ -27,6 +27,7 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | glance at a frame | `p df` | 4 |
 | print every row | `puts df`, `to_table(rows: nil)` | 4 |
 | check every column's type, missing count and range | `describe` | 4 |
+| one summary of every column, as one row | `df.mean`, `df.max("x", "y")` | 4 |
 | know the size, the column names, the types | `nrow`, `column_names`, `data_types` | 4 |
 | see the distinct values of a column and their counts | `value_counts` | 4 |
 | find the rows with missing values | `df[df["x"].is_masked]` | 4, 8 |

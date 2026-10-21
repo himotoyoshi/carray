@@ -140,6 +140,16 @@ counts.to_a   # => [8, 8, 8]
 
 Eight days from each shop: the table has no missing rows.
 
+The same summaries work on the frame, giving one row with a value for each column you name, or for every column that has the summary when you name none:
+
+```ruby
+p sales.max("visitors", "revenue")
+# #<CAFrame nrow=1 columns=[visitors:int64, revenue:float64]>
+# visitors  revenue
+# --------  -------
+#      402  4112.58
+```
+
 ## Finding the rows with missing values
 
 `is_masked` gives, for each cell of a column, `true` where it is missing. Used as a row selector it picks out those rows:

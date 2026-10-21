@@ -76,6 +76,23 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     :resample      => ->(df, _) { df.parse_to_time("t").resample("t", "2 days").mean },
     :windows       => ->(df, _) { df.windows(on: "k", before: 1).mean },
     :lag           => ->(df, _) { df.lag(n: 1) },
+    :sum           => ->(df, _) { df.sum },
+    :mean          => ->(df, _) { df.mean },
+    :min           => ->(df, _) { df.min },
+    :max           => ->(df, _) { df.max },
+    :prod          => ->(df, _) { df.prod },
+    :accumulate    => ->(df, _) { df.accumulate },
+    :median        => ->(df, _) { df.median },
+    :variance      => ->(df, _) { df.variance },
+    :stddev        => ->(df, _) { df.stddev },
+    :variancep     => ->(df, _) { df.variancep },
+    :stddevp       => ->(df, _) { df.stddevp },
+    :first         => ->(df, _) { df.first },
+    :last          => ->(df, _) { df.last },
+    :nunique       => ->(df, _) { df.nunique },
+    :count         => ->(df, _) { df.count },
+    :all           => ->(df, _) { df.all },
+    :any           => ->(df, _) { df.any },
   }.freeze
 
   # Public methods that return no frame made from this one.
