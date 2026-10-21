@@ -850,6 +850,56 @@ class GroupedFrame
     self
   end
 
+  # The +n+ rows of each group with the largest values of the key columns,
+  # as a view-frame: the groups in the order of +labels+, each group's rows
+  # largest first, as +CAFrame#nlargest+ orders them (several keys break
+  # ties in turn, a NaN or masked key loses to every value, rows that tie on
+  # every key keep their order). A group with fewer than +n+ rows gives all
+  # of them; a row whose group key is masked is in no group.
+  #
+  #   df.group_by("station").nlargest(3, "temp")   # each station's 3 warmest rows
+  #
+  # @param n [Integer] how many rows per group, 0 or more.
+  # @param keys [Array<String>] the key columns (or the index axis name).
+  # @return [CAFrame]
+  # @raise [ArgumentError] when +n+ is negative or no key is given.
+  def nlargest (n, *keys)
+    return largest_rows_of_groups("nlargest", n, keys, true)
+  end
+
+  # The +n+ rows of each group with the smallest values of the key columns,
+  # as +nlargest+ gives the largest.
+  #
+  # @param n [Integer] how many rows per group, 0 or more.
+  # @param keys [Array<String>] the key columns (or the index axis name).
+  # @return [CAFrame]
+  # @raise [ArgumentError] when +n+ is negative or no key is given.
+  def nsmallest (n, *keys)
+    return largest_rows_of_groups("nsmallest", n, keys, false)
+  end
+
+  private def largest_rows_of_groups (verb, n, keys, descending)
+    refuse_changed_rows(verb)
+    unless n.is_a?(Integer)
+      raise TypeError, "#{verb}: the count is an Integer (got #{n.inspect})"
+    end
+    raise ArgumentError, "#{verb}: the count must be 0 or more (got #{n})" if n < 0
+    raise ArgumentError, "#{verb}: give at least one key column" if keys.empty?
+    cols = keys.map do |key|
+      @frame.__send__(:key_column, @frame.__send__(:column_key, key, verb), verb)
+    end
+    sort_keys = cols.map { |col| descending ? col.order(descending: true, method: :dense) : col }
+    # Rows sorted by group, then by the keys; a row in no group comes last.
+    addr = CArray.sort_addr(group_codes, *sort_keys, masked_position: :last).to_a
+    picked = []
+    start  = 0
+    @cat.category_sizes.to_a.each do |size|
+      picked.concat(addr[start, [n, size].min]) if n > 0
+      start += size
+    end
+    return @frame[CA_INT64(picked)]
+  end
+
   # Keep the rows of the groups the block chooses. The block receives the
   # grouped frame and returns a boolean CArray with one value per group,
   # built from the group reductions, as +CAFrame#filter+'s block returns one
