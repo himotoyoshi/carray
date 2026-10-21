@@ -155,13 +155,13 @@ class CAFrame
               "df[...] with several keys returns columns; every key must be a String " \
               "(use df.select(...) for a subset frame)"
       end
-      return keys.map { |k| @columns.fetch(k) { raise KeyError, "no column #{k.inspect}" } }
+      return keys.map { |k| @columns.fetch(k) { refuse_missing_column(k) } }
     end
 
     key = keys.first
     case key
     when String
-      @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+      @columns.fetch(key) { refuse_missing_column(key) }
     when Integer
       row(key)
     when Range
@@ -998,6 +998,17 @@ class CAFrame
 
   # A column name given as an argument: a String, as the frame's column
   # keys are. Symbols are the frame's options and types, never names.
+  # df["name"] for a name that is no column. The index is not a column, so
+  # its name is refused too, pointing at df.index.
+  private def refuse_missing_column(key)
+    if @index && key == @axis_name
+      raise KeyError,
+            "no column #{key.inspect}: it is the index, read it with df.index " \
+            "(reset_index makes it a column again)"
+    end
+    raise KeyError, "no column #{key.inspect}"
+  end
+
   private def column_key(name, verb)
     CAFrame.__send__(:column_key, name, verb)
   end

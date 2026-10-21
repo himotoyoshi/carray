@@ -943,7 +943,7 @@ The index is an array of **row labels** — times, station names, ids — kept b
 - interpolating in time with [`fill(name, :linear)`](#masking-and-filling-cells);
 - labelling the rows of a grouped result — [`group_by`](#grouping-rows) and [`resample`](#time-bins--resample) make the group key the index.
 
-The index is not a column: `df["time"]` does not reach it (it raises `KeyError`), and `drop` does not remove it. Its name is the frame's **`axis_name`**, the name of the row axis (`"row"` by default); it is the key the index appears under in a row `Hash`, and the first column `to_csv` writes. Because of that, while the frame has an index, its axis name cannot also be a column name: building such a frame, or `append` of a column with that name, raises `ArgumentError`.
+The index is not a column: `df["time"]` does not reach it (it raises `KeyError`, which points at `df.index`), and `drop` does not remove it. Its name is the frame's **`axis_name`**, the name of the row axis (`"row"` by default); it is the key the index appears under in a row `Hash`, and the first column `to_csv` writes. Because of that, while the frame has an index, its axis name cannot also be a column name: building such a frame, or `append` of a column with that name, raises `ArgumentError`.
 
 ### `set_index` / `reset_index`
 

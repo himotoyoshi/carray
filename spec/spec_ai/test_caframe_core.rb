@@ -591,6 +591,16 @@ class TestCAFrameFilterAndGather < Test::Unit::TestCase
     assert_raise(ArgumentError) { @df.filter(@df["temp"]) }   # not boolean
   end
 
+  def test_the_index_name_is_no_column_and_points_at_the_index
+    df = @df.set_index("station")
+    e = assert_raise(KeyError) { df["station"] }
+    assert_match(/it is the index, read it with df\.index/, e.message)
+    e = assert_raise(KeyError) { df["temp", "station"] }
+    assert_match(/df\.index/, e.message)
+    e = assert_raise(KeyError) { df["nope"] }
+    assert_equal 'no column "nope"', e.message
+  end
+
   def test_filter_carries_index
     df = @df.set_index("station")
     sub = df.filter { |f| f["temp"] > 20 }
