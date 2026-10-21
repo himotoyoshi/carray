@@ -41,8 +41,11 @@ class CAFrame
         end
         return cols
       end
-      results = names.map do |name|
-        key = @frame.__send__(:column_key, name, verb)
+      # A column named twice would be one result column twice over.
+      keys = CAFrame.__send__(:refuse_repeated_names,
+                              names.map { |name| @frame.__send__(:column_key, name, verb) }, verb)
+      results = keys.map do |key|
+        name = key
         col = @frame[key]
         unless column_has?(col, verb, args, keywords)
           raise CArray::DataTypeError,

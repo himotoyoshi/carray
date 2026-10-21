@@ -70,4 +70,16 @@ class TestCAFrameReduceAllRows < Test::Unit::TestCase
     assert_raise(CArray::DataTypeError) { frame.mean("s") }
     assert_raise(ArgumentError) { frame.first("v", min_count: 1) }
   end
+
+  # A column named twice is refused, as select refuses it.
+  def test_a_column_named_twice
+    df = frame
+    assert_raise(ArgumentError) { df.mean("v", "v") }
+    assert_raise(ArgumentError) { df.cumsum("v", "v") }
+    assert_raise(ArgumentError) { df.lag("v", "v") }
+    df = CAFrame.new("g" => CA_OBJECT(%w[a b]), "v" => CA_FLOAT64([1, 2]))
+    assert_raise(ArgumentError) { df.group_by("g").mean("v", "v") }
+    assert_raise(ArgumentError) { df.group_by("g").mean("v", "v", keep_rows: true) }
+    assert_raise(ArgumentError) { df.windows(on: "v", before: 1).mean("v", "v") }
+  end
 end
