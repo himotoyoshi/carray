@@ -447,8 +447,13 @@ class CAFrame
   private def string_kind_column?(col)
     return true if col.is_a?(CArray::StringOperationMixin)
     return false if col.face? || col.data_type != :object
-    present = col.to_a.reject { |v| UNDEF.equal?(v) }
-    return !present.empty? && present.all?(String)
+    found = false
+    col.each do |v|
+      next if UNDEF.equal?(v)
+      return false unless v.is_a?(String)
+      found = true
+    end
+    return found
   end
 
   # Column projection (memo §13.2): a view-frame holding the named columns as
@@ -534,11 +539,12 @@ class CAFrame
   #   df.drop_masked                    # rows complete in every column
   #   df.drop_masked("tmax", "tmin")    # rows with both temperatures
   #
-  # @param names [Array<String>] the columns to look at.
+  # @param names [Array<String, Range, Regexp, Symbol>] the columns to look
+  #   at, picked as +select+ picks them.
   # @return [CAFrame]
   # @raise [KeyError] for a name that is no column.
   def drop_masked (*names)
-    keys = names.empty? ? @columns.keys : column_keys(names, "drop_masked")
+    keys = names.empty? ? @columns.keys : names_selected(names, "drop_masked")
     holes = CArray.boolean(@nrow).fill(false)
     keys.each do |key|
       col = if @columns.key?(key)

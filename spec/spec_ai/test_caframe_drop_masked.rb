@@ -53,6 +53,11 @@ class TestCAFrameDropMasked < Test::Unit::TestCase
     assert_equal 99.0, df["a"][2]
   end
 
+  def test_columns_picked_as_select_picks_them
+    assert_equal [10, 12], frame.drop_masked(:float64).index.to_a   # a and the 2-D p
+    assert_equal [10, 13], frame.drop_masked(/^[ab]$/).index.to_a
+  end
+
   def test_an_unknown_name
     assert_raise(KeyError) { frame.drop_masked("nope") }
     assert_raise(TypeError) { frame.drop_masked(:a) }

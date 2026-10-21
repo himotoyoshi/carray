@@ -287,14 +287,47 @@ class CAFrame
   #   @return [CAFrame] one row, for the boolean columns.
   CArray.send(:define_named_methods, self,
               [:sum, :mean, :min, :max, :prod, :accumulate, :median,
-               :variance, :stddev, :variancep, :stddevp,
-               :first, :last, :nunique, :count, :all, :any], :reduce_all_rows)
+               :variance, :stddev, :variancep, :stddevp], :reduce_all_rows)
 
-  private def reduce_all_rows (reduction, *names, **keywords)
-    out = all_rows_group.public_send(reduction, *names, **keywords)
-    return out if keywords[:keep_rows]
-    # One row of the whole frame: no group to label it.
-    return CAFrame.new(out.column_names.to_h { |name| [name, out[name]] })
+  CArray.send(:define_named_methods, self,
+              [:first, :last, :nunique, :count, :all, :any], :reduce_all_rows_to_a_value)
+
+  private def reduce_all_rows (reduction, *names, min_count: nil, fill_value: nil, keep_rows: false)
+    if fill_value.is_a?(Hash)
+      unknown = fill_value.keys - column_names
+      unless unknown.empty?
+        raise ArgumentError,
+              "#{reduction}: fill_value names no column #{unknown.map(&:inspect).join(', ')}"
+      end
+    end
+    return reduce_down_the_rows(reduction, names, keep_rows) do |name|
+      fill = fill_value.is_a?(Hash) ? fill_value[name] : fill_value
+      { min_count: min_count, fill_value: fill }.compact
+    end
+  end
+
+  private def reduce_all_rows_to_a_value (reduction, *names, keep_rows: false)
+    return reduce_down_the_rows(reduction, names, keep_rows) { |_| {} }
+  end
+
+  # Each named column, or every column whose type has the reduction,
+  # reduced by the column itself along the rows to one row (keep_axis), so
+  # it keeps its type as the column's reduction keeps it. The block gives a
+  # column's keywords. A frame of one row with no index; with +keep_rows+,
+  # each row holding the result, as a group's +keep_rows+ gives it.
+  private def reduce_down_the_rows (reduction, names, keep_rows)
+    meth  = reduction == :count ? :count_not_masked : reduction
+    named = {}
+    out = ColumnWalk.new(self).over(reduction, names) do |col, name|
+      result = col.public_send(meth, axis: 0, keep_axis: true, **yield(name))
+      if keep_rows
+        result = result[CArray.int64(@nrow).fill(0), *([nil] * (result.ndim - 1))].copy
+      end
+      named[name] = result
+    end
+    return CAFrame.new(named) unless keep_rows
+    return out unless names.empty?
+    return CAFrame.new(named, axis_name: @axis_name, index: @index)
   end
 
   # Values computed down the rows, one per row, as +GroupedFrame+ computes
@@ -323,15 +356,30 @@ class CAFrame
               [:order, :cumsum, :cumprod, :cummax, :cummin, :cumcount], :run_down_all_rows)
 
   private def run_down_all_rows (operation, *names, **keywords)
-    return all_rows_group.public_send(operation, *names, **keywords)
+    # The keywords are the core's to check, before any column is read.
+    CArray.float64(1).public_send(operation, **keywords)
+    out = ColumnWalk.new(self).over(operation, names, [], [], keywords) do |col, _|
+      col.public_send(operation, **(col.ndim > 1 ? keywords.merge(axis: 0) : keywords))
+    end
+    return out unless names.empty?
+    return CAFrame.new(out, axis_name: @axis_name, index: @index)
   end
 
-  # The frame's rows as one group, for the verbs a grouped frame has.
-  private def all_rows_group
-    cat = CACategorical.from_codes(CArray.uint8(@nrow).fill(0), ["all"])
-    # key-labels: no key; the one group's label is dropped by the callers
-    return GroupedFrame.new(self, cat, "all", [], index: CA_OBJECT(["all"]))
+  # The frame's own walk over its columns: the one rule of a frame-wide verb
+  # (ColumnVerbs) -- which columns, and the shape of the answer -- for the
+  # verbs that run down all the rows, each column computed by itself.
+  class ColumnWalk
+    include CAFrame::ColumnVerbs
+
+    def initialize (frame)
+      @frame = frame
+    end
+
+    def over (verb, names, key_names = [], args = [], keywords = {}, &block)
+      return over_named_columns(verb, names, key_names, args, keywords, &block)
+    end
   end
+  private_constant :ColumnWalk
 
   # The values of the columns moved along the rows: +n:+ rows back (a
   # negative +n+ looks ahead), or the value at an exact distance of the key
@@ -363,12 +411,17 @@ class CAFrame
   #   key repeats (the row at a key would not be one row).
   def lag (*names, n: nil, before: nil, after: nil, on: nil)
     distance = lag_distance("lag", n, before, after, on)
+    walk = ColumnWalk.new(self)
     if distance.nil?
       step = n.nil? ? 1 : n
-      cols = lag_columns("lag", names, []) { |col| col.ndim > 1 ? col.lag(step, axis: 0) : col.lag(step) }
+      cols = walk.over(:lag, names, [], [step]) do |col, _|
+        col.ndim > 1 ? col.lag(step, axis: 0) : col.lag(step)
+      end
     else
       addr = lag_addresses("lag", [CArray.int64(nrow).seq], *distance)
-      cols = lag_columns("lag", names, [distance.first]) { |col| col[addr, *([nil] * (col.ndim - 1))].copy }
+      cols = walk.over(:lag, names, [distance.first], [1]) do |col, _|
+        col[addr, *([nil] * (col.ndim - 1))].copy
+      end
     end
     return cols unless names.empty?
     CAFrame.new(cols, axis_name: @axis_name, index: @index)
@@ -431,20 +484,6 @@ class CAFrame
     return keys.public_send(sign, width)
   end
 
-  # The named columns (each checked) or every column but +skip+, each through
-  # the block.
-  private def lag_columns (verb, names, skip)
-    if names.empty?
-      cols = {}
-      @columns.each { |name, col| cols[name] = yield(col) unless skip.include?(name) }
-      return cols
-    end
-    out = column_keys(names, verb).map do |name|
-      col = @columns.fetch(name) { refuse_missing_column(name) }
-      yield(col)
-    end
-    return out.size == 1 ? out.first : out
-  end
 end
 
 # GroupedFrame — the result of +CAFrame#group_by+ (memo §11.6, §16).
@@ -492,14 +531,22 @@ class GroupedFrame
     @labels.size
   end
 
-  # The number of rows in each group, as a frame of one column "size",
-  # labelled as a reduction's result is. A row whose key is masked is in no
-  # group, so the sizes need not add up to the frame's nrow.
+  # The number of rows in each group, as a frame of one column, "size"
+  # unless +name:+ says otherwise, labelled as a reduction's result is. A row
+  # whose key is masked is in no group, so the sizes need not add up to the
+  # frame's nrow.
   #
+  # @param name [String] the result column's name.
   # @return [CAFrame]
-  def size
+  # @raise [ArgumentError] when a key has that name.
+  def size (name: "size")
     refuse_changed_rows("size")
-    return result_frame({ "size" => @cat.category_sizes.int64 }, false)
+    name = @frame.__send__(:column_name_arg, name, "size")
+    if @key_names.include?(name) || @axis_name == name
+      raise ArgumentError,
+            "size: a key is named #{name.inspect}; name the result otherwise, as in size(name: \"n\")"
+    end
+    return result_frame({ name => @cat.category_sizes.int64 }, false)
   end
 
   # Each group's label (an Array of the key values for several keys) and its
@@ -869,6 +916,9 @@ class GroupedFrame
     when :linear
       @frame.__send__(:refuse_if_frozen)
       key = @frame.__send__(:column_key, name, "fill")
+      # The column and the index are checked as CAFrame#fill checks them,
+      # on no rows, so a call without groups is refused as one with groups.
+      @frame.__send__(:select_rows, CA_INT64([])).fill(key, :linear)
       # Each group's rows as a frame of views, so its fill writes through.
       ngroup.times do |k|
         @frame.__send__(:select_rows, group_address(k)).fill(key, :linear)

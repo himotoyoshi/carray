@@ -1200,7 +1200,7 @@ The columns are the names any group's Hash has, in the order they first appear. 
 
 ### Going through the groups — `each`, `size`
 
-`each` yields each group's label and its rows as a sub-frame sharing the frame's columns, in the order of `labels` (an Array of the key values for several keys); without a block it gives an Enumerator. `size` gives the number of rows in each group, as a frame of one column `"size"` labelled as a reduction's result is. A row whose key is masked is in no group, so neither sees it.
+`each` yields each group's label and its rows as a sub-frame sharing the frame's columns, in the order of `labels` (an Array of the key values for several keys); without a block it gives an Enumerator. `size` gives the number of rows in each group, as a frame of one column `"size"` (or the name `size(name: ...)` gives, for a frame with a key of that name) labelled as a reduction's result is. A row whose key is masked is in no group, so neither sees it.
 
 ```ruby
 df.group_by("station").each { |station, rows| puts "#{station}: #{rows.nrow}" }

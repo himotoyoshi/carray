@@ -172,6 +172,13 @@ class TestCAFrameGroupTransform < Test::Unit::TestCase
     assert_equal [3.0, 0.0, 0.0, 100.0, 0.0], df["v"].to_a
   end
 
+  def test_fill_linear_checks_the_column_without_groups_too
+    k = CA_OBJECT(%w[a b])
+    k[] = UNDEF
+    df = CAFrame.new("k" => k, "s" => CArray.string(%w[x y]))
+    assert_raise(ArgumentError) { df.group_by("k").fill("s", :linear) }
+  end
+
   def test_resample_groups
     t  = CArray.time_range("2024-01-01T00:00", "2024-01-01T05:00", unit: :h)
     df = CAFrame.new("time" => t, "v" => CA_FLOAT64([1, 2, 3, 4, 5, 6])).set_index("time")

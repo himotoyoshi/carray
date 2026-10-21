@@ -34,6 +34,14 @@ class TestCAFrameShapeAndGroups < Test::Unit::TestCase
     assert_equal [1, 2, 1], out["size"].to_a
   end
 
+  def test_size_named
+    df = CAFrame.new("size" => CA_OBJECT(%w[a b a]), "d" => CA_INT32([1, 1, 2]))
+    e = assert_raise(ArgumentError) { df.group_by("size", "d").size }
+    assert_match(/size\(name:/, e.message)
+    assert_equal %w[size d n], df.group_by("size", "d").size(name: "n").column_names
+    assert_equal %w[n], df.group_by("size").size(name: "n").column_names
+  end
+
   def test_each
     seen = []
     grp = frame.group_by("k")
