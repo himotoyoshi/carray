@@ -397,16 +397,31 @@ class CAFrame
     self
   end
 
+  # The names that the arguments of select / drop pick: a name, or a Range
+  # or Regexp expanded as stack_columns expands it; none twice.
+  private def names_selected(args, verb)
+    names = args.flat_map do |a|
+      a.is_a?(Range) || a.is_a?(Regexp) ? columns_selected(a, verb) : [a]
+    end
+    return column_keys(names, verb)
+  end
+
   # Column projection (memo §13.2): a view-frame holding the named columns as
   # aliases (zero-copy, sharing storage with the parent frame). Distinct from
   # +df[...]+, which escapes columns to raw CArrays, and from +filter+, which
   # selects rows. +select+ takes no block — row conditions go through +filter+
   # (old carray-dataframe fused the two into +select(cols) { cond }+; here they
   # are orthogonal and compose by chaining: +df.select(...).filter { ... }+).
+  # Each argument is a name, a Range of names (the columns from one to the
+  # other, in the frame's order) or a Regexp (the names it matches), as
+  # +stack_columns+ takes them.
+  #
+  #   df.select("station", "tmax".."rain")
+  #   df.select(/^t/)
   def select(*names)
     raise ArgumentError, "select requires at least one column name" if names.empty?
     cols = {}
-    column_keys(names, "select").each do |key|
+    names_selected(names, "select").each do |key|
       raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
       cols[key] = @columns[key]
     end

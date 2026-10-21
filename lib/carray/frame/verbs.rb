@@ -49,10 +49,11 @@ class CAFrame
   end
 
   # Remove one or more columns, returning a new frame (column set changes,
-  # memo §3.8). Column data is untouched and shared with the original.
+  # memo §3.8). Column data is untouched and shared with the original. Each
+  # argument is a name, a Range of names or a Regexp, as +select+ takes them.
   def drop(*names)
     cols = @columns.dup
-    column_keys(names, "drop").each do |key|
+    names_selected(names, "drop").each do |key|
       raise KeyError, "no column #{key.inspect}" unless cols.key?(key)
       cols.delete(key)
     end

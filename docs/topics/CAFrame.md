@@ -498,6 +498,8 @@ df.filter { |f| f.index.is_masked }   # every row with no label
 
 ```ruby
 sub = df.select("station", "temp")   # => CAFrame with two columns
+df.select("tmax".."rain")            # the columns from tmax to rain, in the frame's order
+df.select(/^t/)                      # the columns whose names match
 sub.column_names                     # => ["station", "temp"]
 ```
 
@@ -689,7 +691,7 @@ df.fill("temp", :linear)                            # fill masked cells
 ### Adding, removing and renaming columns
 
 - **`append(name, col)`** returns a new frame with the column added at the end, or replacing an existing column of that name in place. With `before: "temp"` or `after: "station"` it goes next to that column instead, and an existing column of that name is moved there: `df.append("id", ids, before: df.column_names.first)` puts it leftmost. Its length must be `N`. Only a frame with **no columns and no index** takes `N` from the column appended to it; a frame of zero rows that still has a column or an index requires length 0 (see [A frame with only an index](#a-frame-with-only-an-index)).
-- **`drop(*names)`** returns a new frame without those columns. The data is not touched.
+- **`drop(*names)`** returns a new frame without those columns. The data is not touched. As in `select`, a name may be given as a Range of names or a Regexp.
 - **`rename(old => new, ...)`** returns a new frame with the columns renamed, in the same order.
 
 The same changes can be made to the frame itself with `df["name"] =`:
