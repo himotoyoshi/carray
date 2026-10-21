@@ -74,6 +74,7 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     :unstack       => ->(df, _) { df.select("w").unstack(axis: 1).first },
     :resample      => ->(df, _) { df.parse_to_time("t").resample("t", "2 days").mean },
     :windows       => ->(df, _) { df.windows(on: "k", before: 1).mean },
+    :lag           => ->(df, _) { df.lag(n: 1) },
   }.freeze
 
   # Public methods that return no frame made from this one.

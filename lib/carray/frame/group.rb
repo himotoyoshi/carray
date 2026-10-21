@@ -6,6 +6,8 @@
 # -> group_by_category, so the frame layer only builds the key and hands
 # the group iterator back (exposure, §4.3).
 
+require "carray/distance_limit"
+
 class CAFrame
   # Group rows by one or more keys. Each key is a column name (String) or an
   # external length-N CArray. Returns a GroupedFrame.
@@ -233,6 +235,119 @@ class CAFrame
             "use one of its components (e.g. df[name][nil, 0])"
     end
     col
+  end
+
+  # The values of the columns moved along the rows: +n:+ rows back (a
+  # negative +n+ looks ahead), or the value at an exact distance of the key
+  # -- +before: "1 hour"+ gives each row the value of the row whose key is
+  # one hour earlier, +after:+ one hour later. The key is the index, or the
+  # column +on:+ names; it is a time, a duration or a number, and the
+  # distance is a duration such as "1 hour" (or a CATimedelta value) or a
+  # number accordingly. A row with no row at that key gets UNDEF; so does a
+  # row whose key is masked. The rows need not be in order.
+  #
+  #   df["dtemp"] = df["temp"] - df.lag("temp", before: "1 hour")
+  #   df.lag("temp", n: 1)               # the previous row
+  #
+  # +GroupedFrame#lag+ does the same within each group. Given names, one
+  # name gives the CArray and several an Array of them; without names, a
+  # frame of every column (the +on:+ column left out) on the frame's rows
+  # and index. A result shows the column's attributes, as +CArray#lag+'s
+  # does.
+  #
+  # @param names [Array<String>] the columns.
+  # @param n [Integer] rows back.
+  # @param before [String, CATimedelta::Element, Numeric] the distance back.
+  # @param after [String, CATimedelta::Element, Numeric] the distance ahead.
+  # @param on [String] the key column, with +before:+ or +after:+ (default the
+  #   index).
+  # @return [CArray, Array<CArray>, CAFrame]
+  # @raise [ArgumentError] when +n:+, +before:+ and +after:+ are combined,
+  #   when +on:+ comes without a distance, when there is no key, or when the
+  #   key repeats (the row at a key would not be one row).
+  def lag (*names, n: nil, before: nil, after: nil, on: nil)
+    distance = lag_distance("lag", n, before, after, on)
+    if distance.nil?
+      step = n.nil? ? 1 : n
+      cols = lag_columns("lag", names, []) { |col| col.ndim > 1 ? col.lag(step, axis: 0) : col.lag(step) }
+    else
+      addr = lag_addresses("lag", [CArray.int64(nrow).seq], *distance)
+      cols = lag_columns("lag", names, [distance.first]) { |col| col[addr, *([nil] * (col.ndim - 1))].copy }
+    end
+    return cols unless names.empty?
+    CAFrame.new(cols, axis_name: @axis_name, index: @index)
+  end
+
+  # [key name, key, sign, width] for a lag by distance; nil for one by rows.
+  private def lag_distance (verb, n, before, after, on)
+    if before.nil? && after.nil?
+      raise ArgumentError, "#{verb}: on: goes with before: or after:" unless on.nil?
+      return nil
+    end
+    unless n.nil?
+      raise ArgumentError, "#{verb}: give n: (rows) or before: / after: (a distance of the key), not both"
+    end
+    unless before.nil? || after.nil?
+      raise ArgumentError, "#{verb}: give before: or after:, not both"
+    end
+    if on.nil?
+      unless @index
+        raise ArgumentError, "#{verb}: the frame has no index; name the key column with on:"
+      end
+      on_name = @axis_name
+    else
+      on_name = column_key(on, verb)
+    end
+    key   = key_column(on_name, verb)
+    label = before.nil? ? "#{verb}: after:" : "#{verb}: before:"
+    width = CArray::DistanceLimit.read(before || after, key, label)
+    return [on_name, key, before.nil? ? :+ : :-, width]
+  end
+
+  # For each row, the address of the row of its row set whose key is its own
+  # key moved by the width; masked where there is none. A row in no set is
+  # masked too, and so is a row whose key is NaN or infinite, which is no
+  # distance from any key (as in windows).
+  private def lag_addresses (verb, row_sets, _on_name, key, sign, width)
+    key  = key.mask_invalid if key.float?
+    addr = CArray.int64(nrow)
+    addr[] = UNDEF
+    row_sets.each do |rows|
+      keys = key[rows]
+      next if keys.count_not_masked == 0
+      if keys.nunique < keys.count_not_masked
+        raise ArgumentError,
+              "#{verb}: the key repeats#{row_sets.size > 1 ? " within a group" : ""}, " \
+              "so the row at a key is not one row"
+      end
+      addr[rows] = rows[lag_target(keys, sign, width).locate_addr(keys)]
+    end
+    return addr
+  end
+
+  # The keys moved by the width. A time is moved on the finer of its unit and
+  # the width's, so that an hour back from a day is not rounded onto the day.
+  private def lag_target (keys, sign, width)
+    if width.is_a?(CATimedelta::Element) &&
+       CATimeUnitAlgebra.same_group?(keys.unit.base, width.unit.base)
+      keys = keys.to_unit(CATimeUnitAlgebra.finer(keys.unit, width.unit))
+    end
+    return keys.public_send(sign, width)
+  end
+
+  # The named columns (each checked) or every column but +skip+, each through
+  # the block.
+  private def lag_columns (verb, names, skip)
+    if names.empty?
+      cols = {}
+      @columns.each { |name, col| cols[name] = yield(col) unless skip.include?(name) }
+      return cols
+    end
+    out = column_keys(names, verb).map do |name|
+      col = @columns.fetch(name) { refuse_missing_column(name) }
+      yield(col)
+    end
+    return out.size == 1 ? out.first : out
   end
 end
 
@@ -532,9 +647,12 @@ class GroupedFrame
   # "Previous" is the previous row of the frame: sort the frame first
   # (+sort_by_key("time")+) when its rows are not in time order.
   #
-  # @!method lag(*names, n: 1)
+  # @!method lag(*names, n: 1, before: nil, after: nil, on: nil)
   #   Returns each row's value +n+ rows back in its own group, UNDEF where
-  #   the group has none, as +CArray#lag+; a negative +n+ looks ahead.
+  #   the group has none, as +CArray#lag+; a negative +n+ looks ahead. With
+  #   +before:+ (or +after:+) instead, the value of the group's row whose key
+  #   (the index, or the column +on:+ names) is that distance earlier (or
+  #   later), as +CAFrame#lag+ gives it.
   #   @return [CAFrame, CArray, Array<CArray>]
   # @!method order(*names, descending: false, method: :ordinal, kind: :quick)
   #   Returns each row's rank among its group's rows (int64, 0 the
@@ -555,8 +673,16 @@ class GroupedFrame
   # @!method cumcount(*names)
   #   Returns the running count of present values within each group (int64).
   #   @return [CAFrame, CArray, Array<CArray>]
-  def lag (*names, n: 1)
-    transform_columns(:lag, names, [n], {})
+  def lag (*names, n: nil, before: nil, after: nil, on: nil)
+    distance = @frame.__send__(:lag_distance, "lag", n, before, after, on)
+    return transform_columns(:lag, names, [n.nil? ? 1 : n], {}) if distance.nil?
+    refuse_changed_rows("lag")
+    addr = @frame.__send__(:lag_addresses, "lag", (0...ngroup).map { |k| group_address(k) }, *distance)
+    out = over_named_columns(:lag, names, @key_names | [distance.first], [1], {}) do |col|
+      col[addr, *([nil] * (col.ndim - 1))].copy
+    end
+    return out unless names.empty?
+    CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index)
   end
 
   def order (*names, descending: false, method: :ordinal, kind: :quick)

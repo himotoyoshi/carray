@@ -367,7 +367,7 @@ A frame made from this one takes its attributes when it holds the same table:
 - a change of columns: `select`, `append`, `drop`, `rename`, `split_column`, `contrast_columns`, `stack_columns`, `unstack_column`
 - `copy`, `dup` and `clone`
 
-A frame computed from it does not: a summary (`describe`, `verify`, grouped reductions, `aggregate`, `resample`, a window's reductions), a combination (`join`, `join_asof`, `align`, `paste`, `CAFrame.meld` / `concatenate` / `stack`, `unstack`) or a reshape (`pivot`, `melt`, `stack_rows`, `unstack_rows`). To see the original attributes, ask the frame they came from. Each frame has its own set: setting an attribute on a frame made from this one does not change this one.
+A frame computed from it does not: a summary (`describe`, `verify`, grouped reductions, `aggregate`, `resample`, a window's reductions, `lag`), a combination (`join`, `join_asof`, `align`, `paste`, `CAFrame.meld` / `concatenate` / `stack`, `unstack`) or a reshape (`pivot`, `melt`, `stack_rows`, `unstack_rows`). To see the original attributes, ask the frame they came from. Each frame has its own set: setting an attribute on a frame made from this one does not change this one.
 
 `to_csv` does not write the frame's attributes.
 
@@ -1184,6 +1184,7 @@ Some values are not one per group but one per row, computed among the rows of th
 ```ruby
 grp = df.group_by("station")
 df["dtemp"] = df["temp"] - grp.lag("temp")       # change since the station's previous row
+df["d1h"]   = df["temp"] - grp.lag("temp", before: "1 hour")   # change over the past hour
 df["rank"]  = grp.order("temp", descending: true) # 0 for the station's warmest
 df["total"] = grp.cumsum("rain")                  # running total per station
 ```
@@ -1191,12 +1192,15 @@ df["total"] = grp.cumsum("rain")                  # running total per station
 | method | each row gets |
 |---|---|
 | `lag(n: 1)` | the value `n` rows back in its group, `UNDEF` where there is none; a negative `n` looks ahead |
+| `lag(before: d)` / `lag(after: d)` | the value of its group's row whose key is exactly `d` earlier / later, `UNDEF` where there is none |
 | `order(descending:, method:, kind:)` | its rank among its group's rows (int64, `0` the smallest), as `CArray#order` |
 | `cumsum` `cumprod` `cummax` `cummin` `cumcount` | the running value of its group up to and including it |
 
 - They are called as the reductions are: given names, one name gives the `CArray` and several an `Array` of them; without names they give a frame of every column whose type has the operation (the keys left out), on the frame's rows and index.
 - **"Back" means earlier rows of the frame.** Rows that are not in time order give the previous row, not the previous time: sort first, with `sort_by_key("time")`.
 - `lag` takes its step as `n:`, since the positional arguments are column names.
+- **A lag by a distance of the key.** `before: "1 hour"` gives each row the value of the row of its group whose key is one hour earlier; `after:` looks the same distance ahead. The key is the index, or the column `on:` names: a time (the distance is a duration, `"1 hour"` or a `CATimedelta` value), a duration, or a number (the distance is a number). The key must match exactly, so a station with a reading missing at that time gets `UNDEF` rather than an older reading — use [`join_asof`](#join_asof--the-nearest-key) for the nearest one. The rows need not be in time order. A key that repeats within a group is refused, since the row at a key would not be one row; a row whose key is masked, NaN or infinite gets `UNDEF`. A time is moved on the finer of its unit and the distance's, so an hour before a date is not rounded onto the date. `n:` and a distance cannot be given together.
+- `CAFrame#lag` takes the same arguments without groups: `df.lag("temp", before: "1 hour")` on a frame of one station.
 - `lag` gives the column's values moved, so its result shows the column's attributes (units, say), as `CArray#lag` does. `order` and the running values are new quantities and show none, as `CArray#order` and `CArray#cumsum` do. `fill` writes into the column, which keeps its attributes.
 - **Filling gaps per group.** `grp.fill("temp", :ffill)` fills the masked cells of a column in place from the earlier rows of the same group (`:bfill` from the later ones), as [`fill`](#masking-and-filling-cells) does for the whole column. A fill never reaches across into another group, so a station's first rows stay masked when it has nothing to carry, and a row whose key is masked is left as it is. `:linear` interpolates between the group's present values against the index (against the row position within the group when there is none), reading each group in the order of the index as `fill` does; a cell outside the group's present values stays masked. A constant fills every masked cell, as `fill` does.
 - An N-D column runs along the rows, keeping its trailing shape. A row whose key is masked belongs to no group, so its cells are `UNDEF`. They work for `resample` as well, within each time bin.
@@ -2000,6 +2004,7 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | a statistic over a three-hour window every hour (windows that overlap) | [`windows(..., at:)`](#windows-bounded-by-a-key--windows) |
 | refuse an hourly mean that has too few readings | [`mean(min_count:)`](#the-same-reduction-for-every-column) |
 | the change since a station's previous reading | [`group_by(...).lag`](#values-within-a-group--lag-order-running-values) |
+| the change over the past hour at each station | [`group_by(...).lag(name, before: "1 hour")`](#values-within-a-group--lag-order-running-values) |
 | a rank or a running total within each station | [`group_by(...).order` / `cumsum`](#values-within-a-group--lag-order-running-values) |
 | fill each station's gaps from its own earlier readings | [`group_by(...).fill(name, :ffill)`](#values-within-a-group--lag-order-running-values) |
 | interpolate each station's gaps in time | [`group_by(...).fill(name, :linear)`](#values-within-a-group--lag-order-running-values) |
