@@ -38,7 +38,7 @@ The chapters follow the order in which a frame is usually used: read it, look at
 ```ruby
 df = CAFrame.from_csv("obs.csv", types: { "temp" => :float64 })  # Building a frame
 puts df.describe.to_table                                        # Looking at a frame
-df = df.parse_to_time("time").set_index("time")                  # Editing columns, The index
+df = df.set_index("time")                                        # The index (time is read as a time)
 warm  = df.filter { |f| f["temp"] > 20 }                         # Selecting rows
 daily = df.resample("time", "1 day").mean                        # Grouping rows
 means = df.group_by("station").mean.reset_index
