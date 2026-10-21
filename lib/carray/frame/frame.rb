@@ -183,8 +183,8 @@ class CAFrame
       end
     when Symbol
       raise ArgumentError,
-            "df[symbol] is reserved for predicate keys; a column name is a String " \
-            "(df[#{key.to_s.inspect}])"
+            "df[symbol] is reserved for predicate keys; name a column with a String: " \
+            "df[#{key.to_s.inspect}]"
     when Array
       refuse_array_key(key)
     else
