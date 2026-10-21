@@ -54,6 +54,13 @@ sales.filter { |f| f["shop"].eq("south") | (f["revenue"] > 3500) }.nrow         
 sales.filter { |f| f["shop"].is_in(["north", "south"]).not }.nrow                # => 8
 ```
 
+Do not use `&&`, `||` or `!` here. They are Ruby's own operators: they look only at whether the array on their left exists, not at its cells, so `&&` and `||` hand back one of the two conditions whole, and `!` gives `false`. `&&` is the dangerous one, because it raises nothing and quietly keeps the rows of the second condition alone:
+
+```ruby
+sales.filter { |f| (f["visitors"] > 300) & f["shop"].eq("north") }.nrow    # => 2
+sales.filter { |f| f["visitors"] > 300 && f["shop"].eq("north") }.nrow     # => 8, every north row
+```
+
 `is_between` also takes a Range, and `exclude:` leaves out one end or both:
 
 ```ruby
