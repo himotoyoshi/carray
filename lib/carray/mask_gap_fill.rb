@@ -161,8 +161,11 @@ class CArray
   end
 
   # Fill the masked cells of this 1-D array by linear interpolation against
-  # the coordinate `x` (same length, ascending over the present cells).
-  # The one rule both the core (x = cell position) and CAFrame (x = index)
+  # the coordinate `x` (same length).  `x` need not be in order: the present
+  # cells are read as one series in the order of their `x`, so a frame whose
+  # index restarts for each station interpolates across the stations by
+  # time (interpolate one station at a time to keep them apart).  Present
+  # cells sharing an `x` keep their row order.  The one rule both the core (x = cell position) and CAFrame (x = index)
   # use: present cells come back exactly as they are, in this array's own
   # type; a masked cell inside the span of the present ones takes the
   # interpolated value; one outside it stays masked.  Outside is where
@@ -174,13 +177,22 @@ class CArray
     # Fewer than two valid points -> nothing to interpolate between; leave
     # every masked cell masked.
     return copy if present.count(true) < 2
-    addr = x[present].linear_section(x)       # valid positions -> monotonic grid
+    grid  = x[present]
+    order = nil
+    if ( grid[1..-1] < grid[0..-2] ).any
+      order = grid.sort_addr                  # stable: ties keep their row order
+      grid  = grid[order]
+    end
+    addr = grid.linear_section(x)             # valid positions -> monotonic grid
     if face?
       # The Face's linear_fetch already masks the exterior (out of range) and
       # lands on its own grid.
-      return self[present].linear_fetch(addr)
+      known = self[present]
+      known = known[order] if order
+      return known.linear_fetch(addr)
     end
     v = value[present]
+    v = v[order] if order
     # A complex value interpolates its real and imaginary parts.
     interp = v.complex? ? v.linear_fetch(addr) : v.float64.linear_fetch(addr)
     # An integer array takes the nearest integer, half away from zero (as a

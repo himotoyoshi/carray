@@ -174,3 +174,70 @@ class TestCAFrameFillLinearIndexType < Test::Unit::TestCase
     assert_match(/unmask\(method: :linear, axis: 0\)/, e.message)
   end
 end
+
+# An index out of order (stations stacked one after another, each in time
+# order) is read as one series in the order of its values, as windows(on:)
+# and join_asof read it.
+class TestCAFrameFillLinearUnorderedIndex < Test::Unit::TestCase
+  def stacked_stations
+    t = CArray.time(["2024-01-01 00:00", "2024-01-01 00:30", "2024-01-01 01:00",
+                     "2024-01-01 01:30", "2024-01-01 03:00",
+                     "2024-01-01 00:00", "2024-01-01 01:00", "2024-01-01 02:00"])
+    v = CA_FLOAT64([1.5, 1.8, 0.0, 2.4, 3.0, 5.0, 5.5, 6.1])
+    v[2] = UNDEF
+    return CAFrame.new({ "temp" => v }, axis_name: "time", index: t)
+  end
+
+  def test_stacked_stations_interpolate_as_one_series_in_time
+    df = stacked_stations
+    df.fill("temp", :linear)
+    # 01:00 of the first station takes the other station's reading at 01:00
+    assert_equal([1.5, 1.8, 5.5, 2.4, 3.0, 5.0, 5.5, 6.1], df["temp"].to_a)
+  end
+
+  def test_one_station_at_a_time_keeps_them_apart
+    df = stacked_stations
+    first = df.filter { |f| CArray.boolean(f.nrow) { |i| i < 5 } }
+    first.fill("temp", :linear)
+    assert_in_delta(2.1, df["temp"][2], 1e-12)
+  end
+
+  def test_interior_cells_of_an_unordered_index
+    v = CA_FLOAT64([3.0, 0, 0, 0.0])
+    v[1] = UNDEF
+    v[2] = UNDEF
+    df = CAFrame.new({ "x" => CA_FLOAT64([3, 1, 2, 0]), "v" => v }).set_index("x")
+    df.fill("v", :linear)
+    assert_equal([3.0, 1.0, 2.0, 0.0], df["v"].to_a)
+  end
+
+  def test_exterior_of_an_unordered_index_stays_masked
+    v = CA_FLOAT64([3.0, 0, 0, 2.0])
+    v[1] = UNDEF
+    v[2] = UNDEF
+    df = CAFrame.new({ "x" => CA_FLOAT64([3, 0, 1, 2]), "v" => v }).set_index("x")
+    df.fill("v", :linear)
+    assert_equal([3.0, UNDEF, UNDEF, 2.0], df["v"].to_a)
+  end
+
+  def test_time_column_against_an_unordered_index
+    t = CArray.time(["2024-01-01 03:00", "2024-01-01 01:00",
+                     "2024-01-01 02:00", "2024-01-01 00:00"])
+    t[1] = UNDEF
+    df = CAFrame.new("x" => CA_FLOAT64([3, 1, 2, 0]), "when" => t).set_index("x")
+    df.fill("when", :linear)
+    assert_equal(CArray.time("2024-01-01 01:00").parent.to_a,
+                 [df["when"].parent[1]])
+    assert_equal(0, df["when"].count_masked)
+  end
+
+  def test_present_cells_sharing_an_index_value_keep_their_row_order
+    v = CA_FLOAT64([0.0, 10.0, 20.0, 40.0, 0.0])
+    v[4] = UNDEF
+    # x = 1 holds 10 then 20; the masked cell at x = 1.5 lies between the
+    # later of them and x = 2
+    df = CAFrame.new({ "x" => CA_FLOAT64([0, 1, 1, 2, 1.5]), "v" => v }).set_index("x")
+    df.fill("v", :linear)
+    assert_equal([0.0, 10.0, 20.0, 40.0, 30.0], df["v"].to_a)
+  end
+end
