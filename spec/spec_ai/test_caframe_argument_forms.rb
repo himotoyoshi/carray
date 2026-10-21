@@ -94,6 +94,19 @@ class TestCAFrameArgumentForms < Test::Unit::TestCase
     assert_equal [2, 2], grp.size["size"].to_a
   end
 
+  def test_the_first_and_last_rows_of_each_group
+    k = CA_OBJECT(%w[a b a b a c])
+    k[5] = UNDEF
+    grp = CAFrame.new("k" => k, "v" => CA_INT32([0, 1, 2, 3, 4, 5])).group_by("k")
+    assert_equal [0, 1], grp.head(1)["v"].to_a
+    assert_equal [0, 1, 2, 3], grp.head(2)["v"].to_a
+    assert_equal [3, 4], grp.tail(1)["v"].to_a
+    assert_equal [0, 1, 2, 3, 4], grp.head["v"].to_a     # the row in no group left out
+    assert_equal 0, grp.head(0).nrow
+    assert_raise(ArgumentError) { grp.head(-1) }
+    assert_raise(TypeError) { grp.tail("1") }
+  end
+
   def test_sort_by_descending
     df = frame
     assert_equal %w[dd ccc bb a], df.sort_by(descending: true) { |f| f["s"] }["s"].to_a

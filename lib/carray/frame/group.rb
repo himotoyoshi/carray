@@ -974,6 +974,37 @@ class GroupedFrame
     self
   end
 
+  # The first +n+ rows of each group, in row order, as a view-frame: the
+  # rows stay in the frame's order, as +filter+ keeps them. A group with
+  # fewer than +n+ rows gives all of them; a row whose group key is masked
+  # is in no group.
+  #
+  #   df.group_by("station").head(1)    # each station's first row
+  #
+  # @param n [Integer] how many rows per group, 0 or more (default 5).
+  # @return [CAFrame]
+  def head (n = 5)
+    return rows_at_the_ends_of_groups("head", n) { |addr| addr.first(n) }
+  end
+
+  # The last +n+ rows of each group, in row order, as +head+ gives the first.
+  #
+  # @param n [Integer] how many rows per group, 0 or more (default 5).
+  # @return [CAFrame]
+  def tail (n = 5)
+    return rows_at_the_ends_of_groups("tail", n) { |addr| addr.last(n) }
+  end
+
+  private def rows_at_the_ends_of_groups (verb, n)
+    refuse_changed_rows(verb)
+    unless n.is_a?(Integer)
+      raise TypeError, "#{verb}: the count is an Integer (got #{n.inspect})"
+    end
+    raise ArgumentError, "#{verb}: the count must be 0 or more (got #{n})" if n < 0
+    picked = (0...ngroup).flat_map { |k| yield(group_address(k).to_a) }.sort
+    return @frame[CA_INT64(picked)]
+  end
+
   # The +n+ rows of each group with the largest values of the key columns,
   # as a view-frame: the groups in the order of +labels+, each group's rows
   # largest first, as +CAFrame#nlargest+ orders them (several keys break

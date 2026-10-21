@@ -1293,6 +1293,12 @@ df["total"] = grp.cumsum("rain")                  # running total per station
 df.group_by("station").nlargest(3, "temp")    # each station's three warmest rows
 ```
 
+`grp.head(n)` and `grp.tail(n)` give the first and the last `n` rows of each group (5 by default) without sorting: the rows stay in the frame's order, as `filter` keeps them.
+
+```ruby
+df.group_by("station").head(1)                # each station's first row
+```
+
 ### Keeping whole groups — `filter`
 
 `filter` on a grouped frame keeps the rows of the groups its block chooses. The block receives the grouped frame and returns a boolean `CArray` with **one value per group**, built from the group reductions, as `CAFrame#filter`'s block returns one value per row:

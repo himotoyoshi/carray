@@ -63,6 +63,7 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | sort by a computed value | `sort_by { \|f\| ... }` | 6 |
 | take the top few rows | `nlargest(n, "x")`, `nsmallest` | 6 |
 | take the top few rows of each group | `group_by(...).nlargest(n, "x")` | 10, 18 |
+| take the first rows of each group | `group_by(...).head(n)`, `.tail(n)` | 10 |
 | remove repeated rows | `df[df.is_duplicate.not]` | 6 |
 | keep groups that pass a test | `group_by(...).filter { \|g\| ... }` | 10 |
 

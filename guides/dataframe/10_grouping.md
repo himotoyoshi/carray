@@ -287,6 +287,22 @@ p df.filter { |f| f["shop"].eq("north") }.select("date", "revenue", "change", "r
 
 `g.fill(name, :ffill)` fills missing values from earlier rows of the same group only, never from another group (chapter 8).
 
+## The first rows of each group — `head`, `tail`
+
+`head(n)` gives the first `n` rows of each group, and `tail(n)` the last, in the order the rows have in the table:
+
+```ruby
+p sales.group_by("shop").head(1)
+# #<CAFrame nrow=3 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop     visitors  revenue  rating
+# ----------  -------  --------  -------  ------
+# 2024-03-04  north         182  2121.39     4.2
+# 2024-03-04  south          95  1391.47     4.6
+# 2024-03-04  central       310   3038.0     3.8
+```
+
+For the rows with the largest values instead, `nlargest(n, "x")` sorts within each group (chapter 18).
+
 ## Keeping whole groups — `filter`
 
 `filter` on a grouped frame keeps the rows of the groups that pass a test. The block receives the grouped frame and returns one value per group, built from group summaries:
