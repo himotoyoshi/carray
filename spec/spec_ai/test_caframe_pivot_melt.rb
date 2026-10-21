@@ -292,8 +292,13 @@ class TestCAFrameMelt < Test::Unit::TestCase
     assert_equal -1.0, @wide["osaka"][1]
   end
 
-  def test_melt_raises_on_mixed_value_types
+  def test_melt_brings_mixed_number_types_to_their_common_type
     @wide["osaka"] = CA_INT32([11, 21, 31])
+    assert_equal :float64, @wide.melt(id: "time")["value"].data_type
+  end
+
+  def test_melt_raises_on_numbers_mixed_with_text
+    @wide["osaka"] = CArray.string(%w[a b c])
     err = assert_raise(ArgumentError) { @wide.melt(id: "time") }
     assert_match(/cast them to one type/, err.message)
   end

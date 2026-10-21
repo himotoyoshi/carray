@@ -235,9 +235,16 @@ class CAFrame
     pieces = vars.map { |name| self[name] }
     types = pieces.map(&:data_type).uniq
     unless types.size == 1
-      raise ArgumentError,
-            "melt: value columns differ in data type (#{vars.zip(pieces.map(&:data_type)).to_h}); " \
-            "cast them to one type first"
+      # Numbers of different types meet at their common type, each through a
+      # view of its own column (as_type), so the value column still reads
+      # and writes the columns it was made from.
+      unless pieces.all? { |c| !c.face? && (c.numeric? || c.data_type == :boolean) }
+        raise ArgumentError,
+              "melt: value columns differ in data type (#{vars.zip(pieces.map(&:data_type)).to_h}); " \
+              "cast them to one type first"
+      end
+      common = CArray.result_type(*pieces)
+      pieces = pieces.map { |c| c.data_type == common ? c : c.as_type(common) }
     end
     shapes = pieces.map { |c| c.shape.drop(1) }.uniq
     unless shapes.size == 1

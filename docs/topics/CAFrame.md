@@ -1588,7 +1588,7 @@ long["value"].to_a      # => [10.0, 20.0, 30.0, 11.0, 21.0, 31.0]
 - When the frame has an index, it is carried as an id column named after the row axis.
 - Masked cells stay masked.
 - **The result is a sub-frame**: its value column is a view of the melted columns, so writing the result reaches the wide frame. `copy` it to detach it.
-- Because it is a view, the value columns must share **one data type**. Mixed types raise rather than being promoted silently; `cast` them first.
+- Value columns of different number types (an `int64` and a `float64` column, say) meet at their common type, each through a converting view of its own column, so the result is still a view: reading follows the columns, and writing reaches them under each column's own type (a `7.5` written into an integer column's part becomes `7`, as writing to that column does). Other mixtures — numbers with text, or with a time — raise; `cast` them first.
 
 `melt` followed by `pivot` on the same keys gives back the wide frame's values and column names. The id column comes back as the index, and the value columns in ascending order of their names.
 
