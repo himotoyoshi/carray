@@ -346,6 +346,39 @@ class CAFrame
                     keep_rows: keep_rows, args: [p])
   end
 
+  # Each column's five quartile percentiles over all the rows, as
+  # +CArray#quantile+ gives them, as a frame of one row: a column "x" gives
+  # the five columns "x_p0", "x_p25", "x_p50", "x_p75" and "x_p100". With
+  # +keep_rows: true+ every row holds them.
+  #
+  #   df.quantile("temp")
+  #
+  # @param names [Array<String>] the columns; default every column that has
+  #   a quantile.
+  # @return [CAFrame]
+  def quantile (*names, keep_rows: false)
+    named = {}
+    ColumnWalk.new(self).over(:quantile, names) do |col, name|
+      named[name] = col.quantile(axis: 0, keep_axis: true).map do |q|
+        keep_rows ? q[CArray.int64(@nrow).fill(0), *([nil] * (q.ndim - 1))].copy : q
+      end
+    end
+    cols = CAFrame.__send__(:quantile_columns, named)
+    return CAFrame.new(cols) unless keep_rows
+    return CAFrame.new(cols, axis_name: @axis_name, index: @index)
+  end
+
+  # The five columns a quantile gives a column, by name.
+  def self.quantile_columns(named)
+    named.each_with_object({}) do |(name, quartiles), cols|
+      QUANTILE_SUFFIXES.zip(quartiles) { |suffix, q| cols["#{name}_#{suffix}"] = q }
+    end
+  end
+  private_class_method :quantile_columns
+
+  QUANTILE_SUFFIXES = %w[p0 p25 p50 p75 p100].freeze
+  private_constant :QUANTILE_SUFFIXES
+
   private def reduce_all_rows (reduction, *names, min_count: nil, fill_value: nil, keep_rows: false, args: [])
     if fill_value.is_a?(Hash)
       unknown = fill_value.keys - column_names
@@ -844,6 +877,28 @@ class GroupedFrame
     CAFrame.__send__(:check_percentage, p)
     refuse_changed_rows(:percentile)
     reduce_columns(:percentile, names, keep_rows, args: [p], min_count: min_count, fill_value: fill_value)
+  end
+
+  # Each group's five quartile percentiles, as +CAFrame#quantile+ gives them
+  # for all the rows: a column "x" gives "x_p0", "x_p25", "x_p50", "x_p75"
+  # and "x_p100", one row per group, labelled as {#sum} labels its result;
+  # with +keep_rows: true+ on the frame's rows.
+  #
+  #   grp.quantile("temp")
+  #
+  # @param names [Array<String>] the columns; default every column that has
+  #   a quantile.
+  # @return [CAFrame]
+  def quantile (*names, keep_rows: false)
+    refuse_changed_rows(:quantile)
+    refuse_key_as_result(:quantile, names) unless keep_rows
+    named = {}
+    over_named_columns(:quantile, names, @key_names) do |col, name|
+      named[name] = group_reduce(col, :quantile).map { |q| keep_rows ? spread_to_rows(q) : q }
+    end
+    cols = CAFrame.__send__(:quantile_columns, named)
+    return result_frame(cols, false) unless keep_rows
+    return CAFrame.new(cols, axis_name: @frame.axis_name, index: @frame.index)
   end
 
   # The same convenience for the reductions that take no min_count: or

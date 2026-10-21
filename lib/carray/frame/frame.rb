@@ -192,18 +192,23 @@ class CAFrame
     end
   end
 
-  # A Ruby Array is no df[] key: CArray reads one as [start, count], not as
-  # positions. Says what to write for what the Array holds.
-  private def refuse_array_key(key)
-    hint = if !key.empty? && key.all? { |k| k.is_a?(String) }
+  # A Ruby Array is no df[] key, read or written: CArray reads one as
+  # [start, count], where [0, 2] would be rows 0 and 1 rather than rows 0
+  # and 2. Says what to write for what the Array holds.
+  private def refuse_array_key(key, verb = "df[]")
+    strings = !key.empty? && key.all? { |k| k.is_a?(String) }
+    hint = if strings && verb == "df[]"
              "for columns, df[#{key.map(&:inspect).join(', ')}] or " \
              "df.select(#{key.map(&:inspect).join(', ')})"
+           elsif strings
+             "a column is named by one String, df[#{key.first.inspect}] = ..."
            elsif !key.empty? && key.all? { |k| k == true || k == false }
              "for rows, a boolean CArray: df[CA_BOOLEAN(#{key.inspect})]"
            else
-             "for rows, an integer CArray: df[CA_INT64(#{key.inspect})]"
+             "for rows, an integer CArray: df[CA_INT64(#{key.inspect})] " \
+             "(a Range picks a run of rows: df[0..2])"
            end
-    raise ArgumentError, "df[] takes no Ruby Array; #{hint}"
+    raise ArgumentError, "#{verb} takes no Ruby Array; #{hint}"
   end
 
   # --- df[...] = value : row-level assignment ---------------------------
@@ -223,12 +228,13 @@ class CAFrame
   #
   # +sel+ is a row-axis indexer key, classified exactly as CArray classifies a
   # 1-D column key (docs/topics/Indexer_decision_tree.md): a slice (BLOCK —
-  # Range / ArithmeticSequence / [start, count, step]), a boolean CArray
-  # (SELECT), an integer CArray (GRID), or an Integer (a single row). Mask and
-  # delete take any of them and are forwarded to the column indexer, so their
-  # errors match the rest of CArray. Splice reuses the same classifier
-  # (CArray.scan_index) but needs a contiguous slice, so it takes an Integer or
-  # a step-1 BLOCK (Range, step-1 ArithmeticSequence, or [start, count]); a
+  # Range / ArithmeticSequence), a boolean CArray (SELECT), an integer CArray
+  # (GRID), or an Integer (a single row). A Ruby Array, which the column
+  # indexer would read as [start, count], is refused, as df[] refuses it.
+  # Mask and delete take the others and are forwarded to the column indexer,
+  # so their errors match the rest of CArray. Splice reuses the same
+  # classifier (CArray.scan_index) but needs a contiguous slice, so it takes
+  # an Integer or a step-1 BLOCK (Range, step-1 ArithmeticSequence); a
   # strided or scattered selector raises.
   #
   # Delete and splice rebuild the column set, so an alias previously taken
@@ -267,6 +273,8 @@ class CAFrame
     # String names a column, anything else selects rows.
     if selector.is_a?(String)
       column_assign(selector, value)
+    elsif selector.is_a?(Array)
+      refuse_array_key(selector, "df[] =")
     elsif UNDEF.equal?(value)
       mask_rows(selector)
     elsif value.nil?

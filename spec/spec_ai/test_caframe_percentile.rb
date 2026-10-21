@@ -42,6 +42,42 @@ class TestCAFramePercentile < Test::Unit::TestCase
     assert_equal [2.5, 5.5], at["v"].to_a
   end
 
+  QUARTILE_NAMES = %w[v_p0 v_p25 v_p50 v_p75 v_p100].freeze
+
+  # quantile: the five quartile percentiles, each a column "<name>_p<pct>".
+  def test_quantile_of_the_frame
+    df  = frame
+    out = df.quantile("v")
+    assert_equal QUARTILE_NAMES, out.column_names
+    assert_equal 1, out.nrow
+    assert_equal [[1.0, 2.25, 3.5, 4.75, 6.0]], out.to_a
+    assert_equal %w[t_p0 t_p25 t_p50 t_p75 t_p100] + QUARTILE_NAMES, df.quantile.column_names
+    rows = df.quantile("v", keep_rows: true)
+    assert_equal df.index.to_a, rows.index.to_a
+    assert_equal [3.5] * 6, rows["v_p50"].to_a
+  end
+
+  def test_quantile_of_a_group
+    grp = frame.group_by("g")
+    out = grp.quantile("v")
+    assert_equal %w[a b], out.index.to_a
+    assert_equal QUARTILE_NAMES, out.column_names
+    assert_equal [[1.0, 2.0, 3.0, 4.0, 5.0], [2.0, 3.0, 4.0, 5.0, 6.0]], out.to_a
+    assert_equal grp.percentile(25, "v").to_a.flatten, out["v_p25"].to_a
+    assert_equal [3.0, 4.0, 3.0, 4.0, 3.0, 4.0], grp.quantile("v", keep_rows: true)["v_p50"].to_a
+    assert_raise(ArgumentError) { grp.quantile("g") }
+  end
+
+  def test_quantile_of_windows
+    df  = frame
+    out = df.windows(on: "t", before: 2).quantile("v")
+    assert_equal QUARTILE_NAMES, out.column_names
+    assert_equal df.index.to_a, out.index.to_a
+    assert_equal [5.0, 5.25, 5.5, 5.75, 6.0], out.to_a.last
+    at = df.windows(on: "t", before: 2, at: CA_FLOAT64([3, 6])).quantile("v")
+    assert_equal [3.0, 6.0], at.index.to_a
+  end
+
   def test_refusals
     df = frame
     e = assert_raise(ArgumentError) { df.percentile("v", 90) }

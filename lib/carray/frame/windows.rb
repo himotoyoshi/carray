@@ -106,6 +106,24 @@ class WindowedFrame
     window_reduce(:percentile, names, [p], min_count: min_count, fill_value: fill_value)
   end
 
+  # Each window's five quartile percentiles, as +CAFrame#quantile+ gives
+  # them: a column "x" gives "x_p0", "x_p25", "x_p50", "x_p75" and "x_p100",
+  # a frame on the frame's rows and index, or with +at:+ on the points.
+  #
+  # @param names [Array<String>] the columns; default every column that has
+  #   a quantile.
+  # @return [CAFrame]
+  def quantile (*names)
+    named = {}
+    over_named_columns(:quantile, names, @key_names) do |col, name|
+      named[name] = @plan.for_value(col).quantile
+    end
+    cols = CAFrame.__send__(:quantile_columns, named)
+    return CAFrame.new(cols, axis_name: @frame.axis_name, index: @frame.index) unless @at
+    key = @frame.__send__(:key_column, @key_names.first, "windows")
+    CAFrame.new(cols, axis_name: @key_names.first, index: CAFrame.__send__(:key_labels, key, @at.copy))
+  end
+
   private
 
   def window_reduction (reduction, *names, min_count: nil, fill_value: nil)
