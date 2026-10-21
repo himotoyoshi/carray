@@ -25,7 +25,7 @@
       (see the section comment above `rb_ca_axis_group_scan`).
 
   Group codes outside [0, k) at any bundle mark the slab element unassigned
-  (skipped, contributing to no group) — mirrors digitize OOB.
+  (skipped, contributing to no group) — mirrors bin_to OOB.
 
   Float reductions carry the CArray ε-close contract: relative error bounded,
   not bit-exact.

@@ -1,8 +1,8 @@
 # spec_ai/test_snap_to.rb
 #
 # Tests for `CArray#snap_to(list, lfill:, ufill:)`: nearest-neighbour
-# snap to an ascending non-uniform grid.  Sibling of `quantize` (uniform
-# step) and `digitize` (bin index, half-open intervals).
+# snap to an ascending non-uniform grid.  Sibling of `snap` (uniform
+# step) and `bin_to` (bin index, half-open intervals).
 
 require "test/unit"
 require "carray"

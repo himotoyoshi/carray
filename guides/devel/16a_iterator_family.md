@@ -313,7 +313,7 @@ inside the library:
   per-group accumulators, O(K·band), never O(N).
 - The accumulate is a sort-free scatter: `out[composite*band + b] op= v`.
   Codes outside `[0, k)` at any bundle mark the element unassigned (it
-  contributes to no group), mirroring digitize's out-of-bounds handling.
+  contributes to no group), mirroring `bin_to`'s out-of-bounds handling.
 
 Because a group preserves source order, a *within-group* index is weak; the
 group member exposes the flat **source address** of a winner (`min_addr` /
