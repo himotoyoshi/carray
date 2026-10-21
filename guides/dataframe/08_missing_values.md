@@ -213,6 +213,18 @@ s["v_filled"].to_a   # => [1.0, 2.0, 3.0, 4.0, UNDEF]
 
 `strip_mask(value)` fills with a value, and `method: :forward` / `:backward` carry values as `:ffill` / `:bfill` do.
 
+The frame has a `strip_mask` too, which returns a new frame with the gaps filled and leaves the original as it is. A Hash gives each column its own value, and `method:` takes a method or a Hash of them:
+
+```ruby
+s2 = CAFrame.new("v" => [1.0, nil, 3.0], "n" => [1, 2, 3])
+s2.strip_mask(Float::NAN)["v"].to_a              # => [1.0, NaN, 3.0]
+s2.strip_mask("v" => 0.0)["v"].to_a              # => [1.0, 0.0, 3.0]
+s2.strip_mask(method: { "v" => :linear })["v"].to_a   # => [1.0, 2.0, 3.0]
+s2["v"].to_a                                     # => [1.0, UNDEF, 3.0]
+```
+
+One value for the whole frame fills only the columns that have gaps, so `NaN` can fill the float column `v` while the complete integer column `n` is left alone.
+
 ### Filling the result of a summary
 
 `fill_value:` on a summary fills its `UNDEF` results only, leaving the data alone (above).

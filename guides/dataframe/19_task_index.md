@@ -98,6 +98,7 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | interpolate gaps along dates | `set_index` then `fill(name, :linear)` | 9, 11 |
 | interpolate gaps within each group | `group_by(...).fill(name, :linear)` | 10, 11 |
 | keep the original and add a filled copy | `strip_mask` | 8 |
+| a filled copy of the whole frame | `df.strip_mask(value)`, `df.strip_mask(method: ...)` | 8 |
 | refuse a summary with too few values | `min_count:` | 8, 10 |
 | drop rows with missing values | `drop_masked`, `drop_masked("x", "y")` | 8 |
 

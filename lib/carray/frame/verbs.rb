@@ -816,6 +816,109 @@ class CAFrame
     self
   end
 
+  # A frame with the masked cells filled, this frame left as it is: the
+  # sibling of +fill+ that returns a new frame, as CArray#strip_mask is of
+  # CArray#unmask. The value or the method is given as CArray#strip_mask
+  # takes it, for every column or, with a Hash, column by column:
+  #
+  #   df.strip_mask(0.0)                                 # every column, one value
+  #   df.strip_mask("temp" => Float::NAN, "n" => -1)
+  #   df.strip_mask(method: :forward)                    # every column, one method
+  #   df.strip_mask(method: { "temp" => :linear, "station" => :forward })
+  #
+  # A positional Symbol is a value, as in CArray#strip_mask. The methods are
+  # :forward and :backward (carry the last or the next present value down the
+  # rows; :ffill and :bfill are the same) and :linear, which interpolates
+  # against this frame's index when it has one, as +fill+ does, and against
+  # the row position when it has none. An N-D column is filled down the rows.
+  # A cell a method cannot reach (before the first present value, say) stays
+  # masked.
+  #
+  # The forms for every column fill the columns that have a masked cell and
+  # leave the others alone, so one value serves a frame whose complete
+  # columns could not hold it (NaN beside a complete integer column). A
+  # column named in a Hash is filled whatever it holds. A column that cannot
+  # take its value is refused, by name, and no frame is returned.
+  #
+  # The filled columns are new arrays; the others are this frame's own, shared
+  # as +select+ shares them. The index is not filled.
+  #
+  # @return [CAFrame]
+  # @raise [KeyError] for a name that is no column.
+  # @raise [ArgumentError] for neither or both of a value and method:, or an
+  #   unknown method.
+  def strip_mask (fill = STRIP_MASK_UNSET, method: nil, **named)
+    # df.strip_mask("x" => 0.0) arrives as keywords: the String keys are
+    # column names, never an option.
+    unless named.empty?
+      unless fill.equal?(STRIP_MASK_UNSET)
+        raise ArgumentError, "strip_mask: give a fill value or a Hash of them, not both"
+      end
+      fill = named
+    end
+    given = !fill.equal?(STRIP_MASK_UNSET)
+    if given && method
+      raise ArgumentError, "strip_mask: pass either a fill value or method:, not both"
+    end
+    unless given || method
+      raise ArgumentError, "strip_mask: a fill value is required (or method:)"
+    end
+    how = given ? fill : method
+    plan = if how.is_a?(Hash)
+             raise ArgumentError, "strip_mask: the Hash names no column" if how.empty?
+             keys = column_keys(how.keys, "strip_mask")
+             keys.each { |key| refuse_missing_column(key) unless @columns.key?(key) }
+             keys.zip(how.values)
+           else
+             @columns.select { |_, col| col.any_masked? }.keys.map { |key| [key, how] }
+           end
+    unless given
+      plan.each do |_, m|
+        next if STRIP_MASK_METHODS.include?(m)
+        raise ArgumentError,
+              "strip_mask: unknown method #{m.inspect} (:forward | :backward | :linear)"
+      end
+    end
+    cols = @columns.dup
+    plan.each do |key, h|
+      cols[key] = given ? strip_mask_by_value(key, @columns[key], h)
+                        : strip_mask_by_method(key, @columns[key], h)
+    end
+    return rebuild(cols)
+  end
+
+  STRIP_MASK_UNSET = ::Object.new
+  Ractor.make_shareable(STRIP_MASK_UNSET)
+  private_constant :STRIP_MASK_UNSET
+
+  STRIP_MASK_METHODS = %i[forward backward ffill bfill linear].freeze
+  private_constant :STRIP_MASK_METHODS
+
+  private def strip_mask_by_value (key, col, value)
+    return col.strip_mask(value)
+  rescue ArgumentError, TypeError, RangeError, FloatDomainError => e
+    raise e.exception("strip_mask: column #{key.inspect} (#{CArray::Inspector.type_label(col)}) " \
+                      "cannot take #{value.inspect}: #{e.message}")
+  end
+
+  private def strip_mask_by_method (key, col, method)
+    if method == :linear && @index
+      out = col.copy
+      fill_linear_column(key, out, "strip_mask")
+      return out
+    end
+    begin
+      return col.strip_mask(method: method, **(col.ndim > 1 ? { axis: 0 } : {}))
+    rescue ArgumentError, TypeError => e
+      raise e.exception("strip_mask: column #{key.inspect}: #{e.message}")
+    end
+  end
+
+  private def linear_call (verb, key)
+    return "fill(#{key.inspect}, :linear)" if verb == "fill"
+    return "strip_mask(method: :linear) of column #{key.inspect}"
+  end
+
   # A fill Hash, name => method or value. Each column is filled first on a
   # copy, in a frame holding the copy, by the block (frame, name, how) -- so
   # every check a single fill makes applies -- and the stored columns are
@@ -844,12 +947,12 @@ class CAFrame
     return self
   end
 
-  private def fill_linear_column(key, col)
+  private def fill_linear_column(key, col, verb = "fill")
     # A Face column interpolates through its own linear_fetch (a time
     # column's keeps the Face and its unit), as the core gap fill does.
     unless col.__send__(:interpolable?)
       raise ArgumentError,
-            "fill(#{key.inspect}, :linear): numeric or time column required " \
+            "#{linear_call(verb, key)}: numeric or time column required " \
             "(got #{col.data_type_name})"
     end
     # Without an index coordinate x is the cell position, which is exactly what
@@ -860,16 +963,16 @@ class CAFrame
     unless @index.numeric? || @index.is_a?(CATime) || @index.is_a?(CATimedelta)
       along = col.ndim > 1 ? ", axis: 0" : ""
       raise ArgumentError,
-            "fill(#{key.inspect}, :linear): the index #{@axis_name.inspect} is " \
+            "#{linear_call(verb, key)}: the index #{@axis_name.inspect} is " \
             "#{@index.data_type_name}, not numeric or time, so it cannot be the x of " \
             "the interpolation; to interpolate by row position, use " \
-            "df[#{key.inspect}].unmask(method: :linear#{along})"
+            "df[#{key.inspect}].#{verb == "fill" ? "unmask" : "strip_mask"}(method: :linear#{along})"
     end
     # With the index as x, an N-D column is filled one trailing position at a
     # time; each position is a 1-D view, so the fill writes through to it.
     if col.ndim > 1
       col.shape[1..].map { |d| (0...d).to_a }.inject { |a, b| a.product(b).map { |e| Array(e).flatten } }
-         .each { |pos| fill_linear_column(key, col[nil, *Array(pos)]) }
+         .each { |pos| fill_linear_column(key, col[nil, *Array(pos)], verb) }
       return
     end
     # The same fill as the core, with the index as x.

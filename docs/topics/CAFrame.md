@@ -938,7 +938,20 @@ df.fill("temp", 0.0)        # a constant
 - **`:linear`** interpolates a numeric column **against the frame's index** when one is set (a time index gives interpolation in time), and against the row position when there is no index. The index need not be in order: the present values are read as one series in the order of the index, as `windows(on:)` and `join_asof` read it. So a frame with several stations stacked one after another interpolates across the stations by time; to keep them apart, interpolate within each station with `df.group_by("station").fill("temp", :linear)` (see [Values within a group](#values-within-a-group--lag-order-running-values)). Present values at the same index keep their row order. A row whose index is masked, NaN or infinite has no place on the line: its value is not used, and a missing value there stays missing. With an index that is neither numeric nor a time (station names, say), it raises rather than falling back to the row position; to interpolate by position there, use `df["temp"].unmask(method: :linear)` on the column directly. Cells outside the range of present values stay masked; a column with fewer than two present cells is left unchanged.
 - **A value** fills every masked cell with that constant.
 
-A [categorical](../objects/CACategorical.md) column's codes are read-only, so `mask_eq` and `fill` raise on one. Bind a new column instead: `df = df.append("s", df["s"].strip_mask(method: :forward))`.
+A [categorical](../objects/CACategorical.md) column's codes are read-only, so `mask_eq` and `fill` raise on one. Take a filled frame with `strip_mask` instead (below), or bind a new column: `df = df.append("s", df["s"].strip_mask(method: :forward))`.
+
+**`strip_mask`** gives a **new frame** with the masked cells filled and leaves this one as it is — `fill`'s counterpart that returns a copy, as `CArray#strip_mask` is of `CArray#unmask`:
+
+```ruby
+df.strip_mask(0.0)                                   # every column, one value
+df.strip_mask("temp" => Float::NAN, "station" => "?")
+df.strip_mask(method: :forward)                      # every column, one method
+df.strip_mask(method: { "temp" => :linear, "station" => :forward })
+```
+
+- The value or method is given as `CArray#strip_mask` takes it: a positional value (a Symbol is a value), or `method:` with `:forward` / `:backward` (`:ffill` / `:bfill` are the same) or `:linear`, which interpolates against the index as `fill` does.
+- The forms for every column fill **only the columns that have a masked cell**, so one value serves a frame whose complete columns could not hold it (`NaN` beside a complete integer column). A column named in a Hash is filled whatever it holds. A column that cannot take its value raises, naming the column.
+- The filled columns are new arrays; the others are this frame's own, shared as `select` shares them. The index is not filled.
 
 ### Masking, deleting and splicing rows
 
