@@ -1456,6 +1456,17 @@ The key stays a column, and the result keeps the left frame's index:
 
 When the other frame's key is unique, `:left` gives one row per left row, in order: the left columns and index are this frame's own. When a left row matches several right rows, it repeats, and the left columns are views of this frame's picked by row, so a write still reaches this frame.
 
+**Which columns are shared.** A side that every result row has a row of gives its columns as views, picked by row; the side that gets `UNDEF` for an unmatched row is gathered into new columns:
+
+| `how:` | this frame's columns | the other frame's columns |
+|---|---|---|
+| `:left` (default) | views | new |
+| `:inner` | views | views |
+| `:right` | new | views (the key column too) |
+| `:outer` | new | new |
+
+A write to a view column reaches the frame it came from, and reading one gathers its rows through the view each time. Call `copy` on the result when it will be written without touching the joined frames, or read many times (a later `group_by`, repeated reductions): `obs.join(meta, on: "station", how: :inner).copy`.
+
 **Keeping rows by whether the other frame has their key.** Two more modes do not pair rows. They pick this frame's rows:
 
 ```ruby
@@ -1779,7 +1790,9 @@ snapshot = df.copy         # independent; later edits to df don't touch it
 | `df.append` / `drop` / `rename` | every column | — | [Adding, removing and renaming](#adding-removing-and-renaming-columns) |
 | `df.paste(other)` | the columns of both frames | — | [paste](#paste--columns-side-by-side) |
 | `df.dup` / `clone` | every column and the index | — (adding or dropping a name affects only the new frame) | — |
-| `df.join(..., how: :left / :inner)` / `df.join_asof(...)` | this frame's columns and index (picked by row when a row repeats) | the other frame's columns, gathered | [join](#join--match-rows-by-key) |
+| `df.join(..., how: :left)` / `df.join_asof(...)` | this frame's columns and index (picked by row when a row repeats) | the other frame's columns, gathered | [join](#join--match-rows-by-key) |
+| `df.join(..., how: :inner)` | views of the rows of both frames, and this frame's index | — | [join](#join--match-rows-by-key) |
+| `df.join(..., how: :right)` | views of the other frame's columns | this frame's columns and index, gathered | [join](#join--match-rows-by-key) |
 | `df.split_column(...)` | the other columns | text columns built from the split one | [split_column](#splitting-a-text-column--split_column) |
 | `df.contrast_columns(...)` | the other columns | int8 columns built from the expanded one | [contrast_columns](#numeric-columns-from-a-categorical--contrast_columns) |
 | `df.stack_columns(...)` / `unstack_column(...)` | the other columns | a view of the stacked or split columns | [From columns side by side](#from-columns-side-by-side--stack_columns--unstack_column) |
@@ -1790,7 +1803,7 @@ snapshot = df.copy         # independent; later edits to df don't touch it
 |---|---|
 | `df.copy` | — |
 | `CAFrame.concatenate(...)` | [concatenate](#caframemeld--caframeconcatenate--rows-after-rows) |
-| `df.join(..., how: :outer / :right)` / `df.align(...)` | [join](#join--match-rows-by-key), [align](#align--conform-to-a-reference-key-set) |
+| `df.join(..., how: :outer)` / `df.align(...)` | [join](#join--match-rows-by-key), [align](#align--conform-to-a-reference-key-set) |
 | `df.pivot(...)` / `df.pivot_grid(...)` | [pivot](#pivot--long-to-wide) |
 | `df.to_records` | [to_records](#ruby-records--to_records) |
 | `df.stack_rows(by:, on:)` | [From rows of a group](#from-rows-of-a-group--stack_rows--unstack_rows) |

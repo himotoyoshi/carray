@@ -63,7 +63,9 @@ Copy when you are about to change a part and want the original as it was, when y
 | `append`, `drop`, `rename`, `set_index`, `reset_index` | every column |
 | `cast`, `promote`, `parse_to_time`, `to_time` | every column but the converted ones, which are new |
 | `paste` | the columns of both frames |
-| `join(how: :left)`, `join(how: :inner)`, `join_asof` | this frame's columns; the other frame's are copied |
+| `join(how: :left)`, `join_asof` | this frame's columns; the other frame's are copied |
+| `join(how: :inner)` | the columns of both frames, picked by row |
+| `join(how: :right)` | the other frame's columns; this frame's are copied |
 | `split_column`, `contrast_columns` | the columns not split |
 | `stack_columns`, `unstack_column` | the other columns; the new columns are views of the old |
 
@@ -73,7 +75,7 @@ Copy when you are about to change a part and want the original as it was, when y
 |---|
 | `copy` |
 | `CAFrame.concatenate` |
-| `join(how: :outer)`, `join(how: :right)`, `align` |
+| `join(how: :outer)`, `align` |
 | `pivot`, `pivot_grid` |
 | group summaries, `resample`, `describe` |
 | `to_records`, `to_csv` |

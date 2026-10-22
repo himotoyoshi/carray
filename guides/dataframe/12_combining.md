@@ -61,6 +61,12 @@ extra.join(shops.select("shop", "size"), on: "shop", how: :right).nrow   # => 4
 
 When a key appears more than once on both sides, every pairing gives a row: a key on 2 rows of this table and 3 of the other gives 6 rows. When the other table's key is unique — one row per shop, as here — `:left` gives exactly one row per row of this table, in the same order.
 
+The result shares cells with the tables it came from wherever every row has a row of that table: this table's columns for `:left` and `:inner`, the other table's for `:inner` and `:right`. Writing such a cell writes the original, and reading it looks the rows up each time. When you will write to the result, or read it many times — group it, summarize it repeatedly — take a copy first:
+
+```ruby
+both = extra.join(shops.select("shop", "size"), on: "shop", how: :inner).copy
+```
+
 ### Keeping rows by whether the other table has their key — `:semi`, `:anti`
 
 Sometimes you want no columns from the other table, only to know whether it has the key. `:semi` keeps the rows whose key the other table has; `:anti` keeps the rows whose key it does not have:

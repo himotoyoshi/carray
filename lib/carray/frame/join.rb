@@ -29,9 +29,13 @@ class CAFrame
   #                 right row.
   #
   # Rows come in left-row order (right-row order for :right), the pairs of
-  # one row in the other side's order.  The left columns are views of this
-  # frame's, picked by row, wherever every row comes from the left (:left,
-  # :inner); the right columns are gathered into new arrays.
+  # one row in the other side's order.  A side whose row every result row
+  # has gives views of its columns, picked by row: this frame's for :left
+  # and :inner, +other+'s for :inner and :right (the key column too).  A
+  # write to the result then reaches that frame, and reading the result
+  # gathers through the views each time; call +copy+ on the result for
+  # columns of its own, when it will be written or read many times.  The
+  # side that gets UNDEF for an unmatched row is gathered into new arrays.
   #
   # A non-key column present on both sides collides. The key column (+on+) is
   # kept once, never suffixed. By default the collision is resolved by suffixing
@@ -490,6 +494,12 @@ class CAFrame
     every_left = how == :left || how == :inner
     identity   = every_left && li.elements == nrow &&
                  (nrow == 0 || li.eq(CArray.int64(nrow).seq).all)
+    # Every result row of an inner or right join has a row of the other
+    # frame, so its columns are views of those rows, as the left's are in
+    # an inner or left join.
+    every_right    = how == :right || how == :inner
+    right_identity = every_right && ri.elements == other.nrow &&
+                     (other.nrow == 0 || ri.eq(CArray.int64(other.nrow).seq).all)
     rows = { li: li, ri: ri, extra: extra, how: how, every_left: every_left, identity: identity }
     cols = {}
     column_names.each do |name|
@@ -504,7 +514,12 @@ class CAFrame
     end
     other.column_names.each do |name|
       next if rnames.include?(name)
-      put_join_column(cols, join_name(name, plan[:rsuf], plan), project_rows(other[name], ri))
+      col = other[name]
+      col = if right_identity then col
+            elsif every_right then col[ri, *([nil] * (col.ndim - 1))]
+            else                   project_rows(col, ri)
+            end
+      put_join_column(cols, join_name(name, plan[:rsuf], plan), col)
     end
     # A key that is the left index is the result's index, as a key column
     # is a column of it.
@@ -525,7 +540,7 @@ class CAFrame
     li, ri = rows[:li], rows[:ri]
     return lkeys[j] if rows[:identity]
     return lkeys[j][li] if rows[:every_left]
-    return project_rows(rkeys[j], ri) if rows[:how] == :right
+    return rkeys[j][ri] if rows[:how] == :right
     common, lc, rc = parts[j]
     extra = rows[:extra]
     code = if extra
