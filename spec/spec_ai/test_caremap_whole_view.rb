@@ -84,6 +84,36 @@ class TestCARemapWholeView < Test::Unit::TestCase
     end
   end
 
+  # The parent is a strided view with no buffer of its own, so each
+  # address is translated to the root's address axis by axis.
+  def test_strided_parent_of_every_rank
+    srand(7)
+    [[6, 5], [4, 3, 5], [3, 2, 4, 3], [2, 3, 2, 2, 3]].each do |shape|
+      root = CArray.int32(*shape).seq!
+      [root.transpose,
+       root.reshape(*shape.reverse).transpose,
+       root.transpose(*(0...shape.size).to_a.rotate)].each do |parent|
+        perm = (0...parent.elements).to_a.shuffle
+        idx  = CArray.int64(perm.size) { |k| perm[k] }.reshape(*parent.shape).copy
+        want = parent.copy.to_a.flatten
+        v    = parent[idx]
+        assert_kind_of CARemap, v
+        assert_equal perm.map { |k| want[k] }, v.copy.to_a.flatten, shape.inspect
+        v[] = CArray.int32(perm.size) { |k| -k - 1 }.reshape(*parent.shape)
+        got = parent.copy.to_a.flatten
+        perm.each_with_index { |k, j| assert_equal(-j - 1, got[k]) }
+      end
+    end
+  end
+
+  def test_stepped_slice_parent
+    root = CArray.int32(8, 9).seq!
+    parent = root[(1..7).step(2), (8..0).step(-3)]
+    perm = (0...parent.elements).to_a.reverse
+    idx  = CArray.int64(perm.size) { |k| perm[k] }.reshape(*parent.shape).copy
+    assert_equal parent.copy.to_a.flatten.reverse, parent[idx].copy.to_a.flatten
+  end
+
   def test_sort_axis_view
     a = CArray.float64(3, 4) { [3, 1, 2, 0, 9, 8, 7, 6, 4, 5, 11, 10].map(&:to_f) }
     assert_equal a.to_a.map(&:sort), a.sort(axis: 1).copy.to_a

@@ -679,14 +679,20 @@ ca_stride_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
       }
     }
     else {
+      /* Peel the axes from the innermost: a % dim[k] is the index on
+         axis k and a / dim[k] carries the rest outward.  The outermost
+         axis takes whatever is left, so ndim-1 divisions per address. */
+      ca_size_t *dim = ca->dim;
+      int8_t     ndim = ca->ndim;
       for ( i = 0; i < n; i++ ) {
-        ca_size_t idx[CA_RANK_MAX];
+        ca_size_t a = addrs[i];
         ca_size_t off = ebase;
-        ca_addr2index((CArray *) ca, addrs[i], idx);
-        for ( k = 0; k < ca->ndim; k++ ) {
-          off += idx[k] * esteps[k];
+        for ( k = ndim - 1; k > 0; k-- ) {
+          ca_size_t q = a / dim[k];
+          off += ( a - q * dim[k] ) * esteps[k];
+          a = q;
         }
-        paddrs[i] = off;
+        paddrs[i] = off + a * esteps[0];
       }
     }
     ca_xfer_addrs(root, n, paddrs, data, dir);
