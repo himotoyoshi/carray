@@ -62,6 +62,10 @@ class TestCAFrameCSVReadFromWriteTo < Test::Unit::TestCase
     assert_raise(ArgumentError) { CAFrame.from_csv(TEXT).to_csv("out.csv") }
   end
 
+  def test_from_csv_skips_a_leading_bom
+    assert_equal %w[k v], CAFrame.from_csv("\uFEFF" + TEXT).column_names
+  end
+
   def test_round_trip_through_text
     df = CAFrame.from_csv(TEXT)
     assert_equal df["k"].to_a, CAFrame.from_csv(df.to_csv(index: false))["k"].to_a
