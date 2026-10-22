@@ -657,8 +657,9 @@ class CAFrame
   # makes the key show the attributes both keys have alike, as the default
   # key does.
   private def joined_key_view(lkey, rkey, li, extra)
-    lface = lkey.face? ? lkey.class : nil   # not the view class a filtered key has
-    rface = rkey.face? ? rkey.class : nil
+    # A Face's class, not the view class a filtered key has.
+    lface = lkey.class if lkey.face?
+    rface = rkey.class if rkey.face?
     reason = if lface != rface || lkey.data_type != rkey.data_type
                "#{CArray::Inspector.type_label(lkey)} and #{CArray::Inspector.type_label(rkey)}"
              end
