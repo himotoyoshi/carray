@@ -540,13 +540,17 @@ cag_parent_addrs_whole (const CAGrid *ca, ca_size_t *paddrs, uint8_t *hole)
       const ca_size_t *ix = last->indices;
       const uint8_t   *hx = last->holes;
       for (j = 0; j < count; j++) {
-        if ( paddrs ) paddrs[i + j] = base + ix[j];
+        if ( paddrs ) {
+          paddrs[i + j] = base + ix[j];
+        }
         hole[i + j] = (uint8_t) (outer_hole | (hx ? hx[j] : 0));
       }
     }
     else {
       for (j = 0; j < count; j++) {
-        if ( paddrs ) paddrs[i + j] = base + last->start + j * last->step;
+        if ( paddrs ) {
+          paddrs[i + j] = base + last->start + j * last->step;
+        }
         hole[i + j] = outer_hole;
       }
     }
@@ -597,9 +601,13 @@ ca_grid_holed_xfer (CAGrid *ca, ca_size_t n, const ca_size_t *addrs,
     return;
   }
 
-  if ( dir == CA_XFER_GET && ! addrs && ca->ndim == 1 ) {
-    /* A 1-D grid read whole: its index axis's index and hole arrays are
-       the batch as they are (a PUT compacts the batch, so it copies). */
+  if ( dir == CA_XFER_GET && ! addrs && ca->ndim == 1
+       && ( parent->obj_type == CA_OBJ_ARRAY || parent->obj_type == CA_OBJ_ARRAY_WRAP
+            || parent->obj_type == CA_OBJ_SCALAR ) ) {
+    /* A 1-D grid read whole from an array of its own: its index axis's
+       index and hole arrays are the batch as they are.  Another parent's
+       transfer (a view, a CAObject's hook) takes a copy it may write on,
+       as a PUT does, which compacts the batch. */
     paddrs = ca->axes[0].indices;
     hole   = ca->axes[0].holes;
   }
@@ -811,22 +819,6 @@ ca_grid_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
   return 1;
 }
 
-/* xfer_stride: structural region delivery when CAGrid is the (declining)
-   fold boundary -- a multi-element INDEX axis.  Instead of materialising
-   the whole grid, deliver only the requested region using the per-axis
-   kind:
-
-     - iterate the OUTER axes [0..ndim-2] with an odometer, computing the parent
-       byte base and the contiguous data offset for each combination;
-     - deliver the INNERMOST axis as one batched run into the contiguous data
-       sub-block at data+offset:
-         * STRIDE inner axis -> parent.xfer_stride (one strided run; entity
-           parent delivers a contiguous/strided memcpy);
-         * INDEX  inner axis -> parent.xfer_addrs (gather the selected cells).
-
-   strides[] = src access byte strides into the grid (semantics b); data is
-   contiguous row-major over counts.  g->bytes == parent->bytes (no reinterpret).
-   No whole-view attach -- only the requested cells touch the parent. */
 /* A region of a grid with holes: its view addresses as one batch to the
    holed transfer, or none when the region is the whole view in order. */
 static void
@@ -858,7 +850,9 @@ cag_holed_xfer_stride (CAGrid *g, const ca_size_t *starts, const ca_size_t *coun
   addrs = ALLOCV_N(ca_size_t, holder, n);
   for (i = 0; i < n; i++) {
     ca_size_t goff = base;
-    for (k = 0; k < ndim; k++) goff += idx[k] * strides[k];
+    for (k = 0; k < ndim; k++) {
+      goff += idx[k] * strides[k];
+    }
     addrs[i] = goff / g->bytes;
     for (k = ndim - 1; k >= 0; k--) {
       if ( ++idx[k] < counts[k] ) break;
@@ -869,6 +863,22 @@ cag_holed_xfer_stride (CAGrid *g, const ca_size_t *starts, const ca_size_t *coun
   ALLOCV_END(holder);
 }
 
+/* xfer_stride: structural region delivery when CAGrid is the (declining)
+   fold boundary -- a multi-element INDEX axis.  Instead of materialising
+   the whole grid, deliver only the requested region using the per-axis
+   kind:
+
+     - iterate the OUTER axes [0..ndim-2] with an odometer, computing the parent
+       byte base and the contiguous data offset for each combination;
+     - deliver the INNERMOST axis as one batched run into the contiguous data
+       sub-block at data+offset:
+         * STRIDE inner axis -> parent.xfer_stride (one strided run; entity
+           parent delivers a contiguous/strided memcpy);
+         * INDEX  inner axis -> parent.xfer_addrs (gather the selected cells).
+
+   strides[] = src access byte strides into the grid (semantics b); data is
+   contiguous row-major over counts.  g->bytes == parent->bytes (no reinterpret).
+   No whole-view attach -- only the requested cells touch the parent. */
 static void
 ca_grid_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir)

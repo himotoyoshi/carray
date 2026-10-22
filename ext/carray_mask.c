@@ -495,18 +495,21 @@ ca_mask_standin_settle (CArray *parent, CArray *standin)
     rb_raise(rb_eTypeError, "can not create mask array for the %s array",
              ca_is_value_array(parent) ? "value" : "mask");
   }
-  ca_create_mask(parent);
   /* The trues are added to the parent's mask, not copied over it: the
-     parent may have come to have masked cells of its own meanwhile. */
+     parent may have come to have masked cells of its own meanwhile.  The
+     stand-in is cleared before the parent is asked for a mask, so a
+     parent that refuses one leaves it all false, as its readers take it
+     to be at rest. */
   addrs = ALLOCV_N(ca_size_t, holder, n);
   for ( ; i < n; i++ ) {
     if ( z[i] ) {
       addrs[m++] = i;
     }
   }
+  MEMZERO(z, boolean8_t, n);
+  ca_create_mask(parent);
   ca_fill_addrs(parent->mask, m, addrs, &one);
   ALLOCV_END(holder);
-  MEMZERO(z, boolean8_t, n);
 }
 
 CArray *

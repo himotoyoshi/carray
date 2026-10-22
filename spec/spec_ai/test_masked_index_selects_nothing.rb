@@ -306,4 +306,60 @@ class TestMaskedIndexSelectsNothing < Test::Unit::TestCase
       assert_equal want.flatten.reject { |x| UNDEF.equal?(x) }.sum, v.sum
     end
   end
+
+  # A parent that can not take a mask refuses the write of a true into the
+  # mask of a view with holes; the write leaves no trace, read whole or by
+  # the cell.
+  class NoMaskSource < CAObject
+    def initialize
+      @d = [0.0, 10.0, 20.0, 30.0]
+      super(CA_FLOAT64, [4])
+    end
+
+    private
+
+    def fetch_addr (addr)
+      @d[addr]
+    end
+
+    def store_addr (addr, value)
+      @d[addr] = value
+    end
+  end
+
+  def test_a_refused_mask_write_leaves_no_trace
+    i = CA_INT64([0, 1, 2, 3]); i[3] = UNDEF
+    g = NoMaskSource.new[i]
+    m = g.mask
+    assert_raise(TypeError) { m[0] = true }
+    assert_equal [false, false, false, true], m.to_a
+    assert_equal false, m[0]
+    assert_equal [0.0, 10.0, 20.0, UNDEF], g.copy.to_a
+  end
+
+  # A parent's transfer may write on the address list it is given; the
+  # grid's own indices are not that list.
+  class ScribblingSource < CAObject
+    def initialize
+      super(CA_FLOAT64, [5])
+    end
+
+    private
+
+    def fetch_addr (addr)
+      addr * 10.0
+    end
+
+    def copy_addrs (addrs, data)
+      addrs.to_a.each_with_index { |a, k| data[k] = a * 10.0 }
+      addrs[] = 4
+    end
+  end
+
+  def test_a_parent_writing_on_the_addresses_leaves_the_grid_alone
+    i = CA_INT64([0, 1, 2, 3]); i[3] = UNDEF
+    g = ScribblingSource.new[i]
+    assert_equal [0.0, 10.0, 20.0, UNDEF], g.copy.to_a
+    assert_equal [0.0, 10.0, 20.0, UNDEF], g.copy.to_a
+  end
 end
