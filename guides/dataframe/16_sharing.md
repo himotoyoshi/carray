@@ -75,7 +75,6 @@ Copy when you are about to change a part and want the original as it was, when y
 | `CAFrame.concatenate` |
 | `join(how: :outer)`, `join(how: :right)`, `align` |
 | `pivot`, `pivot_grid` |
-| `filter(keep_masked: true)` |
 | group summaries, `resample`, `describe` |
 | `to_records`, `to_csv` |
 

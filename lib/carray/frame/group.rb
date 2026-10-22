@@ -1164,16 +1164,14 @@ class GroupedFrame
   # The rows of a chosen group are kept in the frame's order, as a sub-frame
   # sharing the frame's columns. A group whose value is UNDEF is
   # undetermined, as is a row whose key is masked (it belongs to no group):
-  # such rows are dropped, or with +keep_masked: true+ carried with their
-  # cells masked, as +CAFrame#filter+ does.
+  # such rows are not kept, as +CAFrame#filter+ does not keep them.
   #
-  # @param keep_masked [Boolean] carry the undetermined rows forward masked.
   # @yieldparam grouped [GroupedFrame] self.
   # @yieldreturn [CArray] boolean, one value per group.
   # @return [CAFrame]
   # @raise [ArgumentError] when the block does not return a boolean CArray of
   #   shape [ngroup].
-  def filter (keep_masked: false)
+  def filter
     refuse_changed_rows("filter")
     chosen = yield(self)
     unless chosen.is_a?(CArray) && chosen.data_type == :boolean
@@ -1187,7 +1185,7 @@ class GroupedFrame
             "expected [#{ngroup}] (one value per group)"
     end
     rows = spread_to_rows(chosen)
-    @frame.filter(keep_masked: keep_masked) { rows }
+    @frame.filter(rows)
   end
 
   # Returns the grouped rows as a frame: the frame the grouping was made

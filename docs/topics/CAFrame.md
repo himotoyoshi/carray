@@ -566,9 +566,9 @@ df.filter { |f| f["temp"] > 24 }
 df.filter { |f| (f["temp"] > 24) & (f["rh"] < 50) }   # & / | combine conditions
 ```
 
-> **`&` and `|`, never `&&` and `||`.** `&&`, `||` and `!` are Ruby's own operators and look only at whether the array on their left exists, not at its cells. `a && b` therefore hands back `b` whole: `df.filter { |f| f["temp"] > 24 && f["rh"] < 50 }` raises nothing and keeps the rows where `rh < 50`, whatever the temperature. Write `(f["temp"] > 24) & (f["rh"] < 50)`, `.not` for negation, and `eq` for equality (`==` compares two arrays as a whole). The methods `.and` / `.or` also combine conditions; they leave a row undetermined when either side is masked, where `&` / `|` settle it from the known side, so the two differ only under `keep_masked: true`.
+> **`&` and `|`, never `&&` and `||`.** `&&`, `||` and `!` are Ruby's own operators and look only at whether the array on their left exists, not at its cells. `a && b` therefore hands back `b` whole: `df.filter { |f| f["temp"] > 24 && f["rh"] < 50 }` raises nothing and keeps the rows where `rh < 50`, whatever the temperature. Write `(f["temp"] > 24) & (f["rh"] < 50)`, `.not` for negation, and `eq` for equality (`==` compares two arrays as a whole). The methods `.and` / `.or` also combine conditions; they leave a row undetermined when either side is masked, where `&` / `|` settle it from the known side. So `filter` keeps a row whose known side is true under `|` but not under `.or`; `&` and `.and` keep the same rows.
 
-The block lets you refer to columns without binding a variable first, and the result is a sub-frame, so filters chain into `group_by`, `join` and the rest. A selector already in hand is given directly instead of a block, `df.filter(mask)` (one or the other, not both); unlike `df[mask]`, it takes `keep_masked:` as well.
+The block lets you refer to columns without binding a variable first, and the result is a sub-frame, so filters chain into `group_by`, `join` and the rest. A selector already in hand is given directly instead of a block, `df.filter(mask)` (one or the other, not both), and selects the same rows as `df[mask]`.
 
 Column names are written as `f["..."]` strings, **not** bare identifiers: a frame allows any column name (`"temp.max"`, names with spaces, names that collide with method names), which a `method_missing` DSL cannot support.
 
@@ -585,18 +585,18 @@ A comparison between two frames does not fit a block that receives one frame —
 diff = df_aws["temp"] - df_gpv["temp"]
 ```
 
-### Rows whose condition is undetermined — `keep_masked:`
+### Rows whose condition is undetermined
 
-A row is **undetermined** when the value its condition reads is masked, so the condition is neither true nor false for it. By default such a row is **dropped**, exactly as a false row would be. Pass `keep_masked: true` to keep it, masked:
+A row is **undetermined** when the value its condition reads is masked, so the condition is neither true nor false for it. Such a row is **not kept**, as a false row is not, the same as `ca[mask]` on a single array. To choose otherwise, settle it in the condition:
 
 ```ruby
-df.filter { |f| f["temp"] > 24 }                     # undetermined rows dropped
-df.filter(keep_masked: true) { |f| f["temp"] > 24 }  # they survive, masked
+s = df["temp"] > 24
+df.filter(s)                    # undetermined rows not kept
+df.filter(s.is_masked)          # only the undetermined rows
+df.filter(s.strip_mask(true))   # the true rows and the undetermined ones
 ```
 
-The surviving undetermined rows arrive with their **data cells masked** and their **index value present**, so the row stays identifiable and a later, better-informed pass can judge it again. Rows whose condition is true carry their values through unchanged either way.
-
-**`keep_masked: true` returns a new frame, not a sub-frame**: a view could not show those rows masked without masking them in the original frame too. It is a new frame even when no cell of the condition is masked.
+Each of these is a sub-frame sharing the frame's cells. A kept row's cells are as they were in the frame: masked only where they were masked already.
 
 ### Checking rows against rules — `verify`
 
@@ -1321,7 +1321,7 @@ df.resample("time", "1 hour").filter { |g| g["temp"].count_not_masked == 6 }   #
 ```
 
 - The rows keep the frame's order, and the result shares the frame's columns, as `CAFrame#filter`'s does.
-- A group whose value is `UNDEF` cannot be judged, and neither can a row whose key is masked, since it belongs to no group. Such rows are dropped, or with `keep_masked: true` carried with their cells masked, as for [`filter(keep_masked: true)`](#rows-whose-condition-is-undetermined--keep_masked).
+- A group whose value is `UNDEF` cannot be judged, and neither can a row whose key is masked, since it belongs to no group. Such rows are not kept, as [`filter`](#rows-whose-condition-is-undetermined) does not keep an undetermined row.
 - The result is a frame, not a grouping: group it again (`kept.group_by("station")`) to go on reducing by group. `to_frame` gives all of a grouped frame's rows as a frame, for code that was handed only the grouping; the frame shares its cells but not its set of columns.
 
 ### Time bins — `resample`
@@ -1789,7 +1789,6 @@ snapshot = df.copy         # independent; later edits to df don't touch it
 | operation | see |
 |---|---|
 | `df.copy` | — |
-| `df.filter(keep_masked: true) { }` | [keep_masked](#rows-whose-condition-is-undetermined--keep_masked) |
 | `CAFrame.concatenate(...)` | [concatenate](#caframemeld--caframeconcatenate--rows-after-rows) |
 | `df.join(..., how: :outer / :right)` / `df.align(...)` | [join](#join--match-rows-by-key), [align](#align--conform-to-a-reference-key-set) |
 | `df.pivot(...)` / `df.pivot_grid(...)` | [pivot](#pivot--long-to-wide) |
@@ -2086,7 +2085,7 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | get every row whose label appears more than once | [`filter { \|f\| f.index.eq(label) }`](#one-row-by-its-label--at) |
 | see the first or last few rows | [`head` / `tail`](#first-and-last-rows--head-tail) |
 | keep the rows where a condition holds | [`filter`](#filter--rows-matching-a-condition) |
-| keep the rows whose condition could not be judged, for a later pass | [`filter(keep_masked: true)`](#rows-whose-condition-is-undetermined--keep_masked) |
+| find the rows whose condition could not be judged | [`filter(s.is_masked)`](#rows-whose-condition-is-undetermined) |
 | check every row against named rules and find the ones that break them | [`verify`](#checking-rows-against-rules--verify) |
 | keep only the stations with enough readings | [`group_by(...).filter`](#keeping-whole-groups--filter) |
 | keep the rows in a range of times | [`filter { \|f\| (f.index >= lo) & (f.index <= hi) }`](#filter--rows-matching-a-condition) |

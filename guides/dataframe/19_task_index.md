@@ -57,7 +57,7 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | keep rows whose value is one of several | `is_in([...])` | 6 |
 | keep rows in a range of values or dates | `is_between(lo, hi)` | 6 |
 | keep weekend days | `f["date"].weekday.is_in([0, 6])` | 6 |
-| keep rows whose condition could not be decided | `filter(keep_masked: true)` | 6 |
+| keep rows whose condition could not be decided | `filter(c \| c.is_masked)` | 6 |
 | check rows against rules | `verify` | 6 |
 | sort by columns | `sort_by_key` | 6 |
 | sort by a computed value | `sort_by { \|f\| ... }` | 6 |

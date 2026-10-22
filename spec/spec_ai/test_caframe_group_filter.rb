@@ -4,7 +4,7 @@ require "carray"
 # GroupedFrame#filter keeps the rows of the groups its block chooses, one
 # boolean per group, and leaves the rest of the selection to CAFrame#filter:
 # the result is a sub-frame sharing the frame's columns, and an undetermined
-# row is dropped or, with keep_masked:, carried masked.
+# row is not kept.
 
 class TestCAFrameGroupFilter < Test::Unit::TestCase
 
@@ -36,9 +36,7 @@ class TestCAFrameGroupFilter < Test::Unit::TestCase
     chosen = CA_BOOLEAN([true, false, true])
     chosen[2] = UNDEF                           # nagoya undetermined
     assert_equal %w[tokyo tokyo tokyo], grp.filter { chosen }["station"].to_a
-    carried = grp.filter(keep_masked: true) { chosen }
-    # tokyo, tokyo (masked already), nagoya, tokyo, the row in no group
-    assert_equal [10.0, UNDEF, UNDEF, 13.0, UNDEF], carried["temp"].to_a
+    assert_raise(ArgumentError) { grp.filter(keep_masked: true) { chosen } }
   end
 
   def test_a_view_of_the_frame

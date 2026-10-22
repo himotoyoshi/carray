@@ -617,13 +617,12 @@ class TestCAFrameFilterAndGather < Test::Unit::TestCase
   end
 end
 
-# filter keep_masked: — a masked (UNDEF) selector cell means membership is
-# genuinely undetermined (PROPOSAL_KLEENE_BOOLEAN_LOGIC §9, CLAUDE.md 将来の
-# リファクタリング候補). Default drops it; keep_masked: true carries the UNDEF
-# forward as masked data cells while keeping the index value present.
-class TestCAFrameFilterKeepMasked < Test::Unit::TestCase
+# A masked (UNDEF) selector cell means the row's membership is undetermined.
+# filter does not keep such a row, as ca[selector] does not; the selector
+# decides otherwise, and the result stays a sub-frame of views.
+class TestCAFrameFilterUndetermined < Test::Unit::TestCase
   def setup
-    # row 1's predicate input is masked -> its selector cell is UNDEF
+    # row 2's predicate input is masked -> its selector cell is UNDEF
     @df = CAFrame.new(
       "a" => CA_INT32([10, 20, 30, 40]),
       "b" => CA_FLOAT64([0.5, 1.5, 2.5, 3.5]),
@@ -631,124 +630,28 @@ class TestCAFrameFilterKeepMasked < Test::Unit::TestCase
     @df["a"][2] = UNDEF   # selector a > 15 -> [F, T, U, T]
   end
 
-  def test_default_drops_undetermined_row
+  def test_undetermined_row_is_not_kept
     sub = @df.filter { |f| f["a"] > 15 }
-    assert_equal 2, sub.nrow
     assert_equal [20, 40], sub["a"].to_a
     assert_equal [1.5, 3.5], sub["b"].to_a
   end
 
-  def test_keep_masked_carries_undef_forward
-    sub = @df.filter(keep_masked: true) { |f| f["a"] > 15 }
-    assert_equal 3, sub.nrow
-    # true rows keep their values; the undetermined row's cells are masked
-    assert_equal [20, nil, 40], sub["a"].to_a.map { |v| v == UNDEF ? nil : v }
-    assert_equal [false, true, false], sub["a"].mask.to_a
-    assert_equal [false, true, false], sub["b"].mask.to_a
+  def test_selector_chooses_the_undetermined_rows
+    s = @df["a"] > 15
+    assert_equal [2.5], @df.filter(s.is_masked)["b"].to_a
+    kept = @df.filter(s.strip_mask(true))
+    assert_equal [20, UNDEF, 40], kept["a"].to_a   # masked only where it was
+    assert_equal [1.5, 2.5, 3.5], kept["b"].to_a
   end
 
-  def test_keep_masked_with_a_selector_given_directly
-    sub = @df.filter(@df["a"] > 15, keep_masked: true)
-    assert_equal 3, sub.nrow
-    assert_equal [false, true, false], sub["b"].mask.to_a
+  def test_result_is_a_view
+    sub = @df.filter((@df["a"] > 15).strip_mask(true))
+    sub["b"][1] = -1.0
+    assert_equal [0.5, 1.5, -1.0, 3.5], @df["b"].to_a
   end
 
-  def test_keep_masked_does_not_corrupt_parent
-    @df.filter(keep_masked: true) { |f| f["a"] > 15 }
-    assert_equal [10, 20, nil, 40], @df["a"].to_a.map { |v| v == UNDEF ? nil : v }
-    assert_equal [0.5, 1.5, 2.5, 3.5], @df["b"].to_a
-  end
-
-  # keep_masked: has to write the carried-forward UNDEF into the result, so the
-  # result is materialized -- and materialized means the index too, not just the
-  # columns. Writing the result must not reach the parent through either.
-  def test_keep_masked_result_index_is_independent
-    df = CAFrame.new({ "v" => CA_INT32([10, 20, 30, 40]) },
-                     index: CA_INT32([100, 200, 300, 400]), axis_name: "id")
-    df["v"][2] = UNDEF
-    sub = df.filter(keep_masked: true) { |f| f["v"] > 15 }
-    sub.index[0] = -1
-    assert_equal [100, 200, 300, 400], df.index.to_a
-  end
-
-  # The same call site must not switch between sharing and copying on whether
-  # that day's data happened to produce an undetermined cell (the reasoning
-  # CAFrame.md section 3 gives for splice always snapshotting).
-  def test_keep_masked_is_materialized_whether_or_not_the_selector_is_masked
-    cols = { "v" => CA_INT32([10, 20, 30, 40]) }
-    unmasked = CAFrame.new(cols.transform_values(&:copy),
-                           index: CA_INT32([100, 200, 300, 400]))
-    masked   = CAFrame.new(cols.transform_values(&:copy),
-                           index: CA_INT32([100, 200, 300, 400]))
-    masked["v"][2] = UNDEF
-
-    [unmasked, masked].each do |df|
-      before_v = df["v"].to_a
-      before_i = df.index.to_a
-      sub = df.filter(keep_masked: true) { |f| f["v"] > 15 }
-      sub["v"][0] = -1
-      sub.index[0] = -1
-      assert_equal before_v, df["v"].to_a
-      assert_equal before_i, df.index.to_a
-    end
-  end
-
-  # A read-only Face column (categorical, CAConstString) takes the mask the
-  # other columns take, and keeps its Face; so do the other Faces.
-  def test_keep_masked_with_face_columns
-    df = CAFrame.new(
-      "c" => CA_OBJECT(%w[b a c a]).categorize,
-      "s" => CArray.const_string(%w[w x y z]),
-      "t" => CArray.time(%w[2024-01-01 2024-01-02 2024-01-03 2024-01-04], unit: :D),
-      "v" => CA_FLOAT64([1, 2, 3, 4]),
-    )
-    sel = df["v"] > 1.5
-    sel[2] = UNDEF
-    sub = df.filter(keep_masked: true) { sel }
-    assert_kind_of CACategorical, sub["c"]
-    assert_kind_of CAConstString, sub["s"]
-    assert_kind_of CATime, sub["t"]
-    assert_equal ["a", UNDEF, "a"], sub["c"].to_a
-    assert_equal ["x", UNDEF, "z"], sub["s"].to_a
-    assert_equal ["2024-01-02", UNDEF, "2024-01-04"], sub["t"].to_a.map { |v| UNDEF.equal?(v) ? v : v.to_s }
-    assert_equal ["a", "c", "a"], df["c"].to_a.values_at(1, 2, 3)
-  end
-
-  def test_keep_masked_with_an_nd_column
-    df = CAFrame.new("m" => CA_INT32([[1, 2], [3, 4], [5, 6]]), "v" => CA_FLOAT64([1, 2, 3]))
-    sel = df["v"] > 0
-    sel[1] = UNDEF
-    sub = df.filter(keep_masked: true) { sel }
-    assert_equal [[false, false], [true, true], [false, false]], sub["m"].is_masked.to_a
-    assert_equal [false, false, false, false, false, false], df["m"].is_masked.flatten.to_a
-  end
-
-  def test_keep_masked_without_masked_selector_equals_drop
-    df = CAFrame.new("a" => CA_INT32([10, 20, 30, 40]))
-    drop = df.filter { |f| f["a"] > 15 }
-    keep = df.filter(keep_masked: true) { |f| f["a"] > 15 }
-    assert_equal drop["a"].to_a, keep["a"].to_a
-    assert_equal 3, keep.nrow
-  end
-
-  def test_keep_masked_preserves_index_on_undetermined_row
-    df = CAFrame.new({ "v" => CA_INT32([10, 20, 30, 40]) },
-                     index: CA_INT32([100, 200, 300, 400]), axis_name: "id")
-    df["v"][2] = UNDEF
-    sub = df.filter(keep_masked: true) { |f| f["v"] > 15 }
-    assert_equal "id", sub.axis_name
-    assert_equal [200, 300, 400], sub.index.to_a   # index value present, unmasked
-    assert_equal false, sub.index.has_mask?        # the index carries no masked cell
-  end
-
-  def test_keep_masked_all_undetermined
-    df = CAFrame.new("v" => CA_INT32([1, 2, 3]))
-    df["v"][0..2] = UNDEF
-    keep = df.filter(keep_masked: true) { |f| f["v"] > 0 }
-    assert_equal 3, keep.nrow
-    assert_equal [true, true, true], keep["v"].mask.to_a
-    drop = df.filter { |f| f["v"] > 0 }
-    assert_equal 0, drop.nrow
+  def test_keep_masked_is_gone
+    assert_raise(ArgumentError) { @df.filter(keep_masked: true) { |f| f["a"] > 15 } }
   end
 end
 

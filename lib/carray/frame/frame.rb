@@ -520,21 +520,14 @@ class CAFrame
   # +&&+ / +||+ look only at whether the left array exists, so +a && b+ is +b+
   # and the first condition is silently dropped.
   #
-  # A masked (UNDEF) selector cell means the row's membership is *genuinely
-  # undetermined* (e.g. the predicate read a masked input). By default such
-  # rows are silently dropped, exactly as a false cell would be. Pass
-  # +keep_masked: true+ to carry the UNDEF forward instead: the undetermined
-  # rows survive into the result with their data cells masked (and their index
-  # value kept, so the row stays identifiable), leaving a later, better-informed
-  # pass to re-judge them. Definitely-true rows carry their values through
-  # unchanged in both modes.
+  # A masked (UNDEF) selector cell means the row's membership is undetermined
+  # (e.g. the predicate read a masked input). Such a row is not kept, as a
+  # false cell is not, as +ca[selector]+ does. Settle it in the selector to
+  # choose otherwise: +s.is_masked+ selects the undetermined rows,
+  # +s.strip_mask(true)+ keeps them along with the true ones.
   #
-  # The default is a view-frame. +keep_masked: true+ returns a **materialized**
-  # frame instead -- carrying the UNDEF forward means writing it into the
-  # result, which a view cannot do without masking the parent's rows. That holds
-  # whether or not the selector actually carries a masked cell, so the same call
-  # site does not switch between sharing and copying with the data.
-  def filter(*selector, keep_masked: false)
+  # The result is a sub-frame of views sharing the frame's cells.
+  def filter(*selector)
     if selector.size > 1
       raise ArgumentError, "filter takes one selector (got #{selector.size})"
     end
@@ -560,7 +553,7 @@ class CAFrame
       raise ArgumentError,
             "filter mask has shape #{mask.shape.inspect}, expected [#{@nrow}] (one value per row)"
     end
-    select_rows(mask, keep_masked: keep_masked)
+    select_rows(mask)
   end
 
   # Keep the rows that have no masked cell in the named columns (every
@@ -1149,47 +1142,12 @@ class CAFrame
     end
   end
 
-  private def select_rows(selector, keep_masked: false)
-    if keep_masked && selector.is_a?(CArray) && selector.data_type == :boolean
-      # Not gated on selector.has_mask?: gating there would make the same call
-      # site return a view-frame or a materialized one depending on whether that
-      # run's data happened to produce an undetermined cell (the reason splice
-      # always snapshots -- see CAFrame.md section 3).
-      return select_rows_keep_masked(selector)
-    end
+  private def select_rows(selector)
     cols = {}
     @columns.each do |name, col|
       cols[name] = col[selector, *([nil] * (col.ndim - 1))]
     end
     new_index = @index ? @index[selector] : nil
-    CAFrame.new(cols, axis_name: @axis_name, index: new_index, attrs: @attrs)
-  end
-
-  private def select_rows_keep_masked(selector)
-    keep       = selector.strip_mask(1)   # true where selected OR undetermined
-    undet_kept = selector.is_masked[keep] # among kept rows, which were undetermined
-    cols = {}
-    any_undet = undet_kept.any
-    @columns.each do |name, col|
-      tail = [nil] * (col.ndim - 1)
-      g = col[keep, *tail]
-      if any_undet
-        # mask_where copies and masks in one step, so a read-only Face
-        # (categorical, CAConstString) takes the mask as any column does.
-        cells = CArray.boolean(*g.shape)
-        cells[] = false
-        cells[undet_kept, *tail] = true
-        cols[name] = g.mask_where(cells)
-      else
-        cols[name] = g.copy
-      end
-    end
-    # The index is copied along with the columns. Its values are carried over
-    # unmasked (an undetermined row keeps its label, as mask_rows leaves the
-    # index alone), but a materialized frame has to be materialized whole: an
-    # aliased index would write through to the parent from a frame whose columns
-    # do not.
-    new_index = @index ? @index[keep].copy : nil
     CAFrame.new(cols, axis_name: @axis_name, index: new_index, attrs: @attrs)
   end
 
