@@ -524,6 +524,7 @@ cag_parent_addrs_whole (const CAGrid *ca, ca_size_t *paddrs, uint8_t *hole)
   for (k = 0; k < ndim; k++) {
     idx[k] = 0;
   }
+  /* empty: returned above when the view has no cell */
   while ( 1 ) {
     ca_size_t base = 0;
     uint8_t   outer_hole = 0;
