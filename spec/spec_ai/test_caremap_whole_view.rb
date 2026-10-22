@@ -2,10 +2,11 @@
 #
 # Reading or writing a whole CARemap (`copy`, `to_a`, a reduction,
 # `v[] = x`) reads the index array's cells as the parent addresses.  The
-# answers match the cell-by-cell reads for every element width, and an
-# index changed through `mapper` after the view was made is checked when
-# the view is read: a negative one counts from the end, one out of range
-# raises before the parent is touched.
+# answers match the cell-by-cell reads for every element width.  The index
+# array a view reads (`mapper`) is read-only; its cells are still checked
+# on every transfer, so one changed past the flag (the private
+# without_read_only_flag) counts from the end when negative and raises
+# before the parent is touched when out of range.
 
 require "test/unit"
 require "carray"
@@ -63,10 +64,30 @@ class TestCARemapWholeView < Test::Unit::TestCase
                  v.is_masked.to_a
   end
 
+  # Writes a mapper cell past its read-only flag.
+  def force_mapper_cell (v, value, *pos)
+    m = v.mapper
+    m.send(:without_read_only_flag) { m[*pos] = value }
+  end
+
+  def test_mapper_is_read_only
+    a = CArray.int32(3, 4).seq!
+    idx = index
+    [a[idx], a.sort(axis: 1), a.partition(1, axis: 1), a[idx].dup].each do |v|
+      assert_kind_of CARemap, v
+      assert v.mapper.read_only?
+      assert_raise(RuntimeError) { v.mapper[0, 0] = 0 }
+      assert_raise(RuntimeError) { v.mapper[] = 0 }
+      assert ! v.mapper.copy.read_only?
+    end
+    assert ! idx.read_only?
+    assert_equal expected(a), a[idx].to_a
+  end
+
   def test_negative_mapper_cell_counts_from_the_end
     a = CArray.int32(3, 4).seq!
     v = a[index]
-    v.mapper[0, 0] = -1
+    force_mapper_cell(v, -1, 0, 0)
     assert_equal 11, v.copy[0, 0]
     assert_equal -1, v.mapper[0, 0]
     v[] = 0
@@ -77,7 +98,7 @@ class TestCARemapWholeView < Test::Unit::TestCase
     a = CArray.int32(3, 4).seq!
     v = a[index]
     [12, -13].each do |bad|
-      v.mapper[2, 3] = bad
+      force_mapper_cell(v, bad, 2, 3)
       assert_raise(IndexError, bad.to_s) { v.copy }
       assert_raise(IndexError, bad.to_s) { v[] = 99 }
       assert_equal (0..11).to_a, a.to_a.flatten
@@ -147,7 +168,10 @@ class TestCARemapWholeView < Test::Unit::TestCase
     src = HookSource.new
     v = src[CArray.int64(4) { |k| 3 - k }.reshape(2, 2)]
     m = v.mapper
-    src.on_fetch = -> { m[3] = 1_000_000; src.on_fetch = nil }
+    src.on_fetch = lambda do
+      m.send(:without_read_only_flag) { m[3] = 1_000_000 }
+      src.on_fetch = nil
+    end
     assert_equal [[30, 20], [10, 0]], v.to_a
     assert_equal [3, 2, 1, 0], src.seen
   end

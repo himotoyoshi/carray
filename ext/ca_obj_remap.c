@@ -304,8 +304,9 @@ ca_remap_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
 
   paddrs = ALLOCV_N(ca_size_t, holder, n);
   ca_xfer_addrs(ca->idx, n, addrs, paddrs, CA_XFER_GET);
-  /* idx is read live, so its values are checked here, not at
-     construction: negative counts from the end, out of range raises
+  /* idx is read-only once the view holds it, but its values are still
+     checked on every transfer (the private without_read_only_flag can
+     lift the flag): negative counts from the end, out of range raises
      before the parent is touched. */
   for ( i = 0; i < n; i++ ) {
     CA_CHECK_INDEX(paddrs[i], ca->parent->elements);
@@ -467,7 +468,13 @@ ca_operation_function_t ca_remap_func = {
    carray_partition.c).  Callers are expected to have already checked the
    routing preconditions (same shape, idx data_type == CA_SIZE);
    ca_remap_setup raises ArgumentError on mismatch as a defensive
-   fallback. */
+   fallback.
+
+   The view takes rmapper over: every caller hands a fresh array no one
+   else holds, and it is marked read-only here, so the mapping a view was
+   made with cannot be rewritten through #mapper.  CAGrid and CASelect
+   keep their indices where Ruby cannot reach them; this is the same
+   promise for an index array that stays visible. */
 VALUE
 rb_ca_remap_new (VALUE cary, VALUE rmapper)
 {
@@ -487,13 +494,14 @@ rb_ca_remap_new (VALUE cary, VALUE rmapper)
      covers the view's.  ca->idx is a raw pointer into idx's struct;
      keeping rmapper reachable through the view keeps it alive. */
   rb_ivar_set(obj, rb_intern("remap_idx"), rmapper);
+  rb_ca_set_read_only_flag(rmapper);
   return obj;
 }
 
-/* Read-only accessor for the per-cell index CArray that defines this
-   CARemap's mapping: the array the view reads.  For ca[mapper] it is a
-   copy of mapper taken at the call, so a later change to mapper does
-   not reach the view.  Companion to
+/* Accessor for the per-cell index CArray that defines this CARemap's
+   mapping: the array the view reads, itself read-only.  For ca[mapper]
+   it is a copy of mapper taken at the call, so a later change to mapper
+   does not reach the view.  Companion to
    CABlock#start / CAStride#strides / CAWindow#count etc. — the view
    hierarchy is preserved so each named view class exposes its own
    defining semantic state. */
