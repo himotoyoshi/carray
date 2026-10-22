@@ -37,6 +37,15 @@ class CAFrame
   # columns of its own, when it will be written or read many times.  The
   # side that gets UNDEF for an unmatched row is gathered into new arrays.
   #
+  # +view: :full+ (experimental) makes that side views too, with a hole
+  # where a row has no match: the hole reads UNDEF and a write to it is
+  # dropped.  Every result column then reaches its frame, at a cost on each
+  # read (a column with holes is gathered whole, roughly ten times slower
+  # than a column of its own).  The key of an outer join welds the two key
+  # columns (+CArray.meld+), so it needs keys of one kind on both sides, the
+  # same type and, for a Face, the same state (time unit, labels); a key of
+  # +CAConstString+ cannot be welded.
+  #
   # A non-key column present on both sides collides. The key column (+on+) is
   # kept once, never suffixed. By default the collision is resolved by suffixing
   # both sides (+suffixes: ["_left", "_right"]+); pass a 2-element array to pick
@@ -63,9 +72,13 @@ class CAFrame
   # The result shares this frame's columns and index, as +filter+'s does.
   #
   #   obs.join(stations, on: "station", how: :anti)   # stations not listed
-  def join(other, on:, how: :left, suffixes: DEFAULT_JOIN_SUFFIXES)
+  def join(other, on:, how: :left, suffixes: DEFAULT_JOIN_SUFFIXES, view: nil)
     unless %i[left inner outer right semi anti].include?(how)
       raise ArgumentError, "unknown join mode #{how.inspect}"
+    end
+    refuse_unknown_view(view, "join")
+    if (how == :semi || how == :anti) && view
+      raise ArgumentError, "join: how: #{how.inspect} adds no column of the other frame, so view: does not apply"
     end
     if (how == :semi || how == :anti) && !suffixes.equal?(DEFAULT_JOIN_SUFFIXES)
       raise ArgumentError, "join: how: #{how.inspect} adds no column of the other frame, so suffixes: does not apply"
@@ -77,7 +90,7 @@ class CAFrame
     return join_filter(lkeys, rkeys, how) if how == :semi || how == :anti
 
     plan = join_name_plan(other, names, rnames, suffixes)
-    join_pairs(other, names, rnames, lkeys, rkeys, how, plan)
+    join_pairs(other, names, rnames, lkeys, rkeys, how, plan, view)
   end
 
   # As-of (nearest-key) left join for irregular series (memo §11.7). Each
@@ -88,7 +101,8 @@ class CAFrame
   # in that direction or beyond +tolerance:+ come back UNDEF. +tolerance:+
   # is a number for a numeric key and a duration for a time key
   # ("10 minutes", or a CATimedelta value). Same wiring as the left join,
-  # only the address primitive differs.
+  # only the address primitive differs; +view: :full+ makes +other+'s
+  # columns views with holes, as +join+'s does.
   #
   # +by:+ names columns that must match exactly, one name or an Array: each
   # left row is matched to the nearest row among the rows of +other+ with
@@ -97,7 +111,8 @@ class CAFrame
   # named differently on the two sides, as +join+'s +on:+ does.
   #
   #   obs.join_asof(radar, on: "time", by: "station", tolerance: "10 minutes")
-  def join_asof(other, on:, by: nil, direction: :floor, tolerance: nil, suffixes: DEFAULT_JOIN_SUFFIXES)
+  def join_asof(other, on:, by: nil, direction: :floor, tolerance: nil, suffixes: DEFAULT_JOIN_SUFFIXES, view: nil)
+    refuse_unknown_view(view, "join_asof")
     ons, ron = join_key_pairs(on, "join_asof", "on:")
     if ons.size != 1
       raise ArgumentError, "join_asof: on: names one key column (got #{ons.size}); by: names the others"
@@ -124,7 +139,7 @@ class CAFrame
              _, lcode, rcode, k = join_codes(lexact, rexact)
              join_asof_by(lkey, rkey, lcode, rcode, k, direction, tolerance)
            end
-    join_by_addr(other, [on, *exact], [ron, *rexact_names], addr, plan)
+    join_by_addr(other, [on, *exact], [ron, *rexact_names], addr, plan, view)
   end
 
   # Conform every column to an externally supplied reference key set (the
@@ -455,7 +470,7 @@ class CAFrame
 
   # The left key columns keep their names, as in join_pairs; a right column
   # of the same name takes the right suffix.
-  private def join_by_addr(other, names, rnames, addr, plan)
+  private def join_by_addr(other, names, rnames, addr, plan, view)
     cols = {}
     column_names.each do |name|
       name_out = names.include?(name) ? name : join_name(name, plan[:lsuf], plan)
@@ -463,14 +478,14 @@ class CAFrame
     end
     other.column_names.each do |name|
       next if rnames.include?(name)
-      put_join_column(cols, join_name(name, plan[:rsuf], plan), project_rows(other[name], addr))
+      put_join_column(cols, join_name(name, plan[:rsuf], plan), join_rows(other[name], addr, view))
     end
     CAFrame.new(cols, axis_name: @axis_name, index: @index)
   end
 
   # The rows of a key join: li / ri are the left / right row of each result
   # row, UNDEF on the side a row has no match on.
-  private def join_pairs(other, names, rnames, lkeys, rkeys, how, plan)
+  private def join_pairs(other, names, rnames, lkeys, rkeys, how, plan, view)
     parts, lcode, rcode, k = join_codes(lkeys, rkeys)
     extra = nil
     if how == :right
@@ -500,14 +515,15 @@ class CAFrame
     every_right    = how == :right || how == :inner
     right_identity = every_right && ri.elements == other.nrow &&
                      (other.nrow == 0 || ri.eq(CArray.int64(other.nrow).seq).all)
-    rows = { li: li, ri: ri, extra: extra, how: how, every_left: every_left, identity: identity }
+    rows = { li: li, ri: ri, extra: extra, how: how, every_left: every_left, identity: identity,
+             view: view }
     cols = {}
     column_names.each do |name|
       j = names.index(name)
       col = if j                 then joined_key(j, parts, lkeys, rkeys, rows)
             elsif identity       then self[name]
             elsif every_left     then self[name][li, *([nil] * (self[name].ndim - 1))]
-            else                      project_rows(self[name], li)
+            else                      join_rows(self[name], li, view)
             end
       name = join_name(name, plan[:lsuf], plan) unless j
       put_join_column(cols, name, col)
@@ -517,7 +533,7 @@ class CAFrame
       col = other[name]
       col = if right_identity then col
             elsif every_right then col[ri, *([nil] * (col.ndim - 1))]
-            else                   project_rows(col, ri)
+            else                   join_rows(col, ri, view)
             end
       put_join_column(cols, join_name(name, plan[:rsuf], plan), col)
     end
@@ -528,7 +544,7 @@ class CAFrame
                 elsif ij        then joined_key(ij, parts, lkeys, rkeys, rows)
                 elsif identity  then @index
                 elsif every_left then @index[li]
-                else                  project_rows(@index, li)
+                else                  join_rows(@index, li, view)
                 end
     CAFrame.new(cols, axis_name: @axis_name, index: new_index)
   end
@@ -541,6 +557,7 @@ class CAFrame
     return lkeys[j] if rows[:identity]
     return lkeys[j][li] if rows[:every_left]
     return rkeys[j][ri] if rows[:how] == :right
+    return joined_key_view(lkeys[j], rkeys[j], li, rows[:extra]) if rows[:view]
     common, lc, rc = parts[j]
     extra = rows[:extra]
     code = if extra
@@ -626,6 +643,48 @@ class CAFrame
       return [CArray.int64(0), CArray.int64(0)] if ai.elements == 0
       [ai, brow.project(acode.project(ai))]
     end
+  end
+
+  # The key of an outer join as a view: the left key on the left rows, then
+  # the right key on the right rows no left row matched. The two keys are
+  # welded, so they must be of one kind.
+  private def joined_key_view(lkey, rkey, li, extra)
+    # Checked whether or not this join has a right-only row, so the same
+    # call does not raise or pass with the data: the kinds first, then the
+    # weld itself on no rows (a Face's state, such as a time unit).
+    reason = if lkey.class != rkey.class || lkey.data_type != rkey.data_type
+               "#{CArray::Inspector.type_label(lkey)} and #{CArray::Inspector.type_label(rkey)}"
+             else
+               begin
+                 CArray.meld([lkey[0...0], rkey[0...0]], axis: 0)
+                 nil
+               rescue ArgumentError => e
+                 e.message
+               end
+             end
+    if reason
+      raise ArgumentError,
+            "join: view: :full welds the two key columns of an outer join, which needs " \
+            "one kind of key (#{reason}); cast one side first, or leave view: out"
+    end
+    return lkey[li] unless extra
+    nleft = li.elements - extra.elements
+    CArray.meld([lkey[li[0...nleft]], rkey[extra]], axis: 0)
+  end
+
+  # view: is nil (views where every row has a row of the side, new columns
+  # where some do not) or :full (views throughout, UNDEF for a row with no
+  # row of the side).
+  private def refuse_unknown_view(view, verb)
+    return if view.nil? || view == :full
+    raise ArgumentError, "#{verb}: view: takes :full (got #{view.inspect})"
+  end
+
+  # The rows +addr+ picks from +col+, UNDEF where +addr+ is masked: a view
+  # with view: :full, else a new column.
+  private def join_rows(col, addr, view)
+    return project_rows(col, addr) unless view == :full
+    col[addr, *([nil] * (col.ndim - 1))]
   end
 
   private def project_rows(col, addr)

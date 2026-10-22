@@ -67,6 +67,8 @@ The result shares cells with the tables it came from wherever every row has a ro
 both = extra.join(shops.select("shop", "size"), on: "shop", how: :inner).copy
 ```
 
+The other side — the one with missing values for rows without a match — is a new table of its own. `view: :full` makes it a view as well, with the missing places left as holes that read as missing and ignore writes. It is experimental, and slow to read; use it only when the result must stay connected to both tables.
+
 ### Keeping rows by whether the other table has their key — `:semi`, `:anti`
 
 Sometimes you want no columns from the other table, only to know whether it has the key. `:semi` keeps the rows whose key the other table has; `:anti` keeps the rows whose key it does not have:

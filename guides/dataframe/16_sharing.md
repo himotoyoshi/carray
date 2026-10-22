@@ -66,6 +66,7 @@ Copy when you are about to change a part and want the original as it was, when y
 | `join(how: :left)`, `join_asof` | this frame's columns; the other frame's are copied |
 | `join(how: :inner)` | the columns of both frames, picked by row |
 | `join(how: :right)` | the other frame's columns; this frame's are copied |
+| `join(..., view: :full)`, `join_asof(..., view: :full)` | every column, with holes where a row has no match (experimental) |
 | `split_column`, `contrast_columns` | the columns not split |
 | `stack_columns`, `unstack_column` | the other columns; the new columns are views of the old |
 

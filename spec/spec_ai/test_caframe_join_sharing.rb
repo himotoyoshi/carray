@@ -57,4 +57,63 @@ class TestCAFrameJoinSharing < Test::Unit::TestCase
     j["y"][0] = -20.0
     assert_equal [40.0, 20.0, 50.0], r["y"].to_a
   end
+
+  # view: :full: every column a view, UNDEF where a row has no row of a side.
+  def test_full_view_gives_the_same_values
+    l = CAFrame.new({ "k" => CA_INT32([1, 2, 3, 4]), "x" => CA_FLOAT64([1, 2, 3, 4]),
+                      "m" => CA_INT32([[1, 2], [3, 4], [5, 6], [7, 8]]) },
+                    index: CA_INT32([10, 20, 30, 40]))
+    r = right
+    %i[left inner right outer].each do |how|
+      a = l.join(r, on: "k", how: how)
+      b = l.join(r, on: "k", how: how, view: :full)
+      a.column_names.each { |c| assert_equal a[c].to_a, b[c].to_a, "#{how} #{c}" }
+      assert_equal a.index.to_a, b.index.to_a, how.to_s
+    end
+  end
+
+  def test_full_view_outer_writes_reach_both_frames
+    l, r = left, right
+    j = l.join(r, on: "k", how: :outer, view: :full)
+    assert_equal [1, 2, 3, 4, 5], j["k"].to_a
+    j["x"][1] = -2.0
+    j["y"][1] = -20.0
+    j["k"][4] = 9                              # the right-only row's key
+    assert_equal [1.0, -2.0, 3.0, 4.0], l["x"].to_a
+    assert_equal [40.0, -20.0, 50.0], r["y"].to_a
+    assert_equal [4, 2, 9], r["k"].to_a
+    j["x"][4] = 99.0                           # a hole: no cell to land in
+    assert_equal [1.0, -2.0, 3.0, 4.0], l["x"].to_a
+  end
+
+  def test_full_view_left_and_asof
+    l, r = left, right
+    j = l.join(r, on: "k", view: :full)
+    j["y"][1] = -20.0
+    assert_equal [40.0, -20.0, 50.0], r["y"].to_a
+    t = CAFrame.new("t" => CA_FLOAT64([1, 2, 3]))
+    u = CAFrame.new("t" => CA_FLOAT64([1.5, 10]), "w" => CA_INT32([7, 8]))
+    a = t.join_asof(u, on: "t", view: :full)
+    assert_equal [UNDEF, 7, 7], a["w"].to_a
+    a["w"][1] = -7
+    assert_equal [-7, 8], u["w"].to_a
+  end
+
+  # The outer key welds both key columns, so they must be of one kind; this
+  # is checked whether or not a right-only row comes out.
+  def test_full_view_outer_needs_one_kind_of_key
+    l = left
+    matched = CAFrame.new("k" => CA_FLOAT64([2]))
+    assert_raise(ArgumentError) { l.join(matched, on: "k", how: :outer, view: :full) }
+    d = CAFrame.new("t" => CArray.time(%w[2024-01-01], unit: :D))
+    h = CAFrame.new("t" => CArray.time(%w[2024-01-01T00], unit: :h))
+    assert_raise(ArgumentError) { d.join(h, on: "t", how: :outer, view: :full) }
+    assert_equal [1, 2, 3, 4], l.join(matched, on: "k", view: :full)["k"].to_a
+  end
+
+  def test_view_takes_only_full
+    assert_raise(ArgumentError) { left.join(right, on: "k", view: :part) }
+    assert_raise(ArgumentError) { left.join(right, on: "k", how: :semi, view: :full) }
+    assert_raise(ArgumentError) { left.join_asof(right, on: "k", view: true) }
+  end
 end
