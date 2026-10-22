@@ -45,8 +45,8 @@ class CAFrame
   # makes the other side views too, so a write reaches either frame, with a
   # hole where a row has no match: the hole reads UNDEF and a write to it is
   # dropped.  Every result column then reaches its frame, at a cost on each
-  # read (a column with holes is gathered whole: a reduction is ten to
-  # thirty times slower than on a column of its own, a +copy+ more).  The key of an outer join welds the two key
+  # read (a column with holes is gathered whole: a reduction is about
+  # three times slower than on a column of its own, a +copy+ five to ten).  The key of an outer join welds the two key
   # columns (+CArray.meld+), so it needs keys of one kind on both sides, the
   # same type and, for a Face, the same state (time unit, labels); a key of
   # +CAConstString+ cannot be welded.

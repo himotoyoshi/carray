@@ -89,7 +89,7 @@ detail["floor_m2"][crowded] = UNDEF
 area["floor_m2"].to_a   # => [UNDEF, 85, 240, 200]
 ```
 
-`view: :full` is experimental, and a column with holes is slow to read — ten times or more. That is fine for cleaning; for the analysis afterwards, use the cleaned tables themselves, or a copy of the joined one.
+`view: :full` is experimental, and a column with holes is slower to read — about three times for a summary. That is fine for cleaning; for the analysis afterwards, use the cleaned tables themselves, or a copy of the joined one.
 
 ### Keeping rows by whether the other table has their key — `:semi`, `:anti`
 
