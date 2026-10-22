@@ -283,6 +283,8 @@ b[i] = CA_INT([1, 2, 3])
 b                       #  => [ 10, 20, 3, 40, 1 ]
 ```
 
+That place has no cell of the source behind it, so nothing written through the view lands there, `unmask` included: it stays masked. A value for it needs a new array, `b[i].strip_mask(0)`.
+
 ## Writing through a slice
 
 Any of the slice forms above can appear on the left of an assignment. Assigning a scalar fills every selected element; assigning an array of matching shape copies it in element-wise.

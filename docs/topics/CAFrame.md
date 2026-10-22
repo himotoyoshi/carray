@@ -1483,6 +1483,8 @@ j = obs.join(meta, on: "station", how: :outer, view: :full)
 j[(j["elev"] > 1000).strip_mask(false)] = UNDEF        # whole rows, in each frame that has the row
 ```
 
+A hole has no cell to write, so `unmask` leaves it masked too; `strip_mask` gives new columns with every hole filled, no longer connected to either frame.
+
 It is for writing back while cleaning, not for the analysis that follows. A column with holes is gathered whole each time it is read: a reduction on it is about three times slower than on a column of its own, a `copy` of it five to ten times, and building it costs as much as gathering it. Clean through the joined frame, then analyse the cleaned frames, or a `copy` of the join. The key column of an `:outer` join holds the left key on the left rows and the right key on the right-only rows, welded as `CArray.meld` welds them, so both keys must be of one kind: the same type and, for a Face, the same state (time unit, categorical labels). Otherwise `view: :full` raises `ArgumentError`, whether or not the join has a right-only row; a `CAConstString` key cannot be welded at all. Leave `view:` out, or cast one key first.
 
 **Keeping rows by whether the other frame has their key.** Two more modes do not pair rows. They pick this frame's rows:

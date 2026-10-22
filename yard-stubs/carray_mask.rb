@@ -84,6 +84,12 @@ class CArray
   # that derives values from neighbouring valid cells (mask gap-fill).
   # The two are mutually exclusive: passing both raises `ArgumentError`.
   #
+  # On a view, the values are written through to the cells it views. A
+  # position with no cell behind it -- the place of a masked cell of an
+  # index array (`a[i]`), as a join with `view: :full` gives for an
+  # unmatched row -- takes no write and stays masked, without an error.
+  # `strip_mask` gives a new array, where every masked cell takes a value.
+  #
   # @overload unmask
   #   Clears the mask state of every element of `self`, leaving the
   #   stored data values untouched. Mutates `self`.

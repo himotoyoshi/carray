@@ -209,6 +209,8 @@ c
 
 `strip_mask` has no such form. It insists on being told what to put in the gaps and raises if you give it nothing; when you want the stored values as a new array, copy first and unmask the copy, as above.
 
+`unmask` on a view writes through to the cells the view shows. A view taken with an index array that has masked cells (chapter 2) has places with no cell behind them; they take no write, so after `unmask` they are still masked. `strip_mask` makes a new array and fills them too.
+
 ### Filling from the neighbours
 
 Instead of one value everywhere, `method:` derives each gap from the cells around it. `:forward` carries the last present value forward, `:backward` carries the next one back, and `:linear` interpolates between the two.
