@@ -328,8 +328,8 @@ module MkKernel
   #                                 # :match_source (legacy) reads the weight at
   #                                 # the source type -- wrong for fractional
   #                                 # weights, kept only for DSL forward-compat.
-  #     shape: :rev5_strict,        # W-A1 scalar / W-A2 1-D axis-broadcast / W-A3
-  #                                 # same-shape (:match_source = W-A3 only)
+  #     shape: :rev5_strict,        # W-A1 scalar / W-A4 shape of the reduced axes /
+  #                                 # W-A3 self.shape (:match_source = W-A3 only)
   #     mask:  :overlay,            # weights.mask OR'd into self.mask before
   #                                 # kernel call (= legacy parity, Q3 (A))
   #   }
@@ -570,9 +570,9 @@ module MkKernel
       raise "#{name}: array_arg: data_type must be :promote or :match_source" \
         unless [:promote, :match_source].include?(array_arg[:data_type])
       # PROPOSAL_REDUCTION_PER_FIBER_AUX_OPERAND rev1: shape acceptance expanded
-      # to W-A1 (scalar) / W-A2 (1-D axis-broadcast) / W-A3 (same shape).
+      # to W-A1 (scalar) / W-A4 (shape of the reduced axes) / W-A3 (self.shape).
       # :match_source = legacy W-A3 only (kept for forward-compat in DSL).
-      # :rev5_strict = W-A1 + W-A2 + W-A3 acceptance (= new default for wsum/wmean).
+      # :rev5_strict = W-A1 + W-A4 + W-A3 acceptance (= new default for wsum/wmean).
       raise "#{name}: array_arg: shape must be :match_source or :rev5_strict" \
         unless [:match_source, :rev5_strict].include?(array_arg[:shape])
       raise "#{name}: array_arg: mask must be :overlay (W.1 MVP)" \
@@ -3513,12 +3513,12 @@ module MkKernel
       # computation type (so a float weight against an int source is not
       # truncated -- the body reads it as `double`); :match_source keeps the
       # legacy source-type storage.  waca is the CA_* constant the three
-      # materialization sites (W-A1 / W-A2 / W-A3) allocate/wrap against, and
+      # materialization sites (W-A1 / W-A4 / W-A3) allocate/wrap against, and
       # must agree with the T_W the reduce macro reads (double for :promote).
       waca = (k[:array_arg][:data_type] == :promote) ? "CA_FLOAT64" : "src->data_type"
       # PROPOSAL_REDUCTION_PER_FIBER_AUX_OPERAND rev1: weights acceptance
-      # expanded to 3 forms (W-A1 scalar / W-A2 1-D axis-broadcast / W-A3
-      # full per-element).  W-A1 / W-A2 are materialized to W-A3 form
+      # expanded to 3 forms (W-A1 scalar / W-A4 shape of the reduced axes / W-A3
+      # full per-element).  W-A1 / W-A4 are materialized to W-A3 form
       # at dispatch (= simple, uniform kernel path).  rev5 strict acceptance
       # mirrors PROPOSAL_LINEAR_INTERP_PER_FIBER_MATCHED rev5 in spirit.
       io.puts "  if ( argc < 1 ) {"
@@ -3557,72 +3557,75 @@ module MkKernel
       wio.puts "  else {"
       wio.puts "    /* CArray val: coerce to the weight storage type (f64 for :promote, so a"
       wio.puts "       float weight against an int source is not truncated) */"
-      wio.puts "    /* vcv holds the view while cv is read: W-A2 below moves vcw on to"
+      wio.puts "    /* vcv holds the view while cv is read: W-A4 below moves vcw on to"
       wio.puts "       the materialised copy before it is done with cv. */"
       wio.puts "    volatile VALUE vcv = rb_ca_wrap_readonly(rweights, INT2NUM(#{waca}));"
       wio.puts "    CArray *cv;"
       wio.puts "    GetCArray(vcv, cv);"
       wio.puts "    vcw = vcv;"
       wio.puts ""
-      wio.puts "    /* rev5 form detection: A3 (same ndim) -> A2 (1-D axis-broadcast) -> raise */"
-      wio.puts "    if ( cv->ndim == src->ndim ) {"
-      wio.puts "      /* W-A3 commit-or-raise: shape strict match */"
-      wio.puts "      for ( int8_t i = 0; i < src->ndim; i++ ) {"
-      wio.puts "        if ( cv->dim[i] != src->dim[i] ) {"
-      wio.puts %Q[          rb_raise(rb_eArgError, "%s: weights shape mismatch (dim[%d]=%ld != self.dim[%d]=%ld; expected a scalar, a 1-D array along the reduced axis, or self.shape)", ca_calling_method_name(), (int)i, (long)cv->dim[i], (int)i, (long)src->dim[i]);]
-      wio.puts "        }"
-      wio.puts "      }"
-      wio.puts "      /* W-A3 path: use cv directly (= existing) */"
+      wio.puts "    /* form detection: W-A3 (self.shape) -> W-A4 (shape of the reduced axes,"
+      wio.puts "       taken in ascending axis order whatever order axis: lists them) -> raise */"
+      wio.puts "    int8_t wax[CA_RANK_MAX];"
+      wio.puts "    for ( int8_t i = 0; i < naxes; i++ ) {"
+      wio.puts "      int8_t a = slab_axes[i], j = i;"
+      wio.puts "      while ( j > 0 && wax[j-1] > a ) { wax[j] = wax[j-1]; j--; }"
+      wio.puts "      wax[j] = a;"
+      wio.puts "    }"
+      wio.puts "    int is_full_shape = ( cv->ndim == src->ndim );"
+      wio.puts "    for ( int8_t i = 0; is_full_shape && i < src->ndim; i++ ) {"
+      wio.puts "      if ( cv->dim[i] != src->dim[i] ) is_full_shape = 0;"
+      wio.puts "    }"
+      wio.puts "    int is_reduced_shape = ( ! is_full_shape && naxes >= 1 && cv->ndim == naxes );"
+      wio.puts "    for ( int8_t i = 0; is_reduced_shape && i < naxes; i++ ) {"
+      wio.puts "      if ( cv->dim[i] != src->dim[wax[i]] ) is_reduced_shape = 0;"
+      wio.puts "    }"
+      wio.puts "    if ( is_full_shape ) {"
+      wio.puts "      /* W-A3: per-element weights, used as they are */"
       wio.puts "      cw = cv;"
       wio.puts "    }"
-      wio.puts "    else if ( naxes == 1 && cv->ndim == 1 && cv->dim[0] == src->dim[slab_axes[0]] ) {"
-      wio.puts "      /* W-A2: 1-D axis-broadcast -> materialize to full shape.  cw and"
-      wio.puts "         its mask are made before cv is attached: making them allocates. */"
+      wio.puts "    else if ( is_reduced_shape ) {"
+      wio.puts "      /* W-A4: one weight per cell of the reduced axes, repeated along the"
+      wio.puts "         kept axes; materialized to self.shape.  cw and its mask are made"
+      wio.puts "         before cv is attached: making them allocates. */"
       wio.puts "      vcw = rb_carray_new(#{waca}, src->ndim, src->dim, 0, NULL);"
       wio.puts "      GetCArray(vcw, cw);"
       wio.puts "      if ( ca_has_mask(cv) ) {"
       wio.puts "        ca_create_mask(cw);"
       wio.puts "      }"
       wio.puts "      ca_attach(cv);   /* window: nothing raises inside */"
-      wio.puts "      /* broadcast cv (1-D, length src->dim[slab_axes[0]]) along reduce axis */"
       wio.puts "      {"
-      wio.puts "        int8_t baxis = slab_axes[0];"
-      wio.puts "        ca_size_t inner_stride = 1;"
-      wio.puts "        for ( int8_t ii = baxis + 1; ii < src->ndim; ii++ ) inner_stride *= src->dim[ii];"
-      wio.puts "        ca_size_t axis_n = src->dim[baxis];"
-      wio.puts "        ca_size_t outer  = ( axis_n && inner_stride ) ? src->elements / (axis_n * inner_stride) : 0;   /* a zero-length axis leaves nothing to fill */"
-      wio.puts "        for ( ca_size_t o = 0; o < outer; o++ ) {"
-      wio.puts "          for ( ca_size_t a = 0; a < axis_n; a++ ) {"
-      wio.puts "            for ( ca_size_t in = 0; in < inner_stride; in++ ) {"
-      wio.puts "              ca_size_t flat = (o * axis_n + a) * inner_stride + in;"
-      wio.puts "              memcpy(cw->ptr + flat * cw->bytes, cv->ptr + a * cv->bytes, cw->bytes);"
-      wio.puts "            }"
-      wio.puts "          }"
+      wio.puts "        ca_size_t idx[CA_RANK_MAX], wstep[CA_RANK_MAX];"
+      wio.puts "        ca_size_t step = 1;"
+      wio.puts "        boolean8_t *cw_m = ca_has_mask(cv) ? (boolean8_t *) cw->mask->ptr : NULL;"
+      wio.puts "        boolean8_t *cv_m = ca_has_mask(cv) ? (boolean8_t *) cv->mask->ptr : NULL;"
+      wio.puts "        for ( int8_t i = 0; i < src->ndim; i++ ) {"
+      wio.puts "          idx[i]   = 0;"
+      wio.puts "          wstep[i] = 0;   /* kept axes: the weight repeats */"
       wio.puts "        }"
-      wio.puts "      }"
-      wio.puts "      /* Propagate cv mask via W-A3 overlay path below (= mask materialize) */"
-      wio.puts "      if ( ca_has_mask(cv) ) {"
-      wio.puts "        /* broadcast cv mask along axis */"
-      wio.puts "        boolean8_t *cw_m = (boolean8_t *)cw->mask->ptr;"
-      wio.puts "        boolean8_t *cv_m = (boolean8_t *)cv->mask->ptr;"
-      wio.puts "        int8_t baxis = slab_axes[0];"
-      wio.puts "        ca_size_t inner_stride = 1;"
-      wio.puts "        for ( int8_t ii = baxis + 1; ii < src->ndim; ii++ ) inner_stride *= src->dim[ii];"
-      wio.puts "        ca_size_t axis_n = src->dim[baxis];"
-      wio.puts "        ca_size_t outer  = ( axis_n && inner_stride ) ? src->elements / (axis_n * inner_stride) : 0;   /* a zero-length axis leaves nothing to fill */"
-      wio.puts "        for ( ca_size_t o = 0; o < outer; o++ ) {"
-      wio.puts "          for ( ca_size_t a = 0; a < axis_n; a++ ) {"
-      wio.puts "            for ( ca_size_t in = 0; in < inner_stride; in++ ) {"
-      wio.puts "              ca_size_t flat = (o * axis_n + a) * inner_stride + in;"
-      wio.puts "              cw_m[flat] = cv_m[a];"
-      wio.puts "            }"
+      wio.puts "        for ( int8_t i = naxes - 1; i >= 0; i-- ) {"
+      wio.puts "          wstep[wax[i]] = step;"
+      wio.puts "          step *= cv->dim[i];"
+      wio.puts "        }"
+      wio.puts "        for ( ca_size_t flat = 0; flat < src->elements; flat++ ) {"
+      wio.puts "          ca_size_t w = 0;"
+      wio.puts "          for ( int8_t i = 0; i < src->ndim; i++ ) w += idx[i] * wstep[i];"
+      wio.puts "          memcpy(cw->ptr + flat * cw->bytes, cv->ptr + w * cv->bytes, cw->bytes);"
+      wio.puts "          if ( cw_m ) cw_m[flat] = cv_m[w];"
+      wio.puts "          for ( int8_t i = src->ndim - 1; i >= 0; i-- ) {"
+      wio.puts "            if ( ++idx[i] < src->dim[i] ) break;"
+      wio.puts "            idx[i] = 0;"
       wio.puts "          }"
       wio.puts "        }"
       wio.puts "      }"
       wio.puts "      ca_detach(cv);"
       wio.puts "    }"
       wio.puts "    else {"
-      wio.puts %Q[      rb_raise(rb_eArgError, "%s: w shape not accepted (val.ndim=%d, val.dim[0]=%ld; expected scalar / [M=%ld] / self.shape)", ca_calling_method_name(), (int)cv->ndim, (long)(cv->ndim >= 1 ? cv->dim[0] : 0), (long)(naxes == 1 ? src->dim[slab_axes[0]] : -1));]
+      wio.puts "      volatile VALUE rexpect = rb_ary_new();"
+      wio.puts "      for ( int8_t i = 0; i < naxes; i++ ) {"
+      wio.puts "        rb_ary_push(rexpect, SIZE2NUM(src->dim[wax[i]]));"
+      wio.puts "      }"
+      wio.puts %Q[      rb_raise(rb_eArgError, "%s: weights of shape %"PRIsVALUE" not accepted (expected a scalar, the shape of the reduced axes %"PRIsVALUE", or self.shape %"PRIsVALUE")", ca_calling_method_name(), rb_funcall(vcv, rb_intern("shape"), 0), rexpect, rb_funcall(self, rb_intern("shape"), 0));]
       wio.puts "    }"
       wio.puts "  }"
       # Mask overlay (= legacy W-A3 path; if the materialized cw carries a mask, overlay it)

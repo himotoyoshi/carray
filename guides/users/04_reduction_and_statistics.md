@@ -266,6 +266,26 @@ v.wsum(w)     #  => 20.0    1*4 + 2*3 + 3*2 + 4*1
 v.wmean(w)    #  => 2.0     20.0 / (4 + 3 + 2 + 1)
 ```
 
+The weights take one of three shapes:
+
+- a scalar, the same weight for every element;
+- the shape of the reduced axes, one weight per cell of those axes, used again along every axis that is kept;
+- the shape of the array, one weight per element.
+
+The second is the usual one when a reduction runs over some of the axes. An area-weighted spatial mean of a `[time, lat, lon]` field takes a `[lat, lon]` weight and gives one value per time:
+
+```ruby
+x = CArray.float64(2, 3, 4).seq          # [time, lat, lon]
+w = CA_DOUBLE([[1, 1, 1, 1],
+               [2, 2, 2, 2],
+               [3, 3, 3, 3]])            # [lat, lon]
+
+x.wmean(w, axis: [1, 2])   #  => [ 6.833333333333333, 18.833333333333332 ]
+x.mean(axis: [1, 2])       #  => [ 5.5, 17.5 ]
+```
+
+The reduced axes are matched in the order they appear in the array, whatever order `axis:` lists them in: `axis: [2, 1]` takes the same `[lat, lon]` weight. A masked weight drops its element, as a masked value does.
+
 A natural use is a frequency table. The mean of the original data is the weighted mean of the values by their counts, and `index` hands you the value axis that `bincount` counted along:
 
 ```ruby
@@ -396,7 +416,7 @@ The reduction and statistics methods covered above, with their argument forms. E
 | `stddev`              | `stddev(axis: k)`                    | Sample standard deviation as `float64`        |
 | `variancep`           | `variancep(axis: k)`                 | Population variance as `float64`              |
 | `stddevp`             | `stddevp(axis: k)`                   | Population standard deviation as `float64`    |
-| `wsum`                | `wsum(weights, axis: k)`             | Weighted sum as `float64`; `weights` is a per-element weight the same shape as the array |
+| `wsum`                | `wsum(weights, axis: k)`             | Weighted sum as `float64`; `weights` is a scalar, the shape of the reduced axes, or the shape of the array |
 | `wmean`               | `wmean(weights, axis: k)`            | Weighted mean `sum(v*w)/sum(w)` as `float64`  |
 | `accumulate`          | `accumulate(axis: k)`                | Sum that keeps the input data type; wraps at that type's width |
 | `median`              | `median(axis: k)`                    | Middle value as `float64`                     |

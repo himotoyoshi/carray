@@ -57,13 +57,14 @@ class CArray
   # is more naturally (and exactly, for Rational / BigDecimal weights) a
   # +(self * weights).sum+ composition than a dedicated :object kernel branch.
   #
-  # +weights+ is a Ruby Numeric scalar (W-A1) or a same-shape CArray; the 1-D
-  # axis-broadcast form (W-A2) is not supported for object weights (pass a
-  # scalar or a full-shape weight), matching CArray's explicit-broadcast rule.
-  # +opts+ is the trailing options Hash (axis:/keep_axis:/min_count:/
-  # fill_value:) forwarded verbatim by the C escape; it goes straight to +sum+.
+  # +weights+ takes the forms the numeric kernel takes: a scalar (or a
+  # one-element CArray), an array of the shape of the reduced axes (taken in
+  # ascending axis order), or an array of self.shape.  +opts+ is the trailing
+  # options Hash (axis:/keep_axis:/min_count:/fill_value:) forwarded verbatim
+  # by the C escape; it goes straight to +sum+.
   def wsum_object (weights, opts = {}) # :nodoc:
-    (self * weights).sum(**opts)
+    weights = weights_over_self_shape(weights, opts[:axis], "wsum")
+    return (self * weights).sum(**opts)
   end
   private :wsum_object
 
@@ -76,6 +77,7 @@ class CArray
   def wmean_object (weights, opts = {}) # :nodoc:
     axis      = opts[:axis]
     keep_axis = opts[:keep_axis]
+    weights = weights_over_self_shape(weights, axis, "wmean")
     prod = self * weights
     wv   = (weights.is_a?(CArray) ? weights : self * 0 + weights).copy
     wv[prod.is_masked] = UNDEF if prod.has_mask?
@@ -96,6 +98,38 @@ class CArray
     CArray.__fill_undefined_result_cells__(result, opts[:fill_value])
   end
   private :wmean_object
+
+  # The weights of wsum / wmean as a scalar or an array of self.shape.  An
+  # array of the shape of the reduced axes (in ascending axis order) is
+  # repeated along the kept axes; any other shape is refused, with the same
+  # message as the numeric kernel.
+  def weights_over_self_shape (weights, axis, name) # :nodoc:
+    unless weights.is_a?(CArray)
+      return weights
+    end
+    if weights.elements == 1
+      return weights[0]
+    end
+    if weights.shape == self.shape
+      return weights
+    end
+    axes = case axis
+           when nil     then (0...self.ndim).to_a
+           when Integer then [axis]
+           else              axis
+           end
+    axes = axes.map { |a| ( a < 0 ) ? a + self.ndim : a }.sort
+    reduced_shape = axes.map { |a| self.shape[a] }
+    unless weights.shape == reduced_shape
+      raise ArgumentError,
+            "#{name}: weights of shape #{weights.shape.inspect} not accepted " \
+            "(expected a scalar, the shape of the reduced axes " \
+            "#{reduced_shape.inspect}, or self.shape #{self.shape.inspect})"
+    end
+    spread = self.shape.each_index.map { |i| axes.include?(i) ? self.shape[i] : 1 }
+    return weights.reshape(*spread).broadcast_to(*self.shape)
+  end
+  private :weights_over_self_shape
 
   # Define on +mod+ one method per name in +names+, each a `def` that passes
   # its own name and its arguments to the private method +to+:

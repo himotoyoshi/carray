@@ -306,7 +306,8 @@ NUL-pad to the cell width instead of never matching. The kernel must also
 list `:fixlen` in `source:`, the way `:object` opts in.
 
 **`array_arg:`** adds a per-cell auxiliary operand (a second CArray)
-exposed as `w`, with scalar / 1-D axis-broadcast / same-shape acceptance.
+exposed as `w`, accepting a scalar, the shape of the reduced axes (in
+ascending axis order, repeated along the kept axes) or the source's shape.
 Used by `wsum` / `wmean`:
 
 ```ruby

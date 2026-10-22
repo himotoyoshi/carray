@@ -14,9 +14,8 @@ require "test/unit"
 # weights via the Ruby numeric tower, and a masked value OR weight drops the
 # cell from both sums (mask overlay), matching the numeric kernels.
 #
-# Weight forms: Ruby Numeric scalar (W-A1) or same-shape CArray (W-A3).  The
-# 1-D axis-broadcast form (W-A2) is not offered for object weights (CArray's
-# explicit-broadcast rule: pass a scalar or a full-shape weight).
+# Weight forms: as for the numeric kernels -- a scalar (W-A1), the shape of
+# the reduced axes (W-A4, repeated along the kept axes) or self.shape (W-A3).
 class TestObjectWsumWmean < Test::Unit::TestCase
 
   # ---- flat, no mask: parity with numeric ----------------------------
