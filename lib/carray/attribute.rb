@@ -6,6 +6,7 @@
 #    ca.set_attr(:unit, "m/s")  # => setter; writes to self's @attr
 #    ca.set_attrs(other.attrs)  # => sets every key of a Hash at once
 #    ca.attrs                   # => frozen shallow clone of the full Hash
+#    ca.attrs_symkey            # => the same, with Symbol keys (nested too)
 #    ca.has_attr?               # => any attribute present?
 #    ca.has_attr?(:unit)        # => specific key present?
 #
@@ -160,6 +161,15 @@ class CArray
       h.each { |k, v| merged[k] = v unless merged.key?(k) }
     end
     (merged || {}).freeze
+  end
+
+  # @overload attrs_symkey
+  #   Returns {#attrs} with its keys as Symbols, frozen.  The keys of
+  #   Hashes nested in the values, inside Arrays too, become Symbols
+  #   as well.
+  #   @return [Hash{Symbol => Object}]
+  def attrs_symkey
+    return CArray.__send__(:attr_symbolize_keys, self.attrs)
   end
 
   # @overload has_attr?
@@ -317,6 +327,20 @@ class CArray
       v
     end
   end
-  private_class_method :attr_normalize_key, :attr_validate_value, :attr_coerce_value
+  # A stored value with the keys of every Hash in it as Symbols, frozen
+  # as the stored value is.
+  def self.attr_symbolize_keys (v)
+    case v
+    when Array then v.map { |e| attr_symbolize_keys(e) }.freeze
+    when Hash
+      v.each_with_object({}) do |(k, vv), h|
+        h[k.to_sym] = attr_symbolize_keys(vv)
+      end.freeze
+    else
+      v
+    end
+  end
+  private_class_method :attr_normalize_key, :attr_validate_value, :attr_coerce_value,
+                       :attr_symbolize_keys
 
 end

@@ -878,6 +878,12 @@ class CAFrame
     (@attrs ? @attrs.dup : {}).freeze
   end
 
+  # The frame's attributes with Symbol keys, frozen.  The keys of Hashes
+  # nested in the values become Symbols as well.
+  def attrs_symkey
+    CArray.__send__(:attr_symbolize_keys, attrs)
+  end
+
   # Give every column its own name as the attribute "name", and the
   # attributes +common+ alike, and return self.  A column's other attributes
   # are kept.  The index is not a column and is left alone.  This is how a

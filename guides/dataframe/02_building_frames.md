@@ -213,7 +213,7 @@ sales.attr(:title)    # => "daily figures by shop"
 sales.attrs           # => {"title" => "daily figures by shop", "source" => "sales.csv"}
 ```
 
-Keys may be Symbols or Strings and are stored as Strings. A value must be something JSON can hold: a number, a String, `true` / `false` / `nil`, or an Array or Hash of those.
+Keys may be Symbols or Strings and are stored as Strings; `attrs_symkey` gives the same Hash with Symbol keys, in nested Hashes too (`sales.attrs_symkey[:title]`). A value must be something JSON can hold: a number, a String, `true` / `false` / `nil`, or an Array or Hash of those.
 
 A column has attributes of its own, as any CArray does — units and currencies are common ones:
 

@@ -11,6 +11,22 @@ class TestAttributeInherit < Test::Unit::TestCase
     @b.set_attr(:units, "K")
   end
 
+  # attrs_symkey is attrs with Symbol keys, nested Hashes included.
+  def test_attrs_symkey
+    v = @a[0, nil]
+    v.set_attr(:info, { "k" => 1, "list" => [{ "x" => "y" }, 2] })
+    h = v.attrs_symkey
+    assert_equal({ units: "m/s", info: { k: 1, list: [{ x: "y" }, 2] } }, h)
+    assert h.frozen?
+    assert h[:info].frozen?
+    assert h[:info][:list].frozen?
+    assert h[:info][:list][0].frozen?
+    assert_equal({ "k" => 1, "list" => [{ "x" => "y" }, 2] }, v.attr(:info))
+    assert_equal({}, CArray.int32(2).attrs_symkey)
+    s = CArray.stack([@a, @a])
+    assert_equal({ units: "m/s" }, s.attrs_symkey)
+  end
+
   def test_copy_keeps_attributes
     assert_equal({ "units" => "m/s" }, @a.copy.attrs)
   end

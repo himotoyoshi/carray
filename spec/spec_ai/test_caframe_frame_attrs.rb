@@ -114,7 +114,7 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     == []= at axis_name column_names columns data_types each_row index
     infer_time_format infer_types inspect is_duplicate ncol nrow shape empty? pivot_grid protected?
     to_a to_ca to_csv to_records to_s to_table
-    attr set_attr set_attrs delete_attr attrs has_attr?
+    attr set_attr set_attrs delete_attr attrs attrs_symkey has_attr?
   ].freeze
 
   CLASS_DROPS = {
@@ -193,6 +193,16 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     assert_equal ["m", { "k" => "s" }], df.delete_attr(:unit)
     assert_nil df.delete_attr(:unit)
     assert !df.has_attr?
+  end
+
+  def test_attrs_symkey
+    h = frame.attrs_symkey
+    assert_equal({ title: "hourly observations", source: "station network" }, h)
+    assert h.frozen?
+    assert_equal({}, other.attrs_symkey)
+    df = other
+    df.set_attr(:info, { "k" => [{ "x" => 1 }] })
+    assert_equal({ info: { k: [{ x: 1 }] } }, df.attrs_symkey)
   end
 
   def test_rejected_value_leaves_the_frame_unchanged

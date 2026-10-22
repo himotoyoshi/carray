@@ -384,7 +384,7 @@ df.attr(:title)      # => "hourly observations"
 df.attrs             # => { "title" => "hourly observations", "source" => "station network" }
 ```
 
-`attr`, `set_attr`, `set_attrs`, `delete_attr`, `attrs` and `has_attr?` follow the rules of the same methods on a CArray: a Symbol or String key, stored as a String, and a JSON-compatible value, stored as a frozen copy. A [read-only frame](#read-only-frames) refuses to change them.
+`attr`, `set_attr`, `set_attrs`, `delete_attr`, `attrs`, `attrs_symkey` and `has_attr?` follow the rules of the same methods on a CArray: a Symbol or String key, stored as a String, and a JSON-compatible value, stored as a frozen copy. A [read-only frame](#read-only-frames) refuses to change them.
 
 A column taken out of the frame knows neither its name nor the frame's attributes. `set_column_attrs` writes them onto the columns: each column takes its own name as the attribute `"name"`, and every column takes the Hash it is given. A consumer that reads attributes, such as a plotting library labelling an axis, can then use them.
 
