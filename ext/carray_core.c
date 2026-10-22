@@ -858,6 +858,31 @@ ca_test_cyclic_check(void *ap, void *ptr)
   }
 }
 
+/* Refuse to write into an object array a value that is a CArray sharing
+   its cells -- the array itself or a view of it.  Reading such a cell back
+   is refused as cyclic (ca_test_cyclic_check); refusing the write where it
+   passes through here reports the mistake where it is made.  A write that
+   reaches the cells another way is still caught when the cell is read.
+   data holds n VALUEs. */
+static void
+ca_refuse_storing_self (CArray *ca, const void *data, ca_size_t n)
+{
+  const char *d = (const char *) data;
+  ca_size_t i;
+  for (i=0; i<n; i++) {
+    VALUE rval;
+    memcpy(&rval, d + i * sizeof(VALUE), sizeof(VALUE));
+    if ( rb_obj_is_carray(rval) ) {
+      CArray *cv;
+      TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
+      if ( ca_shares_root(ca, cv) ) {
+        rb_raise(rb_eArgError, "%s: can not store an object array into itself",
+                 ca_calling_method_name());
+      }
+    }
+  }
+}
+
 /* Runs body(arg) -- one transfer of an object cell or cells -- with ca's
    cycle check set, and clears the check however body leaves.  Either
    direction can call into Ruby: a GET through a CAObject slot or the
@@ -957,6 +982,9 @@ ca_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   }
 
   /* CA_OBJECT slow path: cyclic check. */
+  if ( dir == CA_XFER_PUT ) {
+    ca_refuse_storing_self(ca, data, 1);
+  }
   {
     struct ca_xfer_index_args args;
     args.ca  = ca;
@@ -1105,6 +1133,9 @@ ca_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data, int dir)
   }
 
   /* CA_OBJECT slow path: cyclic check. */
+  if ( dir == CA_XFER_PUT ) {
+    ca_refuse_storing_self(ca, data, n);
+  }
   {
     struct ca_xfer_addrs_args args;
     args.ca    = ca;
@@ -1548,6 +1579,12 @@ ca_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     return;
   }
 
+  if ( dir == CA_XFER_PUT ) {
+    ca_size_t n = 1;
+    int8_t k;
+    for (k=0; k<ca->ndim; k++) n *= counts[k];
+    ca_refuse_storing_self(ca, data, n);
+  }
   {
     struct ca_xfer_stride_args args;
     args.ca = ca; args.starts = starts; args.counts = counts;

@@ -113,60 +113,79 @@ class TestCAObjectClone < Test::Unit::TestCase
 end
 
 # ===========================================================================
-# CA_OBJECT 循環参照 と exception safety (carray_core.c)
+# CA_OBJECT cyclic references (carray_core.c)
 #
-# ca_fetch_addr の構造:
-#   ca_test_cyclic_check(ca)  ← 再入検出 (flag が set なら raise)
-#   ca_set_cyclic_check(ca)   ← flag を set
-#   delegate(fetch)            ← CA_OBJECT は内部で Ruby に戻ることがある
-#   ca_clear_cyclic_check(ca) ← flag を clear
-#
-# 直接自己参照 (a[0]=a):
-#   - store は成功 (store 時は test しない)
-#   - fetch 時: delegate 中に再度 ca_fetch_addr が呼ばれ、
-#     ca_test_cyclic_check が flag 残留を検出して RuntimeError を raise
-#   - この raise は set→delegate→clear の delegate 中で起きるため
-#     ca_clear_cyclic_check は呼ばれず、flag が永続化する
-#
-# Exception safety バグ:
-#   上記の RuntimeError をキャッチした後、flag が残留しているため
-#   その配列への以降の全アクセスが "cyclic reference is not allowed" で失敗する。
-#   配列が永久使用不能になる。
+# An object array can not hold itself.  A cell read that delivers the
+# array being read is refused (ca_test_cyclic_check).  A write through
+# ca_xfer_index / ca_xfer_addrs / ca_xfer_stride of a CArray that shares
+# the destination's cells -- the array or a view of it -- is refused before
+# it is made.  A write that reaches the cells another way (fill, a Ruby
+# Array) is not checked; the read refuses it.
 # ===========================================================================
 class TestCyclicReference < Test::Unit::TestCase
 
-  def test_self_reference_can_be_stored
-    a = CArray.object(2)
+  def object_array
+    a = CArray.object(3)
+    a[] = [1, 2, 3]
+    a
+  end
+
+  def test_storing_the_array_into_itself_is_refused
+    writes = {
+      "a[i] = a"         => ->(a) { a[0] = a },
+      "view[i] = a"      => ->(a) { a[0..1][0] = a },
+      "a[mask][i] = a"   => ->(a) { a[a.eq(2)][0] = a },
+      "a[i] = a view"    => ->(a) { a[0] = a[1..2] },
+      "elem_store"       => ->(a) { a.elem_store(0, a) },
+      "map!"             => ->(a) { a.map! { a } },
+      "attach!"          => ->(a) { a.attach! { |x| x[0] = a } },
+    }
+    writes.each do |name, write|
+      next if name == "attach!" && !CArray.method_defined?(:attach!)
+      a = object_array
+      e = assert_raise(ArgumentError, name) { write.call(a) }
+      assert_match(/\A\S+: can not store an object array into itself\z/, e.message, name)
+      assert_equal [1, 2, 3], a.to_a, name
+      a[0] = 9
+      assert_equal 9, a[0], "#{name}: the array stays usable"
+    end
+  end
+
+  def test_storing_another_array_is_allowed
+    a = object_array
+    b = CArray.int32(2)
+    a[0] = b
+    assert_same b, a[0]
+  end
+
+  def test_an_array_inside_a_ruby_array_is_allowed
+    a = object_array
+    a[0] = [a]
+    assert_same a, a[0][0]
+  end
+
+  # fill and an Array of values are not checked as they write; the read is.
+  def test_a_cell_holding_the_array_refuses_reads
+    [->(a) { a.fill(a) }, ->(a) { a[] = [a, 2, 3] }].each do |write|
+      a = object_array
+      write.call(a)
+      e = assert_raise(ArgumentError) { a[0] }
+      assert_equal "cyclic reference is not allowed in CArray", e.message
+      assert_raise(ArgumentError) { a.to_a }
+    end
+  end
+
+  # A refused read clears the check, so the array is usable again once the
+  # cell is overwritten.
+  def test_array_usable_after_a_refused_read
+    a = object_array
+    a.fill(a)
+    assert_raise(ArgumentError) { a[0] }
     a[0] = 42
-    # store 時は cyclic check しない → 代入は成功する
-    assert_nothing_raised { a[0] = a }
-  end
-
-  def test_self_reference_fetch_raises
-    a = CArray.object(2)
-    a[0] = a
-    # fetch 時に再入を検出して ArgumentError を raise する
-    assert_raises(ArgumentError) { a[0] }
-  end
-
-  # [修正済み] 循環参照エラー後に cyclic_check flag が残留して配列が永久使用不能になる
-  # → ca_fetch_addr / ca_fetch_index を rb_protect で包み、例外時も必ず flag をクリア
-  def test_array_permanently_broken_after_cyclic_error
-    a = CArray.object(2)
-    a[0] = a  # 自己参照 (この時点では flag 未セット → 成功)
-
-    begin
-      a[0]  # cyclic reference 検出 → ArgumentError, flag 残留
-    rescue ArgumentError
-    end
-
-    assert_nothing_raised do
-      a[0] = 42
-    end
     assert_equal 42, a[0]
   end
 
-  # 循環参照でないエラー (範囲外) の後は正常アクセスできる
+  # An error that is not a cyclic reference leaves the array usable.
   def test_array_accessible_after_unrelated_error
     a = CArray.object(2)
     a[0] = 100
@@ -174,7 +193,6 @@ class TestCyclicReference < Test::Unit::TestCase
       a[99]  # IndexError
     rescue IndexError, RuntimeError
     end
-    # 非循環エラー後は問題なくアクセスできるはず
     assert_equal 100, a[0],
       "array should remain accessible after non-cyclic error"
   end
