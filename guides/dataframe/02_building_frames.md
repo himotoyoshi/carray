@@ -222,6 +222,14 @@ sales["revenue"].set_attr(:currency, "USD")
 sales["revenue"].attr(:currency)   # => "USD"
 ```
 
+A column taken out of the frame does not know what it was called. `set_column_attrs` gives each column its name as the attribute `"name"`, and every column the attributes it is given:
+
+```ruby
+sales.set_column_attrs(sales.attrs)
+sales["revenue"].attr(:name)    # => "revenue"
+sales["revenue"].attr(:title)   # => "daily figures by shop"
+```
+
 A frame made by choosing rows or columns of this one — `filter`, `head`, `select`, `drop`, `rename`, `copy` and the like — takes its attributes with it, since it is still the same table. A frame computed from it — a group summary, a join, a pivot — starts with none.
 
 ```ruby
