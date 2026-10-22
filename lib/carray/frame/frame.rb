@@ -527,7 +527,8 @@ class CAFrame
   # +s.strip_mask(true)+ keeps them along with the true ones.
   #
   # The result is a sub-frame of views sharing the frame's cells.
-  def filter(*selector)
+  def filter(*selector, **options)
+    CAFrame.__send__(:refuse_filter_keywords, options, "filter")
     if selector.size > 1
       raise ArgumentError, "filter takes one selector (got #{selector.size})"
     end
@@ -1163,6 +1164,20 @@ class CAFrame
     end
     raise KeyError, "#{lead}no column #{key.inspect}"
   end
+
+  # filter takes no keyword. keep_masked:, which it once took, is named
+  # with where its work went: the selector settles an undetermined row.
+  def self.refuse_filter_keywords(options, verb)
+    return if options.empty?
+    names = options.keys.map(&:inspect).join(", ")
+    message = "#{verb}: unknown keyword#{options.size > 1 ? "s" : ""} #{names}"
+    if options.key?(:keep_masked)
+      message += "; to keep the rows whose condition is undetermined, select them " \
+                 "in the selector (s.strip_mask(true))"
+    end
+    raise ArgumentError, message
+  end
+  private_class_method :refuse_filter_keywords
 
   # A column name given as an argument: a String, as the frame's column
   # keys are. Symbols are the frame's options and types, never names.

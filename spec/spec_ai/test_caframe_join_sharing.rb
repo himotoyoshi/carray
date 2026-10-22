@@ -116,4 +116,29 @@ class TestCAFrameJoinSharing < Test::Unit::TestCase
     assert_raise(ArgumentError) { left.join(right, on: "k", how: :semi, view: :full) }
     assert_raise(ArgumentError) { left.join_asof(right, on: "k", view: true) }
   end
+
+  # A filtered frame's key is a view (CASelect); it welds as the column it
+  # is a view of.
+  def test_full_view_outer_takes_a_key_that_is_a_view
+    l, r = left, right
+    rf = r.filter(r["y"] > 30)
+    a = l.join(rf, on: "k", how: :outer)
+    b = l.join(rf, on: "k", how: :outer, view: :full)
+    assert_equal a["k"].to_a, b["k"].to_a
+  end
+
+  # The outer key shows the attributes both keys have alike, as the default
+  # key does, whether or not a right-only row comes out.
+  def test_full_view_outer_key_attrs_do_not_depend_on_the_data
+    l = left
+    l["k"].set_attr("units", "a")
+    [[2], [2, 7]].each do |keys|
+      %w[a b].each do |units|
+        r = CAFrame.new("k" => CA_INT32(keys), "y" => CA_INT32(keys))
+        r["k"].set_attr("units", units)
+        assert_equal l.join(r, on: "k", how: :outer)["k"].attrs,
+                     l.join(r, on: "k", how: :outer, view: :full)["k"].attrs, "#{keys} #{units}"
+      end
+    end
+  end
 end

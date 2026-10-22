@@ -31,20 +31,22 @@ class CAFrame
   # Rows come in left-row order (right-row order for :right), the pairs of
   # one row in the other side's order.  A side whose row every result row
   # has gives views of its columns, picked by row: this frame's for :left
-  # and :inner, +other+'s for :inner and :right (the key column too).  A
+  # and :inner, +other+'s for :inner and :right (for :right, the key column
+  # too).  A
   # write to the result then reaches that frame, and reading the result
   # gathers through the views each time; call +copy+ on the result for
   # columns of its own, when it will be written or read many times.  The
   # side that gets UNDEF for an unmatched row is gathered into new arrays.
   #
-  # The views are for cleaning data through the join: a condition built
-  # from both frames' columns masks or corrects the cells it marks, and the
-  # write lands in the frame they came from.  +view: :full+ (experimental)
+  # The views are for cleaning data through the join, on frames read in as
+  # working copies just before an analysis: a condition built from both
+  # frames' columns masks or corrects the cells it marks, and the write
+  # lands in the frame they came from.  +view: :full+ (experimental)
   # makes the other side views too, so a write reaches either frame, with a
   # hole where a row has no match: the hole reads UNDEF and a write to it is
   # dropped.  Every result column then reaches its frame, at a cost on each
-  # read (a column with holes is gathered whole, roughly ten times slower
-  # than a column of its own).  The key of an outer join welds the two key
+  # read (a column with holes is gathered whole: a reduction is ten to
+  # thirty times slower than on a column of its own, a +copy+ more).  The key of an outer join welds the two key
   # columns (+CArray.meld+), so it needs keys of one kind on both sides, the
   # same type and, for a Face, the same state (time unit, labels); a key of
   # +CAConstString+ cannot be welded.
@@ -648,31 +650,33 @@ class CAFrame
     end
   end
 
-  # The key of an outer join as a view: the left key on the left rows, then
-  # the right key on the right rows no left row matched. The two keys are
-  # welded, so they must be of one kind.
+  # The key of an outer join as a view: the two key columns welded
+  # (+CArray.meld+), picked at the left rows and then at the right rows no
+  # left row matched. Welding the whole columns, whatever rows the join
+  # gives, makes the call raise or pass the same way with any data, and
+  # makes the key show the attributes both keys have alike, as the default
+  # key does.
   private def joined_key_view(lkey, rkey, li, extra)
-    # Checked whether or not this join has a right-only row, so the same
-    # call does not raise or pass with the data: the kinds first, then the
-    # weld itself on no rows (a Face's state, such as a time unit).
-    reason = if lkey.class != rkey.class || lkey.data_type != rkey.data_type
+    lface = lkey.face? ? lkey.class : nil   # not the view class a filtered key has
+    rface = rkey.face? ? rkey.class : nil
+    reason = if lface != rface || lkey.data_type != rkey.data_type
                "#{CArray::Inspector.type_label(lkey)} and #{CArray::Inspector.type_label(rkey)}"
-             else
-               begin
-                 CArray.meld([lkey[0...0], rkey[0...0]], axis: 0)
-                 nil
-               rescue ArgumentError => e
-                 e.message
-               end
              end
+    unless reason
+      begin
+        both = CArray.meld([lkey, rkey], axis: 0)
+      rescue ArgumentError => e   # a Face's state, such as a time unit
+        reason = e.message
+      end
+    end
     if reason
       raise ArgumentError,
             "join: view: :full welds the two key columns of an outer join, which needs " \
             "one kind of key (#{reason}); cast one side first, or leave view: out"
     end
-    return lkey[li] unless extra
+    return both[li] unless extra
     nleft = li.elements - extra.elements
-    CArray.meld([lkey[li[0...nleft]], rkey[extra]], axis: 0)
+    both[CArray.concatenate([li[0...nleft], extra + lkey.elements])]
   end
 
   # view: is nil (views where every row has a row of the side, new columns

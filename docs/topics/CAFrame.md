@@ -1467,7 +1467,7 @@ When the other frame's key is unique, `:left` gives one row per left row, in ord
 
 A write to a view column reaches the frame it came from, and reading one gathers its rows through the view each time. Call `copy` on the result when it will be written without touching the joined frames, or read many times (a later `group_by`, repeated reductions): `obs.join(meta, on: "station", how: :inner).copy`.
 
-**Cleaning data through a join.** The shared columns are what data cleaning needs: build a condition from the columns of both frames, then mask or correct the cells it marks, and the change lands in the frame the cells came from. With `:left` (or `:inner`) this frame's columns are shared already:
+**Cleaning data through a join.** The shared columns are what data cleaning needs. The frames read in from a file or a database are working copies; the source stays as it is, and the cleaning happens on the copies just before the analysis. Build a condition from the columns of both frames, then mask or correct the cells it marks, and the change lands in the frame the cells came from. With `:left` (or `:inner`) this frame's columns are shared already:
 
 ```ruby
 detail = obs.join(meta, on: "station")
@@ -1483,7 +1483,7 @@ j = obs.join(meta, on: "station", how: :outer, view: :full)
 j[(j["elev"] > 1000).strip_mask(false)] = UNDEF        # whole rows, in each frame that has the row
 ```
 
-It is for writing back, not for speed. A column with holes is gathered whole each time it is read, about ten times slower than a column of its own, and building it costs as much as gathering it. The key column of an `:outer` join holds the left key on the left rows and the right key on the right-only rows, welded as `CArray.meld` welds them, so both keys must be of one kind: the same type and, for a Face, the same state (time unit, categorical labels). Otherwise `view: :full` raises `ArgumentError`, whether or not the join has a right-only row; a `CAConstString` key cannot be welded at all. Leave `view:` out, or cast one key first.
+It is for writing back while cleaning, not for the analysis that follows. A column with holes is gathered whole each time it is read: a reduction on it is ten to thirty times slower than on a column of its own, a `copy` of it slower still, and building it costs as much as gathering it. Clean through the joined frame, then analyse the cleaned frames, or a `copy` of the join. The key column of an `:outer` join holds the left key on the left rows and the right key on the right-only rows, welded as `CArray.meld` welds them, so both keys must be of one kind: the same type and, for a Face, the same state (time unit, categorical labels). Otherwise `view: :full` raises `ArgumentError`, whether or not the join has a right-only row; a `CAConstString` key cannot be welded at all. Leave `view:` out, or cast one key first.
 
 **Keeping rows by whether the other frame has their key.** Two more modes do not pair rows. They pick this frame's rows:
 

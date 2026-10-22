@@ -1171,7 +1171,8 @@ class GroupedFrame
   # @return [CAFrame]
   # @raise [ArgumentError] when the block does not return a boolean CArray of
   #   shape [ngroup].
-  def filter
+  def filter (**options)
+    CAFrame.__send__(:refuse_filter_keywords, options, "filter")
     refuse_changed_rows("filter")
     chosen = yield(self)
     unless chosen.is_a?(CArray) && chosen.data_type == :boolean

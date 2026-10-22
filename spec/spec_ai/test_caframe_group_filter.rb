@@ -36,7 +36,8 @@ class TestCAFrameGroupFilter < Test::Unit::TestCase
     chosen = CA_BOOLEAN([true, false, true])
     chosen[2] = UNDEF                           # nagoya undetermined
     assert_equal %w[tokyo tokyo tokyo], grp.filter { chosen }["station"].to_a
-    assert_raise(ArgumentError) { grp.filter(keep_masked: true) { chosen } }
+    e = assert_raise(ArgumentError) { grp.filter(keep_masked: true) { chosen } }
+    assert_match(/filter: unknown keyword :keep_masked/, e.message)
   end
 
   def test_a_view_of_the_frame

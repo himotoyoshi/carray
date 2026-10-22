@@ -69,7 +69,7 @@ both = extra.join(shops.select("shop", "size"), on: "shop", how: :inner).copy
 
 ### Cleaning data through a join
 
-The sharing is what data cleaning needs. A check often needs both tables — here, a day with more than 2.5 visitors per square metre of floor is suspect — and the cells it finds belong to one of them. Build the condition on the joined table and write to it; with the default `:left`, this table's columns are shared, so the write lands in the original. Work on a copy to keep `sales` as it is:
+The sharing is what data cleaning needs. A table read from a file or a database is a working copy: the source stays as it is, and the cleaning happens on the copy, just before the analysis. A check often needs both tables — here, a day with more than 2.5 visitors per square metre of floor is suspect — and the cells it finds belong to one of them. Build the condition on the joined table and write to it; with the default `:left`, this table's columns are shared, so the write lands in the original. Work on a copy to keep `sales` as it is:
 
 ```ruby
 checked = sales.copy
@@ -89,7 +89,7 @@ detail["floor_m2"][crowded] = UNDEF
 area["floor_m2"].to_a   # => [UNDEF, 85, 240, 200]
 ```
 
-`view: :full` is experimental, and a column with holes is slow to read: copy the result if you go on to summarize it.
+`view: :full` is experimental, and a column with holes is slow to read — ten times or more. That is fine for cleaning; for the analysis afterwards, use the cleaned tables themselves, or a copy of the joined one.
 
 ### Keeping rows by whether the other table has their key — `:semi`, `:anti`
 

@@ -651,7 +651,13 @@ class TestCAFrameFilterUndetermined < Test::Unit::TestCase
   end
 
   def test_keep_masked_is_gone
-    assert_raise(ArgumentError) { @df.filter(keep_masked: true) { |f| f["a"] > 15 } }
+    s = @df["a"] > 15
+    [-> { @df.filter(keep_masked: true) { s } }, -> { @df.filter(s, keep_masked: true) }].each do |call|
+      e = assert_raise(ArgumentError) { call.() }
+      assert_match(/filter: unknown keyword :keep_masked; .*strip_mask\(true\)/, e.message)
+    end
+    e = assert_raise(ArgumentError) { @df.filter(s, how: 1) }
+    assert_equal "filter: unknown keyword :how", e.message
   end
 end
 
