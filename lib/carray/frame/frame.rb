@@ -12,7 +12,7 @@
 
 class CAFrame
   # Raised when the contents of a column cannot be read as asked: a cell
-  # that does not read as the type a +cast+ (or +from_csv+'s +types:+) asks
+  # that does not read as the type a +cast+ (or +read_csv+'s +types:+) asks
   # for under on_error: :raise, a cell +parse_to_time+ cannot read, a column
   # whose time format +infer_time_format+ / parse_to_time(name, :infer)
   # cannot find, or a float column +to_time+ cannot read as whole counts.

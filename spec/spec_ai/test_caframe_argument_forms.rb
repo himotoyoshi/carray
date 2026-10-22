@@ -122,9 +122,9 @@ class TestCAFrameArgumentForms < Test::Unit::TestCase
   end
 
   def test_csv_text_given_as_a_path
-    e = assert_raise(Errno::ENOENT) { CAFrame.from_csv("a,b\n1,2\n") }
-    assert_match(/StringIO\.new\(text\)/, e.message)
-    assert_equal %w[a b], CAFrame.from_csv(StringIO.new("a,b\n1,2\n")).column_names
+    e = assert_raise(Errno::ENOENT) { CAFrame.read_csv("a,b\n1,2\n") }
+    assert_match(/from_csv\(text\)/, e.message)
+    assert_equal %w[a b], CAFrame.from_csv("a,b\n1,2\n").column_names
   end
 
   def test_aggregate_with_reductions_in_the_column_place

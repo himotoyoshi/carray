@@ -388,7 +388,7 @@ Where one library has no direct counterpart, the row gives the nearest way to do
 | pandas | CArray | Notes |
 |---|---|---|
 | `pd.DataFrame({"k": k, "v": v})` | `CAFrame.new("k" => k, "v" => v)` | A table of named CArray columns. Column names are Strings. `df["v"]` is the column as a CArray |
-| `pd.read_csv(path)` | `CAFrame.from_csv(path)` | A String is a path; give CSV text as an IO. `df.to_csv` writes |
+| `pd.read_csv(path)` | `CAFrame.read_csv(path)` | A String is a path; CSV text goes to `CAFrame.from_csv`. `df.write_csv` writes |
 | `df.groupby("k").mean()` | `df.group_by("k").mean` | |
 | `df.merge(other, on="k")` | `df.join(other, on: "k")` | |
 | `df[df["v"] > 1]` | `df.filter(df["v"] > 1)` | |

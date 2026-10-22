@@ -13,7 +13,7 @@
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## Columns

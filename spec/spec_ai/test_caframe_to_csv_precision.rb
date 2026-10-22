@@ -4,7 +4,7 @@ require "test/unit"
 require "carray"
 require "stringio"
 
-# to_csv(precision:) writes each float cell rounded to that many places.
+# write_csv(precision:) writes each float cell rounded to that many places.
 class TestCAFrameToCsvPrecision < Test::Unit::TestCase
   def frame
     f = CA_FLOAT64([1.23456, Float::NAN, 2.0 / 3, Float::INFINITY])
@@ -24,14 +24,14 @@ class TestCAFrameToCsvPrecision < Test::Unit::TestCase
   end
 
   def test_read_back
-    back = CAFrame.from_csv(StringIO.new(frame.select("f").to_csv(precision: 3)))
+    back = CAFrame.from_csv(frame.select("f").to_csv(precision: 3))
     assert_equal [1.235, 0.667], [back["f"][0], back["f"][2]]
   end
 
   def test_zero_places_still_writes_floats
     df = CAFrame.new("x" => CA_FLOAT64([2.5, -0.4]), "z" => CA_CMPLX128([Complex(1.6, 2.4), 0]))
     assert_equal ["x,z", "3.0,2.0+2.0i", "0.0,0.0+0.0i"], df.to_csv(precision: 0).lines.map(&:chomp)
-    assert_equal :float64, CAFrame.from_csv(StringIO.new(df.select("x").to_csv(precision: 0))).data_types["x"]
+    assert_equal :float64, CAFrame.from_csv(df.select("x").to_csv(precision: 0)).data_types["x"]
   end
 
   def test_refusals

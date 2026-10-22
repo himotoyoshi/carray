@@ -458,7 +458,7 @@ class CAFrame
   # :ns for fractions of a second); parse_to_time takes a format and a
   # unit. A column cast to :categorical becomes a CACategorical of its
   # values, the labels in the order they first appear (categorize); a text
-  # column read by from_csv with types: gets there without a String made per
+  # column read by read_csv with types: gets there without a String made per
   # cell. Other targets use to_type.
   # The call shapes are told apart by the fact that column names are always
   # Strings and types always Symbols (§3.7):
@@ -499,7 +499,7 @@ class CAFrame
   #           cell; no column is rebound
   #
   # +option_name:+ is for a method that takes the map as one of its own
-  # options and hands it to cast, as from_csv does with +types:+. An error
+  # options and hands it to cast, as read_csv does with +types:+. An error
   # about the map then names that option instead of cast, and the map must
   # be a Hash or :infer:
   #

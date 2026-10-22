@@ -7,7 +7,7 @@ Data reaches a frame in one of four shapes, and there is one way in for each:
 | arrays you already have, one per column | `CAFrame.new` |
 | one array whose columns lie along an axis | `CArray#to_frame` |
 | an Array of Hashes, as parsed JSON gives | `CAFrame.from_records` |
-| a CSV file | `CAFrame.from_csv` (chapter 3) |
+| a CSV file | `CAFrame.read_csv` (chapter 3) |
 
 ## From arrays — `CAFrame.new`
 
@@ -71,7 +71,7 @@ df3 = CAFrame.new({ "shop"     => ["north", "south", "central"],
 df3.data_types   # => {"shop" => CAString, "revenue" => :float32, "visitors" => :int16}
 ```
 
-`types:` takes the same forms as in `from_records` and `from_csv` (chapter 3): a Hash of column name to type, `:infer`, or a Hash with `default:` for the columns it does not name. Strings are read as numbers here too, so `types: { "count" => :int32 }` turns a column of `"12"`, `"7"` into integers; a string that cannot be read becomes missing, or with `on_error: :raise` raises an error (chapter 3).
+`types:` takes the same forms as in `from_records` and `read_csv` (chapter 3): a Hash of column name to type, `:infer`, or a Hash with `default:` for the columns it does not name. Strings are read as numbers here too, so `types: { "count" => :int32 }` turns a column of `"12"`, `"7"` into integers; a string that cannot be read becomes missing, or with `on_error: :raise` raises an error (chapter 3).
 
 The columns go in braces when `types:` is given, as with the other options below. A column converted by `types:` is a new array, so a CArray you passed for it is no longer shared with the frame.
 
@@ -181,10 +181,10 @@ df.data_types   # => {"shop" => CAString, "revenue" => :float64, "visitors" => :
 
 Symbol keys work as well as String keys; they become String column names.
 
-## From a CSV file — `from_csv`
+## From a CSV file — `read_csv`
 
 ```ruby
-sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 sales.nrow   # => 24
 ```
 
@@ -206,7 +206,7 @@ df.nrow   # => 4
 A frame can carry a few facts about the table as a whole — a title, where the data came from — as attributes. They are kept with the frame and do not take part in any computation.
 
 ```ruby
-sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 sales.set_attr(:title, "daily figures by shop")
 sales.set_attr(:source, "sales.csv")
 sales.attr(:title)    # => "daily figures by shop"

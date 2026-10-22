@@ -2,7 +2,7 @@ require "test/unit"
 require "stringio"
 require "carray"
 
-# from_csv's header: / data: / column_names:, and the reading block that
+# read_csv's header: / data: / column_names:, and the reading block that
 # takes the reader as its parameter.
 class TestCAFrameCSVLayout < Test::Unit::TestCase
   MALFORMED = CAFrame::CSVParser::MalformedCSV
@@ -10,7 +10,7 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
   TEXT = "Observations\n\nstation,temp\nname,degC\nTokyo,1\nOsaka,2\nNagoya,3\nSendai,4\n"
 
   def read(text, **opts, &block)
-    CAFrame.from_csv(StringIO.new(text), types: :string, **opts, &block)
+    CAFrame.from_csv(text, types: :string, **opts, &block)
   end
 
   def cells(df)
@@ -92,7 +92,7 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
     assert_raise(ArgumentError) { read(TEXT, data: "2:101") }
     assert_raise(ArgumentError) { read(TEXT, data: 5..4) }
     err = assert_raise(ArgumentError) { read(TEXT, header: 2, data: 2) }
-    assert_equal "from_csv: data: 2 does not come after header: 2", err.message
+    assert_equal "read_csv: data: 2 does not come after header: 2", err.message
     err = assert_raise(ArgumentError) { read(TEXT, header: 2) { |r| r.data } }
     assert_match(/header: or a reading block, not both/, err.message)
   end
@@ -110,7 +110,7 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
     [false, true].each do |ruby|
       check = lambda do
         err = assert_raise(ArgumentError) { read("1,2\n3,4\n", column_names: %w[a b c]) }
-        assert_equal "from_csv: column_names: gives 3 names for the 2 columns of line 1", err.message
+        assert_equal "read_csv: column_names: gives 3 names for the 2 columns of line 1", err.message
         err = assert_raise(ArgumentError) { read("\n\n1,2,3\n", column_names: %w[a b]) }
         assert_match(/2 names for the 3 columns of line 3/, err.message)
         err = assert_raise(ArgumentError) { read("x,y\n1,2\n", header: 0, column_names: %w[a]) }
@@ -151,20 +151,20 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
   def test_columns_are_checked
     wide = "a,b,c\n1,2,3\n"
     err = assert_raise(KeyError) { read(wide, columns: %w[a x]) }
-    assert_equal 'from_csv: columns: names no column "x"', err.message
+    assert_equal 'read_csv: columns: names no column "x"', err.message
     err = assert_raise(ArgumentError) { read(wide, columns: [0, 3]) }
-    assert_equal "from_csv: columns: 3 is past the 3 columns of the file", err.message
+    assert_equal "read_csv: columns: 3 is past the 3 columns of the file", err.message
     assert_raise(ArgumentError) { read(wide, columns: [0, "a"]) }
     err = assert_raise(KeyError) { read("1,2\n", header: false, columns: %w[c01]) }
-    assert_equal 'from_csv: columns: names no column "c01" (with no header the columns are c0, c1, ...)', err.message
+    assert_equal 'read_csv: columns: names no column "c01" (with no header the columns are c0, c1, ...)', err.message
     assert_raise(KeyError) { read(wide, columns: %w[c0]) }
     err = assert_raise(ArgumentError) { read(wide, columns: { 0..1 => "x" }) }
     assert_match(/not a Range/, err.message)
     assert_raise(TypeError) { read(wide, columns: { 0 => :x }) }
     err = assert_raise(TypeError) { read(wide, columns: { c: "x" }) }
-    assert_equal "from_csv: columns: a column name is a String (got :c)", err.message
+    assert_equal "read_csv: columns: a column name is a String (got :c)", err.message
     err = assert_raise(ArgumentError) { read(wide, columns: { 0 => "x", 1 => "x" }) }
-    assert_equal 'from_csv: columns: names "x" more than once', err.message
+    assert_equal 'read_csv: columns: names "x" more than once', err.message
     assert_raise(ArgumentError) { read(wide, columns: []) }
     assert_raise(ArgumentError) { read(wide, columns: [-1]) }
     assert_raise(KeyError) { read(wide, columns: %w[a], types: { "b" => :int32 }) }

@@ -2,7 +2,7 @@ require "test/unit"
 require "carray"
 require "stringio"
 
-# CAFrame#cast takes :infer and a map with default: -- the shapes from_csv /
+# CAFrame#cast takes :infer and a map with default: -- the shapes read_csv /
 # from_records' types: takes -- and an error about the map names the option
 # it came in through.
 class TestCAFrameCastDefault < Test::Unit::TestCase
@@ -14,7 +14,7 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
   CSV
 
   def frame
-    CAFrame.from_csv(StringIO.new(CSV_TEXT), types: :string)
+    CAFrame.from_csv(CSV_TEXT, types: :string)
   end
 
   def test_infer
@@ -154,14 +154,14 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
   end
 
   def test_from_csv_errors_name_types
-    err = assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(CSV_TEXT), types: "bad") }
+    err = assert_raise(ArgumentError) { CAFrame.from_csv(CSV_TEXT, types: "bad") }
     assert_match(/\Atypes: takes a map of column types, :infer or :string/, err.message)
     err = assert_raise(KeyError) do
-      CAFrame.from_csv(StringIO.new(CSV_TEXT), types: { "nope" => :int32 })
+      CAFrame.from_csv(CSV_TEXT, types: { "nope" => :int32 })
     end
     assert_match(/\Atypes: /, err.message)
     err = assert_raise(TypeError) do
-      CAFrame.from_csv(StringIO.new(CSV_TEXT), types: { defualt: :infer })
+      CAFrame.from_csv(CSV_TEXT, types: { defualt: :infer })
     end
     assert_match(/\Atypes: /, err.message)
   end

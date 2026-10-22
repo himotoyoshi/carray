@@ -919,7 +919,7 @@ class TestCAFrameRowAndFilterMessages < Test::Unit::TestCase
   end
 end
 
-# A column given as Ruby Strings is a text column, as from_csv reads text,
+# A column given as Ruby Strings is a text column, as read_csv reads text,
 # with the String methods; a mix of kinds stays an object column.
 class TestCAFrameStringColumns < Test::Unit::TestCase
   def test_strings_make_a_text_column

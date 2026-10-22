@@ -4,7 +4,7 @@ Between reading a table and analysing it there is usually some preparation: add 
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## Does it change the frame, or return a new one?
@@ -119,7 +119,7 @@ df.data_types
 `cast` reads text as numbers, so it is also how you convert a text column you read with `types: :string`:
 
 ```ruby
-raw = CAFrame.from_csv("sales.csv", types: :string)
+raw = CAFrame.read_csv("sales.csv", types: :string)
 raw = raw.cast("revenue" => :float64, "visitors" => :int32)
 raw["visitors"].to_a.first(8)   # => [182, 95, 310, 175, 102, 295, 190, -1]
 ```
@@ -127,11 +127,11 @@ raw["visitors"].to_a.first(8)   # => [182, 95, 310, 175, 102, 295, 190, -1]
 Numbers in text are read as decimal numbers, with an optional sign, point and exponent; surrounding spaces are ignored. An integer type takes a value that is exactly a whole number (`"1.0"`, `"1e3"`) but not `"1.5"`. A cell that cannot be read, or whose value the type cannot hold, becomes missing — or, with `on_error: :warn` or `:raise`, tells you so (chapter 3).
 
 ```ruby
-raw = CAFrame.from_csv("sales.csv", types: :string)
+raw = CAFrame.read_csv("sales.csv", types: :string)
 raw.cast("rating" => :float64, on_error: :raise)   # raises CAFrame::UnreadableColumn: column "rating", row 15 "n/a" cannot be read as float64
 ```
 
-`cast(:infer)` converts the text columns to the types `infer_types` finds, as `from_csv` does when reading.
+`cast(:infer)` converts the text columns to the types `infer_types` finds, as `read_csv` does when reading.
 
 In the frame `cast` returns, a converted column is a new column; the frame you called it on, and any frame that shared the old column, keep the old one.
 

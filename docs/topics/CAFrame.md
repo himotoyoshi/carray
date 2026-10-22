@@ -36,13 +36,13 @@ osaka     25.3
 The chapters follow the order in which a frame is usually used: read it, look at it, pick rows and columns, fix the columns, aggregate, combine, write it out.
 
 ```ruby
-df = CAFrame.from_csv("obs.csv", types: { "temp" => :float64 })  # Building a frame
+df = CAFrame.read_csv("obs.csv", types: { "temp" => :float64 })  # Building a frame
 puts df.describe.to_table                                        # Looking at a frame
 df = df.set_index("time")                                        # The index (time is read as a time)
 warm  = df.filter { |f| f["temp"] > 20 }                         # Selecting rows
 daily = df.resample("time", "1 day").mean                        # Grouping rows
 means = df.group_by("station").mean.reset_index
-means.join(meta, on: "station").to_csv("summary.csv")            # Combining, Exporting
+means.join(meta, on: "station").write_csv("summary.csv")            # Combining, Exporting
 ```
 
 ### Contents
@@ -123,7 +123,7 @@ There are four ways in, one per shape the data arrives in:
 | arrays you already have, one per column | `CAFrame.new` |
 | one array whose columns lie along an axis | `CArray#to_frame` |
 | an Array of row Hashes (parsed JSON) | `CAFrame.from_records` |
-| a CSV file or IO | `CAFrame.from_csv` |
+| a CSV file or IO | `CAFrame.read_csv` |
 
 ### `CAFrame.new`
 
@@ -140,7 +140,7 @@ CAFrame.new("a" => CA_INT32([1, 2, 3]), "b" => CA_FLOAT64([1.0, 2.0, 3.0]))
 | `[1, 2]` | `int64` |
 | `[1, 2.5]` | `float64` |
 | `[[1, 2], [3, 4]]` | an N-D column |
-| strings | a text column (`CAString`), as `from_csv` reads text |
+| strings | a text column (`CAString`), as `read_csv` reads text |
 | `CATime` / `CATimedelta` elements | a `CATime` / `CATimedelta` column in the finest resolution among them |
 | mixed values | `:object` |
 | `nil` or `UNDEF` | a masked cell |
@@ -243,19 +243,19 @@ df = CAFrame.from_records(records,
                           types: { %w[prefNumber humidity] => :int32 })
 ```
 
-### `CAFrame.from_csv`
+### `CAFrame.read_csv`
 
-Read a CSV from a path or from an open IO. The header row gives the column names, and each column is given the type every one of its present cells can be read as — integer, float, boolean, or a time written year first — and stays text (a `CAString`) otherwise:
+Read a CSV from a path or from an open IO (`CAFrame.from_csv` reads CSV text held in a String, with the same options). The header row gives the column names, and each column is given the type every one of its present cells can be read as — integer, float, boolean, or a time written year first — and stays text (a `CAString`) otherwise:
 
 ```ruby
-df = CAFrame.from_csv("obs.csv")                                    # each column's type inferred
-df = CAFrame.from_csv("obs.csv", types: { "temp" => :float64 })     # temp read as float64, the rest inferred
-df = CAFrame.from_csv("obs.csv", types: :string)                      # every column as text
+df = CAFrame.read_csv("obs.csv")                                    # each column's type inferred
+df = CAFrame.read_csv("obs.csv", types: { "temp" => :float64 })     # temp read as float64, the rest inferred
+df = CAFrame.read_csv("obs.csv", types: :string)                      # every column as text
 ```
 
 The inference (the rules are under [`infer_types`](#finding-the-types--infer_types)). A time column read this way is already a `CATime`, so it goes straight to `set_index`; `parse_to_time` is for a column still held as text.
 
-An empty cell, or one that cannot be read as the type asked for, becomes `UNDEF` — in an integer column too, which stays integer. The other options — missing-value tokens, encodings, header and data lines, reading only some columns — are described in [Reading and writing CSV](CAFrameCSV.md#reading-csv-caframefrom_csv).
+An empty cell, or one that cannot be read as the type asked for, becomes `UNDEF` — in an integer column too, which stays integer. The other options — missing-value tokens, encodings, header and data lines, reading only some columns — are described in [Reading and writing CSV](CAFrameCSV.md#reading-csv-caframeread_csv).
 
 ### Other formats
 
@@ -298,7 +298,7 @@ puts df.to_table(rows: 40) # explicit cap, split evenly around the elided middle
 - `precision:` rounds float cells to that many decimal places **for display only** (default 6), so that one value like `141.67833333333334` does not set the width of the whole column. `precision: nil` prints them as Ruby renders them.
 - `index: false` drops the index column.
 
-In the table, numeric columns are right-aligned and everything else left-aligned, and **a masked cell shows as `_`** (the marker CArray's own inspect uses). `to_table` is text to be looked at, not read back — for a file, use [`to_csv`](#csv--to_csv).
+In the table, numeric columns are right-aligned and everything else left-aligned, and **a masked cell shows as `_`** (the marker CArray's own inspect uses). `to_table` is text to be looked at, not read back — for a file, use [`write_csv`](#csv--write_csv--to_csv).
 
 ### How often each value occurs — `value_counts`
 
@@ -325,7 +325,7 @@ temp     float64      2       1       2  19.0        22.1        20.55       2.1
 time     CATime       3       0       3  2024-01-01  2024-01-03  2024-01-02  1D
 ```
 
-- `type` is the data type, or the Face's class for a Face column (a text column read by `from_csv` shows as `CAString`), as in `data_types`.
+- `type` is the data type, or the Face's class for a Face column (a text column read by `read_csv` shows as `CAString`), as in `data_types`.
 - `count` and `masked` count cells; `unique` is the number of distinct present values. A `masked` count you did not expect is the usual sign that a column was read with the wrong type.
 - `min` / `max` / `mean` / `stddev` apply where the column's kind gives them a meaning and are `UNDEF` elsewhere:
   - real numbers and booleans get all four (a boolean's mean is the share of trues);
@@ -781,11 +781,11 @@ df = df.promote(:object)                            # ...to the widest type of a
   - A cell that does not read, or a value the type cannot hold (`"300"` into `:int8`), becomes `UNDEF`.
   - A Ruby number in an object column follows the same rule: an Integer that fits, or a Float, Rational or BigDecimal with no fractional part, is kept, and `2.5` becomes `UNDEF` rather than being truncated — so `"2.5"` and `2.5` in one column agree.
 - **Text to `:time`.** `cast(name => :time)` parses a text column into a `CATime` column, as [`parse_to_time`](#time-columns) without a format does.
-- **To `:string`.** A text column stays as it is, and an object column of Strings becomes a `CAString`. A number or time column is refused, as `CArray.string` refuses it: write numbers as text with `format`. In `from_csv`, whose columns are read as text, `:string` keeps a column text.
-- **To `:categorical`.** `cast(name => :categorical)` turns a column into a [`CACategorical`](../objects/CACategorical.md) of its values, the labels in the order they first appear, as `categorize` does. A column of few distinct values held once each: `from_csv(path, types: { "station" => :categorical })` reads it without making a String per cell.
+- **To `:string`.** A text column stays as it is, and an object column of Strings becomes a `CAString`. A number or time column is refused, as `CArray.string` refuses it: write numbers as text with `format`. In `read_csv`, whose columns are read as text, `:string` keeps a column text.
+- **To `:categorical`.** `cast(name => :categorical)` turns a column into a [`CACategorical`](../objects/CACategorical.md) of its values, the labels in the order they first appear, as `categorize` does. A column of few distinct values held once each: `read_csv(path, types: { "station" => :categorical })` reads it without making a String per cell.
 - **A number to a number**, and other targets, go through `to_type`, an ordinary conversion.
 
-**`on_error:`** decides what an unreadable cell does, for `cast`, `parse_to_time` and `from_csv` alike:
+**`on_error:`** decides what an unreadable cell does, for `cast`, `parse_to_time` and `read_csv` alike:
 
 - `:mask` (the default) makes it `UNDEF`;
 - `:warn` does the same and warns once per column, with the count and the first few cells;
@@ -808,7 +808,7 @@ df = df.cast("rh" => :int32, on_error: :raise)
 
 ### Finding the types — `infer_types`
 
-`infer_types` returns, for each text column, the type all its present cells can be read as, as a Hash that `cast` takes directly. `cast(:infer)` is `cast(infer_types)`, and `from_csv(types: :infer)` applies it while reading.
+`infer_types` returns, for each text column, the type all its present cells can be read as, as a Hash that `cast` takes directly. `cast(:infer)` is `cast(infer_types)`, and `read_csv(types: :infer)` applies it while reading.
 
 ```ruby
 df.infer_types   # => { "time" => :time, "temp" => :float64, "n" => :int64, "flag" => :boolean }
@@ -1719,7 +1719,7 @@ long["value"].to_a      # => [10.0, 20.0, 30.0, 11.0, 21.0, 31.0]
 |---|---|
 | Ruby values, e.g. for JSON | `to_records` |
 | rows as Ruby Arrays, for a library that takes rows | `to_a` |
-| a CSV file or String | `to_csv` |
+| a CSV file or String | `write_csv` / `to_csv` |
 | one numeric matrix for array work | `to_ca` |
 
 ### Ruby records — `to_records`
@@ -1743,7 +1743,7 @@ A record carries only Ruby values, so this is what a round trip keeps:
 | the index | not kept — it comes back as an ordinary first column (call `set_index` again) |
 | the columns of a frame with no rows | not kept — `to_records` gives `[]`, which has no names in it |
 
-When the types matter, read back with `types:` or `cast` afterwards; to keep the types and the index together, use `to_csv` / `from_csv` with `types:`.
+When the types matter, read back with `types:` or `cast` afterwards; to keep the types and the index together, use `to_csv` / `read_csv` with `types:`.
 
 ### Rows as Arrays — `to_a`
 
@@ -1756,16 +1756,16 @@ df.strip_mask("temp" => Float::NAN).to_a  # masked cells decided first
 
 **`nil` and `UNDEF` become the same thing on the way out.** In memory they are distinct — a masked cell is `UNDEF`, and an object column can hold a genuine Ruby `nil` as a value. Neither `to_records` nor `to_csv` keeps them apart: both write either one as missing, and both read missing back as `UNDEF`. So a `nil` held as a value in an object column comes back masked.
 
-### CSV — `to_csv`
+### CSV — `write_csv` / `to_csv`
 
-`to_csv` writes the frame as CSV, to a file or as a String:
+`write_csv` writes the frame as CSV to a file or an open IO, and `to_csv` returns the same text as a String:
 
 ```ruby
-df.to_csv("out.csv")       # write a CSV file, returns self
-csv = df.to_csv            # no path -> return the CSV String
+df.write_csv("out.csv")       # write a CSV file, returns self
+csv = df.to_csv               # the CSV as a String
 ```
 
-The index, when there is one, is written as the first column. A masked cell is written as an empty field, which `from_csv` reads back as masked. Every column must be 1-D. The options — separators, encodings, missing-value tokens — are described in [Reading and writing CSV](CAFrameCSV.md#writing-csv-to_csv).
+The index, when there is one, is written as the first column. A masked cell is written as an empty field, which `read_csv` reads back as masked. Every column must be 1-D. The options — separators, encodings, missing-value tokens — are described in [Reading and writing CSV](CAFrameCSV.md#writing-csv-write_csv--to_csv).
 
 ### A matrix — `to_ca`
 
@@ -2111,7 +2111,7 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | make a frame from arrays I already have | [`CAFrame.new`](#caframenew) |
 | view an array I already have as a table, without copying | [`CArray#to_frame`](#carrayto_frame) |
 | read parsed JSON (an Array of objects) | [`CAFrame.from_records`](#caframefrom_records) |
-| read a CSV, with types guessed from the text | [`CAFrame.from_csv`](#caframefrom_csv) |
+| read a CSV, with types guessed from the text | [`CAFrame.read_csv`](#caframeread_csv) |
 | see what types the text columns could be, before converting | [`infer_types`](#finding-the-types--infer_types) |
 | glance at a frame | [`p df`](#printing--p-puts-to_table) |
 | check every column just read: types, counts, masked cells, ranges | [`describe`](#checking-a-frame-just-read--describe) |
@@ -2219,7 +2219,7 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 | I want to… | use |
 |---|---|
 | JSON | [`to_records`](#ruby-records--to_records) |
-| a CSV file | [`to_csv`](#csv--to_csv) |
+| a CSV file | [`write_csv`](#csv--write_csv--to_csv) |
 | one numeric matrix | [`to_ca`](#a-matrix--to_ca) |
 
 ### Sharing and safety
@@ -2235,7 +2235,7 @@ The chapters are ordered by how a frame is used. This appendix is ordered by wha
 ## See also
 
 - [What is CArray](../WhatIsCArray.md) — the array type columns are made of.
-- [Reading and writing CSV](CAFrameCSV.md) — every option of `from_csv` / `to_csv`.
+- [Reading and writing CSV](CAFrameCSV.md) — every option of `read_csv` / `to_csv`.
 - [CACategorical](../objects/CACategorical.md) — categorical columns and the group-by substrate.
 - [CATime](CATime.md) — time columns and time indices.
 - [CAFace](CAFace.md) — semantic column types (time / categorical) carried through joins and gathers.

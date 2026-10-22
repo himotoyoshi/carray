@@ -55,6 +55,6 @@ class TestCAFrameTimeTextRange < Test::Unit::TestCase
 
   def test_from_csv_types_infer_raises_too
     csv = "t\n2300-01-01\n2024-01-01 00:00:00.1234567\n"
-    assert_raise(RangeError) { CAFrame.from_csv(StringIO.new(csv), types: :infer) }
+    assert_raise(RangeError) { CAFrame.from_csv(csv, types: :infer) }
   end
 end

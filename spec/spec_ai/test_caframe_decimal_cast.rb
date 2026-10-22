@@ -3,13 +3,13 @@ require "carray"
 require "stringio"
 
 # A CSV cell is data, not a Ruby literal. CAFrame#cast (and so
-# from_csv(types:)) reads an object column into a number type with a decimal
+# read_csv(types:)) reads an object column into a number type with a decimal
 # grammar: "010" is ten, "0x1F" / "1_000" are not numbers, and a value the
 # target type cannot hold is UNDEF.
 
 class TestCAFrameDecimalCast < Test::Unit::TestCase
   def read(text, types)
-    CAFrame.from_csv(StringIO.new(text), types: types)
+    CAFrame.from_csv(text, types: types)
   end
 
   def test_leading_zero_is_decimal
@@ -45,7 +45,7 @@ class TestCAFrameDecimalCast < Test::Unit::TestCase
   def test_on_error_raise_names_column_row_and_cell
     text = "a,b\n1,1\n2,1.5\n"
     e = assert_raise(CAFrame::UnreadableColumn) do
-      CAFrame.from_csv(StringIO.new(text), types: { "a" => :int32, "b" => :int32 },
+      CAFrame.from_csv(text, types: { "a" => :int32, "b" => :int32 },
                        on_error: :raise)
     end
     assert_match(/column "b", row 1 "1\.5" cannot be read as int32/, e.message)
@@ -126,7 +126,7 @@ class TestCAFrameDecimalCast < Test::Unit::TestCase
     assert_equal [1, 2, UNDEF, UNDEF, UNDEF, 3], df["a"].to_a
   end
 
-  # A column that is a view (from_csv hands out views over one backing array).
+  # A column that is a view (read_csv hands out views over one backing array).
   def test_view_column
     base = CA_OBJECT([["1", "010"], ["2", "0x1F"]])
     df = CAFrame.new("a" => base[nil, 1])

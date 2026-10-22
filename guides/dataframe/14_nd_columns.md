@@ -6,9 +6,8 @@ This chapter shows how to make such columns, work with them, and turn them back 
 
 ```ruby
 require "carray"
-require "stringio"
 
-parts = CAFrame.from_csv(StringIO.new(<<~CSV))
+parts = CAFrame.from_csv(<<~CSV)
   date,shop,morning,midday,afternoon,evening
   2024-03-04,north,40,61,52,29
   2024-03-04,south,18,30,29,18
@@ -106,7 +105,7 @@ df.unstack_column("visits", into: periods).column_names
 Data often comes the other way round: one row per value, several rows per group:
 
 ```ruby
-long = CAFrame.from_csv(StringIO.new(<<~CSV))
+long = CAFrame.from_csv(<<~CSV)
   shop,period,visits
   north,morning,40
   north,midday,61

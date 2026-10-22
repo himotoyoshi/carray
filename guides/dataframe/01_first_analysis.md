@@ -48,22 +48,22 @@ west,West Park,large,2024-04-01,200
 
 ## Reading the file
 
-`CAFrame.from_csv` reads a CSV and gives each column the type every one of its cells can be read as:
+`CAFrame.read_csv` reads a CSV and gives each column the type every one of its cells can be read as:
 
 ```ruby
 require "carray"
 
-sales = CAFrame.from_csv("sales.csv")
+sales = CAFrame.read_csv("sales.csv")
 sales.data_types
 # => {"date" => CATime, "shop" => CAString, "visitors" => :int64, "revenue" => :float64, "rating" => CAString}
 ```
 
 The dates became a time column, the visitor counts integers and the revenue floats; the empty revenue did not stop that, since an empty cell is missing rather than unreadable. Two columns show the file's problems. `visitors` became integers, but `-1` is now a count of minus one visitor. `rating` stayed text, because `n/a` is not a number.
 
-Both are ways this file writes "no value". Tell `from_csv` about them with `missing:`, and those cells are read as missing before the columns are typed:
+Both are ways this file writes "no value". Tell `read_csv` about them with `missing:`, and those cells are read as missing before the columns are typed:
 
 ```ruby
-sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 sales.data_types
 # => {"date" => CATime, "shop" => CAString, "visitors" => :int64, "revenue" => :float64, "rating" => :float64}
 ```
@@ -212,7 +212,7 @@ p sales.head(6)
 The shop table gives each shop its floor area. `join` adds those columns to the summary, matching rows by the shop key. The summary's index is first turned back into a column with `reset_index`, so it can serve as the key:
 
 ```ruby
-shops = CAFrame.from_csv("shops.csv")
+shops = CAFrame.read_csv("shops.csv")
 report = summary.reset_index.join(shops.select("shop", "name", "floor_m2"), on: "shop")
 report["revenue_per_m2"] = (report["revenue"] / report["floor_m2"]).round(2)
 p report
@@ -228,11 +228,11 @@ The west shop is in the shop table but has no sales, so it does not appear: by d
 
 ## Writing the result
 
-`to_csv` writes a frame as CSV — to a file when given a path, or as a String. The revenue totals are sums of floating-point numbers, which can leave a tail of digits such as `22113.010000000002`; rounding them to cents first keeps the file tidy:
+`write_csv` writes a frame as CSV to a file, and `to_csv` gives the same text as a String. The revenue totals are sums of floating-point numbers, which can leave a tail of digits such as `22113.010000000002`; rounding them to cents first keeps the file tidy:
 
 ```ruby
 report["revenue"] = report["revenue"].round(2)
-report.to_csv("report.csv")
+report.write_csv("report.csv")
 puts report.to_csv
 # shop,revenue,best_day,busiest,days_counted,name,floor_m2,revenue_per_m2
 # north,22994.93,4112.58,341,8,North Street,120,191.62

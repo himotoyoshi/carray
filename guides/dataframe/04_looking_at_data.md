@@ -4,7 +4,7 @@ Before analysing a table, look at it: how big it is, what type each column was r
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## Printing a frame

@@ -4,7 +4,7 @@ Real tables have gaps: a counter that failed, a field left empty, a value that c
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## What a missing value is
@@ -118,10 +118,10 @@ Both work on group summaries as well, which is where they are most useful.
 
 ### A code that means "no value" — `mask_eq`
 
-If a column uses a code such as `-1` and you did not tell `from_csv` about it, `mask_eq` makes those cells missing:
+If a column uses a code such as `-1` and you did not tell `read_csv` about it, `mask_eq` makes those cells missing:
 
 ```ruby
-raw = CAFrame.from_csv("sales.csv")
+raw = CAFrame.read_csv("sales.csv")
 raw["visitors"].min           # => -1
 raw.mask_eq("visitors", -1)
 raw["visitors"].min           # => 95
@@ -246,7 +246,7 @@ Before removing rows, consider whether you need to. Summaries already leave miss
 
 ## Missing values on the way out
 
-- **CSV**: a missing cell is written as an empty field, which `from_csv` reads back as missing. `missing: "NA"` writes a code instead (chapter 17).
+- **CSV**: a missing cell is written as an empty field, which `read_csv` reads back as missing. `missing: "NA"` writes a code instead (chapter 17).
 - **Ruby values** (`to_records`, for JSON): a missing cell becomes `nil`, and `from_records` reads `nil` back as missing.
 - **One row** (`df[i]`, `each_row`): a missing cell is `UNDEF`.
 - **Arrays** (`to_a`, of a column or of the frame): a missing cell is `UNDEF`. Before handing rows to another library, fill the gaps with `strip_mask` or leave the rows out with `drop_masked`.

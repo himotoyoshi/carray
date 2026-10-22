@@ -28,7 +28,7 @@ class TestTimeTextLeapSecond < Test::Unit::TestCase
     Dir.mktmpdir do |dir|
       path = File.join(dir, "leap.csv")
       File.write(path, "t\n2016-12-31T23:59:60\n")
-      t = CAFrame.from_csv(path, types: { "t" => :time })["t"]
+      t = CAFrame.read_csv(path, types: { "t" => :time })["t"]
       assert_equal ["2017-01-01T00:00:00Z"], t.to_a.map(&:to_s)
     end
   end

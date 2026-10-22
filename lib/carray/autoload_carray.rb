@@ -137,7 +137,7 @@ autoload :CAUnion,  "carray/struct"
 # ---- CAFrame (DataFrame over CArray columns) -------------------------------
 #
 # The frame is only reached through the CAFrame constant (CAFrame.new /
-# .from_csv / subclassing) or GroupedFrame (obtained from CAFrame#group_by,
+# .read_csv / subclassing) or GroupedFrame (obtained from CAFrame#group_by,
 # by which point CAFrame is already loaded). Both constants live in the same
 # require bundle (carray/frame.rb), so autoloading either loads the whole
 # frame. Nothing in the eager core references them, so it loads on first use.

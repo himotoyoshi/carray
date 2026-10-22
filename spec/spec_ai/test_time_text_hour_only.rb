@@ -27,7 +27,7 @@ class TestTimeTextHourOnly < Test::Unit::TestCase
 
   def test_the_frame_reader_agrees
     csv = "t\n2024-01-01T05\n2024-01-01T25\n2024-01-01T05+09\n"
-    t = CAFrame.from_csv(StringIO.new(csv), types: { "t" => :time })["t"]
+    t = CAFrame.from_csv(csv, types: { "t" => :time })["t"]
     assert_equal "2024-01-01T05:00:00Z", t[0].to_s
     assert_equal [false, true, false], t.is_masked.to_a
     assert_equal "2023-12-31T20:00:00Z", t[2].to_s

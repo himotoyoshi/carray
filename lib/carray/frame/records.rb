@@ -1,7 +1,7 @@
 # CAFrame record (row-oriented) input (memo §11.2, §11.5).
 #
 # from_records takes an Array of row Hashes -- the shape JSON.parse yields for
-# a JSON array of objects -- and arranges it into columns. Unlike from_csv,
+# a JSON array of objects -- and arranges it into columns. Unlike read_csv,
 # the cell values are already typed Ruby objects (Float / Integer / DateTime /
 # String), so a homogeneous column is built at its native leaf type rather than
 # left as strings ("arrange by the value's own type", not string inference --
@@ -67,7 +67,7 @@ class CAFrame
   # them (CAFrame.new and df[name]= given an Array, from_records, the values
   # a group's block or Proc gives).  All-Array cells of equal length -> N-D
   # native column; numeric scalars -> native scalar column (missing ->
-  # UNDEF); Strings -> a text column (CAString), as from_csv reads text;
+  # UNDEF); Strings -> a text column (CAString), as read_csv reads text;
   # time and duration elements -> a CATime / CATimedelta column in the finest
   # resolution among them; anything else -> object column.
   def self.build_record_column(values, n)

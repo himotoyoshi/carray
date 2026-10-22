@@ -545,7 +545,7 @@ rb_ca_load_binary (VALUE self, VALUE io)
 }
 
 /* The double nearest to the shortest decimal that reads back as x, the
-   float32 value, as from_csv reads text into float32: strtod, then the cast
+   float32 value, as read_csv reads text into float32: strtod, then the cast
    to float.  Its digits are those of the decimal (at most 9, which a double
    holds), so Float#to_s writes them. */
 static double

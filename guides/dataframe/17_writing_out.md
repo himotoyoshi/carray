@@ -4,7 +4,7 @@ When the analysis is done, the results go somewhere: a CSV file for a spreadshee
 
 | you want… | use |
 |---|---|
-| a CSV file, or CSV text | `to_csv` |
+| a CSV file, or CSV text | `write_csv`, `to_csv` |
 | Ruby Hashes and Arrays, for JSON | `to_records` |
 | rows as Ruby Arrays | `to_a` |
 | a table as text, to read | `to_table` |
@@ -13,17 +13,16 @@ When the analysis is done, the results go somewhere: a CSV file for a spreadshee
 ```ruby
 require "carray"
 require "json"
-require "stringio"
-sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 summary = sales.select("shop", "visitors", "revenue").group_by("shop").mean
 ```
 
-## CSV — `to_csv`
+## CSV — `write_csv` and `to_csv`
 
-With a path, `to_csv` writes a file; without one, it returns the CSV as a String:
+`write_csv` writes a file (or to an open IO), and `to_csv` returns the same CSV as a String:
 
 ```ruby
-summary.to_csv("summary.csv")
+summary.write_csv("summary.csv")
 puts summary.to_csv
 # shop,visitors,revenue
 # north,233.75,2874.36625
@@ -32,12 +31,12 @@ puts summary.to_csv
 ```
 
 - The index, when there is one, is written as the first column, under its name. `index: false` leaves it out.
-- A missing cell is written as an empty field. `from_csv` reads an empty field back as missing, so the gaps survive the round trip.
+- A missing cell is written as an empty field. `read_csv` reads an empty field back as missing, so the gaps survive the round trip.
 - An empty string, which is a value and not a gap, is written `""` to keep the two apart.
 - A field containing the separator, a quote or a line break is quoted, with quotes doubled.
-- Times are written year first (`2024-03-04`, `2024-03-04T08:12:00Z`), which `from_csv` reads back as times.
+- Times are written year first (`2024-03-04`, `2024-03-04T08:12:00Z`), which `read_csv` reads back as times.
 - A yes/no (boolean) column is written as `1` and `0`; read it back with `types: { "name" => :boolean }`.
-- Numbers are written in full, so `from_csv` reads back the same values. `precision:` rounds every floating-point cell to that many decimal places for a tidier file:
+- Numbers are written in full, so `read_csv` reads back the same values. `precision:` rounds every floating-point cell to that many decimal places for a tidier file:
 
 ```ruby
 puts summary.to_csv(precision: 2)
@@ -56,7 +55,7 @@ puts sales.head(3).to_csv(sep: ";", header: false)
 
 ### Writing a code for missing values — `missing:`
 
-Some programs expect missing values written as a code. `missing:` writes one — a String for every column, or a Hash with a `default:` and per-column codes, the same form `from_csv` reads:
+Some programs expect missing values written as a code. `missing:` writes one — a String for every column, or a Hash with a `default:` and per-column codes, the same form `read_csv` reads:
 
 ```ruby
 puts sales[6..8].to_csv(missing: "NA")
@@ -73,12 +72,12 @@ Reading the file back with the same `missing:` restores the gaps. If a real valu
 `to_csv` writes UTF-8. For a program that expects another encoding, give `encoding:`. A character the encoding cannot hold raises, naming the cell, rather than being dropped:
 
 ```ruby norun
-df.to_csv("for_excel.csv", encoding: "Windows-1252")
+df.write_csv("for_excel.csv", encoding: "Windows-1252")
 ```
 
 ### Column attributes — `attrs:`
 
-`attrs: [:units]` writes, below the names, a line with each column's `units` attribute, which `from_csv(attrs: [:units])` reads back:
+`attrs: [:units]` writes, below the names, a line with each column's `units` attribute, which `read_csv(attrs: [:units])` reads back:
 
 ```ruby
 df = sales.select("shop", "revenue").head(2).copy

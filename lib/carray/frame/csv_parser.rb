@@ -1,4 +1,4 @@
-# A small, self-contained CSV tokenizer for CAFrame.from_csv.
+# A small, self-contained CSV tokenizer for CAFrame.read_csv.
 #
 # It produces raw String cells and does no type inference — casting is a
 # separate step. The tokenizer is tuned for the
@@ -22,14 +22,14 @@
 # Two entry points share the Tokenizer:
 #   * CSVParser.parse / parse_file -- whole-file parse into [headers, rows].
 #   * CSVReader                    -- the block reading-control DSL used by
-#                                     CAFrame.from_csv (header / skip / body /
+#                                     CAFrame.read_csv (header / skip / body /
 #                                     column_names).
 
 require "strscan"
 require "stringio"
 
 class CAFrame
-  # CSV tokenizer behind `CAFrame.from_csv`.  It produces raw String cells
+  # CSV tokenizer behind `CAFrame.read_csv`.  It produces raw String cells
   # and does no type inference — casting is a separate step.
   #
   # Records with no quote character take a `String#split` fast path; only
@@ -79,7 +79,7 @@ class CAFrame
 
     # Parse an IO (or anything answering +gets+). The first record supplies the
     # headers; the rest are data rows. Blank lines are skipped, including in a
-    # one-column file (from_csv reads them there as missing cells).
+    # one-column file (read_csv reads them there as missing cells).
     def parse(io, sep: ",", quote: '"', strip: false)
       tok = Tokenizer.new(sep, quote, strip)
       headers = nil
@@ -315,24 +315,24 @@ class CAFrame
     end
   end
 
-  # The reading-control block for CAFrame.from_csv. A file often has
+  # The reading-control block for CAFrame.read_csv. A file often has
   # preamble lines, a units row, or no header at all; the block is given the
   # reader and says, in order, how to consume the stream:
   #
-  #   CAFrame.from_csv(path) do |r|
+  #   CAFrame.read_csv(path) do |r|
   #     r.skip 3          # drop 3 preamble lines
   #     r.header          # next record supplies the column names
   #     r.skip 1          # drop a units row
   #     r.data            # the rest are data rows
   #   end
   #
-  #   CAFrame.from_csv(path) { it.column_names "date", "temp", "rh"; it.data }
+  #   CAFrame.read_csv(path) { it.column_names "date", "temp", "rh"; it.data }
   #
   # The verbs are +skip+ / +header+ / +column_names+ / +columns+ / +data+;
   # each returns a value useful inline (header returns its fields) and the ordering is the
   # script. The reader is a parameter, not self, so a local variable named
   # +data+ or +header+ cannot stand in for the verb. Without a block,
-  # from_csv reads by its header: / data: / column_names: (see +layout+).
+  # read_csv reads by its header: / data: / column_names: (see +layout+).
   class CSVReader
     def initialize(io, sep: ",", quote: '"', strip: false, read_text_as_const_string: false)
       @read_text_as_const_string = read_text_as_const_string
@@ -388,7 +388,7 @@ class CAFrame
         key = name.to_s
         @named_headers ||= {}
         if @named_headers.key?(key)
-          raise ArgumentError, "from_csv: header(#{name.inspect}) is read twice"
+          raise ArgumentError, "read_csv: header(#{name.inspect}) is read twice"
         end
         @named_headers[key] = [fields, @tok.record_line, name]
       end
@@ -403,7 +403,7 @@ class CAFrame
     def column_names(*names)
       names = names.flatten.map(&:to_s)
       if names.include?("")
-        raise ArgumentError, "from_csv: column_names: a column name can not be empty"
+        raise ArgumentError, "read_csv: column_names: a column name can not be empty"
       end
       if @header_line
         check_column_names(names, @names.size, @header_line)
@@ -431,15 +431,15 @@ class CAFrame
       end
       selection = selection.flatten
       if selection.empty?
-        raise ArgumentError, "from_csv: columns: names no column"
+        raise ArgumentError, "read_csv: columns: names no column"
       end
       selection.each do |c|
         next if c.is_a?(String)
-        CAFrame.__send__(:column_key, c, "from_csv", "columns: a column name") if c.is_a?(Symbol)
+        CAFrame.__send__(:column_key, c, "read_csv", "columns: a column name") if c.is_a?(Symbol)
         next if c.is_a?(Integer) && c >= 0
         next if c.is_a?(Range) && (c.begin.nil? || (c.begin.is_a?(Integer) && c.begin >= 0)) &&
                 (c.end.nil? || c.end.is_a?(Integer))
-        raise ArgumentError, "from_csv: columns: takes column names, or indexes from 0 " \
+        raise ArgumentError, "read_csv: columns: takes column names, or indexes from 0 " \
                              "and Ranges of them (got #{c.inspect})"
       end
       @selection = selection
@@ -450,17 +450,17 @@ class CAFrame
     private def column_renames(map)
       map.each do |key, name|
         if key.is_a?(Range)
-          raise ArgumentError, "from_csv: columns: a Hash selects one column per key, " \
+          raise ArgumentError, "read_csv: columns: a Hash selects one column per key, " \
                                "not a Range (got #{key.inspect})"
         end
-        CAFrame.__send__(:column_key, name, "from_csv", "columns: a column name",
+        CAFrame.__send__(:column_key, name, "read_csv", "columns: a column name",
                          hint: "given for #{key.inspect}")
         if name.empty?
-          raise ArgumentError, "from_csv: columns: a column name can not be empty " \
+          raise ArgumentError, "read_csv: columns: a column name can not be empty " \
                                "(given for #{key.inspect})"
         end
       end
-      CAFrame.__send__(:refuse_repeated_names, map.values, "from_csv", "columns: names")
+      CAFrame.__send__(:refuse_repeated_names, map.values, "read_csv", "columns: names")
       map.values
     end
 
@@ -474,7 +474,7 @@ class CAFrame
           # Without a header the columns are named c0, c1, ... by position.
           j = names ? names.index(c) : c[/\Ac(0|[1-9]\d*)\z/, 1]&.to_i
           if j.nil?
-            raise KeyError, "from_csv: columns: names no column #{c.inspect}" +
+            raise KeyError, "read_csv: columns: names no column #{c.inspect}" +
                             (names ? "" : " (with no header the columns are c0, c1, ...)")
           end
           j
@@ -488,9 +488,9 @@ class CAFrame
           (first..last).to_a
         end
       end
-      CAFrame.__send__(:refuse_repeated_names, indexes, "from_csv", "columns: selects column")
+      CAFrame.__send__(:refuse_repeated_names, indexes, "read_csv", "columns: selects column")
       if ncol && (bad = indexes.find { |j| j >= ncol })
-        raise ArgumentError, "from_csv: columns: #{bad} is past the #{ncol} columns of the file"
+        raise ArgumentError, "read_csv: columns: #{bad} is past the #{ncol} columns of the file"
       end
       indexes
     end
@@ -503,7 +503,7 @@ class CAFrame
 
     private def check_column_names(names, ncol, line)
       return if names.size == ncol
-      raise ArgumentError, "from_csv: column_names: gives #{names.size} " \
+      raise ArgumentError, "read_csv: column_names: gives #{names.size} " \
                            "name#{names.size == 1 ? '' : 's'} for the #{ncol} columns of line #{line}"
     end
 
@@ -525,7 +525,7 @@ class CAFrame
       read_data(nil)
     end
 
-    # The header: / data: / column_names: of from_csv, as the verbs above.
+    # The header: / data: / column_names: of read_csv, as the verbs above.
     # They index the lines of the file from 0, as File.readlines does (an
     # error names a line from 1, as an editor does). header: defaults to 0,
     # or to none (false) when column_names: is given; data: is the first line
@@ -534,12 +534,12 @@ class CAFrame
     def layout(header: nil, data: nil, column_names: nil, columns: nil, attrs: nil)
       header = column_names ? false : 0 if header.nil?
       unless header == false || (header.is_a?(Integer) && header >= 0)
-        raise ArgumentError, "from_csv: header: takes the index of a line, from 0, " \
+        raise ArgumentError, "read_csv: header: takes the index of a line, from 0, " \
                              "or false (got #{header.inspect})"
       end
-      attr_keys = attrs.nil? ? [] : CAFrame.send(:csv_attr_keys, attrs, "from_csv")
+      attr_keys = attrs.nil? ? [] : CAFrame.send(:csv_attr_keys, attrs, "read_csv")
       if !header && !attr_keys.empty?
-        raise ArgumentError, "from_csv: attrs: reads the lines below the header, " \
+        raise ArgumentError, "read_csv: attrs: reads the lines below the header, " \
                              "so it needs a header line"
       end
       first, last = CSVReader.data_lines(data)
@@ -552,7 +552,7 @@ class CAFrame
       self.columns(*(columns.is_a?(Array) ? columns : [columns])) if columns
       first ||= @tok.lineno
       if first < @tok.lineno
-        raise ArgumentError, "from_csv: data: #{first} does not come after header: #{header}" +
+        raise ArgumentError, "read_csv: data: #{first} does not come after header: #{header}" +
                              (attr_keys.empty? ? "" : " and the #{attr_keys.size} attrs: lines")
       end
       skip(first - @tok.lineno)
@@ -570,15 +570,15 @@ class CAFrame
           e -= 1 if e.is_a?(Integer) && spec.exclude_end?
           [spec.begin, e]
         else
-          raise ArgumentError, "from_csv: data: takes the index of a line or a Range of " \
+          raise ArgumentError, "read_csv: data: takes the index of a line or a Range of " \
                                "them, from 0 (got #{spec.inspect})"
         end
       [first, last].each do |n|
         next if n.nil? || (n.is_a?(Integer) && n >= 0)
-        raise ArgumentError, "from_csv: data: lines are indexed from 0 (got #{spec.inspect})"
+        raise ArgumentError, "read_csv: data: lines are indexed from 0 (got #{spec.inspect})"
       end
       if first && last && last < first
-        raise ArgumentError, "from_csv: data: #{spec.inspect} ends before it starts"
+        raise ArgumentError, "read_csv: data: #{spec.inspect} ends before it starts"
       end
       [first, last]
     end
@@ -648,7 +648,7 @@ class CAFrame
     end
 
     # The columns read_body_into_const_string_columns made, as +result+
-    # hands them to CAFrame.from_csv.
+    # hands them to CAFrame.read_csv.
     ConstStringColumns = Struct.new(:columns)
 
     private def body_in_c(last = nil, chunk_bytes = CHUNK_BYTES)
@@ -767,7 +767,7 @@ class CAFrame
       attrs = indexes.map { {} }
       @named_headers.each do |key, (fields, line, name)|
         if fields.size > ncol
-          raise ArgumentError, "from_csv: header(#{name.inspect}) on line #{line} " \
+          raise ArgumentError, "read_csv: header(#{name.inspect}) on line #{line} " \
                                "has #{fields.size} fields for the #{ncol} columns"
         end
         indexes.each_with_index do |j, k|
@@ -784,7 +784,7 @@ class CAFrame
       @names ? @names.size : ((@rows || []).map(&:size).max || 0)
     end
 
-    # [names_or_nil, rows] for CAFrame.from_csv to build from. names is nil when
+    # [names_or_nil, rows] for CAFrame.read_csv to build from. names is nil when
     # neither header nor column_names ran (positional names are generated).
     def result
       return table_result if @table

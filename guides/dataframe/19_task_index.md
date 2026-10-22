@@ -10,16 +10,16 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | give columns particular types as the frame is built | `CAFrame.new(..., types:)` | 2 |
 | see an array I have as a table, without copying | `array.to_frame` | 2, 15 |
 | read parsed JSON (an Array of objects) | `CAFrame.from_records` | 2 |
-| read a CSV file | `CAFrame.from_csv` | 3 |
-| read CSV text I already have in a String | `CAFrame.from_csv(StringIO.new(text))` | 3 |
-| have the column types worked out | `from_csv` (by default) | 3 |
-| read every column as text | `from_csv(types: :string)` | 3 |
+| read a CSV file | `CAFrame.read_csv` | 3 |
+| read CSV text I already have in a String | `CAFrame.from_csv(text)` | 3 |
+| have the column types worked out | `read_csv` (by default) | 3 |
+| read every column as text | `read_csv(types: :string)` | 3 |
 | see the types that would be chosen, before converting | `infer_types` | 3 |
-| treat `-1`, `NA` or another code as missing | `from_csv(missing: [...])` | 3 |
-| be told about cells that cannot be read | `from_csv(on_error: :warn)` | 3 |
-| read a file with title or unit lines | `from_csv(header:, data:, attrs:)` | 3 |
-| read only some columns of a wide file | `from_csv(columns:)` | 3 |
-| read a file that is not UTF-8 | `from_csv(encoding: "Windows-1252:UTF-8")` | 3 |
+| treat `-1`, `NA` or another code as missing | `read_csv(missing: [...])` | 3 |
+| be told about cells that cannot be read | `read_csv(on_error: :warn)` | 3 |
+| read a file with title or unit lines | `read_csv(header:, data:, attrs:)` | 3 |
+| read only some columns of a wide file | `read_csv(columns:)` | 3 |
+| read a file that is not UTF-8 | `read_csv(encoding: "Windows-1252:UTF-8")` | 3 |
 
 ## Looking
 
@@ -188,8 +188,8 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 
 | I want to… | use | chapter |
 |---|---|---|
-| a CSV file | `to_csv(path)` | 17 |
-| CSV with another separator or a missing-value code | `to_csv(sep:, missing:)` | 17 |
+| a CSV file | `write_csv(path)` | 17 |
+| CSV with another separator or a missing-value code | `write_csv(sep:, missing:)` | 17 |
 | JSON | `JSON.generate(df.to_records)` | 17 |
 | rows as Ruby Arrays | `df.to_a` | 17 |
 | a text table for a report | `to_table(rows: nil)` | 17 |

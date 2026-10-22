@@ -16,26 +16,25 @@ class CAFrame
   # (+default: :string+ keeps the rest text); +nil+ for a column keeps it
   # text. Broken cells become UNDEF automatically (parse-mask, §6-2).
   #
-  #   CAFrame.from_csv("obs.csv")                    # types inferred
-  #   CAFrame.from_csv("obs.csv", types: :string)      # every column text
-  #   CAFrame.from_csv("obs.csv", types: { "code" => :int32, "id" => nil })
-  #   CAFrame.from_csv("obs.csv", types: { default: :string, "temp" => :float64 })
-  #   CAFrame.from_csv("obs.csv", types: { default: :infer, "code" => :int32, "id" => nil })
-  #   CAFrame.from_csv("obs.csv", types: { default: :float64, "station" => nil })
-  #   CAFrame.from_csv("obs.csv", types: { "station" => :categorical })
+  #   CAFrame.read_csv("obs.csv")                    # types inferred
+  #   CAFrame.read_csv("obs.csv", types: :string)      # every column text
+  #   CAFrame.read_csv("obs.csv", types: { "code" => :int32, "id" => nil })
+  #   CAFrame.read_csv("obs.csv", types: { default: :string, "temp" => :float64 })
+  #   CAFrame.read_csv("obs.csv", types: { default: :infer, "code" => :int32, "id" => nil })
+  #   CAFrame.read_csv("obs.csv", types: { default: :float64, "station" => nil })
+  #   CAFrame.read_csv("obs.csv", types: { "station" => :categorical })
   #
-  # +source+ is a path, or an open IO -- anything answering +gets+, which a
-  # StringIO is. So CSV that is already in memory does not have to go to a
-  # temporary file first:
+  # +source+ is a path, or an open IO -- anything answering +gets+:
   #
-  #   CAFrame.from_csv("obs.csv")                    # a path
-  #   CAFrame.from_csv(StringIO.new(body))           # text already in hand
-  #   File.open("obs.csv") { |io| CAFrame.from_csv(io) }
+  #   CAFrame.read_csv("obs.csv")                    # a path
+  #   File.open("obs.csv") { |io| CAFrame.read_csv(io) }
+  #   CAFrame.read_csv($stdin)
   #
   # A String is always read as a path, never as CSV text: guessing between the
   # two by looking for a newline is the kind of guess that is right until it is
-  # not, and StringIO says which one you meant in six characters. An IO is read
-  # from where it is and left open -- the caller opened it and closes it.
+  # not. CSV text already in hand goes to +from_csv+, which takes the same
+  # options. An IO is read from where it is and left open -- the caller opened
+  # it and closes it.
   #
   # Parsing uses the built-in fast tokenizer (CSVParser). Options:
   #   sep:      field separator (default ",")
@@ -77,19 +76,19 @@ class CAFrame
   #             fields are read as the data fields are, so strip: trims them
   #             too
   #
-  #   CAFrame.from_csv("obs.csv", header: 2)            # a title above
-  #   CAFrame.from_csv("obs.csv", header: 0, data: 3)   # units on lines 1-2
-  #   CAFrame.from_csv("big.csv", data: 1..100)         # the first 100 lines
-  #   CAFrame.from_csv("raw.csv", column_names: %w[date temp rh])
-  #   CAFrame.from_csv("wide.csv", columns: %w[date temp])
-  #   CAFrame.from_csv("raw.csv", header: false, columns: { 0 => "date", 3 => "temp" })
-  #   CAFrame.from_csv("obs.csv", attrs: [:units])      # units on line 1
+  #   CAFrame.read_csv("obs.csv", header: 2)            # a title above
+  #   CAFrame.read_csv("obs.csv", header: 0, data: 3)   # units on lines 1-2
+  #   CAFrame.read_csv("big.csv", data: 1..100)         # the first 100 lines
+  #   CAFrame.read_csv("raw.csv", column_names: %w[date temp rh])
+  #   CAFrame.read_csv("wide.csv", columns: %w[date temp])
+  #   CAFrame.read_csv("raw.csv", header: false, columns: { 0 => "date", 3 => "temp" })
+  #   CAFrame.read_csv("obs.csv", attrs: [:units])      # units on line 1
   #
   # A block, given the reader, reads in any other order with +skip+ /
   # +header+ / +header(name)+ / +column_names+ / +columns+ / +data+ (see
   # CSVReader):
   #
-  #   CAFrame.from_csv("obs.csv") { |r| r.skip 2; r.header; r.skip 1; r.data }
+  #   CAFrame.read_csv("obs.csv") { |r| r.skip 2; r.header; r.skip 1; r.data }
   #
   # A missing field -- an unquoted empty one, or a cell a short row never
   # reached -- is UNDEF in the frame, whether or not the column is cast by
@@ -100,9 +99,9 @@ class CAFrame
   # whose text is one of the given tokens is UNDEF too, before +types:+
   # casts, so a -999 sentinel never reaches the column as a number:
   #
-  #   CAFrame.from_csv("obs.csv", missing: ["-999", "///"])        # every column
-  #   CAFrame.from_csv("obs.csv", missing: { "temp" => "-999" })   # one column
-  #   CAFrame.from_csv("obs.csv", missing: { default: "-999", "id" => [] })
+  #   CAFrame.read_csv("obs.csv", missing: ["-999", "///"])        # every column
+  #   CAFrame.read_csv("obs.csv", missing: { "temp" => "-999" })   # one column
+  #   CAFrame.read_csv("obs.csv", missing: { default: "-999", "id" => [] })
   #
   # Tokens are Strings and are compared with the field's text as read (after
   # +strip:+, quoted or not), so "-999" does not match "-999.0". In a Hash,
@@ -117,30 +116,30 @@ class CAFrame
   # is read from the text directly, and a column left as text becomes its own
   # CAString. Casting a column materializes it, and +copy+ gives an
   # independent frame.
-  def self.from_csv(source, types: :infer, on_error: :mask, missing: nil,
+  def self.read_csv(source, types: :infer, on_error: :mask, missing: nil,
                     header: nil, data: nil, column_names: nil, columns: nil,
                     attrs: nil, sep: ",", quote: '"', strip: false,
                     encoding: "bom|utf-8", parser: nil, &block)
     layout = { header: header, data: data, column_names: column_names,
                columns: columns, attrs: attrs }.compact
     if block && !layout.empty?
-      raise ArgumentError, "from_csv: give #{layout.keys.map { |k| "#{k}:" }.join(', ')} " \
+      raise ArgumentError, "read_csv: give #{layout.keys.map { |k| "#{k}:" }.join(', ')} " \
                            "or a reading block, not both"
     end
     # The parser reads the header, the data and the columns itself.
     if parser && !layout.empty?
-      raise ArgumentError, "from_csv: give #{layout.keys.map { |k| "#{k}:" }.join(', ')} " \
+      raise ArgumentError, "read_csv: give #{layout.keys.map { |k| "#{k}:" }.join(', ')} " \
                            "or parser:, not both"
     end
     if block && block.arity != 1
-      raise ArgumentError, "from_csv: the reading block takes the reader as its " \
-                           "parameter, as in from_csv(path) { |r| r.skip 2; r.header; r.data }"
+      raise ArgumentError, "read_csv: the reading block takes the reader as its " \
+                           "parameter, as in read_csv(path) { |r| r.skip 2; r.header; r.data }"
     end
     # A String is a path, always. One with a line break in it that names no
     # file is likely CSV text; the missing file says how to give text.
     if source.is_a?(String) && source.include?("\n") && !File.exist?(source)
       raise Errno::ENOENT, "#{source.inspect}; a String is a path, so to read CSV text " \
-                           "give it as an IO: from_csv(StringIO.new(text))"
+                           "give it to from_csv(text)"
     end
     missing = missing_tokens(missing) if missing
     types = csv_types(types)
@@ -156,7 +155,7 @@ class CAFrame
       elsif source.respond_to?(:gets)
         with_encoding_hint("open the IO in the file's encoding, as in " \
                            "File.open(path, \"r:<file encoding>:UTF-8\")") do
-          read_csv(source, sep: sep, quote: quote, strip: strip, layout: layout,
+          parse_csv_io(source, sep: sep, quote: quote, strip: strip, layout: layout,
                    read_text_as_const_string: read_text_as_const_string, &block)
         end
       else
@@ -164,7 +163,7 @@ class CAFrame
                            "file's encoding, as in " \
                            "encoding: \"<file encoding>:UTF-8\"") do
           File.open(source, "r:#{encoding}") do |io|
-            read_csv(io, sep: sep, quote: quote, strip: strip, layout: layout,
+            parse_csv_io(io, sep: sep, quote: quote, strip: strip, layout: layout,
                      read_text_as_const_string: read_text_as_const_string, &block)
           end
         end
@@ -180,7 +179,27 @@ class CAFrame
     frame
   end
 
-  # from_csv's types: as the cast map it stands for: inference unless said
+  # Read CSV text already in hand into a frame -- the String is the CSV, not
+  # a path. The options and the reading block are +read_csv+'s; +encoding:+
+  # has nothing to open and is refused, the text being in its String's
+  # encoding.
+  #
+  #   CAFrame.from_csv("date,temp\n2026-01-01,1.5\n")
+  #   CAFrame.from_csv(response.body, types: :string)
+  #   CAFrame.from_csv(df.to_csv)                    # the round trip
+  def self.from_csv(text, **opts, &block)
+    unless text.is_a?(String)
+      raise TypeError, "from_csv takes CSV text as a String (got #{text.class}); " \
+                       "read a path or an IO with read_csv"
+    end
+    if opts.key?(:encoding)
+      raise ArgumentError, "from_csv: encoding: is the open mode of a path; " \
+                           "text in hand is read in its String's encoding"
+    end
+    read_csv(StringIO.new(text), **opts, &block)
+  end
+
+  # read_csv's types: as the cast map it stands for: inference unless said
   # otherwise. :string reads every column as text (no cast); a Hash without
   # default: infers the columns it does not name, default: :string keeps
   # them text, and :string (or nil) for a column keeps that one text.
@@ -192,7 +211,7 @@ class CAFrame
   end
   private_class_method :csv_types
 
-  # A text column from_csv reads is a CAString, whichever way the body was
+  # A text column read_csv reads is a CAString, whichever way the body was
   # read: the string operations (strip!, gsub!, ...) write through to it.
   def self.convert_const_string_columns_to_castring(frame)
     frame.column_names.each do |name|
@@ -203,7 +222,7 @@ class CAFrame
   end
   private_class_method :convert_const_string_columns_to_castring
 
-  # Split a +missing:+ argument, as from_csv and to_csv both take it, into the
+  # Split a +missing:+ argument, as read_csv and to_csv both take it, into the
   # setting for every column and a Hash of per-column settings that replace
   # it. A Hash says :default for every column and a column name for one;
   # column names are Strings, so the Symbol cannot collide with one. A
@@ -226,7 +245,7 @@ class CAFrame
   # The read side of missing:, checked before the file is read: each setting
   # becomes an Array of token Strings.
   def self.missing_tokens(missing)
-    default, per_column = split_missing(missing, "from_csv")
+    default, per_column = split_missing(missing, "read_csv")
     tokens = lambda do |value|
       list = Array(value)
       bad = list.reject { |t| t.is_a?(String) }
@@ -278,7 +297,7 @@ class CAFrame
   # Drive the reading-control DSL over one open IO and hand back
   # [names, rows, column_attrs]. Shared by the path and the IO source, so the
   # two cannot come to read a file differently.
-  def self.read_csv (io, sep:, quote:, strip:, layout:, read_text_as_const_string: false, &block)
+  def self.parse_csv_io (io, sep:, quote:, strip:, layout:, read_text_as_const_string: false, &block)
     reader = CSVReader.new(io, sep: sep, quote: quote, strip: strip,
                            read_text_as_const_string: read_text_as_const_string)
     reader.reporting do
@@ -288,7 +307,7 @@ class CAFrame
     [names, rows, reader.column_attrs(reader.file_ncol)]
   end
 
-  private_class_method :read_csv
+  private_class_method :parse_csv_io
 
   # Re-raise a failure to decode the input with a line saying how to name the
   # file's encoding. The error and its class are kept; only the message grows.
@@ -319,53 +338,69 @@ class CAFrame
   # no flat CSV cell and raises; export it per column, or use +to_records+ +
   # JSON for the structured shape (memo §11.9, the N-D escape).
   #
-  # With +path+, writes the file and returns self; without it, returns the CSV
-  # String. The index (if any) is written as the first column under +axis_name+
-  # unless +index: false+. A masked cell (UNDEF) becomes an empty field, which
-  # +from_csv+ reads back as UNDEF (parse-mask, §6-2) -- so mask round-trips. A
+  # +target+ is a path, or an open IO -- anything answering +write+, which is
+  # written to where it is and left open. Returns self; +to_csv+ gives the
+  # same text as a String. The index (if any) is written as the first column
+  # under +axis_name+ unless +index: false+. A masked cell (UNDEF) becomes an
+  # empty field, which +read_csv+ reads back as UNDEF (parse-mask, §6-2) -- so mask round-trips. A
   # genuine empty string is written quoted (+""+) to stay distinct from missing,
   # matching the tokenizer's own unquoted-empty vs quoted-empty distinction.
   #
-  #   df.to_csv("out.csv")          # write file
-  #   csv = df.to_csv               # get a String
+  #   df.write_csv("out.csv")
+  #   df.write_csv($stdout)
   #
-  # Options: +sep+ / +quote+ mirror +from_csv+; +header+ writes the name row
+  # Options: +sep+ / +quote+ mirror +read_csv+; +header+ writes the name row
   # (default true); +index+ writes the index column (default true);
-  # +encoding+ transcodes the text before it is written or returned (default
+  # +encoding+ transcodes the text before it is written (default
   # nil leaves it as built, UTF-8). A character the encoding cannot hold
   # raises Encoding::UndefinedConversionError rather than being dropped. A
   # String cell in another encoding is transcoded to UTF-8; one with bytes
   # that are not valid in it, or with no encoding (ASCII-8BIT), raises. Each
   # names the row and the column of the cell.
   #
-  #   df.to_csv("out.csv", encoding: "CP932")   # for Excel in Japanese
+  #   df.write_csv("out.csv", encoding: "CP932")   # for Excel in Japanese
   #
   # +missing:+ writes a masked cell as that String instead of an empty field,
-  # for a reader that expects a sentinel; +from_csv(missing:)+ with the same
+  # for a reader that expects a sentinel; +read_csv(missing:)+ with the same
   # String reads it back as UNDEF. A Hash sets it per column the way
-  # +from_csv+ does: +:default+ for every column, and a column name (or the
+  # +read_csv+ does: +:default+ for every column, and a column name (or the
   # index's axis name) for one, replacing the default; "" is the empty field.
   # A cell whose value would be written as the same text raises, since the
   # file could not tell the two apart.
   #
-  #   df.to_csv("out.csv", missing: "-999")
-  #   df.to_csv("out.csv", missing: { default: "-999", "comment" => "" })
+  #   df.write_csv("out.csv", missing: "-999")
+  #   df.write_csv("out.csv", missing: { default: "-999", "comment" => "" })
   #
   # +attrs:+ writes, below the name row, one line per attribute key given,
   # in that order: field j is +attr(key)+ of column j (the index's for the
   # index column). A column without the attribute gets an empty field, an
   # empty String a quoted "", and a number its +to_s+.
-  # +from_csv(attrs:)+ with the same keys reads them back, as Strings.
+  # +read_csv(attrs:)+ with the same keys reads them back, as Strings.
   #
-  #   df.to_csv("out.csv", attrs: [:units, :long_name])
+  #   df.write_csv("out.csv", attrs: [:units, :long_name])
   #
   # +precision:+ writes each float cell rounded to that many decimal places,
   # still as a float (precision: 0 writes 3.0), and each part of a complex
   # cell likewise; NaN and infinities are written as they are. Without it a float is written in full, so that
-  # from_csv reads back the same value.
+  # read_csv reads back the same value.
   #
-  #   df.to_csv("out.csv", precision: 2)
-  def to_csv(path = nil, sep: ",", quote: '"', header: true, index: true,
+  #   df.write_csv("out.csv", precision: 2)
+  def write_csv(target, **opts)
+    out = to_csv(**opts)
+    if target.respond_to?(:write)
+      target.write(out)
+    else
+      File.binwrite(target, out)
+    end
+    self
+  end
+
+  # The frame as CSV text: what +write_csv+ writes, as a String, with the same
+  # options. +from_csv+ reads it back.
+  #
+  #   csv = df.to_csv
+  #   csv = df.to_csv(sep: "\t", index: false)
+  def to_csv(sep: ",", quote: '"', header: true, index: true,
              encoding: nil, missing: nil, attrs: [], precision: nil)
     unless precision.nil? || (precision.is_a?(Integer) && precision >= 0)
       raise ArgumentError, "to_csv: precision: is a number of decimal places, 0 or more (got #{precision.inspect})"
@@ -457,12 +492,7 @@ class CAFrame
       end
     end
 
-    if path
-      File.binwrite(path, out)
-      self
-    else
-      out
-    end
+    out
   end
 
   # Render the frame as an aligned text table for reading:
@@ -652,13 +682,13 @@ class CAFrame
 
   private def format_csv_column(col, precision = nil)
     # A float32 value goes out as its own shortest decimal ("0.1"), which
-    # from_csv reads back as the same value, not as the double it widens
+    # read_csv reads back as the same value, not as the double it widens
     # to ("0.10000000149011612"); cmplx64 has that in each part.
     if !col.face? && (col.data_type == CA_FLOAT32 || col.data_type == CA_CMPLX64)
       col = col.__widen_keeping_shortest_decimal__
     end
     # A boolean goes out as 0 / 1, as it does in every other serialization;
-    # from_csv reads it back with types: { name => :boolean }.
+    # read_csv reads it back with types: { name => :boolean }.
     col = col.to_type(:uint8) if !col.face? && col.data_type == CA_BOOLEAN
     col.to_a.map do |e|
       if UNDEF.equal?(e) || e.nil?
@@ -789,7 +819,7 @@ class CAFrame
     names ||= Array.new(ncol) { |j| "c#{j}" }
     # A frame holds one column per name, so a repeated one would keep only
     # the last of its columns.
-    CAFrame.__send__(:refuse_repeated_names, names, "from_csv", "the header row names",
+    CAFrame.__send__(:refuse_repeated_names, names, "read_csv", "the header row names",
                      hint: "pass header: false for the default column names " \
                            "(c0, c1, ...), or name the columns with column_names:")
 

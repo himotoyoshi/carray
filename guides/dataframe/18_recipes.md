@@ -4,9 +4,8 @@ Each recipe here is a complete answer to a common question, using the methods of
 
 ```ruby
 require "carray"
-require "stringio"
-sales = CAFrame.from_csv("sales.csv", missing: ["-1", "n/a"])
-shops = CAFrame.from_csv("shops.csv")
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
+shops = CAFrame.read_csv("shops.csv")
 ```
 
 ## Check a file you have just received
@@ -14,7 +13,7 @@ shops = CAFrame.from_csv("shops.csv")
 You have a new file and want to know whether it can be trusted before you use it. Read it, look at the types and the missing counts, and check the values against what you know about them:
 
 ```ruby
-fresh = CAFrame.from_csv("sales.csv", missing: ["n/a"], on_error: :warn)
+fresh = CAFrame.read_csv("sales.csv", missing: ["n/a"], on_error: :warn)
 puts fresh.describe.to_table
 # column    type       count  masked  unique  min         max         mean         stddev
 # --------  ---------  -----  ------  ------  ----------  ----------  -----------  ----------
@@ -211,7 +210,7 @@ Files of the same layout, one per week, are read and put after one another. `con
 ```ruby norun
 files = Dir.glob("sales_week_*.csv").sort
 all = CAFrame.concatenate(files.map { |path|
-  CAFrame.from_csv(path, missing: ["-1", "n/a"])
+  CAFrame.read_csv(path, missing: ["-1", "n/a"])
 })
 ```
 

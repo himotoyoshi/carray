@@ -1,7 +1,7 @@
 # Lint: a column name a CAFrame verb is given is a String, and anything else
 # is refused by one part, CAFrame.column_key (lib/carray/frame/frame.rb),
 # with TypeError "<verb>: a column name is a String (got :x)".  CAFrame.new,
-# cast, to_frame, from_csv and the readers' missing: had each refused a
+# cast, to_frame, read_csv and the readers' missing: had each refused a
 # Symbol by hand, in their own words and with ArgumentError or TypeError.
 # A refusal that says a name must be a String, written outside the part, is
 # a copy.

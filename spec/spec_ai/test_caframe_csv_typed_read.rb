@@ -2,7 +2,7 @@ require "test/unit"
 require "stringio"
 require "carray"
 
-# from_csv with types: reads the body into CAConstString columns (no String
+# read_csv with types: reads the body into CAConstString columns (no String
 # per cell), casts from those, and hands the columns left as text back as
 # CAString. It must give the frame the other two ways give: the Ruby
 # tokenizer, and reading without types: and casting afterwards -- the same
@@ -24,7 +24,7 @@ class TestCAFrameCSVTypedRead < Test::Unit::TestCase
   end
 
   def read(text, **opts)
-    describe(CAFrame.from_csv(StringIO.new(text), types: :string, **opts))
+    describe(CAFrame.from_csv(text, types: :string, **opts))
   rescue StandardError => e
     [:error, e.class, e.message]
   end
@@ -41,7 +41,7 @@ class TestCAFrameCSVTypedRead < Test::Unit::TestCase
 
   # The same input read without types:, cast afterwards.
   def read_then_cast(text, types)
-    df = CAFrame.from_csv(StringIO.new(text), types: :string)
+    df = CAFrame.from_csv(text, types: :string)
     df = df.cast(types == :infer ? df.infer_types : types)
     describe(df)
   rescue StandardError => e
@@ -94,13 +94,13 @@ class TestCAFrameCSVTypedRead < Test::Unit::TestCase
     text = "a,b,c\n1,2.5,x\n,\"3\",\"y,\"\"z\"\"\"\n4,bad,\n"
     types = { "a" => :int32, "b" => :float64 }
     assert_equal read_then_cast(text, types), read(text, types: types)
-    df = CAFrame.from_csv(StringIO.new(text), types: types)
+    df = CAFrame.from_csv(text, types: types)
     assert_equal [:int32, :float64, :object], df.columns.map(&:data_type)
     assert_kind_of CAString, df["c"]
   end
 
   def test_a_text_column_writes_through_to_a_view_of_the_frame
-    df = CAFrame.from_csv(StringIO.new("a,b\n1, x \n2,y\n3,z\n"), types: { "a" => :int64 })
+    df = CAFrame.from_csv("a,b\n1, x \n2,y\n3,z\n", types: { "a" => :int64 })
     sub = df.filter { |r| r["a"] > 1 }
     df["b"][1] = "W"
     df["b"].strip!

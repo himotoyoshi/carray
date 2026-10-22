@@ -14,7 +14,7 @@ class TestCAFrameCSVCReader < Test::Unit::TestCase
   end
 
   def read(text, headerless: false, **opts)
-    df = headerless ? CAFrame.from_csv(StringIO.new(text), types: :string, **opts) { |r| r.data } : CAFrame.from_csv(StringIO.new(text), types: :string, **opts)
+    df = headerless ? CAFrame.from_csv(text, types: :string, **opts) { |r| r.data } : CAFrame.from_csv(text, types: :string, **opts)
     [:ok, df.column_names, df.columns.map(&:to_a)]
   rescue StandardError => e
     [:error, e.class, e.message]
@@ -125,7 +125,7 @@ class TestCAFrameCSVCReader < Test::Unit::TestCase
     text = "a,b\n1,2\n".encode("CP932")
     io = StringIO.new(text)
     io.set_encoding("CP932")
-    df = CAFrame.from_csv(io, types: :string)
+    df = CAFrame.read_csv(io, types: :string)
     assert_equal ["1"], df["a"].to_a
   end
 end

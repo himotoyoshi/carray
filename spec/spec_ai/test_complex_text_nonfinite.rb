@@ -4,7 +4,7 @@
 #
 #  Text read as a complex number takes what Complex#to_s writes for a part
 #  that is not finite ("1.0+Infinity*i", "NaN+0.0i"), so a complex column
-#  with one round-trips through to_csv / from_csv.
+#  with one round-trips through to_csv / read_csv.
 #
 # ----------------------------------------------------------------------------
 
@@ -42,8 +42,8 @@ class TestComplexTextNonfinite < Test::Unit::TestCase
   def test_csv_round_trip
     df = CAFrame.new("c" => CA_CMPLX128(VALUES))
     text = df.to_csv
-    assert_same_values CAFrame.from_csv(StringIO.new(text), types: { "c" => :cmplx128 })["c"].to_a
-    assert_same_values CAFrame.from_csv(StringIO.new(text), types: :string)["c"].to_type(:cmplx128).to_a
+    assert_same_values CAFrame.from_csv(text, types: { "c" => :cmplx128 })["c"].to_a
+    assert_same_values CAFrame.from_csv(text, types: :string)["c"].to_type(:cmplx128).to_a
   end
 
   def test_not_complex_text_stays_unreadable

@@ -113,7 +113,7 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
   NOT_A_FRAME = %i[
     == []= at axis_name column_names columns data_types each_row index
     infer_time_format infer_types inspect is_duplicate ncol nrow shape empty? pivot_grid protected?
-    to_a to_ca to_csv to_records to_s to_table
+    to_a to_ca to_csv to_records to_s to_table write_csv
     attr set_attr set_attrs delete_attr attrs attrs_symkey has_attr?
   ].freeze
 
@@ -124,7 +124,7 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     :stack       => ->(df) { CAFrame.stack(df.select("v"), df.select("v")) },
   }.freeze
 
-  CLASS_NOT_A_FRAME = %i[from_csv from_records].freeze
+  CLASS_NOT_A_FRAME = %i[read_csv from_csv from_records].freeze
 
   def test_every_method_is_classified
     listed = CARRIES.keys + RETURNS_SELF.keys + DROPS.keys + NOT_A_FRAME

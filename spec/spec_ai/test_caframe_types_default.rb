@@ -2,7 +2,7 @@ require "test/unit"
 require "carray"
 require "stringio"
 
-# from_csv / from_records types: with :default -- the columns the map does
+# read_csv / from_records types: with :default -- the columns the map does
 # not name take the default (:infer or a type), a named column takes its own
 # entry, and nil leaves it as it was read.
 class TestCAFrameTypesDefault < Test::Unit::TestCase
@@ -14,7 +14,7 @@ class TestCAFrameTypesDefault < Test::Unit::TestCase
   CSV
 
   def frame(**opts)
-    CAFrame.from_csv(StringIO.new(CSV_TEXT), types: :string, **opts)
+    CAFrame.from_csv(CSV_TEXT, types: :string, **opts)
   end
 
   def test_infer_with_a_column_set_by_hand
@@ -55,7 +55,7 @@ class TestCAFrameTypesDefault < Test::Unit::TestCase
     assert_equal :float64, df["temp"].data_type
   end
 
-  # from_csv infers by default, so a map without default: infers the columns
+  # read_csv infers by default, so a map without default: infers the columns
   # it does not name; cast's map casts only what it names.
   def test_a_map_without_default_infers_the_rest_in_from_csv
     df = frame(types: { "temp" => :float64, "id" => nil })
@@ -83,7 +83,7 @@ class TestCAFrameTypesDefault < Test::Unit::TestCase
 
   def test_runs_after_missing_tokens
     text = "a,b\n1,-999\n2,3\n"
-    df = CAFrame.from_csv(StringIO.new(text), missing: "-999",
+    df = CAFrame.from_csv(text, missing: "-999",
                           types: { default: :infer, "a" => nil })
     assert_equal :int64, df["b"].data_type
     assert_equal [UNDEF, 3], df["b"].to_a

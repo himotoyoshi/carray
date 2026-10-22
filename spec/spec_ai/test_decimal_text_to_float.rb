@@ -2,7 +2,7 @@ require "test/unit"
 require "carray"
 
 # Text read as a float (to_type, a String stored into a float array, CAFrame
-# #cast, from_csv with types:) is rounded correctly: the same double Ruby's
+# #cast, read_csv with types:) is rounded correctly: the same double Ruby's
 # Float() gives, to the last bit. The reader answers most text without
 # strtod, so these sets aim at the places where that is easy to get wrong --
 # an exact halfway point, the second half of the 128-bit power of five,

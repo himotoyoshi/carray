@@ -23,21 +23,21 @@ class TestFrameEmptyColumnName < Test::Unit::TestCase
     assert_refused(/\Aappend:/) { df.append("", CA_INT32([5, 6])) }
     assert_refused(/\Afrom_records:/) { CAFrame.from_records([{ "" => 1 }]) }
     assert_refused(/\Ato_frame:/) { CArray.int32(2, 2).to_frame("", "x") }
-    assert_refused(/\Afrom_csv: columns:/) do
-      CAFrame.from_csv(StringIO.new("a,b\n1,2\n"), columns: { "a" => "" }, types: :string)
+    assert_refused(/\Aread_csv: columns:/) do
+      CAFrame.from_csv("a,b\n1,2\n", columns: { "a" => "" }, types: :string)
     end
-    assert_refused(/\Afrom_csv: column_names:/) do
-      CAFrame.from_csv(StringIO.new("1,2\n"), column_names: ["", "x"], types: :string)
+    assert_refused(/\Aread_csv: column_names:/) do
+      CAFrame.from_csv("1,2\n", column_names: ["", "x"], types: :string)
     end
   end
 
   def test_an_empty_header_field_is_named_by_its_position
-    assert_equal %w[c0 b], CAFrame.from_csv(StringIO.new(",b\n1,2\n"), types: :string).column_names
+    assert_equal %w[c0 b], CAFrame.from_csv(",b\n1,2\n", types: :string).column_names
     # by its place in the line, as header: false names it, also when
     # columns: picks it
     text = "a,b,,d\n1,2,3,4\n"
-    assert_equal %w[c2 d], CAFrame.from_csv(StringIO.new(text), columns: [2, 3], types: :string).column_names
-    assert_equal %w[c2 d], CAFrame.from_csv(StringIO.new(text), columns: [2, 3], types: :infer).column_names
+    assert_equal %w[c2 d], CAFrame.from_csv(text, columns: [2, 3], types: :string).column_names
+    assert_equal %w[c2 d], CAFrame.from_csv(text, columns: [2, 3], types: :infer).column_names
   end
 
   def test_pivot_names_an_empty_label

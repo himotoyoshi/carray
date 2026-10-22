@@ -2,13 +2,13 @@ require "test/unit"
 require "stringio"
 require "carray"
 
-# CAFrame.from_csv gives its text columns as CAString, so the string
+# CAFrame.read_csv gives its text columns as CAString, so the string
 # operations work on the columns themselves.
 class TestCAFrameCSVTextColumns < Test::Unit::TestCase
   CSV = "station,code,temp\n  Tokyo ,A-12,22.1\nOsaka,B-7,\n,C-x,19.5\n"
 
   def frame(**opts)
-    CAFrame.from_csv(StringIO.new(CSV), types: :string, **opts)
+    CAFrame.from_csv(CSV, types: :string, **opts)
   end
 
   def test_text_columns_are_castring
@@ -52,7 +52,7 @@ class TestCAFrameCSVTextColumns < Test::Unit::TestCase
 
   def test_round_trips_through_to_csv
     df = frame
-    back = CAFrame.from_csv(StringIO.new(df.to_csv), types: :string)
+    back = CAFrame.from_csv(df.to_csv, types: :string)
     df.column_names.each { |n| assert_equal df[n].to_a, back[n].to_a, n }
   end
 
@@ -63,7 +63,7 @@ class TestCAFrameCSVTextColumns < Test::Unit::TestCase
   end
 
   def test_split_column
-    df = CAFrame.from_csv(StringIO.new("id,code,v\n1,A-12,x\n2,B-7-x,y\n3,C,z\n4,,w\n"), types: :string)
+    df = CAFrame.from_csv("id,code,v\n1,A-12,x\n2,B-7-x,y\n3,C,z\n4,,w\n", types: :string)
     s = df.split_column("code", "-", into: ["kind", "num"])
     assert_equal ["id", "kind", "num", "v"], s.column_names
     assert_equal ["A", "B", "C", UNDEF], s["kind"].to_a
@@ -97,7 +97,7 @@ class TestCAFrameCSVTextColumns < Test::Unit::TestCase
   end
 
   def test_a_file_with_no_rows
-    df = CAFrame.from_csv(StringIO.new("a,b\n"), types: :string)
+    df = CAFrame.from_csv("a,b\n", types: :string)
     assert_equal [CAString, CAString], df.columns.map(&:class)
     assert_equal 0, df.nrow
   end
