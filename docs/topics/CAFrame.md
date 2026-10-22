@@ -386,6 +386,16 @@ df.attrs             # => { "title" => "hourly observations", "source" => "stati
 
 `attr`, `set_attr`, `set_attrs`, `delete_attr`, `attrs` and `has_attr?` follow the rules of the same methods on a CArray: a Symbol or String key, stored as a String, and a JSON-compatible value, stored as a frozen copy. A [read-only frame](#read-only-frames) refuses to change them.
 
+A column taken out of the frame knows neither its name nor the frame's attributes. `set_column_attrs` writes them onto the columns: each column takes its own name as the attribute `"name"`, and every column takes the Hash it is given. A consumer that reads attributes, such as a plotting library labelling an axis, can then use them.
+
+```ruby
+df.set_column_attrs                                   # "name" only
+df.set_column_attrs(df.attrs.merge("station" => "A")) # and common attributes
+df["temp"].attrs   # => { "title" => "hourly observations", ..., "station" => "A", "name" => "temp" }
+```
+
+The Hash can not hold `"name"`. A column's other attributes are kept, the index is left alone, and the method returns the frame. The attributes belong to the columns, so a frozen or protected frame takes them too; a frozen column refuses them, and then no column is changed.
+
 A frame made from this one takes its attributes when it holds the same table:
 
 - a selection of rows: `df[rows]`, `filter`, `head`, `tail`, `sort_by`, `sort_by_key`, `join(how: :semi / :anti)`, and a group's `filter`

@@ -61,6 +61,7 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     :mask_eq       => ->(df) { df.mask_eq("k", 2) },
     :fill          => ->(df) { df.fill("v", 0.0) },
     :protect       => ->(df) { df.protect },
+    :set_column_attrs => ->(df) { df.set_column_attrs(df.attrs) },
   }.freeze
 
   # Frames computed from this one: they do not take the attributes.
@@ -206,6 +207,57 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     assert_match(/\Acan't modify frozen CAFrame \(\d+ rows?, \d+ columns?\)\z/, err.message)
     assert_raise(FrozenError) { df.delete_attr(:title) }
     assert_equal ATTRS, df.attrs
+  end
+
+  # set_column_attrs: each column takes its own name as "name" and the
+  # common attributes; the frame's own attributes are not touched.
+  def test_set_column_attrs
+    df = frame
+    df["v"].set_attr(:units, "m")
+    assert_same df, df.set_column_attrs(station: "A", "origin" => df.attr("source"))
+    df.column_names.each do |name|
+      assert_equal name, df[name].attr("name")
+      assert_equal "A", df[name].attr("station")
+      assert_equal "station network", df[name].attr("origin")
+    end
+    assert_equal "m", df["v"].attr("units")
+    assert_equal ATTRS, df.attrs
+    # a column taken out of a selection of rows still shows them
+    assert_equal "v", df[0..1]["v"].attr("name")
+  end
+
+  def test_set_column_attrs_without_common
+    df = frame.set_column_attrs
+    assert_equal({ "name" => "k" }, df["k"].attrs)
+  end
+
+  def test_set_column_attrs_leaves_the_index_alone
+    df = CAFrame.new({ "k" => CA_INT32([1, 2]), "v" => CA_FLOAT64([1, 2]) }).set_index("k")
+    df.set_column_attrs
+    assert_equal({}, df.index.attrs)
+    assert_equal "v", df["v"].attr("name")
+  end
+
+  def test_set_column_attrs_refuses_name_and_bad_values
+    df = frame
+    assert_raise(ArgumentError) { df.set_column_attrs("name" => "x") }
+    assert_raise(ArgumentError) { df.set_column_attrs(name: "x") }
+    assert_raise(TypeError) { df.set_column_attrs([1]) }
+    assert_raise(TypeError) { df.set_column_attrs(a: 1, b: Object.new) }
+    assert_raise(TypeError) { df.set_column_attrs(1 => "x") }
+    df.column_names.each { |name| assert_equal({}, df[name].attrs) }
+  end
+
+  def test_set_column_attrs_with_a_frozen_column_writes_nothing
+    df = CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_INT32([3, 4]).freeze)
+    assert_raise(FrozenError) { df.set_column_attrs }
+    assert_equal({}, df["a"].attrs)
+  end
+
+  def test_set_column_attrs_on_a_frozen_frame
+    df = frame.freeze
+    df.set_column_attrs
+    assert_equal "k", df["k"].attr("name")
   end
 
   def test_marshal_round_trip

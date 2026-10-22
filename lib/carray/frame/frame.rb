@@ -878,6 +878,33 @@ class CAFrame
     (@attrs ? @attrs.dup : {}).freeze
   end
 
+  # Give every column its own name as the attribute "name", and the
+  # attributes +common+ alike, and return self.  A column's other attributes
+  # are kept.  The index is not a column and is left alone.  This is how a
+  # column taken out of the frame can tell a consumer (a plot label) what it
+  # was called, and carry the frame's attributes with it:
+  #
+  #   df.set_column_attrs                     # "name" only
+  #   df.set_column_attrs(df.attrs)           # and the frame's attributes
+  #
+  # Keys and values follow CArray#set_attrs.  +common+ can not hold "name",
+  # which would give every column the same name.  Every key, value and
+  # column is checked before any is written.  The attributes are metadata of
+  # the columns, not the table, so a frozen or protected frame takes them;
+  # a frozen column refuses them.
+  def set_column_attrs(common = {})
+    raise TypeError, "set_column_attrs takes a Hash (got #{common.class})" unless common.is_a?(Hash)
+    common.each do |key, value|
+      if CArray.__send__(:attr_normalize_key, key) == "name"
+        raise ArgumentError, "set_column_attrs: \"name\" is each column's own name and can not be given"
+      end
+      CArray.__send__(:attr_validate_value, value)
+    end
+    @columns.each_value { |col| col.__send__(:attr_check_writable) }
+    @columns.each { |name, col| col.set_attrs(common.merge("name" => name)) }
+    self
+  end
+
   # Whether the frame has any attribute, or the attribute +key+.
   def has_attr?(key = nil)
     return !(@attrs.nil? || @attrs.empty?) if key.nil?
