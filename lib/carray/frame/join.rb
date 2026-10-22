@@ -37,8 +37,11 @@ class CAFrame
   # columns of its own, when it will be written or read many times.  The
   # side that gets UNDEF for an unmatched row is gathered into new arrays.
   #
-  # +view: :full+ (experimental) makes that side views too, with a hole
-  # where a row has no match: the hole reads UNDEF and a write to it is
+  # The views are for cleaning data through the join: a condition built
+  # from both frames' columns masks or corrects the cells it marks, and the
+  # write lands in the frame they came from.  +view: :full+ (experimental)
+  # makes the other side views too, so a write reaches either frame, with a
+  # hole where a row has no match: the hole reads UNDEF and a write to it is
   # dropped.  Every result column then reaches its frame, at a cost on each
   # read (a column with holes is gathered whole, roughly ten times slower
   # than a column of its own).  The key of an outer join welds the two key

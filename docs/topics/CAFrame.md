@@ -1467,14 +1467,23 @@ When the other frame's key is unique, `:left` gives one row per left row, in ord
 
 A write to a view column reaches the frame it came from, and reading one gathers its rows through the view each time. Call `copy` on the result when it will be written without touching the joined frames, or read many times (a later `group_by`, repeated reductions): `obs.join(meta, on: "station", how: :inner).copy`.
 
-**Every column a view — `view: :full` (experimental).** `join(..., view: :full)` and `join_asof(..., view: :full)` make the "new" columns of the table above views too, with a **hole** where a row has no match: the hole reads `UNDEF`, and a write to it is dropped without an error. Every column of the result then reaches the frame it came from:
+**Cleaning data through a join.** The shared columns are what data cleaning needs: build a condition from the columns of both frames, then mask or correct the cells it marks, and the change lands in the frame the cells came from. With `:left` (or `:inner`) this frame's columns are shared already:
 
 ```ruby
-j = obs.join(meta, on: "station", how: :outer, view: :full)
-j["elev"][0] = 12.5     # writes meta's row, if row 0 has one
+detail = obs.join(meta, on: "station")
+detail["temp"][(detail["temp"] > detail["temp_max"]).strip_mask(false)] = UNDEF   # masks obs["temp"]
 ```
 
-This is for keeping the result connected, not for speed. A column with holes is gathered whole each time it is read, about ten times slower than a column of its own, and building it costs as much as gathering it. The key column of an `:outer` join holds the left key on the left rows and the right key on the right-only rows, welded as `CArray.meld` welds them, so both keys must be of one kind: the same type and, for a Face, the same state (time unit, categorical labels). Otherwise `view: :full` raises `ArgumentError`, whether or not the join has a right-only row; a `CAConstString` key cannot be welded at all. Leave `view:` out, or cast one key first.
+**Every column a view — `view: :full` (experimental).** To write to the other side too — the side the table above gives as new columns — pass `view: :full` to `join` or `join_asof`. That side becomes views as well, with a **hole** where a row has no match: the hole reads `UNDEF`, and a write to it is dropped without an error. Every column of the result then reaches the frame it came from:
+
+```ruby
+detail = obs.join(meta, on: "station", view: :full)
+detail["temp_max"][(detail["temp"] > detail["temp_max"]).strip_mask(false)] = UNDEF   # masks meta's limit instead
+j = obs.join(meta, on: "station", how: :outer, view: :full)
+j[(j["elev"] > 1000).strip_mask(false)] = UNDEF        # whole rows, in each frame that has the row
+```
+
+It is for writing back, not for speed. A column with holes is gathered whole each time it is read, about ten times slower than a column of its own, and building it costs as much as gathering it. The key column of an `:outer` join holds the left key on the left rows and the right key on the right-only rows, welded as `CArray.meld` welds them, so both keys must be of one kind: the same type and, for a Face, the same state (time unit, categorical labels). Otherwise `view: :full` raises `ArgumentError`, whether or not the join has a right-only row; a `CAConstString` key cannot be welded at all. Leave `view:` out, or cast one key first.
 
 **Keeping rows by whether the other frame has their key.** Two more modes do not pair rows. They pick this frame's rows:
 

@@ -67,7 +67,29 @@ The result shares cells with the tables it came from wherever every row has a ro
 both = extra.join(shops.select("shop", "size"), on: "shop", how: :inner).copy
 ```
 
-The other side — the one with missing values for rows without a match — is a new table of its own. `view: :full` makes it a view as well, with the missing places left as holes that read as missing and ignore writes. It is experimental, and slow to read; use it only when the result must stay connected to both tables.
+### Cleaning data through a join
+
+The sharing is what data cleaning needs. A check often needs both tables — here, a day with more than 2.5 visitors per square metre of floor is suspect — and the cells it finds belong to one of them. Build the condition on the joined table and write to it; with the default `:left`, this table's columns are shared, so the write lands in the original. Work on a copy to keep `sales` as it is:
+
+```ruby
+checked = sales.copy
+detail  = checked.join(shops.select("shop", "floor_m2"), on: "shop")
+crowded = detail["visitors"] > detail["floor_m2"] * 2.5
+detail["visitors"][crowded] = UNDEF
+checked["visitors"].count_masked   # => 3, one of them missing already
+```
+
+The other table's columns — the side with missing values for rows without a match — are new columns of the joined table, so a write to them stays there. To write back to that table too, pass `view: :full`: its columns become views as well, with the places without a match left as holes that read as missing and ignore writes. Here the floor area is the one to doubt:
+
+```ruby
+area    = shops.select("shop", "floor_m2").copy
+detail  = sales.join(area, on: "shop", view: :full)
+crowded = detail["visitors"] > detail["floor_m2"] * 2.5
+detail["floor_m2"][crowded] = UNDEF
+area["floor_m2"].to_a   # => [UNDEF, 85, 240, 200]
+```
+
+`view: :full` is experimental, and a column with holes is slow to read: copy the result if you go on to summarize it.
 
 ### Keeping rows by whether the other table has their key — `:semi`, `:anti`
 
