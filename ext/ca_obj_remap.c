@@ -368,13 +368,17 @@ ca_remap_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 
 /* xfer_all: whole-view delivery.  The whole view reads every cell of idx
    in order, so when idx holds its cells in memory those cells are the
-   parent addresses as they stand: they are checked in one pass and handed
-   to the parent directly.  A negative address is normalised in a copy
-   (idx itself is not written).  Otherwise the sequential view-flat
-   addresses [0..elements) go through xfer_addrs.
+   parent addresses: they are checked in one pass, a negative one counting
+   from the end of the parent.
 
-   The in-place read is skipped when parent and idx share a root, so a
-   scatter can never rewrite the addresses it is reading.
+   idx itself is handed to the parent only when the parent holds its cells
+   in memory and shares no root with idx: that transfer is a plain copy, so
+   no Ruby runs while the parent reads the list and a scatter cannot
+   rewrite it.  Any other parent (a view, a CAObject whose hooks run Ruby)
+   gets a copy of the addresses taken in the checking pass, so nothing it
+   does can change an address after it was checked, or change idx.
+   Without idx in memory, the sequential view-flat addresses [0..elements)
+   go through xfer_addrs.
 
    No ca_attach(parent) / ca_attach(idx). */
 static void
@@ -388,31 +392,43 @@ ca_remap_func_xfer_all (void *ap, void *data, int dir)
 
   if ( n == 0 ) return;
 
-  if ( ca->idx->ptr && ! ca_shares_root(ca->parent, ca->idx) ) {
-    ca_size_t *paddrs = (ca_size_t *) ca->idx->ptr;
+  if ( ca->idx->ptr ) {
+    ca_size_t *iaddrs = (ca_size_t *) ca->idx->ptr;
     ca_size_t  pn = ca->parent->elements;
-    int        has_negative = 0;
+    ca_size_t *paddrs;
+
+    if ( ca->parent->ptr && ! ca_shares_root(ca->parent, ca->idx) ) {
+      int lendable = 1;
+      for ( i = 0; i < n; i++ ) {
+        ca_size_t a = iaddrs[i];
+        if ( a < 0 ) {
+          lendable = 0;
+          a += pn;
+        }
+        if ( a < 0 || a >= pn ) {
+          ca_index_out_of_range(iaddrs[i], pn, "index");
+        }
+      }
+      if ( lendable ) {
+        ca_xfer_addrs(ca->parent, n, iaddrs, data, dir);
+        return;
+      }
+    }
+
+    paddrs = ALLOCV_N(ca_size_t, holder, n);
     for ( i = 0; i < n; i++ ) {
-      ca_size_t a = paddrs[i];
+      ca_size_t a = iaddrs[i];
       if ( a < 0 ) {
-        has_negative = 1;
         a += pn;
       }
       if ( a < 0 || a >= pn ) {
-        ca_index_out_of_range(paddrs[i], pn, "index");
+        ALLOCV_END(holder);
+        ca_index_out_of_range(iaddrs[i], pn, "index");
       }
+      paddrs[i] = a;
     }
-    if ( has_negative ) {
-      ca_size_t *copy = ALLOCV_N(ca_size_t, holder, n);
-      for ( i = 0; i < n; i++ ) {
-        copy[i] = ( paddrs[i] < 0 ) ? paddrs[i] + pn : paddrs[i];
-      }
-      ca_xfer_addrs(ca->parent, n, copy, data, dir);
-      ALLOCV_END(holder);
-    }
-    else {
-      ca_xfer_addrs(ca->parent, n, paddrs, data, dir);
-    }
+    ca_xfer_addrs(ca->parent, n, paddrs, data, dir);
+    ALLOCV_END(holder);
     return;
   }
 

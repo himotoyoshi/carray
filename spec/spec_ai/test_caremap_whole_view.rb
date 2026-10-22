@@ -114,6 +114,52 @@ class TestCARemapWholeView < Test::Unit::TestCase
     assert_equal parent.copy.to_a.flatten.reverse, parent[idx].copy.to_a.flatten
   end
 
+  # A parent whose transfer runs Ruby gets its own copy of the checked
+  # addresses: changing the mapper from a hook reaches neither the addresses
+  # already checked nor the view.
+  class HookSource < CAObject
+    attr_accessor :on_fetch
+    attr_reader :seen
+    def initialize
+      super(CA_INT64, [2, 2])
+      @seen = []
+    end
+    private
+    def fetch_addr (addr)
+      @seen << addr
+      @on_fetch.call if @on_fetch
+      return addr * 10
+    end
+  end
+
+  class ScribblingSource < CAObject
+    def initialize
+      super(CA_INT64, [2, 2])
+    end
+    private
+    def copy_addrs (addrs, data)
+      data[] = addrs * 10
+      addrs[] = 0
+    end
+  end
+
+  def test_hook_changing_the_mapper_does_not_reach_the_read
+    src = HookSource.new
+    v = src[CArray.int64(4) { |k| 3 - k }.reshape(2, 2)]
+    m = v.mapper
+    src.on_fetch = -> { m[3] = 1_000_000; src.on_fetch = nil }
+    assert_equal [[30, 20], [10, 0]], v.to_a
+    assert_equal [3, 2, 1, 0], src.seen
+  end
+
+  def test_hook_writing_its_address_list_leaves_the_mapper
+    src = ScribblingSource.new
+    v = src[CArray.int64(4) { |k| 3 - k }.reshape(2, 2)]
+    assert_equal [[30, 20], [10, 0]], v.to_a
+    assert_equal [[3, 2], [1, 0]], v.mapper.to_a
+    assert_equal [[30, 20], [10, 0]], v.to_a
+  end
+
   def test_sort_axis_view
     a = CArray.float64(3, 4) { [3, 1, 2, 0, 9, 8, 7, 6, 4, 5, 11, 10].map(&:to_f) }
     assert_equal a.to_a.map(&:sort), a.sort(axis: 1).copy.to_a
