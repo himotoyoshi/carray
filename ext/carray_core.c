@@ -1030,7 +1030,27 @@ ca_xfer_addrs_dispatch (CArray *ca, ca_size_t n, ca_size_t *addrs,
       return;
     }
     /* Per-cell loop for arbitrary (non-sequential) addrs:
-       fancy gather/scatter from CASelect 2-D mapper, CSA sparse mask, etc.  */
+       fancy gather/scatter from CASelect 2-D mapper, CSA sparse mask, etc.
+       Cells of 1, 2, 4 or 8 bytes are copied with that length as a
+       constant, which the compiler turns into one load and store (and
+       which stays legal for an unaligned buffer); a length known only at
+       run time is a call per cell. */
+#define CA_XFER_ADDRS_AS(W) \
+    do { \
+      if ( dir == CA_XFER_GET ) { \
+        for (i=0; i<n; i++) memcpy(d + i * (W), ca->ptr + (W) * addrs[i], (W)); \
+      } \
+      else { \
+        for (i=0; i<n; i++) memcpy(ca->ptr + (W) * addrs[i], d + i * (W), (W)); \
+      } \
+    } while (0)
+    switch ( ca->bytes ) {
+    case 1: CA_XFER_ADDRS_AS(1); return;
+    case 2: CA_XFER_ADDRS_AS(2); return;
+    case 4: CA_XFER_ADDRS_AS(4); return;
+    case 8: CA_XFER_ADDRS_AS(8); return;
+    }
+#undef CA_XFER_ADDRS_AS
     for ( i = 0; i < n; i++ ) {
       char *p = ca->ptr + ca->bytes * addrs[i];
       if ( dir == CA_XFER_GET ) memcpy(d + i * ca->bytes, p, ca->bytes);

@@ -366,9 +366,15 @@ ca_remap_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   ALLOCV_END(holder);
 }
 
-/* xfer_all: whole-view delivery.  Sequential view-flat addresses
-   [0..elements) routed through xfer_addrs -- one ALLOCV for the addr
-   list, then two batched ca_xfer_addrs calls inside xfer_addrs.
+/* xfer_all: whole-view delivery.  The whole view reads every cell of idx
+   in order, so when idx holds its cells in memory those cells are the
+   parent addresses as they stand: they are checked in one pass and handed
+   to the parent directly.  A negative address is normalised in a copy
+   (idx itself is not written).  Otherwise the sequential view-flat
+   addresses [0..elements) go through xfer_addrs.
+
+   The in-place read is skipped when parent and idx share a root, so a
+   scatter can never rewrite the addresses it is reading.
 
    No ca_attach(parent) / ca_attach(idx). */
 static void
@@ -381,6 +387,34 @@ ca_remap_func_xfer_all (void *ap, void *data, int dir)
   volatile VALUE holder;
 
   if ( n == 0 ) return;
+
+  if ( ca->idx->ptr && ! ca_shares_root(ca->parent, ca->idx) ) {
+    ca_size_t *paddrs = (ca_size_t *) ca->idx->ptr;
+    ca_size_t  pn = ca->parent->elements;
+    int        has_negative = 0;
+    for ( i = 0; i < n; i++ ) {
+      ca_size_t a = paddrs[i];
+      if ( a < 0 ) {
+        has_negative = 1;
+        a += pn;
+      }
+      if ( a < 0 || a >= pn ) {
+        ca_index_out_of_range(paddrs[i], pn, "index");
+      }
+    }
+    if ( has_negative ) {
+      ca_size_t *copy = ALLOCV_N(ca_size_t, holder, n);
+      for ( i = 0; i < n; i++ ) {
+        copy[i] = ( paddrs[i] < 0 ) ? paddrs[i] + pn : paddrs[i];
+      }
+      ca_xfer_addrs(ca->parent, n, copy, data, dir);
+      ALLOCV_END(holder);
+    }
+    else {
+      ca_xfer_addrs(ca->parent, n, paddrs, data, dir);
+    }
+    return;
+  }
 
   vaddrs = ALLOCV_N(ca_size_t, holder, n);
   for ( i = 0; i < n; i++ ) vaddrs[i] = i;
