@@ -219,26 +219,54 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     assert_equal ATTRS, df.attrs
   end
 
-  # set_column_attrs: each column takes its own name as "name" and the
-  # common attributes; the frame's own attributes are not touched.
-  def test_set_column_attrs
+  # set_column_attrs with no attributes: each column takes its own name as
+  # "name"; the frame's own attributes are not touched.
+  def test_set_column_attrs_names
     df = frame
     df["v"].set_attr(:units, "m")
-    assert_same df, df.set_column_attrs(station: "A", "origin" => df.attr("source"))
-    df.column_names.each do |name|
-      assert_equal name, df[name].attr("name")
-      assert_equal "A", df[name].attr("station")
-      assert_equal "station network", df[name].attr("origin")
-    end
-    assert_equal "m", df["v"].attr("units")
+    assert_same df, df.set_column_attrs
+    df.column_names.each { |name| assert_equal name, df[name].attr("name") }
+    assert_equal({ "units" => "m", "name" => "v" }, df["v"].attrs)
     assert_equal ATTRS, df.attrs
-    # a column taken out of a selection of rows still shows them
+    # a column taken out of a selection of rows still shows it
     assert_equal "v", df[0..1]["v"].attr("name")
   end
 
-  def test_set_column_attrs_without_common
-    df = frame.set_column_attrs
-    assert_equal({ "name" => "k" }, df["k"].attrs)
+  # With attributes, they are set and "name" is not.
+  def test_set_column_attrs_on_every_column
+    df = frame
+    df.set_column_attrs(station: "A", "origin" => df.attr("source"))
+    df.column_names.each do |name|
+      assert_equal({ "station" => "A", "origin" => "station network" }, df[name].attrs)
+    end
+  end
+
+  def test_set_column_attrs_from_a_hash
+    df = frame
+    df.set_column_attrs(df.attrs)
+    assert_equal ATTRS, df["k"].attrs
+    df.set_column_attrs(df.attrs, title: "t")
+    assert_equal "t", df["k"].attr("title")
+    # an empty Hash sets nothing, not "name"
+    df2 = other.set_column_attrs(other.attrs)
+    assert_equal({}, df2["k"].attrs)
+  end
+
+  def test_set_column_attrs_on_named_columns
+    df = frame
+    df.set_column_attrs("v", long_name: "value")
+    df.set_column_attrs("k", "g", "k", station: "A")
+    assert_equal({ "long_name" => "value" }, df["v"].attrs)
+    assert_equal({ "station" => "A" }, df["k"].attrs)
+    assert_equal({ "station" => "A" }, df["g"].attrs)
+    assert_equal({}, df["s"].attrs)
+    # named columns with no attributes take their names
+    df.set_column_attrs("s")
+    assert_equal({ "name" => "s" }, df["s"].attrs)
+    assert_equal({}, df["t"].attrs)
+    # "name" given explicitly is an attribute like any other
+    df.set_column_attrs("t", name: "time")
+    assert_equal "time", df["t"].attr("name")
   end
 
   def test_set_column_attrs_leaves_the_index_alone
@@ -246,12 +274,14 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     df.set_column_attrs
     assert_equal({}, df.index.attrs)
     assert_equal "v", df["v"].attr("name")
+    e = assert_raise(KeyError) { df.set_column_attrs("k", a: 1) }
+    assert_match(/\Aset_column_attrs: no column "k": it is the index/, e.message)
   end
 
-  def test_set_column_attrs_refuses_name_and_bad_values
+  def test_set_column_attrs_refuses_before_writing
     df = frame
-    assert_raise(ArgumentError) { df.set_column_attrs("name" => "x") }
-    assert_raise(ArgumentError) { df.set_column_attrs(name: "x") }
+    assert_raise(KeyError) { df.set_column_attrs("v", "zz", a: 1) }
+    assert_raise(TypeError) { df.set_column_attrs(:v, a: 1) }
     assert_raise(TypeError) { df.set_column_attrs([1]) }
     assert_raise(TypeError) { df.set_column_attrs(a: 1, b: Object.new) }
     assert_raise(TypeError) { df.set_column_attrs(1 => "x") }

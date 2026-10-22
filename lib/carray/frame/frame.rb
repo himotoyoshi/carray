@@ -884,30 +884,44 @@ class CAFrame
     CArray.__send__(:attr_symbolize_keys, attrs)
   end
 
-  # Give every column its own name as the attribute "name", and the
-  # attributes +common+ alike, and return self.  A column's other attributes
-  # are kept.  The index is not a column and is left alone.  This is how a
-  # column taken out of the frame can tell a consumer (a plot label) what it
-  # was called, and carry the frame's attributes with it:
+  # Set attributes on columns and return self.  The columns are the ones
+  # named, or every column when none is named.  With attributes, they are
+  # set on those columns; with none, each column gets its own name as the
+  # attribute "name", which is what the frame knows of a column and a column
+  # taken out of it does not:
   #
-  #   df.set_column_attrs                     # "name" only
-  #   df.set_column_attrs(df.attrs)           # and the frame's attributes
+  #   df.set_column_attrs                                # "name" on every column
+  #   df.set_column_attrs(period: "I")                   # period on every column
+  #   df.set_column_attrs(df.attrs)                      # the frame's attributes
+  #   df.set_column_attrs("hr", long_name: "Hour")       # long_name on "hr"
+  #   df.set_column_attrs("hr", "cnt", station: "A")     # station on both
   #
-  # Keys and values follow CArray#set_attrs.  +common+ can not hold "name",
-  # which would give every column the same name.  Every key, value and
-  # column is checked before any is written.  The attributes are metadata of
-  # the columns, not the table, so a frozen or protected frame takes them;
-  # a frozen column refuses them.
-  def set_column_attrs(common = {})
-    raise TypeError, "set_column_attrs takes a Hash (got #{common.class})" unless common.is_a?(Hash)
-    common.each do |key, value|
-      if CArray.__send__(:attr_normalize_key, key) == "name"
-        raise ArgumentError, "set_column_attrs: \"name\" is each column's own name and can not be given"
+  # The attributes come as keywords, as a Hash given last, or both; an empty
+  # Hash sets nothing (df.set_column_attrs(df.attrs) on a frame with no
+  # attributes does not set "name").  Keys
+  # and values follow CArray#set_attrs.  A column's other attributes are
+  # kept, and the index is not a column.  Every name, key, value and column
+  # is checked before any is written.  The attributes belong to the
+  # columns, not the table, so a frozen or protected frame takes them; a
+  # frozen column refuses them.
+  def set_column_attrs(*names, **keywords)
+    given = names.last.is_a?(Hash) || !keywords.empty?
+    attrs = names.last.is_a?(Hash) ? names.pop.merge(keywords) : keywords
+    names.each do |name|
+      unless name.is_a?(String)
+        raise TypeError, "set_column_attrs: a column name is a String (got #{name.inspect})"
       end
+    end
+    targets = names.empty? ? @columns.keys : names.uniq
+    columns = targets.map { |name| @columns.fetch(name) { refuse_missing_column(name, "set_column_attrs") } }
+    attrs.each do |key, value|
+      CArray.__send__(:attr_normalize_key, key)
       CArray.__send__(:attr_validate_value, value)
     end
-    @columns.each_value { |col| col.__send__(:attr_check_writable) }
-    @columns.each { |name, col| col.set_attrs(common.merge("name" => name)) }
+    columns.each { |col| col.__send__(:attr_check_writable) }
+    targets.zip(columns).each do |name, col|
+      col.set_attrs(given ? attrs : { "name" => name })
+    end
     self
   end
 
