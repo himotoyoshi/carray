@@ -286,4 +286,24 @@ class TestMaskedIndexSelectsNothing < Test::Unit::TestCase
     i = CA_INT64([2, 0]); i[1] = UNDEF
     assert_raise(ArgumentError) { x.value[i] }
   end
+
+  # The whole view is read axis by axis (no address goes back to an
+  # index), and a region of it as one batch of addresses: both answer as
+  # a cell-by-cell read does, for a hole on an outer and on the inner axis.
+  def test_whole_view_and_region_reads
+    a = CArray.float64(5, 4).seq!
+    a[2, 1] = UNDEF
+    i0 = CA_INT64([4, 0, 2, 3]); i0[1] = UNDEF
+    i1 = CA_INT64([3, 1, 0]);    i1[2] = UNDEF
+    [[i0, nil], [i0, 1..2], [i0, i1], [1..3, i1]].each do |k0, k1|
+      v = a[k0, k1]
+      rows = k0.is_a?(Range) ? k0.to_a : k0.to_a.map { |x| UNDEF.equal?(x) ? nil : x }
+      cols = k1.nil? ? (0...4).to_a : k1.is_a?(Range) ? k1.to_a : k1.to_a.map { |x| UNDEF.equal?(x) ? nil : x }
+      want = rows.map { |r| cols.map { |c| (r.nil? || c.nil?) ? UNDEF : a[r, c] } }
+      assert_equal want, v.copy.to_a
+      assert_equal want.map { |row| row.map { |x| UNDEF.equal?(x) } }, v.is_masked.to_a
+      assert_equal want[1..].map { |row| row[1..] }, v[1..-1, 1..-1].copy.to_a
+      assert_equal want.flatten.reject { |x| UNDEF.equal?(x) }.sum, v.sum
+    end
+  end
 end

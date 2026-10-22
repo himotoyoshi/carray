@@ -490,11 +490,81 @@ cag_parent_addr (const CAGrid *ca, const ca_size_t *idx, ca_size_t *paddr)
   return hole;
 }
 
+/* The parent addresses (paddrs, may be NULL) and the hole marks of every
+   view cell in address order: a walk over the outer axes with the
+   innermost axis a run, its indices and holes read off the axis.  A 1-D
+   index axis is its own index and hole arrays. */
+static void
+cag_parent_addrs_whole (const CAGrid *ca, ca_size_t *paddrs, uint8_t *hole)
+{
+  int8_t            ndim  = ca->ndim;
+  int8_t            inner = ndim - 1;
+  const cag_axis_t *last  = &ca->axes[inner];
+  ca_size_t         count = last->count;
+  ca_size_t         pdim  = ca->parent->dim[inner];
+  ca_size_t         idx[CA_RANK_MAX];
+  ca_size_t         i = 0, j;
+  int8_t            k;
+
+  if ( ndim == 1 && last->kind == CAG_AXIS_INDEX ) {
+    if ( paddrs ) {
+      memcpy(paddrs, last->indices, (size_t) count * sizeof(ca_size_t));
+    }
+    if ( last->holes ) {
+      memcpy(hole, last->holes, (size_t) count);
+    }
+    else {
+      memset(hole, 0, (size_t) count);
+    }
+    return;
+  }
+  if ( count == 0 || ca->elements == 0 ) {
+    return;
+  }
+  for (k = 0; k < ndim; k++) {
+    idx[k] = 0;
+  }
+  while ( 1 ) {
+    ca_size_t base = 0;
+    uint8_t   outer_hole = 0;
+    for (k = 0; k < inner; k++) {
+      const cag_axis_t *ax = &ca->axes[k];
+      if ( ax->kind == CAG_AXIS_INDEX && ax->holes && ax->holes[idx[k]] ) {
+        outer_hole = 1;
+      }
+      base = base * ca->parent->dim[k] + cag_parent_index_for(ax, idx[k]);
+    }
+    base *= pdim;
+    if ( last->kind == CAG_AXIS_INDEX ) {
+      const ca_size_t *ix = last->indices;
+      const uint8_t   *hx = last->holes;
+      for (j = 0; j < count; j++) {
+        if ( paddrs ) paddrs[i + j] = base + ix[j];
+        hole[i + j] = (uint8_t) (outer_hole | (hx ? hx[j] : 0));
+      }
+    }
+    else {
+      for (j = 0; j < count; j++) {
+        if ( paddrs ) paddrs[i + j] = base + last->start + j * last->step;
+        hole[i + j] = outer_hole;
+      }
+    }
+    i += count;
+    for (k = inner - 1; k >= 0; k--) {
+      if ( ++idx[k] < ca->dim[k] ) break;
+      idx[k] = 0;
+    }
+    if ( k < 0 ) break;
+  }
+}
+
 /* The transfer of a grid with holes, for the view cells at addrs (NULL:
-   the whole view in order).  The parent is asked for one batch of
-   addresses.  A GET reads every cell, a hole reading the cell at index 0
-   of its holed axes (in a mask grid it is then set true); a PUT leaves
-   the holes out. */
+   the whole view in order, walked axis by axis).  The parent is asked
+   for one batch of addresses.  A GET reads every cell, a hole reading the
+   cell at index 0 of its holed axes (in a mask grid it is then set true); a
+   PUT leaves the holes out.  A mask grid reading its owner's stand-in reads
+   nothing: the stand-in is all false at rest (a write to it is settled
+   into the parent's mask at once), so the holes are the whole answer. */
 static void
 ca_grid_holed_xfer (CAGrid *ca, ca_size_t n, const ca_size_t *addrs,
                     char *data, int dir)
@@ -511,11 +581,39 @@ ca_grid_holed_xfer (CAGrid *ca, ca_size_t n, const ca_size_t *addrs,
   }
   cag_mask_current(ca);
   parent = ca->parent;
-  paddrs = ALLOCV_N(ca_size_t, h_addr, n);
-  hole   = ALLOCV_N(uint8_t, h_hole, n);
-  for (i = 0; i < n; i++) {
-    ca_addr2index((CArray *) ca, addrs ? addrs[i] : i, idx);
-    hole[i] = (uint8_t) cag_parent_addr(ca, idx, &paddrs[i]);
+
+  if ( dir == CA_XFER_GET && ca->holes_read_masked && ca->mask_owner != NULL
+       && parent == ca->mask_owner->mask_standin ) {
+    if ( ! addrs ) {
+      cag_parent_addrs_whole(ca, NULL, (uint8_t *) data);
+    }
+    else {
+      for (i = 0; i < n; i++) {
+        ca_addr2index((CArray *) ca, addrs[i], idx);
+        ((boolean8_t *) data)[i] = (boolean8_t) cag_parent_addr(ca, idx, &m);
+      }
+    }
+    return;
+  }
+
+  if ( dir == CA_XFER_GET && ! addrs && ca->ndim == 1 ) {
+    /* A 1-D grid read whole: its index axis's index and hole arrays are
+       the batch as they are (a PUT compacts the batch, so it copies). */
+    paddrs = ca->axes[0].indices;
+    hole   = ca->axes[0].holes;
+  }
+  else {
+    paddrs = ALLOCV_N(ca_size_t, h_addr, n);
+    hole   = ALLOCV_N(uint8_t, h_hole, n);
+    if ( ! addrs ) {
+      cag_parent_addrs_whole(ca, paddrs, hole);
+    }
+    else {
+      for (i = 0; i < n; i++) {
+        ca_addr2index((CArray *) ca, addrs[i], idx);
+        hole[i] = (uint8_t) cag_parent_addr(ca, idx, &paddrs[i]);
+      }
+    }
   }
 
   if ( dir == CA_XFER_GET ) {
@@ -728,6 +826,48 @@ ca_grid_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
    strides[] = src access byte strides into the grid (semantics b); data is
    contiguous row-major over counts.  g->bytes == parent->bytes (no reinterpret).
    No whole-view attach -- only the requested cells touch the parent. */
+/* A region of a grid with holes: its view addresses as one batch to the
+   holed transfer, or none when the region is the whole view in order. */
+static void
+cag_holed_xfer_stride (CAGrid *g, const ca_size_t *starts, const ca_size_t *counts,
+                       const ca_size_t *strides, char *data, int dir)
+{
+  int8_t         ndim = g->ndim;
+  ca_size_t      gnative[CA_RANK_MAX], idx[CA_RANK_MAX];
+  ca_size_t      n = 1, i, s, base = 0;
+  ca_size_t     *addrs;
+  volatile VALUE holder = 0;
+  int            whole = 1;
+  int8_t         k;
+
+  s = g->bytes;
+  for (k = ndim - 1; k >= 0; k--) { gnative[k] = s; s *= g->dim[k]; }
+  for (k = 0; k < ndim; k++) {
+    n    *= counts[k];
+    base += starts[k] * gnative[k];
+    if ( starts[k] != 0 || counts[k] != g->dim[k] || strides[k] != gnative[k] ) {
+      whole = 0;
+    }
+    idx[k] = 0;
+  }
+  if ( whole ) {
+    ca_grid_holed_xfer(g, n, NULL, data, dir);
+    return;
+  }
+  addrs = ALLOCV_N(ca_size_t, holder, n);
+  for (i = 0; i < n; i++) {
+    ca_size_t goff = base;
+    for (k = 0; k < ndim; k++) goff += idx[k] * strides[k];
+    addrs[i] = goff / g->bytes;
+    for (k = ndim - 1; k >= 0; k--) {
+      if ( ++idx[k] < counts[k] ) break;
+      idx[k] = 0;
+    }
+  }
+  ca_grid_holed_xfer(g, n, addrs, data, dir);
+  ALLOCV_END(holder);
+}
+
 static void
 ca_grid_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir)
@@ -763,9 +903,12 @@ ca_grid_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   /* The request is over the view's addresses, so a transposed / flat request
      is legal and must not be composed axis-by-axis; see
      ca_xfer_stride_request_is_axis_box (carray.h). */
-  if ( cag_has_holes(g)
-       || ! ca_xfer_stride_request_is_axis_box(g, starts, counts, strides) ) {
-    aligned = 0;   /* a grid with holes goes cell by cell (xfer_index) */
+  if ( cag_has_holes(g) ) {
+    cag_holed_xfer_stride(g, starts, counts, strides, d, dir);
+    return;
+  }
+  if ( ! ca_xfer_stride_request_is_axis_box(g, starts, counts, strides) ) {
+    aligned = 0;
   }
   else {
     for (k = 0; k < ndim; k++) {
