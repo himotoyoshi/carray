@@ -255,7 +255,7 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
   def test_set_column_attrs_on_named_columns
     df = frame
     df.set_column_attrs("v", long_name: "value")
-    df.set_column_attrs("k", "g", "k", station: "A")
+    df.set_column_attrs("k", "g", station: "A")
     assert_equal({ "long_name" => "value" }, df["v"].attrs)
     assert_equal({ "station" => "A" }, df["k"].attrs)
     assert_equal({ "station" => "A" }, df["g"].attrs)
@@ -282,6 +282,7 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     df = frame
     assert_raise(KeyError) { df.set_column_attrs("v", "zz", a: 1) }
     assert_raise(TypeError) { df.set_column_attrs(:v, a: 1) }
+    assert_raise(ArgumentError) { df.set_column_attrs("k", "k", a: 1) }
     assert_raise(TypeError) { df.set_column_attrs([1]) }
     assert_raise(TypeError) { df.set_column_attrs(a: 1, b: Object.new) }
     assert_raise(TypeError) { df.set_column_attrs(1 => "x") }
