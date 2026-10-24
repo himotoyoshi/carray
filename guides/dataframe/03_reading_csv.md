@@ -47,7 +47,7 @@ A column gets a type only when every one of its present cells fits that type:
   - an integer too long for `int64`, which is usually an identifier;
   - a date written day-first or month-first (`04/03/2024`), since which one it is cannot be told from the text.
 
-One unreadable cell keeps a whole column as text. That is what happened to `rating` above: the `n/a` in it is not a number. Telling `read_csv` how the file writes missing values (next section) usually settles it.
+One unreadable cell keeps a whole column as text. That is what happened to `rating` above: the `n/a` in it is not a number. Telling `read_csv` how the file writes missing values (next section) usually settles it. A field written as `""`, or as spaces, counts as a value too, so it also keeps its column as text; only a field with nothing in it at all is missing. Read with `strip: true` when spaces mean an empty field.
 
 ### Everything as text — `types: :string`
 

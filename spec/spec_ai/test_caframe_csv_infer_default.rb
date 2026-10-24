@@ -69,4 +69,20 @@ class TestCAFrameCastString < Test::Unit::TestCase
     df = CAFrame.from_csv("a,b\n007,2\n", types: { default: :string, "b" => :int32 })
     assert_equal({ "a" => CAString, "b" => :int32 }, df.data_types)
   end
+
+  # A blank field the reader keeps (a quoted "", or spaces with strip: false)
+  # is a value, so its column stays text; to_csv writes a real "" quoted for
+  # that, and it reads back as the empty string.
+  def test_a_blank_value_keeps_its_column_text
+    df = CAFrame.new("s" => CA_OBJECT(["", "3", "4"]))
+    back = CAFrame.from_csv(df.to_csv)
+    assert_kind_of CAString, back["s"]
+    assert_equal ["", "3", "4"], back["s"].to_a
+    assert_equal :int64, CAFrame.from_csv("s\n1\n\n3\n", types: :infer)["s"].data_type
+    assert_kind_of CAString, CAFrame.from_csv("s,n\n1,1\n  ,2\n")["s"]
+    assert_equal :int64, CAFrame.from_csv("s,n\n1,1\n  ,2\n", strip: true)["s"].data_type
+    assert_kind_of CAString, CAFrame.from_csv("s,n\n\"\",1\ntrue,2\n")["s"]
+    assert_equal :int64, CAFrame.from_csv("s,n\n\"\",1\n3,2\n", types: { "s" => :int64 })["s"].data_type
+    assert_kind_of CAString, CAFrame.from_csv("s,n\n\"\",1\n3,2\n", missing: ["-9"])["s"]
+  end
 end

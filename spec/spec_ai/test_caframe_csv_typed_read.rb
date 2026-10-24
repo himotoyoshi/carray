@@ -5,8 +5,9 @@ require "carray"
 # read_csv with types: reads the body into CAConstString columns (no String
 # per cell), casts from those, and hands the columns left as text back as
 # CAString. It must give the frame the other two ways give: the Ruby
-# tokenizer, and reading without types: and casting afterwards -- the same
-# names, column classes, data types, values and masks, or the same error.
+# tokenizer, and reading without types: and casting afterwards (a column with
+# a blank value left as text) -- the same names, column classes, data types,
+# values and masks, or the same error.
 class TestCAFrameCSVTypedRead < Test::Unit::TestCase
 
   CELLS = ["1", "-2", "007", "3.5", "-0.0", "1e3", "nan", "inf", "", "\"\"", "\"4\"",
@@ -39,10 +40,18 @@ class TestCAFrameCSVTypedRead < Test::Unit::TestCase
     readers.zip(saved) { |m, f| CArray.define_singleton_method(m, f) }
   end
 
-  # The same input read without types:, cast afterwards.
+  # The same input read without types:, cast afterwards. A column the reader
+  # left a blank value in (a quoted "", spaces) is not inferred: the read
+  # knows such a cell was written as a value, the frame in memory does not.
   def read_then_cast(text, types)
     df = CAFrame.from_csv(text, types: :string)
-    df = df.cast(types == :infer ? df.infer_types : types)
+    if types == :infer
+      blank = df.column_names.select do |name|
+        df[name].to_a.any? { |v| v.is_a?(String) && v.strip.empty? }
+      end
+      types = df.infer_types.reject { |name, _| blank.include?(name) }
+    end
+    df = df.cast(types)
     describe(df)
   rescue StandardError => e
     [:error, e.class, e.message]

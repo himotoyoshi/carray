@@ -93,7 +93,10 @@ class CAFrame
   # A missing field -- an unquoted empty one, or a cell a short row never
   # reached -- is UNDEF in the frame, whether or not the column is cast by
   # +types:+. A quoted empty field ("") is the empty string, which is a value.
-  # So the mask +to_csv+ writes comes back as a mask.
+  # So the mask +to_csv+ writes comes back as a mask. A blank value (a quoted
+  # "", or spaces kept by strip: false) is no number, truth value or time, so
+  # a column holding one is not inferred and stays text; name its type in
+  # +types:+ to read it as numbers with the blank cells UNDEF.
   #
   # Files that spell "missing" some other way say so with +missing:+. A field
   # whose text is one of the given tokens is UNDEF too, before +types:+
@@ -171,6 +174,7 @@ class CAFrame
 
     frame = build_frame(names, rows)
     mask_missing_tokens(frame, missing) if missing
+    types = keep_blank_valued_columns_text(frame, types) unless types.nil?
     frame.__send__(:cast_in_place, types, on_error: on_error, option_name: :types) unless types.nil?
     convert_const_string_columns_to_castring(frame)
     column_attrs&.each_with_index do |attrs, j|
@@ -212,6 +216,42 @@ class CAFrame
     return types
   end
   private_class_method :csv_types
+
+  # The reader masks the fields that are missing (an unquoted empty field, a
+  # cell a short row never reaches), so a blank cell it leaves present was
+  # written as a value: a quoted "", or spaces kept by strip: false. Such a
+  # cell is no number, truth value or time, so a column holding one is kept
+  # as text rather than inferred, where a blank cell would count as missing.
+  def self.keep_blank_valued_columns_text(frame, types)
+    map = types == :infer ? { default: :infer } : types
+    return types unless map.is_a?(Hash)
+    frame.column_names.each do |name|
+      given = [name, name.to_sym].find { |k| map.key?(k) }
+      next unless (given ? map[given] : map[:default]) == :infer
+      map = map.merge(name => :string) if blank_value_in?(frame[name])
+    end
+    return map
+  end
+
+  BLANK_LEADS = [" ", "\t", "\n", "\v", "\f", "\r", "\0"].freeze
+  Ractor.make_shareable(BLANK_LEADS)
+  private_constant :BLANK_LEADS
+
+  # Whether a text column holds a present cell of nothing but whitespace. A
+  # CAConstString is narrowed in C to the cells that are empty or start with
+  # whitespace, and only those are read as Strings.
+  def self.blank_value_in?(col)
+    if col.is_a?(CAConstString)
+      lead = col.byte_length.eq(0)
+      BLANK_LEADS.each { |c| lead = lead.or(col.start_with?(c)) }
+      addrs = lead.strip_mask(false).where
+      return addrs.to_a.any? { |i| col[i].strip.empty? }
+    end
+    return false unless col.is_a?(CAString) || (col.data_type == CA_OBJECT && !col.face?)
+    col.each { |v| return true if v.is_a?(String) && v.strip.empty? }
+    return false
+  end
+  private_class_method :keep_blank_valued_columns_text, :blank_value_in?
 
   # A text column read_csv reads is a CAString, whichever way the body was
   # read: the string operations (strip!, gsub!, ...) write through to it.
