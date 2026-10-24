@@ -138,6 +138,8 @@ class TestCyclicReference < Test::Unit::TestCase
       "a[i] = a view"    => ->(a) { a[0] = a[1..2] },
       "elem_store"       => ->(a) { a.elem_store(0, a) },
       "map!"             => ->(a) { a.map! { a } },
+      "seq!(a)"          => ->(a) { a.seq!(a) },
+      "seq!(0, a view)"  => ->(a) { a.seq!(0, a[0..1]) },
       "attach!"          => ->(a) { a.attach! { |x| x[0] = a } },
     }
     writes.each do |name, write|

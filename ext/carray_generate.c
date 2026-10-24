@@ -387,6 +387,23 @@ rb_ca_seq_bang_object (VALUE self, VALUE roffset, VALUE rstep, int axis)
   c.rstep   = rstep;
   c.axis    = axis;
 
+  /* A first value or step that is this array (or a view of it) would put
+     the array into its own cells, and each next cell's value is computed
+     from it; refuse it, as storing an array into itself is refused. */
+  {
+    VALUE given[2] = { roffset, rstep };
+    for (int i = 0; i < 2; i++) {
+      if ( rb_obj_is_carray(given[i]) ) {
+        CArray *cv;
+        TypedData_Get_Struct(given[i], CArray, &carray_data_type, cv);
+        if ( ca_shares_root(c.ca, cv) ) {
+          rb_raise(rb_eArgError, "%s: can not store an object array into itself",
+                   ca_calling_method_name());
+        }
+      }
+    }
+  }
+
   ca_attach_window(1, &c.ca, "w", ca_seq_bang_object_body, (VALUE) &c);
 
   return self;
