@@ -652,7 +652,7 @@ df.sort_by_key("time")                             # by the index (its axis name
 
 `nlargest(n, *keys)` gives the `n` rows with the largest values of the keys, largest first — `sort_by_key(*keys, descending: true).head(n)` — and `nsmallest(n, *keys)` the `n` smallest. A NaN or masked key loses to every value, as in `CArray#nlargest`, so it comes only when fewer than `n` rows have a value.
 
-- Each key is a **column name** (or the index's axis name), or a **`[name, :asc | :desc]`** pair. `order:` is the direction for bare-name keys (default `:asc`).
+- Each key is a **column name** (or the index's axis name), or a **`[name, :asc | :desc]`** pair. `descending: true` sorts the bare-name keys from the largest (default `false`).
 - **`masked_position:`** sends rows whose key is masked to the `:last` (default) or `:first` end, whichever the direction.
 - **NaN** comes after the numbers in both ascending and descending order, and before the masked cells when `masked_position:` is `:last`. To place it with the masked cells, mask it first (`df["temp"][:is_nan] = UNDEF`).
 - A key can be any column whose values have an order — numbers, text, times — in either direction. Two kinds of column cannot be keys:
@@ -1809,6 +1809,9 @@ snapshot = df.copy         # independent; later edits to df don't touch it
 | `df[0..1]` / `df[bool]` / `df[ints]` / `df.filter { }` — views of the selected rows | [Rows as a sub-frame](#rows-as-a-sub-frame), [filter](#filter--rows-matching-a-condition) |
 | `df.join(..., how: :semi / :anti)` — views of the rows kept | [join](#join--match-rows-by-key) |
 | `df.head(n)` / `df.tail(n)` | [head, tail](#first-and-last-rows--head-tail) |
+| `df.drop_masked(...)` — views of the rows with no masked cell | [Masking, deleting and splicing rows](#masking-deleting-and-splicing-rows) |
+| `df.nlargest(n, ...)` / `nsmallest` — views of the rows picked | [sort_by_key](#sort_by_key--reorder-rows-by-key-columns) |
+| `grouped.head` / `tail` / `nlargest` / `nsmallest` — views of each group's rows picked | [nlargest, nsmallest](#the-largest-rows-of-each-group--nlargest-nsmallest) |
 | `df.sort_by_key(...)` / `df.sort_by { }` — views in the sorted order | [sort_by_key](#sort_by_key--reorder-rows-by-key-columns) |
 | `CAFrame.meld(...)` — writes reach the input frames | [meld](#caframemeld--caframeconcatenate--rows-after-rows) |
 | `df.melt(...)` — except the new column naming each row's source | [melt](#melt--wide-to-long) |
@@ -1827,6 +1830,11 @@ snapshot = df.copy         # independent; later edits to df don't touch it
 | `df.join(..., how: :left)` / `df.join_asof(...)` | this frame's columns and index (picked by row when a row repeats) | the other frame's columns, gathered | [join](#join--match-rows-by-key) |
 | `df.join(..., how: :inner)` | views of the rows of both frames, and this frame's index | — | [join](#join--match-rows-by-key) |
 | `df.join(..., how: :right)` | views of the other frame's columns | this frame's columns and index, gathered | [join](#join--match-rows-by-key) |
+| `df.join(..., view: :full)` / `df.join_asof(..., view: :full)` | views of every column of both frames, with a hole (`UNDEF`, writes dropped) where a row has no match | — | [join](#join--match-rows-by-key) |
+| `df.cast(...)` / `promote` / `parse_to_time` / `to_time` | the columns left as they were, and the index | the converted columns | [Changing a column's type](#changing-a-columns-type) |
+| `df.set_index` / `reset_index` | every column, and the index moved to or from them | — | [set_index / reset_index](#set_index--reset_index) |
+| `df.strip_mask(...)` | the columns with nothing to fill, and the index | the filled columns | [Masking and filling cells](#masking-and-filling-cells) |
+| `df.transform { }` | what the block returns, as it returns it (a view stays a view) | — | [transform](#the-same-computation-on-several-columns--transform) |
 | `df.split_column(...)` | the other columns | text columns built from the split one | [split_column](#splitting-a-text-column--split_column) |
 | `df.contrast_columns(...)` | the other columns | int8 columns built from the expanded one | [contrast_columns](#numeric-columns-from-a-categorical--contrast_columns) |
 | `df.stack_columns(...)` / `unstack_column(...)` | the other columns | a view of the stacked or split columns | [From columns side by side](#from-columns-side-by-side--stack_columns--unstack_column) |
@@ -1837,7 +1845,9 @@ snapshot = df.copy         # independent; later edits to df don't touch it
 |---|---|
 | `df.copy` | — |
 | `CAFrame.concatenate(...)` | [concatenate](#caframemeld--caframeconcatenate--rows-after-rows) |
-| `df.join(..., how: :outer)` / `df.align(...)` | [join](#join--match-rows-by-key), [align](#align--conform-to-a-reference-key-set) |
+| `df.join(..., how: :outer)` without `view: :full` / `df.align(...)` | [join](#join--match-rows-by-key), [align](#align--conform-to-a-reference-key-set) |
+| `df.lag(...)` / `grouped.lag(...)`, in every form | [Values within a group](#values-within-a-group--lag-order-running-values) |
+| the one-row reductions (`df.mean`, `df.max`, ...) and `df.value_counts` | [One reduction of every column](#one-reduction-of-every-column--dfmean-dfmax-), [value_counts](#how-often-each-value-occurs--value_counts) |
 | `df.pivot(...)` / `df.pivot_grid(...)` | [pivot](#pivot--long-to-wide) |
 | `df.to_records` | [to_records](#ruby-records--to_records) |
 | `df.stack_rows(by:, on:)` | [From rows of a group](#from-rows-of-a-group--stack_rows--unstack_rows) |
@@ -1848,12 +1858,10 @@ snapshot = df.copy         # independent; later edits to df don't touch it
 |---|---|---|
 | `df.mask_eq(...)` / `df.fill(...)` | yes — the stored column is edited | [Masking and filling](#masking-and-filling-cells) |
 | `df["c"] = UNDEF` / `df[sel] = UNDEF` | yes — masks the stored cells | [Adding, removing and renaming](#adding-removing-and-renaming-columns), [rows](#masking-deleting-and-splicing-rows) |
-| `df.cast(...)` / `promote` / `parse_to_time` / `to_time` | no — a new column is bound | [Changing a column's type](#changing-a-columns-type) |
 | `df["c"] = col` | no — the name is bound to a different column | [Adding, removing and renaming](#adding-removing-and-renaming-columns) |
 | `df["c"] = nil` | — (removes the column from this frame only) | [Adding, removing and renaming](#adding-removing-and-renaming-columns) |
 | `df[sel] = nil` | the remaining rows still share storage with the original columns | [rows](#masking-deleting-and-splicing-rows) |
 | `df[sel] = frame` | the rows outside the span still share storage; the spliced rows share nothing | [rows](#masking-deleting-and-splicing-rows) |
-| `df.set_index` / `reset_index` | — (no cell changes) | [The index](#the-index) |
 | `df.protect` | — (makes the frame read-only; the arrays it was built from stay writable) | [Read-only frames](#read-only-frames) |
 
 `df["col"]` returns the stored column itself ([The model](#the-model)).
