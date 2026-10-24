@@ -45,14 +45,14 @@ class CArray
                 "unmask: pass either a constant fill value or method:, not both"
         end
         held = gap_fill(method, axis, "unmask")
-        # Copy the filled values in place (a Face takes a Face of its own kind
-        # as it is).
-        value[] = held.value
-        if held.has_mask?
-          self.mask = held.mask              # residual leading/trailing mask
-        else
-          super()                   # fully filled: drop the mask
-        end
+        # Write only the cells the fill gave a value (a Face takes a Face of
+        # its own kind as it is). Writing every cell would let a view that
+        # reaches one cell twice send that cell's unfilled copy back last,
+        # masking it again.
+        return self unless has_mask?
+        filled = is_masked
+        filled = filled.and(held.is_not_masked) if held.has_mask?
+        self[filled] = held[filled] if filled.any
         return self
       end
       fill.equal?(MASK_FILL_UNSET) ? super() : super(fill)
