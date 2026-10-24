@@ -428,8 +428,10 @@ class CAFrame
   #
   # +precision:+ writes each float cell rounded to that many decimal places,
   # still as a float (precision: 0 writes 3.0), and each part of a complex
-  # cell likewise; NaN and infinities are written as they are. Without it a float is written in full, so that
-  # read_csv reads back the same value.
+  # cell likewise; NaN and infinities are written as they are, and a value
+  # that rounds to zero keeps its sign (-0.4 at 0 places is -0.0). Without
+  # it a float is written in full, so that read_csv reads back the same
+  # value.
   #
   #   df.write_csv("out.csv", precision: 2)
   def write_csv(target, **opts)
@@ -747,13 +749,23 @@ class CAFrame
       elsif precision && e.is_a?(Float)
         # Still a float, so precision: 0 writes 3.0 and the column reads
         # back as floats.
-        e.finite? ? e.round(precision).to_f.to_s : e.to_s
+        csv_rounded(e, precision).to_s
       elsif precision && e.is_a?(Complex) && e.real.is_a?(Float)
-        Complex(*[e.real, e.imaginary].map { |x| x.finite? ? x.round(precision).to_f : x }).to_s
+        Complex(*[e.real, e.imaginary].map { |x| csv_rounded(x, precision) }).to_s
       else
         e.to_s
       end
     end
+  end
+
+  # A float rounded to +precision+ places, as a Float. A zero keeps the sign
+  # of the value it came from at every precision: Float#round gives an
+  # Integer at 0 places, which has no -0, where it gives -0.0 at 1 or more.
+  private def csv_rounded(x, precision)
+    return x unless x.finite?
+    r = x.round(precision).to_f
+    r = -0.0 if r == 0 && (x < 0 || (x == 0 && (1.0 / x) < 0))
+    r
   end
 
   private def csv_text(names, attr_rows, formatted, header, sep, quote)
