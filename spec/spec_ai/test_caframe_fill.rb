@@ -288,4 +288,11 @@ class TestCAFrameFillLinearIndexWithoutPlace < Test::Unit::TestCase
     df.group_by("g").fill("x", :linear)
     assert_equal [0.0, 100.0, 10.0, UNDEF, 20.0, 300.0], df["x"].to_a
   end
+
+  # A constant a column cannot hold names the column.
+  def test_a_constant_the_column_cannot_take_names_it
+    df = CAFrame.new("g" => CA_INT32([1, UNDEF]))
+    e = assert_raise(FloatDomainError) { df.fill("g", Float::NAN) }
+    assert_match(/\Afill: column "g" \(int32\) cannot take NaN/, e.message)
+  end
 end

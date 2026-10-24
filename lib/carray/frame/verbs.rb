@@ -817,9 +817,18 @@ class CAFrame
             "fill: unknown method #{method_or_value.inspect} " \
             "(:ffill | :bfill | :linear, or a constant fill value)"
     else
-      col.unmask(method_or_value)   # constant fill, in place
+      fill_constant(key, col, method_or_value)
     end
     self
+  end
+
+  # A constant fill, in place, naming the column when the value does not go
+  # into it, as strip_mask names it.
+  private def fill_constant (key, col, value)
+    col.unmask(value)
+  rescue ArgumentError, TypeError, RangeError, FloatDomainError => e
+    raise e.exception("fill: column #{key.inspect} (#{CArray::Inspector.type_label(col)}) " \
+                      "cannot take #{value.inspect}: #{e.message}")
   end
 
   # A frame with the masked cells filled, this frame left as it is: the
