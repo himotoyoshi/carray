@@ -170,4 +170,17 @@ class TestW3Wmean < Test::Unit::TestCase
     # mean over all cells = 21/6 = 3.5
     assert_in_delta(3.5, a.wmean(w), 1e-12)
   end
+
+  # A masked weight given as one value (UNDEF, or a one-element array that is
+  # masked) leaves every cell without a weight: no cell contributes, so the
+  # mean is UNDEF as for a fully masked weight array, and the sum is 0.
+  def test_a_masked_single_weight
+    x = CArray.float64(4, 3).seq!(1)
+    one = CArray.float64(1) { UNDEF }
+    assert_equal [UNDEF] * 4, x.wmean(one, axis: 1).to_a
+    assert_equal [UNDEF] * 4, x.wmean(UNDEF, axis: 1).to_a
+    assert_equal [UNDEF] * 4, x.to_type(:object).wmean(one, axis: 1).to_a
+    assert_same UNDEF, x.wmean(UNDEF)
+    assert_equal [0.0] * 4, x.wsum(UNDEF, axis: 1).to_a
+  end
 end
