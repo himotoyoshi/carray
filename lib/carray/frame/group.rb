@@ -570,7 +570,44 @@ class CAFrame
        CATimeUnitAlgebra.same_group?(keys.unit.base, width.unit.base)
       keys = keys.to_unit(CATimeUnitAlgebra.finer(keys.unit, width.unit))
     end
+    return lag_integer_target(keys, sign, width) if keys.integer?
     return keys.public_send(sign, width)
+  end
+
+  LAG_UNSIGNED = [CA_UINT8, CA_UINT16, CA_UINT32, CA_UINT64].freeze
+  private_constant :LAG_UNSIGNED
+
+  # Integer keys moved by the width exactly, in int64 (or as Ruby integers
+  # for a 64-bit key a step does not fit in). A target outside the key's
+  # range is masked, so it matches no row rather than wrapping onto one; a
+  # width that is not a whole number matches no row either.
+  private def lag_integer_target (keys, sign, width)
+    bits = keys.bytes * 8
+    if LAG_UNSIGNED.include?(keys.data_type)
+      lo, hi = 0, 2**bits - 1
+    else
+      lo, hi = -2**(bits - 1), 2**(bits - 1) - 1
+    end
+    step = width.is_a?(Integer) ? width : nil
+    if step.nil? && width.respond_to?(:finite?) && width.finite? && width == width.floor
+      step = width.to_i
+    end
+    if step.nil? || step > hi - lo
+      out = CArray.int64(*keys.shape)
+      out[] = UNDEF
+      return out
+    end
+    if bits < 64
+      return keys.to_type(CA_INT64).public_send(sign, step)
+    end
+    if step > 2**63 - 1
+      moved = keys.to_type(CA_OBJECT).public_send(sign, step)
+      moved[moved.lt(lo).or(moved.gt(hi))] = UNDEF
+      return moved
+    end
+    out = keys.copy
+    out[sign == :- ? keys.lt(lo + step) : keys.gt(hi - step)] = UNDEF
+    return out.public_send(sign, step)
   end
 
 end

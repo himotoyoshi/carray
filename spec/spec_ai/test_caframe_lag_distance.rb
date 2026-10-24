@@ -96,6 +96,28 @@ class TestCAFrameLagDistance < Test::Unit::TestCase
     assert_match(/no index/, e.message)
   end
 
+  # An integer key moved by the width matches no row outside the key's
+  # range, rather than wrapping onto the row at the other end.
+  def test_integer_key_does_not_wrap
+    df = CAFrame.new("k" => CA_UINT8([0, 255, 1]), "v" => CA_FLOAT64([1, 2, 3]))
+    assert_equal [UNDEF, UNDEF, 1.0], df.lag("v", before: 1, on: "k").to_a
+    assert_equal [3.0, UNDEF, UNDEF], df.lag("v", after: 1, on: "k").to_a
+    assert_equal [UNDEF, UNDEF, UNDEF], df.lag("v", before: 256, on: "k").to_a
+    big = CAFrame.new("k" => CA_INT64([2**63 - 1, -2**63]), "v" => CA_FLOAT64([1, 2]))
+    assert_equal [UNDEF, UNDEF], big.lag("v", after: 1, on: "k").to_a
+    assert_equal [2.0, UNDEF], big.lag("v", before: 2**64 - 1, on: "k").to_a
+    u = CAFrame.new("k" => CA_UINT64([0, 2**64 - 1]), "v" => CA_FLOAT64([1, 2]))
+    assert_equal [2.0, UNDEF], u.lag("v", after: 2**64 - 1, on: "k").to_a
+  end
+
+  # A Float width on an integer key is the whole number it names; a width
+  # that is not a whole number is at no key.
+  def test_float_width_on_integer_key
+    d = CAFrame.new("k" => CA_INT64([2**53, 2**53 + 1, 2**53 + 2]), "v" => CA_FLOAT64([1, 2, 3]))
+    assert_equal [UNDEF, 1.0, 2.0], d.lag("v", before: 1.0, on: "k").to_a
+    assert_equal [UNDEF, UNDEF, UNDEF], d.lag("v", before: 1.5, on: "k").to_a
+  end
+
   # lag gives a new array in every form, so filling a stored lag column
   # leaves the column it came from alone.
   def test_lag_by_rows_is_a_new_array
