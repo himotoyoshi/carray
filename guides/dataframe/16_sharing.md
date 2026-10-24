@@ -47,7 +47,8 @@ Copy when you are about to change a part and want the original as it was, when y
 | operation |
 |---|
 | `select`, and `df["a", "b"]` (the columns themselves) |
-| `filter`, `df[rows]`, `head`, `tail` |
+| `filter`, `df[rows]`, `head`, `tail`, `drop_masked`, `nlargest`, `nsmallest` |
+| `head`, `tail`, `nlargest`, `nsmallest` of each group |
 | `sort_by_key`, `sort_by` |
 | `join(how: :semi)`, `join(how: :anti)` |
 | `CAFrame.meld`, `CAFrame.stack` |
@@ -67,6 +68,8 @@ Copy when you are about to change a part and want the original as it was, when y
 | `join(how: :inner)` | the columns of both frames, picked by row |
 | `join(how: :right)` | the other frame's columns; this frame's are copied |
 | `join(..., view: :full)`, `join_asof(..., view: :full)` | every column, with holes where a row has no match (experimental) |
+| `strip_mask` | the columns with nothing to fill; the filled ones are new |
+| `transform` | what the block returns, as it returns it |
 | `split_column`, `contrast_columns` | the columns not split |
 | `stack_columns`, `unstack_column` | the other columns; the new columns are views of the old |
 
@@ -76,9 +79,10 @@ Copy when you are about to change a part and want the original as it was, when y
 |---|
 | `copy` |
 | `CAFrame.concatenate` |
-| `join(how: :outer)`, `align` |
+| `join(how: :outer)` without `view: :full`, `align` |
+| `lag` |
 | `pivot`, `pivot_grid` |
-| group summaries, `resample`, `describe` |
+| group summaries, `resample`, `describe`, `value_counts`, the one-row summaries (`df.mean`, ...) |
 | `to_records`, `to_csv` |
 
 ## Methods that change a frame
