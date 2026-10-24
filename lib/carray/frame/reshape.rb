@@ -329,7 +329,15 @@ class CAFrame
     end
     n = nrow
     out[var_name]   = CArray.string(Array.new(n * k) { |i| vars[i / n] })
-    out[value_name] = CArray.meld(pieces)
+    begin
+      out[value_name] = CArray.meld(pieces)
+    rescue ArgumentError => e
+      raise unless e.message.start_with?("promote_list:")
+      labels = vars.zip(pieces.map { |c| CArray::Inspector.type_label(c) }).to_h
+      raise ArgumentError,
+            "melt: value columns #{labels} do not meet as one column " \
+            "(#{e.message.delete_prefix("promote_list: ")}); cast them to one type first"
+    end
     CAFrame.new(out)
   end
 

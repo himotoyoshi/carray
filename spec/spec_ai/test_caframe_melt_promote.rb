@@ -58,4 +58,11 @@ class TestCAFrameMeltPromote < Test::Unit::TestCase
     df = frame.append("t", CArray.time(["2024-01-01", "2024-01-02"]))
     assert_raise(ArgumentError) { df.melt(id: ["k"]) }
   end
+
+  # Faces of one class in different states are refused in melt's own words.
+  def test_faces_that_do_not_meet_name_the_columns
+    df = CAFrame.new("a" => CArray.time(["2024-01-01"]), "b" => CArray.time(["2024-01-01 01:00"]))
+    e = assert_raise(ArgumentError) { df.melt }
+    assert_match(/\Amelt: value columns .*"a".*"b".*cast them to one type first\z/, e.message)
+  end
 end
