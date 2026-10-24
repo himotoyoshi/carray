@@ -475,7 +475,9 @@ class CAFrame
   # column +on:+ names; it is a time, a duration or a number, and the
   # distance is a duration such as "1 hour" (or a CATimedelta value) or a
   # number accordingly. A row with no row at that key gets UNDEF; so does a
-  # row whose key is masked. The rows need not be in order.
+  # row whose key is masked. The rows need not be in order. The result is
+  # new arrays in every form, so writing to it, or filling it once it is
+  # stored as a column, does not reach the column it came from.
   #
   #   df["dtemp"] = df["temp"] - df.lag("temp", before: "1 hour")
   #   df.lag("temp", n: 1)               # the previous row
@@ -502,7 +504,7 @@ class CAFrame
     if distance.nil?
       step = n.nil? ? 1 : n
       cols = walk.over(:lag, names, [], [step]) do |col, _|
-        col.ndim > 1 ? col.lag(step, axis: 0) : col.lag(step)
+        (col.ndim > 1 ? col.lag(step, axis: 0) : col.lag(step)).copy
       end
     else
       addr = lag_addresses("lag", [CArray.int64(nrow).seq], *distance)

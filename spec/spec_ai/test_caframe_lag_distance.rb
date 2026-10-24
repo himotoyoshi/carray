@@ -95,4 +95,15 @@ class TestCAFrameLagDistance < Test::Unit::TestCase
     e = assert_raise(ArgumentError) { df.reset_index.lag("temp", before: "1 hour") }
     assert_match(/no index/, e.message)
   end
+
+  # lag gives a new array in every form, so filling a stored lag column
+  # leaves the column it came from alone.
+  def test_lag_by_rows_is_a_new_array
+    df = CAFrame.new("temp" => CA_FLOAT64([1, 2, 3, 4]))
+    df["prev"] = df.lag("temp", n: 1)
+    df["temp"][1] = UNDEF
+    df.fill("prev", -9.0)
+    assert_equal [1.0, UNDEF, 3.0, 4.0], df["temp"].to_a
+    assert_equal [-9.0, 1.0, 2.0, 3.0], df["prev"].to_a
+  end
 end
