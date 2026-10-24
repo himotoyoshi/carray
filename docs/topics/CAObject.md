@@ -322,6 +322,13 @@ separate code path that allocates and writes the mask directly on
 the `CAObject` itself, so it works whether or not you pre-allocated
 the mask buffer.
 
+A mask written onto the object — `b[3] = UNDEF`, `b.mask = ...` — is
+the object's own and stays when its values are read: a value your
+fetcher or `copy_data` answers does not unmask a cell, and only an
+`UNDEF` answer masks one. `unmask` (or writing a value to the cell)
+gives the cell back. A mask kept somewhere else, by the source itself,
+goes through the `mask_*` hooks below instead.
+
 If your array genuinely never produces `UNDEF`, leave `create_mask`
 undefined and the engine's default reject becomes documentation of
 intent.

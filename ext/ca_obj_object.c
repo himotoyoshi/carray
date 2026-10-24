@@ -889,11 +889,10 @@ ca_object_mask_bytes (CAObject *ca)
   return (boolean8_t *) ca->mask->ptr;
 }
 
-/* Whether the mask of this object comes from its mask_* hooks.  Then a
-   fetched value says nothing about the mask: a cell the hooks mask stays
-   masked when its value is read, and only a fetcher answering UNDEF marks
-   one.  Without hooks the mask is what the fetches have answered, so a
-   value fetched clears the cell. */
+/* Whether the mask of this object comes from its mask_* hooks.  A fetched
+   value says nothing about the mask either way: a cell masked -- by the
+   hooks, or without hooks by a write of UNDEF or `mask =` -- stays masked
+   when its value is read, and only a fetcher answering UNDEF marks one. */
 static int
 ca_object_mask_from_hooks (CAObject *ca)
 {
@@ -922,9 +921,6 @@ ca_object_xfer_addr_one (CAObject *ca, ca_size_t addr, void *ptr, int dir)
         }
       }
       else {
-        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
-          ca_object_mask_bytes(ca)[addr] = 0;
-        }
         rb_ca_obj2ptr(ca->self, rval, ptr);
       }
     }
@@ -944,9 +940,6 @@ ca_object_xfer_addr_one (CAObject *ca, ca_size_t addr, void *ptr, int dir)
         }
       }
       else {
-        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
-          ca_object_mask_bytes(ca)[ca_index2addr(ca->mask, idx)] = 0;
-        }
         rb_ca_obj2ptr(ca->self, rval, ptr);
       }
     }
@@ -990,9 +983,6 @@ ca_object_xfer_index_one (CAObject *ca, ca_size_t *idx, void *ptr, int dir)
         }
       }
       else {
-        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
-          ca_object_mask_bytes(ca)[ca_index2addr(ca->mask, idx)] = 0;
-        }
         rb_ca_obj2ptr(ca->self, rval, ptr);
       }
     }
@@ -1008,9 +998,6 @@ ca_object_xfer_index_one (CAObject *ca, ca_size_t *idx, void *ptr, int dir)
         }
       }
       else {
-        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
-          ca_object_mask_bytes(ca)[addr] = 0;
-        }
         rb_ca_obj2ptr(ca->self, rval, ptr);
       }
     }
@@ -1106,6 +1093,24 @@ ca_object_dispatch_copy (CAObject *ca, void *ptr)
       ca->data->mask = NULL;
       rb_ensure(ca_object_copy_bare_body, (VALUE) &c,
                 ca_object_copy_bare_restore, (VALUE) &c);
+      return;
+    }
+    if ( ca->data->mask != NULL ) {
+      /* Without hooks the mask is the object's own: a store of the values
+         into the array copy_data is handed (d[] = src) would clear it, so
+         the cells it held masked are masked again after the call, beside
+         those the call marks. */
+      CArray *m = ca->data->mask;
+      volatile VALUE vkept = rb_str_new(m->ptr, (long) m->elements);
+      const char *kept;
+      ca_size_t i;
+      ca_object_call_lending(ca, ptr, "copy_data");
+      kept = RSTRING_PTR(vkept);
+      m = ca->data->mask;
+      for ( i = 0; m != NULL && i < m->elements; i++ ) {
+        if ( kept[i] ) m->ptr[i] = 1;
+      }
+      RB_GC_GUARD(vkept);
       return;
     }
     ca_object_call_lending(ca, ptr, "copy_data");
