@@ -494,8 +494,8 @@ class CAGroupIterator
   # Weighted mean = Sum(v*w) / Sum(w), both over the combined present-set. The
   # `value*0 + weights` denominator carries the same value|weight mask, so its
   # group-sum is Sum(w) over exactly the cells value*weight used. An empty group
-  # (no present pair) is UNDEF (matching CArray#wmean); a present group whose
-  # weights sum to zero yields NaN/Inf (core's 0/0).
+  # (no present pair) and a group whose weights sum to zero are UNDEF, as
+  # CArray#wmean leaves both.
   def wmean (weights, **kw)
     has_group, = AxisGroup.parse_axis(kw[:axis])
     return value.wmean(weights, **kw) unless has_group
@@ -508,7 +508,7 @@ class CAGroupIterator
     # No present pair is UNDEF (an empty group), set on the denominator so
     # the division never meets an empty group's 0 / 0.
     den  = den.copy
-    den[cnt.eq(0)] = UNDEF
+    den[cnt.eq(0).or(den.eq(0))] = UNDEF
     # min_count: counts the present pairs, as the core wmean does.
     pairs = regroup(prod, spec)
     pairs.finish_reduction(:wmean, kw, num / den)

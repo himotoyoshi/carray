@@ -476,9 +476,8 @@ class CASegmentIterator < CAIterator
   end
 
   # @overload wmean(weights)
-  #   Per-segment weighted mean as float64, matching `CArray#wmean`. Empty
-  #   segment -> MASKED; a present segment whose weights sum to zero -> NaN
-  #   (core's 0/0 contract).
+  #   Per-segment weighted mean as float64, matching `CArray#wmean`. An empty
+  #   segment, and one whose weights sum to zero, is masked.
   #   @param weights [CArray]
   #   @return [CArray]
   def wmean (weights, axis: nil)

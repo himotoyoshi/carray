@@ -362,6 +362,7 @@ module MkKernel
                   object_escape: nil,
                   identity_on_empty: false,
                   all_nan_result: nil,
+                  undefined_if: nil,
                   outputs: 1,
                   # Two-pass centred algorithm (variance / stddev family).
                   # When algorithm: :two_pass_centred is set, `state / init /
@@ -489,6 +490,14 @@ module MkKernel
     end
     if all_nan_result == :undef && mask_policy.nil?
       raise "#{name}: all_nan_result: :undef needs a mask_policy " \
+            "(UNDEF is written through the mask_policy trigger)"
+    end
+    # undefined_if: a C expression over the state that, when true for a
+    # slab, leaves the answer undefined though cells contributed -- wmean's
+    # weights summing to 0, whose quotient has no value.  It is folded into
+    # the mask_policy trigger, so the cell is UNDEF (or fill_value).
+    if undefined_if && mask_policy.nil?
+      raise "#{name}: undefined_if needs a mask_policy " \
             "(UNDEF is written through the mask_policy trigger)"
     end
     if value_arg
@@ -652,6 +661,7 @@ module MkKernel
       object_escape:   object_escape,
       identity_on_empty: identity_on_empty,
       all_nan_result:  all_nan_result,
+      undefined_if:    undefined_if,
       outputs:         outputs,
       algorithm:       algorithm,
       divisor:         divisor,
@@ -2168,6 +2178,7 @@ module MkKernel
                     "#{k[:identity_on_empty] ? 0 : 1})"
                 end
       trigger = "(#{trigger}) || #{all_nan_flag}" if all_nan_flag
+      trigger = "(#{trigger}) || (#{k[:undefined_if]})" if k[:undefined_if]
       finish_emit = view_flat \
         ? "(transform_active ? (outer_off + ((ca_size_t)(#{finish_expr})) * axis_vstride) : ((ca_size_t)(#{finish_expr})))" \
         : "(#{finish_expr})"
@@ -7469,9 +7480,9 @@ MkKernel.reduce :wsum,
 # framework as wsum, but uses state+finish form (= sum + den) for the
 # normalisation `mean = Σv*w / Σw` semantic.
 #
-# Edge case: if all valid weights sum to zero (= den == 0 but some cells
-# valid), finish evaluates 0/0 -> NaN.  Legacy proc_wmean had the same
-# undefined behavior (no division check); mkkernel preserves it.
+# Weights summing to zero (den == 0 with cells present, weights of 0 or of
+# both signs) leave the mean undefined: the cell is UNDEF, as for a slab
+# with no valid cell, rather than 0/0 = NaN or x/0 = +-Infinity.
 #
 # 3.0 breaking semantic changes vs legacy (= identical to wsum W.2):
 #   - calling convention positional -> kwargs (axes positional, opts kw)
@@ -7488,6 +7499,7 @@ MkKernel.reduce :wmean,
   reduce:          "(sum += (double) v * (double) w, den += (double) w)",
   reduction_kind:  { sum: :plus, den: :plus },     # SL.1.4b
   finish:          "sum / den",
+  undefined_if:    "den == 0",
   source:          MkKernel::ALL_NUMERIC,
   output:          :f64,
   ruby_scalar:     :rb_float_new,

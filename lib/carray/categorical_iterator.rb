@@ -295,7 +295,7 @@ class CACategoricalIterator < CASegmentIterator
   #   @overload wmean(weights, axis:)
   #     Per-fiber per-category weighted mean along `axis`.  Same weights-shape
   #     contract as {#wsum} (weights.shape == source.shape).  Empty cell → MASKED;
-  #     a present cell whose weights sum to zero → NaN (0/0 core contract).
+  #     a present cell whose weights sum to zero → UNDEF, as CArray#wmean.
   #     @param weights [CArray]
   #     @param axis [Integer]
   #     @return [CArray]

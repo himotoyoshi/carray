@@ -284,7 +284,7 @@ x.wmean(w, axis: [1, 2])   #  => [ 6.833333333333333, 18.833333333333332 ]
 x.mean(axis: [1, 2])       #  => [ 5.5, 17.5 ]
 ```
 
-The reduced axes are matched in the order they appear in the array, whatever order `axis:` lists them in: `axis: [2, 1]` takes the same `[lat, lon]` weight. A masked weight drops its element, as a masked value does.
+The reduced axes are matched in the order they appear in the array, whatever order `axis:` lists them in: `axis: [2, 1]` takes the same `[lat, lon]` weight. A masked weight drops its element, as a masked value does. Weights that sum to zero (all 0, or some positive and some negative that cancel) leave the mean undefined, so the result is `UNDEF`, as when no element is present.
 
 A natural use is a frequency table. The mean of the original data is the weighted mean of the values by their counts, and `index` hands you the value axis that `bincount` counted along:
 
