@@ -30,6 +30,10 @@ class CAFrame
       raise ArgumentError, "value_counts: sort: is :count, :value or false (got #{sort.inspect})"
     end
     keys = names.empty? ? column_names : names_selected(names, "value_counts")
+    if keys.empty?
+      hint = @index ? "; name the index (#{@axis_name.inspect}) to count its values" : ""
+      raise ArgumentError, "value_counts: the frame has no columns#{hint}"
+    end
     name = column_name_arg(name, "value_counts")
     if keys.include?(name)
       raise ArgumentError,
@@ -544,6 +548,11 @@ class CAFrame
       on_name = column_key(on, verb)
     end
     key   = key_column(on_name, verb)
+    unless key.is_a?(CATime) || key.is_a?(CATimedelta) || (!key.face? && key.numeric?)
+      raise ArgumentError,
+            "#{verb}: the key #{on_name.inspect} is #{CArray::Inspector.type_label(key)}; " \
+            "a distance is taken along a time, a duration or a number"
+    end
     label = before.nil? ? "#{verb}: after:" : "#{verb}: before:"
     width = CArray::DistanceLimit.read(before || after, key, label)
     return [on_name, key, before.nil? ? :+ : :-, width]

@@ -55,4 +55,11 @@ class TestCAFrameValueCounts < Test::Unit::TestCase
     assert_equal %w[x y y z], two["c"].to_a
     assert_equal [1, 1, 2, 1], two["n"].to_a
   end
+
+  # A frame with no columns points at its index.
+  def test_no_columns_points_at_the_index
+    df = CAFrame.new({}, axis_name: "t", index: CA_INT64([1, 1, 2]))
+    e = assert_raise(ArgumentError) { df.value_counts }
+    assert_match(/no columns; name the index \("t"\)/, e.message)
+  end
 end

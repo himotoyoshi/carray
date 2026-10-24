@@ -128,4 +128,11 @@ class TestCAFrameLagDistance < Test::Unit::TestCase
     assert_equal [1.0, UNDEF, 3.0, 4.0], df["temp"].to_a
     assert_equal [-9.0, 1.0, 2.0, 3.0], df["prev"].to_a
   end
+
+  # A distance is taken along a time, a duration or a number key.
+  def test_a_text_key_is_refused
+    df = CAFrame.new("k" => CA_OBJECT(%w[a b]), "v" => CA_FLOAT64([1, 2]))
+    e = assert_raise(ArgumentError) { df.lag("v", before: 1, on: "k") }
+    assert_match(/\Alag: the key "k" is object/, e.message)
+  end
 end
