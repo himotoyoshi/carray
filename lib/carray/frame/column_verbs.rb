@@ -65,10 +65,17 @@ class CAFrame
       verb = :count_not_masked if verb == :count && args.empty?
       # Two cells: one cell does not reach what combines two (a String's
       # median interpolates, its sum adds), and an empty column answers
-      # with the identity without asking the type at all.
+      # with the identity without asking the type at all. The row is the
+      # first that holds a present cell, so a masked first row does not
+      # answer with the identity for a column whose values have none.
       tail = [nil] * (col.ndim - 1)
+      row = 0
+      if col.has_mask? && col.elements > 0
+        present = col.is_not_masked.flatten.where
+        row = present[0] / (col.elements / col.shape[0]) if present.elements > 0
+      end
       probe = if col.shape[0] > 0
-                col[CA_INT64([0, 0]), *tail]
+                col[CA_INT64([row, row]), *tail]
               else
                 col.resize(2, *col.shape[1..])
               end

@@ -103,4 +103,17 @@ class TestCAFrameReduceAllRows < Test::Unit::TestCase
     assert_raise(ArgumentError) { df.group_by("g").mean("v", "v", keep_rows: true) }
     assert_raise(ArgumentError) { df.windows(on: "v", before: 1).mean("v", "v") }
   end
+
+  # A column is picked by what its values are, read at its first present
+  # row, so a masked first row of a text column does not make it look
+  # summable.
+  def test_a_masked_first_row_does_not_pick_a_text_column
+    s = CA_OBJECT(%w[a b c]); s[0] = UNDEF
+    df = CAFrame.new("s" => s, "i" => CA_INT64([1, 2, 3]))
+    assert_equal ["i"], df.sum.column_names
+    assert_equal ["i"], df.mean.column_names
+    assert_equal [], df.group_by("i").sum.column_names
+    o = CA_OBJECT([1, 2, 3]); o[0] = UNDEF
+    assert_equal [5], CAFrame.new("o" => o).sum["o"].to_a
+  end
 end
