@@ -186,8 +186,9 @@ class CAFrame
   # Read CSV text already in hand into a frame -- the String is the CSV, not
   # a path. The options and the reading block are +read_csv+'s; +encoding:+
   # has nothing to open and is refused, the text being in its String's
-  # encoding. A BOM at the start of UTF-8 text is skipped, as +read_csv+
-  # skips one at the start of a file.
+  # encoding. A BOM at the start of UTF-8 or binary text (as File.binread
+  # and many HTTP bodies give) is skipped, as +read_csv+ skips one at the
+  # start of a file.
   #
   #   CAFrame.from_csv("date,temp\n2026-01-01,1.5\n")
   #   CAFrame.from_csv(response.body, types: :string)
@@ -201,7 +202,11 @@ class CAFrame
       raise ArgumentError, "from_csv: encoding: is the open mode of a path; " \
                            "text in hand is read in its String's encoding"
     end
-    text = text.delete_prefix("\uFEFF") if text.encoding == Encoding::UTF_8
+    if text.encoding == Encoding::UTF_8
+      text = text.delete_prefix("\uFEFF")
+    elsif text.encoding == Encoding::BINARY && text.start_with?("\xEF\xBB\xBF".b)
+      text = text.byteslice(3..)       # bytes read from a file or the network
+    end
     read_csv(StringIO.new(text), **opts, &block)
   end
 

@@ -64,6 +64,7 @@ class TestCAFrameCSVReadFromWriteTo < Test::Unit::TestCase
 
   def test_from_csv_skips_a_leading_bom
     assert_equal %w[k v], CAFrame.from_csv("\uFEFF" + TEXT).column_names
+    assert_equal %w[k v], CAFrame.from_csv(("\uFEFF" + TEXT).b).column_names   # as File.binread gives
   end
 
   def test_round_trip_through_text
