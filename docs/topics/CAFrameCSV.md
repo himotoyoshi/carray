@@ -163,7 +163,7 @@ A header read with a name, as `r.header(:units)`, gives each column an attribute
 
 The reader comes as the block's parameter rather than as `self`, so a local variable that happens to be named `data` or `header` cannot stand in for the verb; a block without a parameter raises. A block and `header:` / `data:` / `column_names:` / `columns:` cannot be given together.
 
-To swap in a different parser (the stdlib `csv`, or a typed-table source), pass `parser:` — a callable `source -> [headers, rows]`, handed whatever you passed as the source. When given, it owns parsing, so `sep:` / `quote:` / `strip:` / `encoding:` and any block are its concern:
+To swap in a different parser (the stdlib `csv`, or a typed-table source), pass `parser:` — a callable `source -> [headers, rows]`, handed the path or IO `read_csv` was given; `from_csv` hands it a `StringIO` of the text. When given, it owns parsing, so `sep:` / `quote:` / `strip:` / `encoding:` and any block are its concern:
 
 ```ruby
 require "csv"
