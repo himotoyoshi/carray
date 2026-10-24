@@ -39,7 +39,14 @@ class CAFrame
     out = group_by(*keys).size(name: name)
     case sort
     when :count then out.sort_by_key(name, descending: true)
-    when :value then out.sort_by_key(*keys)
+    when :value
+      # A categorical key is ordered by its labels, as CArray#value_counts
+      # orders one; its codes are in the order labels were met.
+      cols = keys.map do |key|
+        col = out.__send__(:key_column, key, "value_counts")
+        col.is_a?(CACategorical) ? col.to_type(:object) : col
+      end
+      out.__send__(:select_rows, CArray.sort_addr(*cols))
     else             out
     end
   rescue ArgumentError, KeyError, TypeError, CArray::DataTypeError => e

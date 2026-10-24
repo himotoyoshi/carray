@@ -43,4 +43,16 @@ class TestCAFrameValueCounts < Test::Unit::TestCase
     e = assert_raise(KeyError) { df.value_counts("nope") }
     assert_match(/\Avalue_counts:/, e.message)
   end
+
+  # sort: :value orders a categorical key by its labels, as
+  # CArray#value_counts(sort: :value) does.
+  def test_sort_by_value_orders_a_categorical_by_label
+    c  = CA_OBJECT(%w[y x y z]).categorize
+    vc = CAFrame.new("c" => c).value_counts("c", sort: :value)
+    assert_equal %w[x y z], vc.index.to_a
+    assert_equal [1, 2, 1], vc["count"].to_a
+    two = CAFrame.new("c" => c, "n" => CA_INT64([2, 1, 1, 1])).value_counts(sort: :value)
+    assert_equal %w[x y y z], two["c"].to_a
+    assert_equal [1, 1, 2, 1], two["n"].to_a
+  end
 end
