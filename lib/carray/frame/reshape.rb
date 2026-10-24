@@ -232,26 +232,27 @@ class CAFrame
   end
   private_class_method :holds_every_value
 
-  # Whether every present value of +col+ is exactly a value of data type
-  # +to+: by the types when they decide it, else -- for an integer column --
-  # by the values, against the range of an integer type or the significand
-  # of a float. A column with no present value fits.
-  def self.values_fit (col, to)
-    return true if holds_every_value(col.data_type, to)
-    return false unless INTEGER_BITS[CArray.data_type_name(col.data_type)]
-    lo = col.min
-    return true if UNDEF.equal?(lo)
-    hi = col.max
-    tname = CArray.data_type_name(to)
-    if (tbits, tsigned = INTEGER_BITS[tname])
-      low  = tsigned ? -(2**(tbits - 1)) : 0
-      high = tsigned ? 2**(tbits - 1) - 1 : 2**tbits - 1
-      return lo >= low && hi <= high
-    end
-    significand = SIGNIFICAND_BITS[tname]
-    return !significand.nil? && lo >= -(2**significand) && hi <= 2**significand
+  # The types melt may bring number columns to, narrowest first within each
+  # kind, so the first that holds every column's type is the common one.
+  MELT_TYPES = %w[int8 uint8 int16 uint16 int32 uint32 int64 uint64
+                  float32 float64 cmplx64 cmplx128].freeze
+  Ractor.make_shareable(MELT_TYPES)
+  private_constant :MELT_TYPES
+
+  # The common type of number (and boolean) columns of different types: the
+  # one CArray.result_type picks when it holds every value of every column's
+  # type, else the narrowest that does; nil when no type does. Decided by
+  # the types alone, so a value written to a column later is one the common
+  # type holds too.
+  def self.melt_common_type (pieces)
+    types = pieces.map(&:data_type)
+    holds = ->(to) { types.all? { |t| holds_every_value(t, to) } }
+    first = CArray.result_type(*pieces)
+    return first if holds.(first)
+    name = MELT_TYPES.find { |t| holds.(t) }
+    name&.to_sym
   end
-  private_class_method :values_fit
+  private_class_method :melt_common_type
 
   # Gather a wide frame into a long one.  The +value_columns+ are stacked one
   # after another into a single +value_name+ column, a +var_name+ column says
@@ -266,8 +267,12 @@ class CAFrame
   #
   # The result is a view frame: the value column is +CArray.meld+ of the
   # melted columns and each id column is +CArray.meld+ of itself, so a write
-  # to the result lands in +self+.  The value columns must therefore share
-  # one data type and one trailing shape; cast first when they do not.
+  # to the result lands in +self+.  Number columns of different types meet
+  # at a type that holds every value of each column's type (int8 and uint8
+  # at int16, int32 and float64 at float64), so a value written later reads
+  # back unchanged; a mixture no type holds (int64 and float64) raises, and
+  # so do other mixtures of types. The value columns share one trailing
+  # shape; cast first when they do not.
   #
   # @param id [String, Array<String>] columns repeated alongside each value.
   # @param value_columns [Array<String>, nil] columns to stack; default all
@@ -276,7 +281,7 @@ class CAFrame
   # @param value_name [String] name of the stacked value column.
   # @return [CAFrame] a view frame of +nrow * value_columns.size+ rows.
   # @raise [ArgumentError] when there is nothing to melt, or the value
-  #   columns differ in data type.
+  #   columns differ in data type and no type holds every value of each.
   def melt(id: [], value_columns: nil, var_name: "variable", value_name: "value")
     ids = column_keys(Array(id), "melt")
     ids.each { |name| self[name] }
@@ -289,18 +294,18 @@ class CAFrame
     pieces = vars.map { |name| self[name] }
     types = pieces.map(&:data_type).uniq
     unless types.size == 1
-      # Numbers of different types meet at their common type, each through a
-      # view of its own column (as_type), so the value column still reads
-      # and writes the columns it was made from.
+      # Numbers of different types meet at a type that holds every value of
+      # every column's type, each through a view of its own column (as_type),
+      # so the value column still reads and writes the columns it was made
+      # from, whatever is written to them later.
       common = nil
       if pieces.all? { |c| !c.face? && (c.numeric? || c.data_type == :boolean) }
-        common = CArray.result_type(*pieces)
-        common = nil unless pieces.all? { |c| CAFrame.__send__(:values_fit, c, common) }
+        common = CAFrame.__send__(:melt_common_type, pieces)
       end
       if common.nil?
         raise ArgumentError,
               "melt: value columns differ in data type (#{vars.zip(pieces.map(&:data_type)).to_h}) " \
-              "and no type holds all their values; cast them to one type first"
+              "and no type holds every value of each; cast them to one type first"
       end
       pieces = pieces.map { |c| c.data_type == common ? c : c.as_type(common) }
     end
