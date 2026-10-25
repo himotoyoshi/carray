@@ -95,7 +95,8 @@ class TestObjectCellViewOfSelf < Test::Unit::TestCase
         out.uniq
       end
     end
-    assert_equal [[2001000, 2000, 2001000, 2000, true]], rs.map(&:take).flatten(1).uniq
+    results = rs.map { |r| r.respond_to?(:value) ? r.value : r.take }
+    assert_equal [[2001000, 2000, 2001000, 2000, true]], results.flatten(1).uniq
   end
 
   # An element operation called by the computation may compute over the
