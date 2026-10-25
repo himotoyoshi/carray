@@ -456,7 +456,9 @@ class CAFrame
   # column cast to :time is parsed into a CATime column, in the finest unit
   # its text shows (:D for dates alone, :s with a time of day, :ms / :us /
   # :ns for fractions of a second); parse_to_time takes a format and a
-  # unit. A column cast to :categorical becomes a CACategorical of its
+  # unit. A text column cast to :timedelta reads the text to_csv writes for
+  # a duration ("194400s", "3M", "3 @ 10 m") into a CATimedelta column, in
+  # the finest unit its cells show. A column cast to :categorical becomes a CACategorical of its
   # values, the labels in the order they first appear (categorize); a text
   # column read by read_csv with types: gets there without a String made per
   # cell. Other targets use to_type.
@@ -1027,6 +1029,7 @@ class CAFrame
     key = name.to_s
     col = @columns.fetch(key) { refuse_missing_column(key) }
     return cast_time_column(key, col, on_error) if type == :time
+    return cast_timedelta_column(key, col, on_error) if type == :timedelta
     # Text stays text, an object column of Strings becomes a CAString, and
     # anything else is refused as CArray.string refuses it (a number is
     # written as text with #format).
@@ -1127,6 +1130,57 @@ class CAFrame
     end
     parse_time_column(key, col, nil, nil, on_error)
   end
+
+  # cast(name => :timedelta): the text #to_csv writes for a duration -- a
+  # signed integer and its unit ("194400s", "3M"), or "<n> @ <count> <unit>"
+  # for a unit of several base ticks ("3 @ 10 m") -- to CATimedelta. Cells in
+  # different units are brought to the finest of them; a column that mixes
+  # calendar units (Y, M) with fixed-length ones has no common unit.
+  private def cast_timedelta_column(key, col, on_error)
+    return col if col.is_a?(CATimedelta)
+    unless string_column?(col)
+      raise ArgumentError,
+            "cast: column #{key.inspect} is #{col.data_type}, not text; " \
+            "#timedelta(unit:) reads a column of counts as durations"
+    end
+    cells = time_text_of(col).flatten
+    present = cells.is_not_masked
+    values = Array.new(cells.elements)
+    units = Array.new(cells.elements)
+    bad = []
+    cells.elements.times do |addr|
+      next unless present[addr]
+      text = cells[addr]
+      m = text.is_a?(String) && TIMEDELTA_TEXT.match(text)
+      if m
+        values[addr] = Integer(m[1], 10)
+        units[addr] = CATime::Resolution.new(m[2] ? Integer(m[2], 10) : 1, m[3].to_sym)
+      elsif !text.nil? && !(text.is_a?(String) && text.strip.empty?)
+        bad << addr
+      end
+    end
+    report_unreadable(key, col, :timedelta, bad, on_error) unless bad.empty? || on_error == :mask
+    distinct = units.compact.uniq
+    calendar = distinct.partition { |u| %i[Y M].include?(u.base) }
+    unless calendar.all?(&:empty?) || calendar.any?(&:empty?)
+      raise ArgumentError,
+            "cast: column #{key.inspect} mixes calendar units (Y, M) with " \
+            "fixed-length ones (#{distinct.map(&:to_s).join(', ')}); " \
+            "they have no common unit"
+    end
+    unit = distinct.reduce { |a, b| CATimeUnitAlgebra.finer(a, b) } || CATime::Resolution.new(1, :s)
+    ticks = CArray.int64(cells.elements)
+    ticks[nil] = UNDEF
+    distinct.each do |u|
+      addrs = units.each_index.select { |i| units[i] == u }
+      scaled = CATimeUnitAlgebra.convert_scale!(CA_INT64(addrs.map { |i| values[i] }), u, unit)
+      ticks[CA_INT64(addrs)] = scaled
+    end
+    ticks.reshape(*col.shape).timedelta(unit: unit)
+  end
+
+  TIMEDELTA_TEXT = /\A\s*([-+]?\d+)\s*(?:@\s*(\d+)\s+)?(Y|M|W|D|h|ms|us|ns|ps|fs|as|m|s)\s*\z/
+  private_constant :TIMEDELTA_TEXT
 
   # Text to CATime. Without a format only year-first text is read; a
   # strptime format, or :mixed for a guess at each cell, goes through
