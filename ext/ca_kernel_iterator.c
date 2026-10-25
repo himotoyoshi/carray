@@ -2927,7 +2927,7 @@ typedef struct {
   VALUE (*body)(VALUE);
   VALUE arg;
   CArray *ca;
-  int marked;
+  CArray *marked;
 } ca_iter_computing_t;
 
 static VALUE
@@ -2943,7 +2943,7 @@ ca_iter_computing_close (VALUE arg)
 {
   ca_iter_computing_t *c = (ca_iter_computing_t *) arg;
   if ( c->marked ) {
-    ca_clear_computing(c->ca);
+    ca_clear_computing(c->marked);
   }
   return Qnil;
 }
@@ -2954,7 +2954,7 @@ ca_iter_ensure_computing (CArray *ca, int32_t n, ca_iter_state *states,
 {
   ca_iter_computing_t c;
   c.n = n; c.states = states; c.body = body; c.arg = arg;
-  c.ca = ca; c.marked = 0;
+  c.ca = ca; c.marked = NULL;
   return rb_ensure(ca_iter_computing_body, (VALUE) &c,
                    ca_iter_computing_close, (VALUE) &c);
 }

@@ -493,11 +493,9 @@ static VALUE
 ca_compare_run (VALUE arg)
 {
   ca_compare_run_t *r = (ca_compare_run_t *) arg;
-  if ( ca_set_computing(r->list[0]) ) {
-    r->marked[0] = r->list[0];
-  }
-  if ( r->list[1] != r->list[0] && ca_set_computing(r->list[1]) ) {
-    r->marked[1] = r->list[1];
+  r->marked[0] = ca_set_computing(r->list[0]);
+  if ( ca_root_array(r->list[1]) != ca_root_array(r->list[0]) ) {
+    r->marked[1] = ca_set_computing(r->list[1]);
   }
   ca_attach_window(2, r->list, "rr", ca_compare_body, (VALUE) r->c);
   return Qnil;

@@ -840,28 +840,30 @@ ca_clear_cyclic_check(void *ap)
   }
 }
 
-/* Marks an object array a kernel computes over; 1 when this call set the
-   mark (the caller clears it), 0 when there is nothing to mark.  Raises
-   when the array is already being computed over: a cell's value led the
-   computation back into it. */
-int
+/* Marks the root of an object array a kernel computes over, and returns
+   it (the caller clears it); NULL when there is nothing to mark.  Raises
+   when the root is already being computed over: a cell's value led the
+   computation back into the same cells. */
+CArray *
 ca_set_computing (CArray *ca)
 {
+  CArray *root;
   if ( ! ca_is_object_type(ca) ) {
-    return 0;
+    return NULL;
   }
-  if ( ca_test_flag(ca, CA_FLAG_COMPUTING) ) {
+  root = ca_root_array(ca);
+  if ( ca_test_flag(root, CA_FLAG_COMPUTING) ) {
     rb_raise(rb_eArgError, "%s: cyclic reference is not allowed in CArray",
              ca_calling_method_name());
   }
-  ca_set_flag(ca, CA_FLAG_COMPUTING);
-  return 1;
+  ca_set_flag(root, CA_FLAG_COMPUTING);
+  return root;
 }
 
 void
-ca_clear_computing (CArray *ca)
+ca_clear_computing (CArray *root)
 {
-  ca_unset_flag(ca, CA_FLAG_COMPUTING);
+  ca_unset_flag(root, CA_FLAG_COMPUTING);
 }
 
 void

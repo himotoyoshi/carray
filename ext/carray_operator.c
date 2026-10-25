@@ -162,8 +162,43 @@ ca_chunked_gather (CArray *ca, ca_size_t off, ca_size_t n, void *dest)
 
 #define CA_CHUNKED_MAX_OPERANDS 3
 
+/* Marks the roots of the object arrays among ops[0..n) as computed over
+   (ca_set_computing), each root once, appending them to marked[] and
+   counting them in *nmarked as it goes, so that a clear after a raise
+   undoes exactly what was set.  A cell holding the array or a view of it
+   leads the kernel back into the same root, and is refused as cyclic. */
+static void
+ca_op_mark_roots (CArray **ops, int n, CArray **marked, int *nmarked)
+{
+  int k, j;
+  for ( k = 0; k < n; k++ ) {
+    CArray *root;
+    int seen = 0;
+    if ( ! ops[k] ) continue;
+    root = ca_root_array(ops[k]);
+    for ( j = 0; j < *nmarked; j++ ) {
+      if ( marked[j] == root ) seen = 1;
+    }
+    if ( ! seen && (root = ca_set_computing(ops[k])) ) {
+      marked[(*nmarked)++] = root;
+    }
+  }
+}
+
+static void
+ca_op_clear_roots (CArray **marked, int *nmarked)
+{
+  int k;
+  for ( k = 0; k < *nmarked; k++ ) {
+    ca_clear_computing(marked[k]);
+  }
+  *nmarked = 0;
+}
+
 typedef struct ca_chunked_run {
   int         n_op;
+  CArray     *marked[CA_CHUNKED_MAX_OPERANDS];
+  int         nmarked;
   CArray     *ca[CA_CHUNKED_MAX_OPERANDS];
   ca_size_t   step[CA_CHUNKED_MAX_OPERANDS];
   char       *src[CA_CHUNKED_MAX_OPERANDS];
@@ -225,6 +260,7 @@ ca_chunked_run_body (VALUE arg)
   ca_size_t off;
   int k;
 
+  ca_op_mark_roots(run->ca, run->n_op, run->marked, &run->nmarked);
   for ( k = 0; k < run->n_op; k++ ) {
     ca_chunked_run_acquire(run, k);
   }
@@ -250,6 +286,7 @@ ca_chunked_run_release (VALUE arg)
 {
   ca_chunked_run_t *run = (ca_chunked_run_t *) arg;
   int k;
+  ca_op_clear_roots(run->marked, &run->nmarked);
   for ( k = run->n_op - 1; k >= 0; k-- ) {
     if ( run->scratch[k] ) {
       ca_lazy_arena_release(run->scratch[k]);
@@ -450,7 +487,8 @@ typedef struct {
   int        n;
   CArray   **held;
   const char *mode;     /* per held array: 'r' read, 'w' written in place */
-  CArray    *marked[4]; /* the object arrays this call marked as computed over */
+  CArray   **ops;       /* every operand, attached or gathered (marked below) */
+  CArray    *marked[4]; /* the roots this call marked as computed over */
   int        nmarked;
 } ca_op_guard_t;
 
@@ -458,18 +496,7 @@ static VALUE
 ca_op_guard_body (VALUE varg)
 {
   ca_op_guard_t *g = (ca_op_guard_t *) varg;
-  int k, j;
-  for ( k = 0; k < g->n && g->nmarked < 4; k++ ) {
-    CArray *ca = g->held[k];
-    int seen = 0;
-    if ( ! ca ) continue;
-    for ( j = 0; j < g->nmarked; j++ ) {
-      if ( g->marked[j] == ca ) seen = 1;
-    }
-    if ( ! seen && ca_set_computing(ca) ) {
-      g->marked[g->nmarked++] = ca;
-    }
-  }
+  ca_op_mark_roots(g->ops, g->n, g->marked, &g->nmarked);
   g->run(g->arg);
   g->done = 1;
   return Qnil;
@@ -490,10 +517,7 @@ ca_op_guard_release (VALUE varg)
 {
   ca_op_guard_t *g = (ca_op_guard_t *) varg;
   int k;
-  for ( k = 0; k < g->nmarked; k++ ) {
-    ca_clear_computing(g->marked[k]);
-  }
-  g->nmarked = 0;
+  ca_op_clear_roots(g->marked, &g->nmarked);
   if ( g->done ) {
     return Qnil;
   }
@@ -514,10 +538,13 @@ ca_op_guard_release (VALUE varg)
 }
 
 /* Runs the kernel packed in `call` with `held` attached; see above.  NULL
-   entries in held are skipped. */
+   entries in held are skipped.  ops lists every operand the kernel reads
+   or writes, attached or gathered into a buffer, so that the roots of the
+   object arrays among them are marked as computed over (ca_set_computing)
+   while the kernel runs; NULL means the operands are the held arrays. */
 static void
 ca_op_guarded (VALUE (*run)(VALUE), void *call,
-               int n, CArray **held, const char *mode)
+               int n, CArray **held, const char *mode, CArray **ops)
 {
   ca_op_guard_t g;
   g.run  = run;
@@ -526,6 +553,7 @@ ca_op_guarded (VALUE (*run)(VALUE), void *call,
   g.n    = n;
   g.held = held;
   g.mode = mode;
+  g.ops  = ops ? ops : held;
   g.nmarked = 0;
   rb_ensure(ca_op_guard_body, (VALUE) &g, ca_op_guard_release, (VALUE) &g);
 }
@@ -726,7 +754,7 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
     ca_attach(ca1);   /* window: the kernel runs through ca_op_guarded when it can raise */
     k.p1 = ca1->ptr; k.i1 = 1;
     if ( ca_monop_may_raise(func, ca1->data_type) ) {
-      ca_op_guarded(ca_monop_call, &k, 1, &ca1, "r");
+      ca_op_guarded(ca_monop_call, &k, 1, &ca1, "r", NULL);
     }
     else {
       ca_monop_call((VALUE) &k);
@@ -743,7 +771,7 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
     int strided_path_done = 0;
     {
       extern ca_operation_function_t ca_stride_func;
-      if ( ca_func[ca1->obj_type].attach == ca_stride_func.attach ) {
+      if ( ca1->data_type != CA_OBJECT && ca_func[ca1->obj_type].attach == ca_stride_func.attach ) {
         CAStride *cs1 = (CAStride *) ca1;
         CArray   *root1;
         ca_size_t strides1[CA_RANK_MAX];
@@ -823,10 +851,21 @@ rb_ca_call_monop (VALUE self, ca_monop_func_t func[])
       (void) h1;
       p1 = ALLOCV_N(char, h1, ca1->elements * ca1->bytes);
       ca_xfer_all(ca1, p1, CA_XFER_GET);
-      func[ca1->data_type](ca1->elements,
-                           ( ca2->mask ) ? (boolean8_t *)ca2->mask->ptr : NULL,
-                           p1,       1,
-                           ca2->ptr, 1);
+      {
+        ca_monop_call_t k;
+        CArray *none[1] = { NULL };
+        k.f  = func[ca1->data_type];
+        k.n  = ca1->elements;
+        k.m  = ( ca2->mask ) ? (boolean8_t *)ca2->mask->ptr : NULL;
+        k.p1 = p1;       k.i1 = 1;
+        k.p2 = ca2->ptr; k.i2 = 1;
+        if ( ca_monop_may_raise(func, ca1->data_type) ) {
+          ca_op_guarded(ca_monop_call, &k, 1, none, "r", &ca1);
+        }
+        else {
+          ca_monop_call((VALUE) &k);
+        }
+      }
       ALLOCV_END(h1);
     }
   }
@@ -857,7 +896,7 @@ rb_ca_call_monop_bang (VALUE self, ca_monop_func_t func[])
     k.p1 = ca1->ptr; k.i1 = 1;
     k.p2 = ca1->ptr; k.i2 = 1;
     if ( ca_monop_may_raise(func, ca1->data_type) ) {
-      ca_op_guarded(ca_monop_call, &k, 1, &ca1, "w");
+      ca_op_guarded(ca_monop_call, &k, 1, &ca1, "w", NULL);
     }
     else {
       ca_monop_call((VALUE) &k);
@@ -908,7 +947,7 @@ rb_ca_call_monop_typed (VALUE self, ca_monop_func_t func[],
     ca_attach(ca1);   /* window: the kernel runs through ca_op_guarded when it can raise */
     k.p1 = ca1->ptr; k.i1 = 1;
     if ( ca_monop_may_raise(func, ca1->data_type) ) {
-      ca_op_guarded(ca_monop_call, &k, 1, &ca1, "r");
+      ca_op_guarded(ca_monop_call, &k, 1, &ca1, "r", NULL);
     }
     else {
       ca_monop_call((VALUE) &k);
@@ -922,7 +961,7 @@ rb_ca_call_monop_typed (VALUE self, ca_monop_func_t func[],
     int strided_path_done = 0;
     {
       extern ca_operation_function_t ca_stride_func;
-      if ( ca_func[ca1->obj_type].attach == ca_stride_func.attach ) {
+      if ( ca1->data_type != CA_OBJECT && ca_func[ca1->obj_type].attach == ca_stride_func.attach ) {
         CAStride *cs1 = (CAStride *) ca1;
         CArray   *root1;
         ca_size_t strides1[CA_RANK_MAX];
@@ -1001,10 +1040,21 @@ rb_ca_call_monop_typed (VALUE self, ca_monop_func_t func[],
       (void) h1;
       p1 = ALLOCV_N(char, h1, ca1->elements * ca1->bytes);
       ca_xfer_all(ca1, p1, CA_XFER_GET);
-      func[ca1->data_type](ca1->elements,
-                           ( ca2->mask ) ? (boolean8_t *)ca2->mask->ptr : NULL,
-                           p1,       1,
-                           ca2->ptr, 1);
+      {
+        ca_monop_call_t k;
+        CArray *none[1] = { NULL };
+        k.f  = func[ca1->data_type];
+        k.n  = ca1->elements;
+        k.m  = ( ca2->mask ) ? (boolean8_t *)ca2->mask->ptr : NULL;
+        k.p1 = p1;       k.i1 = 1;
+        k.p2 = ca2->ptr; k.i2 = 1;
+        if ( ca_monop_may_raise(func, ca1->data_type) ) {
+          ca_op_guarded(ca_monop_call, &k, 1, none, "r", &ca1);
+        }
+        else {
+          ca_monop_call((VALUE) &k);
+        }
+      }
       ALLOCV_END(h1);
     }
   }
@@ -1305,7 +1355,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
     k.p2 = ca2->ptr; k.i2 = i2;
     if ( ca_binop_may_raise(func, ca1->data_type) ) {
       held[0] = ca1; held[1] = ca2;
-      ca_op_guarded(ca_binop_call, &k, 2, held, "rr");
+      ca_op_guarded(ca_binop_call, &k, 2, held, "rr", NULL);
     }
     else {
       ca_binop_call((VALUE) &k);
@@ -1324,11 +1374,22 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
 
     p_shared = ALLOCV_N(char, h_shared, ca1->elements * ca1->bytes);
     ca_xfer_all(ca1, p_shared, CA_XFER_GET);
-    func[ca1->data_type](n_kernel,
-                         ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL,
-                         p_shared, i1,
-                         p_shared, i2,
-                         ca3->ptr, i3);
+    {
+      ca_binop_call_t k;
+      CArray *none[2] = { NULL, NULL };
+      k.f  = func[ca1->data_type];
+      k.n  = n_kernel;
+      k.m  = ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL;
+      k.p1 = p_shared; k.i1 = i1;
+      k.p2 = p_shared; k.i2 = i2;
+      k.p3 = ca3->ptr; k.i3 = i3;
+      if ( ca_binop_may_raise(func, ca1->data_type) ) {
+        ca_op_guarded(ca_binop_call, &k, 2, none, "rr", (CArray *[]){ ca1, ca2 });
+      }
+      else {
+        ca_binop_call((VALUE) &k);
+      }
+    }
     ALLOCV_END(h_shared);
   }
   else {
@@ -1372,7 +1433,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
        fallback (dead on the success path) but fire for views outside the
        CAStride+entity family (CASelect / CAGrid / CAReduce
        etc.). */
-    if ( i1 == 1 && i2 == 1 && nonalias_arrays >= 1 ) {
+    if ( dt != CA_OBJECT && i1 == 1 && i2 == 1 && nonalias_arrays >= 1 ) {
       extern ca_operation_function_t ca_stride_func;
       CArray   *root1 = NULL, *root2 = NULL;
       ca_size_t strides1[CA_RANK_MAX], strides2[CA_RANK_MAX];
@@ -1524,7 +1585,7 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
         if ( ca_binop_may_raise(func, dt) ) {
           held[0] = a1 ? ca1 : NULL;
           held[1] = a2 ? ca2 : NULL;
-          ca_op_guarded(ca_binop_call, &k, 2, held, "rr");
+          ca_op_guarded(ca_binop_call, &k, 2, held, "rr", (CArray *[]){ ca1, ca2 });
         }
         else {
           ca_binop_call((VALUE) &k);
@@ -1658,7 +1719,7 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
     if ( ca_binop_may_raise(func, ca1->data_type) ) {
       held[0] = ca1;
       held[1] = a2 ? ca2 : NULL;
-      ca_op_guarded(ca_binop_call, &k, 2, held, "wr");
+      ca_op_guarded(ca_binop_call, &k, 2, held, "wr", (CArray *[]){ ca1, ca2 });
     }
     else {
       ca_binop_call((VALUE) &k);
@@ -1885,7 +1946,7 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
           held[0] = attached1 ? ca1 : NULL;
           held[1] = attached2 ? ca2 : NULL;
           held[2] = attached3 ? ca3 : NULL;
-          ca_op_guarded(ca_triop_call, &k, 3, held, "rrr");
+          ca_op_guarded(ca_triop_call, &k, 3, held, "rrr", (CArray *[]){ ca1, ca2, ca3 });
         }
         else {
           ca_triop_call((VALUE) &k);
@@ -2051,7 +2112,7 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
         held[0] = ca1;
         held[1] = attached2 ? ca2 : NULL;
         held[2] = attached3 ? ca3 : NULL;
-        ca_op_guarded(ca_triop_call, &k, 3, held, "wrr");
+        ca_op_guarded(ca_triop_call, &k, 3, held, "wrr", (CArray *[]){ ca1, ca2, ca3 });
       }
       else {
         ca_triop_call((VALUE) &k);
@@ -2096,7 +2157,7 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
           ca_chunked_run_add(&run, ca3, s3);
           run.kernel = ca_triop_chunk_kernel;
           run.data   = &d;
-          ca_op_guarded(ca_triop_bang_chunked, &run, 1, &ca1, "w");
+          ca_op_guarded(ca_triop_bang_chunked, &run, 1, &ca1, "w", NULL);
         }
       }
     }
@@ -2160,8 +2221,9 @@ rb_ca_call_moncmp (VALUE self, ca_moncmp_func_t func[])
     k.m  = ( ca2->mask ) ? (boolean8_t *) ca2->mask->ptr : NULL;
     k.p1 = p1; k.i1 = 1;
     k.p2 = (boolean8_t *) ca2->ptr; k.i2 = 1;
-    if ( attached1 && ca_moncmp_may_raise(func, ca1->data_type) ) {
-      ca_op_guarded(ca_moncmp_call, &k, 1, &ca1, "r");
+    if ( ca_moncmp_may_raise(func, ca1->data_type) ) {
+      CArray *none[1] = { NULL };
+      ca_op_guarded(ca_moncmp_call, &k, 1, attached1 ? &ca1 : none, "r", &ca1);
     }
     else {
       ca_moncmp_call((VALUE) &k);
@@ -2450,12 +2512,23 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
       (void) h_shared;
       p_shared = ALLOCV_N(char, h_shared, ca1->elements * ca1->bytes);
       ca_xfer_all(ca1, p_shared, CA_XFER_GET);
-      func[ca1->data_type](n_kernel,
-                           ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL,
-                           p_shared, ca1->bytes, i1,
-                           p_shared, ca2->bytes, i2,
-                           ca3->ptr,  ca3->bytes, i3,
-                           tol);
+      {
+        ca_bincmp_call_t k;
+        CArray *none[2] = { NULL, NULL };
+        k.f   = func[ca1->data_type];
+        k.n   = n_kernel;
+        k.m   = ( ca3->mask ) ? (boolean8_t *) ca3->mask->ptr : NULL;
+        k.p1  = p_shared; k.b1 = ca1->bytes; k.i1 = i1;
+        k.p2  = p_shared; k.b2 = ca2->bytes; k.i2 = i2;
+        k.p3  = ca3->ptr; k.b3 = ca3->bytes; k.i3 = i3;
+        k.tol = tol;
+        if ( ca_bincmp_may_raise(func, ca1->data_type) ) {
+          ca_op_guarded(ca_bincmp_call, &k, 2, none, "rr", (CArray *[]){ ca1, ca2 });
+        }
+        else {
+          ca_bincmp_call((VALUE) &k);
+        }
+      }
       ALLOCV_END(h_shared);
     }
     else {
@@ -2489,11 +2562,10 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
         k.p2  = p2;       k.b2 = ca2->bytes; k.i2 = i2;
         k.p3  = ca3->ptr; k.b3 = ca3->bytes; k.i3 = i3;
         k.tol = tol;
-        if ( ( attached1 || attached2 ) &&
-             ca_bincmp_may_raise(func, ca1->data_type) ) {
+        if ( ca_bincmp_may_raise(func, ca1->data_type) ) {
           held[0] = attached1 ? ca1 : NULL;
           held[1] = attached2 ? ca2 : NULL;
-          ca_op_guarded(ca_bincmp_call, &k, 2, held, "rr");
+          ca_op_guarded(ca_bincmp_call, &k, 2, held, "rr", (CArray *[]){ ca1, ca2 });
         }
         else {
           ca_bincmp_call((VALUE) &k);
