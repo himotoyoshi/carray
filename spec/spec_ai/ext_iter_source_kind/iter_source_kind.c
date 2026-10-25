@@ -19,9 +19,10 @@
   read it directly, so the registration is a no-op and nothing attaches.
 
   A fourth class, CAIterOffsetNoXfer, is the same conversion layer with no
-  xfer_stride slot, so a kernel walk over a view of it attaches it as the
-  root, and a sync that can be made to raise.  It pins that ca_iter_ensure
-  finishes every walk it opened when finishing one of them raises.
+  xfer_stride slot, so a region of it is moved through the dispatcher's
+  default (its xfer_addrs), and a write-back that can be made to raise.  It
+  pins that a partial transfer reaches only the cells asked for, and that
+  ca_iter_ensure finishes every walk it opened when finishing one raises.
 
   The pair is the point.  Neither class is known to the classifier's
   built-in list, so the unregistered one reproduces what a companion gem
@@ -427,6 +428,19 @@ noxfer_func_sync (void *ap)
   offset_func_sync(ap);
 }
 
+/* A walk over a view of this array writes its region back through
+   xfer_addrs rather than sync (the array is not attached whole), so the
+   same switch fails that write. */
+static void
+noxfer_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
+                        void *data, int dir)
+{
+  if ( noxfer_fail_sync && dir == CA_XFER_PUT ) {
+    rb_raise(rb_eRuntimeError, "CAIterOffsetNoXfer: sync failed");
+  }
+  offset_func_xfer_addrs(ap, n, addrs, data, dir);
+}
+
 static VALUE
 rb_noxfer_set_fail_sync (VALUE klass, VALUE flag)
 {
@@ -511,6 +525,7 @@ Init_iter_source_kind (void)
   noxfer_func = offset_func;
   noxfer_func.xfer_stride = NULL;
   noxfer_func.sync        = noxfer_func_sync;
+  noxfer_func.xfer_addrs  = noxfer_func_xfer_addrs;
   rb_cCAIterOffsetNoXfer     = rb_define_class("CAIterOffsetNoXfer",
                                                rb_cCAView);
   rb_cCAIterOffsetNoXferMask = rb_define_class("CAIterOffsetNoXferMask",

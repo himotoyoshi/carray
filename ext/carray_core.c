@@ -1593,7 +1593,6 @@ ca_xfer_stride_dispatch (CArray *ca, ca_size_t *starts, ca_size_t *counts,
   int8_t    ndim = ca->ndim;
   ca_size_t native[CA_RANK_MAX];
   ca_size_t base = 0;
-  ca_size_t doff = 0;
   ca_size_t s;
   int8_t    k;
   ca_size_t idx[CA_RANK_MAX];
@@ -1620,18 +1619,27 @@ ca_xfer_stride_dispatch (CArray *ca, ca_size_t *starts, ca_size_t *counts,
     return;
   }
 
-  /* fallback: per-cell via byte offset -> flat addr -> index -> xfer_index. */
-  for ( k = 0; k < ndim; k++ ) idx[k] = 0;
-  /* empty: its one caller, ca_xfer_stride, returns on an empty region */
-  while ( 1 ) {
-    ca_size_t soff = base, vidx[CA_RANK_MAX];
-    for ( k = 0; k < ndim; k++ ) soff += idx[k] * strides[k];
-    ca_addr2index(ca, soff / ca->bytes, vidx);
-    ca_xfer_index_dispatch(ca, vidx, d + doff, dir);
-    doff += ca->bytes;
-    k = ndim - 1;
-    while ( k >= 0 ) { if ( ++idx[k] < counts[k] ) break; idx[k] = 0; k--; }
-    if ( k < 0 ) break;
+  /* fallback for a type without xfer_stride: the region's cells by address,
+     handed to xfer_addrs in one call (data is packed over counts, as
+     xfer_addrs takes it). */
+  {
+    volatile VALUE holder = 0;
+    ca_size_t n = 1, i = 0;
+    ca_size_t *addrs;
+    for ( k = 0; k < ndim; k++ ) n *= counts[k];
+    addrs = ALLOCV_N(ca_size_t, holder, n);
+    for ( k = 0; k < ndim; k++ ) idx[k] = 0;
+    /* empty: its one caller, ca_xfer_stride, returns on an empty region */
+    while ( 1 ) {
+      ca_size_t soff = base;
+      for ( k = 0; k < ndim; k++ ) soff += idx[k] * strides[k];
+      addrs[i++] = soff / ca->bytes;
+      k = ndim - 1;
+      while ( k >= 0 ) { if ( ++idx[k] < counts[k] ) break; idx[k] = 0; k--; }
+      if ( k < 0 ) break;
+    }
+    ca_xfer_addrs_dispatch(ca, n, addrs, d, dir);
+    ALLOCV_END(holder);
   }
 }
 

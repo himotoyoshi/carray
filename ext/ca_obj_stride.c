@@ -1123,10 +1123,12 @@ static int ca_layout_is_contiguous (int8_t ndim, const ca_size_t *dim,
    folds onward from itself, so the answer is the one for the root it folds
    to.  What is left is the
    boundary views that compute or fetch their contents -- CAObject, the lazy
-   per-element transforms, whatever a companion gem installed -- and of those,
-   only the ones with an xfer_stride slot can answer a region request at all.
-   The rest have nothing better than materialising, so they keep doing it once
-   under attach rather than once per transfer. */
+   per-element transforms, whatever a companion gem installed.  All of them
+   answer a region request: through their xfer_stride slot, or, when a type
+   leaves it out, through the dispatcher's default, which hands the cells'
+   addresses to xfer_addrs.  Attaching one instead would produce all of it
+   and write all of it back, so a cell nobody touched would go through the
+   view's conversion both ways. */
 int
 ca_root_lends_no_memory (void *ap)
 {
@@ -1144,7 +1146,7 @@ ca_root_lends_no_memory (void *ap)
     ca_stride_compose_to_root((CAStride *) root, &below, cs, &base);
     return ca_root_lends_no_memory(below);
   }
-  return ca_func[root->obj_type].xfer_stride != NULL;
+  return 1;
 }
 
 /* The same question for the parent of a view that is not itself in the
