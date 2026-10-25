@@ -1907,11 +1907,8 @@ that has to line up. `docs/MemoryViewFormat.md` is the authority on
 CArray's format-string contract (PEP 3118, strict at the top level).
 Practical notes per peer:
 
-- **Numo::NArray** — Numo does not itself implement the MemoryView
-  producer protocol in the shipped release, so the interop is not
-  symmetric out of the box; where a MemoryView bridge exists (e.g.
-  `numo-narray-memoryview`), CArray consumes and produces against it
-  with the format synonyms documented in `docs/MemoryViewFormat.md`.
+- **Numo::NArray** — Numo does not implement the MemoryView protocol,
+  so an NArray can not be exchanged with CArray through it.
 - **NumPy via PyCall** — NumPy arrays expose a buffer with a PEP 3118
   format; `CArray.from_memory_view(numpy_array)` copies it in,
   `wrap_memory_view` shares it. Strided NumPy arrays import fine (copy

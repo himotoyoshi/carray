@@ -195,8 +195,8 @@ without referring to another array*: `CA_FLOAT64` you can name;
 
 ## 12a.4 MemoryView producers as operands
 
-An MV producer (Numo + `numo/narray/memoryview`, Arrow, a
-`pycall-memoryview` wrapped NumPy array, …) is accepted at all three
+An MV producer (Arrow, a `pycall-memoryview` wrapped NumPy array,
+…) is accepted at all three
 intake points, and the dtype derivation is single-sourced:
 
 | Entry point | How the MV is handled |

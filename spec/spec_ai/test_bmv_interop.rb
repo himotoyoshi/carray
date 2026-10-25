@@ -146,7 +146,7 @@ class TestBMVInterop < Test::Unit::TestCase
 
   # --- v1.1: PEP 3118 canonical for bool / complex through BMV ------------
   # BMV delegates format parsing to rb_memory_view_parse_item_format,
-  # which is PEP 3118-aware (see MEMORYVIEW_FORMAT.md §0).  These tests
+  # which is PEP 3118-aware.  These tests
   # verify CArray's v1.1 producer emits symbols that BMV passes through
   # untouched and that round-trip back into CArray with correct data_type.
 

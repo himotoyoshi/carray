@@ -124,8 +124,7 @@ mv_write_int32_flags (VALUE self, VALUE obj, VALUE offset_v, VALUE value_v,
 
    Ruby's MemoryView is experimental and ships no producer for tests, so
    exercising the consumer side (e.g. CArray.result_type reading an MV
-   operand's format) otherwise needs an external gem (numo-narray-memoryview,
-   red-arrow).  This mock backs a 1-D contiguous view with an arbitrary format
+   operand's format) otherwise needs an external gem (red-arrow).  This mock backs a 1-D contiguous view with an arbitrary format
    string, so tests can craft the exact PEP 3118 format they want to probe
    (including cross-endian and typeless format == NULL).
 

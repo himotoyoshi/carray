@@ -900,7 +900,7 @@ ca_mv_release (VALUE obj, rb_memory_view_t *view)
 }
 
 /* ---------------- importer ----------------
-   Two-tier API mirroring numo-narray-memoryview:
+   Two-tier API:
 
      CArray.from_memory_view(obj)  -> CArray  (copy, independent buffer)
      CArray.wrap_memory_view(obj)  -> CAWrap  (zero-copy, shared memory)

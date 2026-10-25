@@ -1,7 +1,7 @@
 require "test/unit"
 require "carray"
 
-# Phase 4+5: importer API.  Two methods mirroring numo-narray-memoryview:
+# Phase 4+5: importer API.  Two methods:
 #   - CArray.from_memory_view(obj)  -> CArray  (independent copy)
 #   - CArray.wrap_memory_view(obj)  -> CAWrap  (zero-copy, shared memory)
 # These tests use other CArrays as producers to verify the import path

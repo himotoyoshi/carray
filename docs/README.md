@@ -126,9 +126,3 @@ Topic docs are filed by kind:
 The read-through **guide books** live outside `docs/`, in
 [`../guides/`](../guides/): `devel/` (Developer's Guide) and `users/`
 (User's Guide), plus `pdf/` for their bundled editions (`rake pdf:all`).
-
-## Notes
-
-- `interop/MEMORYVIEW_FORMAT.md` is a historical record from the v1.x phase and
-  is **superseded** by [MemoryViewFormat](interop/MemoryViewFormat.md); it is
-  kept only for provenance.
