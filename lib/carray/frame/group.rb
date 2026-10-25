@@ -1035,6 +1035,7 @@ class GroupedFrame
     distance = @frame.__send__(:lag_distance, "lag", n, before, after, on)
     return transform_columns(:lag, names, [n.nil? ? 1 : n], {}) if distance.nil?
     refuse_changed_rows("lag")
+    refuse_key_on_rows(:lag, names)
     addr = @frame.__send__(:lag_addresses, "lag", (0...ngroup).map { |k| group_address(k) }, *distance)
     out = over_named_columns(:lag, names, @key_names | [distance.first], [1], {}) do |col|
       col[addr, *([nil] * (col.ndim - 1))].copy
@@ -1083,6 +1084,7 @@ class GroupedFrame
   def fill (*args)
     plan = @frame.__send__(:fill_arguments, args, @key_names)
     return self if plan.nil?
+    refuse_key_on_rows(:fill, plan.is_a?(Hash) ? plan.keys : [plan.first])
     if plan.is_a?(Hash)
       @frame.__send__(:fill_by_map, plan, "fill") do |frame, key, how|
         grouped = if frame.equal?(@frame)
@@ -1271,6 +1273,7 @@ class GroupedFrame
   # would otherwise leave every column out without a word.
   private def transform_columns(op, names, args, keywords)
     refuse_changed_rows(op)
+    refuse_key_on_rows(op, names)
     CArray.float64(1).public_send(op, *args, **keywords)
     out = over_named_columns(op, names, @key_names, args, keywords) do |col|
       group_transform(col, op, args, keywords)
@@ -1332,6 +1335,16 @@ class GroupedFrame
     hint = reduction == :count ? "; the number of rows of each group is size" : ""
     raise ArgumentError,
           "#{reduction}: #{named.first.inspect} is the group key, already in the result#{hint}"
+  end
+
+  # A key column named in a verb computed within each group: the key holds
+  # one value in a group, so there is nothing to compute along it, and a
+  # fill would write to what the groups were made from.
+  private def refuse_key_on_rows(verb, names)
+    named = names.map { |n| n.is_a?(String) ? n : nil }.compact & @key_names
+    return if named.empty?
+    raise ArgumentError,
+          "#{verb}: #{named.first.inspect} is the group key, one value within each group"
   end
 
   # One row per group, indexed by the labels; or, with +keep_rows+, the
