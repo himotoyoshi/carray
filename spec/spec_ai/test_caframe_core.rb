@@ -975,4 +975,13 @@ class TestCAFrameTimeColumnsFromRecords < Test::Unit::TestCase
     assert_equal CATime, r.data_types["last"]
     assert_equal ["2024-03-05", "2024-03-06"], r["last"].to_a.map(&:to_s)
   end
+
+  # An empty Array from the block on a frame with no rows keeps the column's
+  # type; there is no value to type it by.
+  def test_transform_of_no_rows_keeps_the_type
+    df = CAFrame.new("n" => CA_FLOAT64([1, 2]), "t" => CArray.time(%w[2024-01-01 2024-01-02]))[0...0]
+    out = df.transform { |c| c.to_a }
+    assert_equal :float64, out["n"].data_type
+    assert_kind_of CATime, out["t"]
+  end
 end

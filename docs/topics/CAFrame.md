@@ -769,7 +769,7 @@ df.transform("tmax".."tmin") { |col| (col - col.mean) / col.stddev }
 df.transform(/^t/) { |col, name| ... }               # the name is the second argument
 ```
 
-- The block returns a CArray or an Array of one value per row. A single value — a reduction's — is refused: one number is not a column. To give every row its column's summary, use a reduction with `keep_rows: true` (`df.mean("temp", keep_rows: true)`).
+- The block returns a CArray or an Array of one value per row; an Array is typed by its values, and the empty Array of a frame with no rows keeps the type of the column it was given. A single value — a reduction's — is refused: one number is not a column. To give every row its column's summary, use a reduction with `keep_rows: true` (`df.mean("temp", keep_rows: true)`).
 - What the block returns becomes the column as it is, so a view stays a view and a write to a cell reaches what it was made from; `copy` cuts that.
 - The blocks run before the frame is built, so a refusal leaves nothing half-made.
 

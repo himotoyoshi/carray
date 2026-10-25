@@ -133,7 +133,9 @@ class CAFrame
               "return one value per row (to give every row a summary, use " \
               "a reduction with keep_rows: true)"
       end
-      out = coerce_column(out)
+      # An empty Array on a frame with no rows has no value to type it by,
+      # so the column keeps the type it was given as.
+      out = out.is_a?(Array) && out.empty? && @nrow == 0 ? @columns[key].copy : coerce_column(out)
       unless out.ndim >= 1 && out.shape[0] == @nrow
         raise ArgumentError,
               "transform: the block gave #{out.ndim >= 1 ? out.shape[0] : "no"} rows for " \
