@@ -705,21 +705,11 @@ end
       end
       return dump_payload unless data_type == CA_OBJECT
       # An object view dumps its cells by a nested Marshal.dump, which does
-      # not know the objects the outer dump has written.  A cell holding a
-      # view of the same cells would dump it again without end, so the
-      # roots being dumped are kept for the length of the nested dump and
-      # meeting one again is refused, as reading such a cell is.
-      roots = (Thread.current[:carray_marshal_roots] ||= {}.compare_by_identity)
-      root = root_array
-      if roots.key?(root)
-        raise ArgumentError, "Marshal.dump: cyclic reference is not allowed in CArray"
-      end
-      roots[root] = true
-      begin
-        dump_payload
-      ensure
-        roots.delete(root)
-      end
+      # not know the objects the outer dump has written.  A cell holding the
+      # view again (directly or through other views) would dump it without
+      # end, so dumping the same view from inside its own dump is refused,
+      # as reading such a cell is.
+      refuse_reentry("Marshal.dump") { dump_payload }
     end
 
     private

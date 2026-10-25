@@ -904,6 +904,28 @@ ca_recursion_probe (VALUE key, VALUE arg, int recursive)
   return recursive ? Qtrue : Qfalse;
 }
 
+static VALUE
+ca_refuse_reentry_step (VALUE self, VALUE name, int recursive)
+{
+  (void) self;
+  if ( recursive ) {
+    rb_raise(rb_eArgError, "%" PRIsVALUE ": cyclic reference is not allowed in CArray",
+             name);
+  }
+  return rb_yield(Qnil);
+}
+
+/* refuse_reentry(name) { ... } -- runs the block, refusing as cyclic a
+   second call for the same array from inside it (rb_exec_recursive, by
+   the receiver).  Ruby code that walks the cells of an object array and
+   comes back to the array through a cell, such as the nested dump of a
+   view, goes through this. */
+static VALUE
+rb_ca_refuse_reentry (VALUE self, VALUE name)
+{
+  return rb_exec_recursive(ca_refuse_reentry_step, self, name);
+}
+
 /* A cell read that delivers an array being read refuses it: the array the
    cell was read from (an entity is not recorded, see ca_with_cyclic_check)
    or one recorded further out. */
@@ -3203,6 +3225,8 @@ Init_carray_core (void)
   id_encode = rb_intern("encode");
 
   ca_init_obj_type();
+
+  rb_define_private_method(rb_cCArray, "refuse_reentry", rb_ca_refuse_reentry, 1);
 
 #ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCArray, "attach", rb_ca_s_attach, -1);
