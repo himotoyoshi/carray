@@ -106,11 +106,11 @@ class CArray
     # describe a segment sequence, so absorbing their parents keeps chain
     # depth at 1 (avoids 2-level xfer_all / reduce chains through the
     # intermediate CAMeld).  A CAMeld with a different meld_axis is left
-    # intact — its segment structure is orthogonal.
-    if arrays.any? { |a| a.is_a?(CAMeld) && a.meld_axis == axis_norm }
-      arrays = arrays.flat_map { |a|
-        a.is_a?(CAMeld) && a.meld_axis == axis_norm ? a.parents : [a]
-      }
+    # intact — its segment structure is orthogonal.  So is a frozen one:
+    # writes through it are refused, and absorbing it would drop that.
+    absorbed = ->(a) { a.is_a?(CAMeld) && a.meld_axis == axis_norm && !a.frozen? }
+    if arrays.any?(&absorbed)
+      arrays = arrays.flat_map { |a| absorbed.(a) ? a.parents : [a] }
     end
     CAMeld.new(arrays, axis: axis_norm)
   end
