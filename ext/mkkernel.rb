@@ -2846,7 +2846,7 @@ module MkKernel
             ca_size_t __li_parent_out  = __li_OUTER * __li_INNER;
             const ca_size_t __li_TILE = 512;
             for ( int32_t __kk = 0; __kk < __li_st->n_parents; __kk++ ) {
-              ca_attach(__li_st->parents[__kk]);   /* window: numeric lanes only, nothing raises inside */
+              ca_attach(__li_st->parents[__kk]);   /* window: a parent may run Ruby to fill itself (a CAObject's copy_data); a raising attach holds nothing and the earlier parents are already detached, and the numeric loop after it does not raise */
               const #{si[:c]} *p_root = (const #{si[:c]} *) __li_st->parents[__kk]->ptr;
               #{oi[:c]} *__li_op_k = op + (ca_size_t) __kk * __li_parent_out;
     #{core.call("p_root", "__li_op_k", "__li_OUTER")}
@@ -2941,7 +2941,7 @@ module MkKernel
             ca_size_t __li_plane_elems = __li_M * __li_INNER;
             const ca_size_t __li_TILE = 512;
             for ( int32_t __kk = 0; __kk < __li_st->n_parents; __kk++ ) {
-              ca_attach(__li_st->parents[__kk]);   /* window: numeric lanes only, nothing raises inside */
+              ca_attach(__li_st->parents[__kk]);   /* window: a parent may run Ruby to fill itself (a CAObject's copy_data); a raising attach holds nothing and the earlier parents are already detached, and the numeric loop after it does not raise */
               const #{si[:c]} *p_root = (const #{si[:c]} *) __li_st->parents[__kk]->ptr;
               ca_size_t __li_k_base = (ca_size_t) __kk * __li_k_stride;
 
@@ -3099,7 +3099,7 @@ module MkKernel
 
             const ca_size_t __li_TILE = 512;
             for ( int32_t __kk = 0; __kk < __li_st->n_parents; __kk++ ) {
-              ca_attach(__li_st->parents[__kk]);   /* window: numeric lanes only, nothing raises inside */
+              ca_attach(__li_st->parents[__kk]);   /* window: a parent may run Ruby to fill itself (a CAObject's copy_data); a raising attach holds nothing and the earlier parents are already detached, and the numeric loop after it does not raise */
               const #{si[:c]} *p_root = (const #{si[:c]} *) __li_st->parents[__kk]->ptr;
               ca_size_t __li_k_base = (ca_size_t) __kk * __li_k_stride;
 
