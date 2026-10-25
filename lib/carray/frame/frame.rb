@@ -805,13 +805,14 @@ class CAFrame
     super
     @columns = @columns.dup
     @attrs   = @attrs.dup if @attrs
+    @name_views = nil
   end
 
   # Marshal writes the instance variables as they are.  Loading stores the
   # attribute values again as set_attr does, as frozen copies: Marshal
   # brings back a value thawed.
   private def marshal_dump
-    instance_variables.to_h { |name| [name, instance_variable_get(name)] }
+    (instance_variables - [:@name_views]).to_h { |name| [name, instance_variable_get(name)] }
   end
 
   private def marshal_load(ivars)
@@ -904,6 +905,17 @@ class CAFrame
   # column is checked before any is written.  The attributes belong to the
   # columns, not the table, so a frozen or protected frame takes them; a
   # frozen column refuses them.
+  #
+  # Attributes given are set on the column arrays themselves, so frames that
+  # share a column (select, rename, append, drop, paste and dup share them)
+  # all see them, as they all see its cells.  A name is not about the data
+  # but about this frame, so it is not set on the shared array: the column
+  # is replaced by a view of it (+refer+, the same data, Face and mask) that
+  # carries the name, and the array's other attributes still show through
+  # it.  Each frame names its own view, whatever order frames are named in,
+  # and a frame that names nothing shows no name.  Giving names replaces
+  # columns, so a frozen frame refuses it unless every column named already
+  # is this frame's own named view.
   def set_column_attrs(*names, **keywords)
     given = names.last.is_a?(Hash) || !keywords.empty?
     attrs = names.last.is_a?(Hash) ? names.pop.merge(keywords) : keywords
@@ -914,11 +926,46 @@ class CAFrame
       CArray.__send__(:attr_validate_value, value)
     end
     columns.each { |col| col.__send__(:attr_check_writable) }
-    targets.zip(columns).each do |name, col|
-      col.set_attrs(given ? attrs : { "name" => name })
+    if given
+      # On the arrays the names were put in front of, so every frame
+      # sharing the data sees them.
+      columns.each { |col| CAFrame.__send__(:named_source, col).set_attrs(attrs) }
+      return self
+    end
+    own = @name_views || {}
+    reuse = targets.zip(columns).map do |name, col|
+      own.key?(col) && @columns.count { |_, c| c.equal?(col) } == 1
+    end
+    if frozen? && !reuse.all?
+      raise FrozenError.new("set_column_attrs: a name goes on a view of the column that " \
+                            "replaces it in this frame, and a frozen CAFrame keeps its " \
+                            "columns; name the columns before freezing, or name a copy",
+                            receiver: self)
+    end
+    targets.zip(columns, reuse).each do |name, col, same|
+      view = same ? col : CAFrame.__send__(:name_view, col)
+      (@name_views ||= {}.compare_by_identity)[view] = true
+      @columns[name] = view
+      view.set_attr("name", name)
     end
     self
   end
+
+  # A view of +col+ to carry a frame's name for it: the same data, Face and
+  # mask, with the column's other attributes showing through. It remembers
+  # the column it was made from (named_source).
+  def self.name_view(col)
+    view = col.refer
+    view.instance_variable_set(:@named_source, named_source(col))
+    view
+  end
+  private_class_method :name_view
+
+  # The array a name view was made from, or +col+ itself.
+  def self.named_source(col)
+    col.instance_variable_get(:@named_source) || col
+  end
+  private_class_method :named_source
 
   # Whether the frame has any attribute, or the attribute +key+.
   def has_attr?(key = nil)

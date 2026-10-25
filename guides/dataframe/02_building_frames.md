@@ -233,6 +233,8 @@ sales["revenue"].attr(:title)       # => "daily figures by shop"
 sales["revenue"].attr(:long_name)   # => "Revenue of the day"
 ```
 
+A name belongs to this frame. Another frame that shares the column — a `select` or `rename` of this one — gives it its own name and does not change this one's.
+
 A frame made by choosing rows or columns of this one — `filter`, `head`, `select`, `drop`, `rename`, `copy` and the like — takes its attributes with it, since it is still the same table. A frame computed from it — a group summary, a join, a pivot — starts with none.
 
 ```ruby

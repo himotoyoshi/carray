@@ -399,6 +399,19 @@ df["temp"].attrs   # => { "name" => "temp", "title" => "hourly observations", ..
 
 The attributes come as keywords, as a Hash given last, or both; an empty Hash sets nothing. A column's other attributes are kept, the index is not a column, and the method returns the frame. Every name, key and value is checked before anything is written. The attributes belong to the columns, so a frozen or protected frame takes them too; a frozen column refuses them, and then no column is changed.
 
+Frames made by `select`, `rename`, `append`, `drop`, `paste` and `dup` share their column arrays, so the attributes given land on those arrays and every frame sharing a column sees them, as it sees the column's cells. A name is different: it is what this frame calls the column, and another frame sharing it may call it something else. So the name is not set on the shared array. The column is replaced by a view of it (`refer`: the same data, Face and mask), and the name goes on the view. The array's other attributes still show through the view. Each frame shows its own name, whichever frame names first, and a frame that has named nothing shows no name:
+
+```ruby
+r = df.rename("temp" => "t2")
+r.set_column_attrs
+df["temp"].attr(:name)   # => nil     df has not named its columns
+df.set_column_attrs
+df["temp"].attr(:name)   # => "temp"
+r["t2"].attr(:name)      # => "t2"
+```
+
+Giving names replaces columns, so a frozen frame refuses it, except when every column named is already the frame's own named view (a frame named before it was frozen). The array a column was made from (the one passed to `CAFrame.new`, say) carries no name; the column taken out of the frame does.
+
 A frame made from this one takes its attributes when it holds the same table:
 
 - a selection of rows: `df[rows]`, `filter`, `head`, `tail`, `sort_by`, `sort_by_key`, `join(how: :semi / :anti)`, and a group's `filter`

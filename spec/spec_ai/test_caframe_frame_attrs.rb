@@ -295,10 +295,49 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     assert_equal({}, df["a"].attrs)
   end
 
+  # A name goes on a view that replaces the column, which a frozen frame
+  # does not allow; attributes given still go on the columns, and a frame
+  # named before it was frozen can name its own views again.
   def test_set_column_attrs_on_a_frozen_frame
     df = frame.freeze
+    assert_raise(FrozenError) { df.set_column_attrs }
+    df.set_column_attrs(units: "K")
+    assert_equal "K", df["k"].attr("units")
+    named = frame
+    named.set_column_attrs
+    named.freeze
+    named.set_column_attrs
+    assert_equal "k", named["k"].attr("name")
+  end
+
+  # A name is this frame's: frames sharing a column (rename, select, dup)
+  # each show their own name, whichever names first, and a frame that names
+  # nothing shows none. Attributes given reach every frame sharing the data.
+  def test_a_name_stays_with_its_frame
+    df = CAFrame.new("temp" => CA_FLOAT64([1, 2]))
+    data = df["temp"]
+    r = df.rename("temp" => "t2")
+    r.set_column_attrs
+    assert_nil df["temp"].attr("name")
     df.set_column_attrs
-    assert_equal "k", df["k"].attr("name")
+    assert_equal "temp", df["temp"].attr("name")
+    assert_equal "t2", r["t2"].attr("name")
+    assert_nil data.attr("name")
+    df.select("temp").set_column_attrs(units: "K")
+    assert_equal ["K", "K", "K"], [df["temp"], r["t2"], data].map { |c| c.attr("units") }
+    df["temp"][0] = 9.0
+    assert_equal [9.0, 2.0], data.to_a
+  end
+
+  # The same array under two names gets two names.
+  def test_one_array_under_two_names
+    df = CAFrame.new("x" => CA_FLOAT64([1, 2]))
+    df["z"] = df["x"]
+    df.set_column_attrs
+    assert_equal ["x", "z"], [df["x"].attr("name"), df["z"].attr("name")]
+    view = df["x"]
+    df.set_column_attrs
+    assert_same view, df["x"]                  # its own view is named again, not wrapped
   end
 
   def test_marshal_round_trip
