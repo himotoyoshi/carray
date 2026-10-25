@@ -301,7 +301,13 @@ ca_has_mask (void *ap)
   if ( ca->mask ) {                /* mask array already created */
     return 1;
   }
-  else if ( ca_is_value_array(ca) ) {
+  else if ( ca_test_flag(ca, CA_FLAG_VALUE_ARRAY) ) {
+    /* Only this array's own mark, not ca_is_value_array, which walks to
+       the root and would make every level of a view pay again for the
+       levels above it.  A view below a value array still answers 0: it
+       asks its parent, and the question reaches the marked array.  No
+       level in between has a mask, since ca_create_mask refuses one for
+       anything below a value array. */
     return 0;                     /* array itself is returned by CArray#value */
   }
   else if ( ca_is_entity(ca) ) {   /* entity array */
@@ -314,6 +320,11 @@ ca_has_mask (void *ap)
         ca_create_mask(ca);
         return 1;
       }
+      return 0;
+    }
+    /* The one level that answers without asking its parent: a value
+       array above it has to be looked for here. */
+    if ( ca_is_value_array(ca) ) {
       return 0;
     }
     if ( rb_obj_respond_to(co->self, rb_intern("mask_created?"), Qtrue) ) {
