@@ -326,10 +326,11 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     assert_kind_of CATime, mean
     assert_equal CArray.time(["2024-01-02", "2024-01-05"]).to_a, mean.to_a
     assert_equal ["a", "c"], g.min["s"].to_a
-    # an empty frame keeps the same columns
+    # an empty frame keeps the same columns, except an object column, which
+    # has no value to show what it holds
     e = df[CA_BOOLEAN([0, 0, 0])].group_by("k")
-    assert_equal %w[t v s b o], e.min.column_names
-    assert_equal %w[t v b o z], e.mean.column_names
+    assert_equal %w[t v s b], e.min.column_names
+    assert_equal %w[t v b z], e.mean.column_names
   end
 
   def test_minimum_of_a_raw_fixlen_column_per_group

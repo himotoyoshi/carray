@@ -338,7 +338,7 @@ time     CATime       3       0       3  2024-01-01  2024-01-03  2024-01-02  1D
 
 ### One reduction of every column — `df.mean`, `df.max`, ...
 
-The reductions of a [grouped frame](#the-same-reduction-for-every-column) also work on the frame itself, with every row in one group: the result is a frame of **one row**, with no index. Given names, it holds those columns; without, every column whose type has the reduction. A column keeps its type where the reduction keeps it, so the earliest time of a time column is a time.
+The reductions of a [grouped frame](#the-same-reduction-for-every-column) also work on the frame itself, with every row in one group: the result is a frame of **one row**, with no index. Given names, it holds those columns; without, every column whose type has the reduction. An object column with no present value (one of a frame with no rows, or all `UNDEF`) does not show what it holds and is left out, except by `count`; name it to reduce it. A column keeps its type where the reduction keeps it, so the earliest time of a time column is a time.
 
 ```ruby
 df.mean                                  # => one row, the mean of every numeric column

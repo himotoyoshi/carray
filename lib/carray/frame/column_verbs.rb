@@ -25,8 +25,10 @@ class CAFrame
   # the column's first row (two blank cells of its kind when it has no
   # rows), so the answer is about the type and not the data: a refusal
   # there means the operation does not apply, while an error in the verb
-  # itself is left to raise. An N-D column (each row a profile) is asked,
-  # and computed, along the rows.
+  # itself is left to raise. An object column is the exception: its type
+  # says nothing of what it holds, so one with no present value is left out
+  # of a verb run over every column. An N-D column (each row a profile) is
+  # asked, and computed, along the rows.
   module ColumnVerbs
 
     private
@@ -37,6 +39,7 @@ class CAFrame
         @frame.column_names.each do |name|
           next if key_names.include?(name)
           col = @frame[name]
+          next if valueless_object_column?(col, verb, args)
           next unless column_has?(col, verb, args, keywords)
           cols[name] = yield(col, name)
         end
@@ -56,6 +59,16 @@ class CAFrame
         yield(col, key)
       end
       results.size == 1 ? results.first : keys.zip(results).to_h
+    end
+
+    # An object column with no present cell says nothing of what it holds,
+    # so a verb run over every column leaves it out, as select leaves it out
+    # of every kind; counting the present cells applies to any column.
+    def valueless_object_column? (col, verb, args)
+      return false if col.face? || col.data_type != CA_OBJECT
+      return false if %i[count_not_masked count_masked].include?(verb)
+      return false if verb == :count && args.empty?
+      col.count_not_masked == 0
     end
 
     # count with no value counts the present cells, which every type has;
