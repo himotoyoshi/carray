@@ -367,7 +367,7 @@ df.column_names     # => ["station", "temp"]
 df.data_types       # => { "station" => :object, "temp" => :float64 }
 ```
 
-`df == other` is true when `other` holds the same table: the same column names in the same order, each column equal as `CArray#==` has it (data type, shape, present values, and where the cells are masked), and the same index and row axis name. Attributes are not compared.
+`df == other` is true when `other` holds the same table: the same column names in the same order, each column equal as `CArray#==` has it (data type, shape, present values, and where the cells are masked; a NaN equals a NaN, so a frame equals its copy and the frame read back from its CSV), and the same index and row axis name. Attributes are not compared.
 
 The Arrays and Hashes these readers return are made for each call, so changing one does not change the frame. The CArrays inside them are not copies: `columns` holds the stored columns themselves, and `index` is the stored index.
 

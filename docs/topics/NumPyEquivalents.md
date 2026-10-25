@@ -186,7 +186,7 @@ Where one library has no direct counterpart, the row gives the nearest way to do
 | NumPy | CArray | Notes |
 |---|---|---|
 | `a == b` (elementwise) | `a.eq(b)` | CArray's `==` and `!=` compare whole arrays and return `true` / `false`. `<`, `>`, `<=`, `>=` are elementwise. Also `ne`, `lt`, `le`, `gt`, `ge` |
-| `np.array_equal(a, b)` | `a == b` | `==` is false when the data types differ, even if the values are equal. `a.eq(b).all` compares the values only |
+| `np.array_equal(a, b, equal_nan=True)` | `a == b` | `==` is false when the data types differ, even if the values are equal, and a NaN equals a NaN. `a.eq(b).all` compares the values only, with NaN equal to nothing |
 | `np.isclose(a, v, rtol=0, atol=t)` | `a.is_close(v, t)` | The tolerance is required and is absolute only; NumPy adds `rtol=1e-5` by default. `is_equiv(v, t)` is the relative test |
 | `np.allclose(a, b, rtol=0, atol=t)` | `a.is_close(b, t).all` | Absolute tolerance only, as above |
 | `np.isnan(a)` | `a.is_nan` | |

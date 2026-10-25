@@ -36,8 +36,11 @@ class CArray
   # @overload ==(other)
   #   Returns `true` if `other` is a CArray with the same shape,
   #   `data_class`, `data_type`, mask state, and elementwise values as
-  #   `self`. NaN values compare unequal (IEEE semantics), so two
-  #   arrays with NaN at the same position are not `==`.
+  #   `self`. It asks whether the contents are the same, so a NaN equals
+  #   a NaN at the same position (whatever its payload, in a float, a
+  #   complex part or an object cell) and -0.0 equals 0.0: an array with
+  #   NaN is `==` to its copy. The IEEE comparison, where NaN equals
+  #   nothing, is {#eq}, cell by cell.
   #
   #   A Face (a time, string or categorical array) equals only a Face of
   #   its own class, and is compared by its values: two time arrays of
@@ -53,8 +56,8 @@ class CArray
   #   Returns `true` under Hash-invariant semantics: `data_class`,
   #   `data_type`, shape, and mask state must all match, and elements
   #   are compared bitwise (for numeric types) or via `Object#eql?`
-  #   (for `:object` arrays). Unlike `==`, `NaN.eql?(NaN)` holds, so
-  #   two mask-free arrays with NaN at the same positions are `eql?`.
+  #   (for `:object` arrays), so -0.0 and 0.0 differ and two NaNs are
+  #   `eql?` only with the same bits.
   #   Two Faces are `eql?` only when they are of the same class, share
   #   their state (a time array's unit, a categorical's labels) and hold
   #   the same storage.

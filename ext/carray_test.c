@@ -274,10 +274,23 @@ eql_## type (const char *a, const char *b, ca_size_t bytes) \
   return ( *(const type*)a == *(const type*)b ); \
 }
 
+/* == compares contents: a NaN equals a NaN (whatever its payload), as the
+   same array read back or copied holds the same NaN; -0.0 equals 0.0 as
+   values do.  eql? stays bitwise. */
+static int
+ca_object_cells_equal (VALUE x, VALUE y)
+{
+  if ( RB_FLOAT_TYPE_P(x) && RB_FLOAT_TYPE_P(y) &&
+       isnan(RFLOAT_VALUE(x)) && isnan(RFLOAT_VALUE(y)) ) {
+    return 1;
+  }
+  return RTEST(rb_funcall(x, id_equal, 1, y)) ? 1 : 0;
+}
+
 static int
 eql_VALUE (const char *a, const char *b, ca_size_t bytes)
 {
-  return RTEST(rb_funcall(*(const VALUE*)a, id_equal, 1, *(const VALUE*)b)) ? 1 : 0;
+  return ca_object_cells_equal(*(const VALUE*)a, *(const VALUE*)b);
 }
 
 static int
@@ -295,10 +308,28 @@ eql_type(int32_t)
 eql_type(uint32_t)
 eql_type(int64_t)
 eql_type(uint64_t)
-eql_type(float32_t)
-eql_type(float64_t)
-eql_type(cmplx64_t)
-eql_type(cmplx128_t)
+#define eql_float(type)        \
+static int                      \
+eql_## type (const char *a, const char *b, ca_size_t bytes) \
+{                               \
+  type x = *(const type*)a, y = *(const type*)b; \
+  return ( x == y ) || ( isnan(x) && isnan(y) ); \
+}
+
+#define eql_cmplx(type, part)   \
+static int                      \
+eql_## type (const char *a, const char *b, ca_size_t bytes) \
+{                               \
+  type x = *(const type*)a, y = *(const type*)b; \
+  part xr = creal(x), xi = cimag(x), yr = creal(y), yi = cimag(y); \
+  return ( ( xr == yr ) || ( isnan(xr) && isnan(yr) ) ) && \
+         ( ( xi == yi ) || ( isnan(xi) && isnan(yi) ) ); \
+}
+
+eql_float(float32_t)
+eql_float(float64_t)
+eql_cmplx(cmplx64_t, float)
+eql_cmplx(cmplx128_t, double)
 
 /* Placeholder for CA_FLOAT128 / CA_CMPLX256 slots (ca_valid[12] =
    ca_valid[15] = 0, so never invoked). */
@@ -371,8 +402,8 @@ ca_compare_body (VALUE arg)
      comparison is bitwise (= NaN.eql?(NaN) yields true since their bit
      patterns match), so memcmp gives the right semantics. For non-strict
      (==) of numeric data_types, type-equality is byte-equality EXCEPT for
-     floats where -0.0 == +0.0 (different bit pattern, same value) and
-     NaN != NaN (same bit pattern, unequal value) -- so we must keep the
+     floats where -0.0 == +0.0 (different bit pattern, same value) and any
+     NaN equals any NaN (payloads may differ) -- so we must keep the
      per-element comparator there.
 
      Integer / bool / fixlen data_types are byte-exact, so memcmp matches both
@@ -380,13 +411,14 @@ ca_compare_body (VALUE arg)
      the comparator. */
   if ( ! masked_a && ! masked_b ) {
     if ( is_object ) {
-      ID id = strict ? id_eql : id_equal;
       VALUE *va = (VALUE *) pa;
       VALUE *vb = (VALUE *) pb;
       for (i=0; i<ca->elements; i++) {
         volatile VALUE x = va[i];
         volatile VALUE y = vb[i];
-        if ( ! RTEST(rb_funcall(x, id, 1, y)) ) {
+        int eq = strict ? RTEST(rb_funcall(x, id_eql, 1, y))
+                        : ca_object_cells_equal(x, y);
+        if ( ! eq ) {
           flag = 0;
           break;
         }
@@ -427,8 +459,8 @@ ca_compare_body (VALUE arg)
         if ( is_object ) {
           volatile VALUE x = *(VALUE *) pa;
           volatile VALUE y = *(VALUE *) pb;
-          ID id = strict ? id_eql : id_equal;
-          eq = RTEST(rb_funcall(x, id, 1, y));
+          eq = strict ? RTEST(rb_funcall(x, id_eql, 1, y))
+                      : ca_object_cells_equal(x, y);
         }
         else if ( strict
                   || ca->data_type <= CA_UINT64
@@ -490,7 +522,7 @@ ca_compare_unmark (VALUE arg)
  * four masked/unmasked combinations.
  *
  * The only difference is the per-element comparator:
- *   == : ca_eql[data_type] (type-specific, so float NaN != NaN)
+ *   == : ca_eql[data_type] (by value: NaN equals NaN, -0.0 equals 0.0)
  *   eql?: memcmp for numeric, rb_funcall(:eql?) for CA_OBJECT
  *
  * The unmasked-unmasked branch takes a bulk memcmp or per-cell
@@ -558,9 +590,10 @@ ca_eql_storage (void *ap, void *bp)
 }
 
 /* CArray#==(other) — elementwise equality returning true / false.
- * data_class, data_type, shape, and mask state must all match; NaN
- * compares unequal per IEEE semantics.  Non-CArray other returns
- * false. */
+ * data_class, data_type, shape, and mask state must all match.  It asks
+ * whether the contents are the same, so a NaN equals a NaN and -0.0
+ * equals 0.0; the IEEE comparison of each element is #eq.  Non-CArray
+ * other returns false. */
 static VALUE
 rb_ca_equal (VALUE self, VALUE other)
 {
