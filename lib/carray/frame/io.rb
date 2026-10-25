@@ -495,6 +495,13 @@ class CAFrame
       formatted << format_csv_column(col, precision)
       written   << col
     end
+    # A line with no fields reads back as a blank line, which a reader passes
+    # over, so the rows would be lost.
+    if names.empty? && @nrow > 0
+      raise ArgumentError,
+            "to_csv: the frame has #{@nrow} rows but no field to write " \
+            "(no columns#{@index ? ', and index: false' : ''})"
+    end
     attr_rows = attr_keys.map do |key|
       written.each_with_index.map { |col, j| csv_attr_text(col, key, names[j]) }
     end
