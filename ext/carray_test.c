@@ -486,27 +486,13 @@ ca_compare_body (VALUE arg)
 typedef struct {
   CArray           **list;
   ca_compare_ctx_t  *c;
-  CArray            *marked[2];
 } ca_compare_run_t;
 
 static VALUE
 ca_compare_run (VALUE arg)
 {
   ca_compare_run_t *r = (ca_compare_run_t *) arg;
-  r->marked[0] = ca_set_computing(r->list[0]);
-  if ( ca_root_array(r->list[1]) != ca_root_array(r->list[0]) ) {
-    r->marked[1] = ca_set_computing(r->list[1]);
-  }
   ca_attach_window(2, r->list, "rr", ca_compare_body, (VALUE) r->c);
-  return Qnil;
-}
-
-static VALUE
-ca_compare_unmark (VALUE arg)
-{
-  ca_compare_run_t *r = (ca_compare_run_t *) arg;
-  if ( r->marked[0] ) ca_clear_computing(r->marked[0]);
-  if ( r->marked[1] ) ca_clear_computing(r->marked[1]);
   return Qnil;
 }
 
@@ -563,14 +549,13 @@ ca_compare_common (void *ap, void *bp, int strict)
     list[0]  = ca;
     list[1]  = cb;
     /* The object lane calls #== / #eql? with both arrays attached, and
-       marked as compared over, so a cell holding one of them is refused
-       as cyclic rather than compared again without end. */
+       recorded as compared over (ca_computing_run), so a cell holding one
+       of them is refused as cyclic rather than compared again without
+       end. */
     ca_compare_run_t r;
     r.list = list;
     r.c    = &c;
-    r.marked[0] = NULL;
-    r.marked[1] = NULL;
-    rb_ensure(ca_compare_run, (VALUE) &r, ca_compare_unmark, (VALUE) &r);
+    ca_computing_run(2, list, ca_compare_run, (VALUE) &r);
     return c.flag;
   }
 }

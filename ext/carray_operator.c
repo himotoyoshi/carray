@@ -162,43 +162,8 @@ ca_chunked_gather (CArray *ca, ca_size_t off, ca_size_t n, void *dest)
 
 #define CA_CHUNKED_MAX_OPERANDS 3
 
-/* Marks the roots of the object arrays among ops[0..n) as computed over
-   (ca_set_computing), each root once, appending them to marked[] and
-   counting them in *nmarked as it goes, so that a clear after a raise
-   undoes exactly what was set.  A cell holding the array or a view of it
-   leads the kernel back into the same root, and is refused as cyclic. */
-static void
-ca_op_mark_roots (CArray **ops, int n, CArray **marked, int *nmarked)
-{
-  int k, j;
-  for ( k = 0; k < n; k++ ) {
-    CArray *root;
-    int seen = 0;
-    if ( ! ops[k] ) continue;
-    root = ca_root_array(ops[k]);
-    for ( j = 0; j < *nmarked; j++ ) {
-      if ( marked[j] == root ) seen = 1;
-    }
-    if ( ! seen && (root = ca_set_computing(ops[k])) ) {
-      marked[(*nmarked)++] = root;
-    }
-  }
-}
-
-static void
-ca_op_clear_roots (CArray **marked, int *nmarked)
-{
-  int k;
-  for ( k = 0; k < *nmarked; k++ ) {
-    ca_clear_computing(marked[k]);
-  }
-  *nmarked = 0;
-}
-
 typedef struct ca_chunked_run {
   int         n_op;
-  CArray     *marked[CA_CHUNKED_MAX_OPERANDS];
-  int         nmarked;
   CArray     *ca[CA_CHUNKED_MAX_OPERANDS];
   ca_size_t   step[CA_CHUNKED_MAX_OPERANDS];
   char       *src[CA_CHUNKED_MAX_OPERANDS];
@@ -253,14 +218,13 @@ ca_chunked_run_acquire (ca_chunked_run_t *run, int k)
 }
 
 static VALUE
-ca_chunked_run_body (VALUE arg)
+ca_chunked_run_loop (VALUE arg)
 {
   ca_chunked_run_t *run = (ca_chunked_run_t *) arg;
   char     *p[CA_CHUNKED_MAX_OPERANDS];
   ca_size_t off;
   int k;
 
-  ca_op_mark_roots(run->ca, run->n_op, run->marked, &run->nmarked);
   for ( k = 0; k < run->n_op; k++ ) {
     ca_chunked_run_acquire(run, k);
   }
@@ -281,12 +245,20 @@ ca_chunked_run_body (VALUE arg)
   return Qnil;
 }
 
+/* The object arrays among the operands are recorded as computed over
+   (ca_computing_run) while the run reads them. */
+static VALUE
+ca_chunked_run_body (VALUE arg)
+{
+  ca_chunked_run_t *run = (ca_chunked_run_t *) arg;
+  return ca_computing_run(run->n_op, run->ca, ca_chunked_run_loop, arg);
+}
+
 static VALUE
 ca_chunked_run_release (VALUE arg)
 {
   ca_chunked_run_t *run = (ca_chunked_run_t *) arg;
   int k;
-  ca_op_clear_roots(run->marked, &run->nmarked);
   for ( k = run->n_op - 1; k >= 0; k-- ) {
     if ( run->scratch[k] ) {
       ca_lazy_arena_release(run->scratch[k]);
@@ -487,17 +459,21 @@ typedef struct {
   int        n;
   CArray   **held;
   const char *mode;     /* per held array: 'r' read, 'w' written in place */
-  CArray   **ops;       /* every operand, attached or gathered (marked below) */
-  CArray    *marked[4]; /* the roots this call marked as computed over */
-  int        nmarked;
+  CArray   **ops;       /* every operand, attached or gathered */
 } ca_op_guard_t;
+
+static VALUE
+ca_op_guard_run (VALUE varg)
+{
+  ca_op_guard_t *g = (ca_op_guard_t *) varg;
+  return g->run(g->arg);
+}
 
 static VALUE
 ca_op_guard_body (VALUE varg)
 {
   ca_op_guard_t *g = (ca_op_guard_t *) varg;
-  ca_op_mark_roots(g->ops, g->n, g->marked, &g->nmarked);
-  g->run(g->arg);
+  ca_computing_run(g->n, g->ops, ca_op_guard_run, varg);
   g->done = 1;
   return Qnil;
 }
@@ -517,7 +493,6 @@ ca_op_guard_release (VALUE varg)
 {
   ca_op_guard_t *g = (ca_op_guard_t *) varg;
   int k;
-  ca_op_clear_roots(g->marked, &g->nmarked);
   if ( g->done ) {
     return Qnil;
   }
@@ -539,8 +514,8 @@ ca_op_guard_release (VALUE varg)
 
 /* Runs the kernel packed in `call` with `held` attached; see above.  NULL
    entries in held are skipped.  ops lists every operand the kernel reads
-   or writes, attached or gathered into a buffer, so that the roots of the
-   object arrays among them are marked as computed over (ca_set_computing)
+   or writes, attached or gathered into a buffer, so that the object
+   arrays among them are recorded as computed over (ca_computing_run)
    while the kernel runs; NULL means the operands are the held arrays. */
 static void
 ca_op_guarded (VALUE (*run)(VALUE), void *call,
@@ -554,7 +529,6 @@ ca_op_guarded (VALUE (*run)(VALUE), void *call,
   g.held = held;
   g.mode = mode;
   g.ops  = ops ? ops : held;
-  g.nmarked = 0;
   rb_ensure(ca_op_guard_body, (VALUE) &g, ca_op_guard_release, (VALUE) &g);
 }
 

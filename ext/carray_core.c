@@ -811,74 +811,116 @@ ca_index2addr (void *ap, ca_size_t *idx)
 
 /* ------------------------------------------------------------------- */
 
-/* The cyclic reference detection should be done in 
-     + ca_fetch_addr, ca_fetch_index,
-     + ca_store_addr, ca_store_index,
-  to avoid the system stack error in reference of the object array.
-*/
+/* Recursion over object arrays.
 
-void
-ca_set_cyclic_check(void *ap)
+   A cell of an object array can hold the array itself or a view of it.
+   Reading such a cell, or computing over the array, would come back into
+   the same cells without end.  Both are refused when they enter an array
+   that the same Ruby method is already reading or computing over, in this
+   thread and fiber: rb_exec_recursive keeps that record, as it does for an
+   Array that holds itself (Array#flatten, Array#inspect).  The array is
+   not written to, so a frozen array, or one shared between Ractors, is
+   read and computed over as any other.
+
+   A read and a computation are recorded apart (CA_RECURSION_READ /
+   CA_RECURSION_COMPUTE): a computation reads the cells it computes over. */
+
+#define CA_RECURSION_COMPUTE 0
+#define CA_RECURSION_READ    1
+
+static VALUE
+ca_recursion_key (CArray *ca, int kind)
 {
-  CArray *ca = (CArray *) ap;
-  /* ca.data_type == CA_OBJECT */
-  if ( ca_is_object_type(ca) ) {
-    if ( ca->flags & CA_FLAG_CYCLE_CHECK ) {
-      rb_raise(rb_eArgError, "cyclic reference is not allowed in CArray");
-    }
-    ca_set_flag(ca, CA_FLAG_CYCLE_CHECK);
-  }
+  /* the struct of an array is aligned, so the low bit is free */
+  return ULL2NUM(((unsigned long long) (uintptr_t) ca) | (unsigned long long) kind);
 }
 
-void
-ca_clear_cyclic_check(void *ap)
-{
-  CArray *ca = (CArray *) ap;
-  /* ca.data_type == CA_OBJECT */
-  if ( ca_is_object_type(ca) ) {
-    ca_unset_flag(ca, CA_FLAG_CYCLE_CHECK);
-  }
-}
+NORETURN(static void ca_refuse_cyclic (int kind));
 
-/* Marks the root of an object array a kernel computes over, and returns
-   it (the caller clears it); NULL when there is nothing to mark.  Raises
-   when the root is already being computed over: a cell's value led the
-   computation back into the same cells. */
-CArray *
-ca_set_computing (CArray *ca)
+static void
+ca_refuse_cyclic (int kind)
 {
-  CArray *root;
-  if ( ! ca_is_object_type(ca) ) {
-    return NULL;
-  }
-  root = ca_root_array(ca);
-  if ( ca_test_flag(root, CA_FLAG_COMPUTING) ) {
+  if ( kind == CA_RECURSION_COMPUTE ) {
     rb_raise(rb_eArgError, "%s: cyclic reference is not allowed in CArray",
              ca_calling_method_name());
   }
-  ca_set_flag(root, CA_FLAG_COMPUTING);
-  return root;
+  rb_raise(rb_eArgError, "cyclic reference is not allowed in CArray");
 }
 
-void
-ca_clear_computing (CArray *root)
+typedef struct {
+  int        n;
+  CArray   **ops;
+  int        k;
+  VALUE    (*body)(VALUE);
+  VALUE      arg;
+} ca_computing_t;
+
+static VALUE ca_computing_next (ca_computing_t *c);
+
+static VALUE
+ca_computing_step (VALUE key, VALUE varg, int recursive)
 {
-  ca_unset_flag(root, CA_FLAG_COMPUTING);
+  (void) key;
+  if ( recursive ) {
+    ca_refuse_cyclic(CA_RECURSION_COMPUTE);
+  }
+  return ca_computing_next((ca_computing_t *) varg);
 }
 
+static VALUE
+ca_computing_next (ca_computing_t *c)
+{
+  while ( c->k < c->n ) {
+    CArray *ca = c->ops[c->k++];
+    int j, seen = 0;
+    if ( ! ca || ! ca_is_object_type(ca) ) continue;
+    for ( j = 0; j < c->k - 1; j++ ) {
+      if ( c->ops[j] == ca ) seen = 1;
+    }
+    if ( seen ) continue;
+    return rb_exec_recursive(ca_computing_step,
+                             ca_recursion_key(ca, CA_RECURSION_COMPUTE),
+                             (VALUE) c);
+  }
+  return c->body(c->arg);
+}
+
+/* Runs body(arg), a computation over ops[0..n), with each object array
+   among them recorded as computed over.  Raises when one of them is
+   already being computed over by the same method: a cell's value, or an
+   element's operation, led the computation back into it. */
+VALUE
+ca_computing_run (int n, CArray **ops, VALUE (*body)(VALUE), VALUE arg)
+{
+  ca_computing_t c;
+  c.n = n; c.ops = ops; c.k = 0; c.body = body; c.arg = arg;
+  return ca_computing_next(&c);
+}
+
+static VALUE
+ca_recursion_probe (VALUE key, VALUE arg, int recursive)
+{
+  (void) key; (void) arg;
+  return recursive ? Qtrue : Qfalse;
+}
+
+/* A cell read that delivers an array being read refuses it: the array the
+   cell was read from (an entity is not recorded, see ca_with_cyclic_check)
+   or one recorded further out. */
 void
-ca_test_cyclic_check(void *ap, void *ptr)
+ca_test_cyclic_check (void *ap, void *ptr)
 {
   CArray *ca = (CArray *) ap;
-
-  /* ca.data_type == CA_OBJECT */
   if ( ca_is_object_type(ca) ) {
-    VALUE rval = *(VALUE*) ptr;
+    VALUE rval = *(VALUE *) ptr;
     if ( rb_obj_is_carray(rval) ) {
       CArray *cv;
       TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
-      if ( ca_test_flag(cv, CA_FLAG_CYCLE_CHECK) ) {
-        rb_raise(rb_eArgError, "cyclic reference is not allowed in CArray");
+      if ( cv == ca ||
+           RTEST(rb_exec_recursive(ca_recursion_probe,
+                                   ca_recursion_key(cv, CA_RECURSION_READ),
+                                   Qnil)) ) {
+        ca_refuse_cyclic(CA_RECURSION_READ);
       }
     }
   }
@@ -909,28 +951,40 @@ ca_refuse_storing_self (CArray *ca, const void *data, ca_size_t n)
   }
 }
 
-/* Runs body(arg) -- one transfer of an object cell or cells -- with ca's
-   cycle check set, and clears the check however body leaves.  Either
-   direction can call into Ruby: a GET through a CAObject slot or the
-   check of what it delivered, a PUT that converts the caller's value.  A
-   raise that skipped the clear would leave every later access to ca
-   reporting a cyclic reference.  A PUT into an entity only copies VALUEs
-   and cannot raise, so it runs unprotected. */
+typedef struct {
+  VALUE (*body)(VALUE);
+  VALUE  arg;
+} ca_reading_t;
+
+static VALUE
+ca_reading_step (VALUE key, VALUE varg, int recursive)
+{
+  ca_reading_t *r = (ca_reading_t *) varg;
+  (void) key;
+  if ( recursive ) {
+    ca_refuse_cyclic(CA_RECURSION_READ);
+  }
+  return r->body(r->arg);
+}
+
+/* Runs body(arg) -- one transfer of an object cell or cells -- with ca
+   recorded as being read.  Entering a transfer of ca again from inside it
+   is refused as cyclic.  A transfer of an entity only copies VALUEs and
+   calls no Ruby, so it cannot be entered again; it is not recorded, and
+   a cell holding the entity itself is caught by ca_test_cyclic_check. */
 static void
 ca_with_cyclic_check (CArray *ca, int dir, VALUE (*body)(VALUE), VALUE arg)
 {
-  int state = 0;
-  ca_set_cyclic_check(ca);
-  if ( dir == CA_XFER_PUT && ca_is_entity(ca) ) {
+  ca_reading_t r;
+  (void) dir;
+  if ( ca_is_entity(ca) ) {
     body(arg);
+    return;
   }
-  else {
-    rb_protect(body, arg, &state);
-  }
-  ca_clear_cyclic_check(ca);
-  if ( state ) {
-    rb_jump_tag(state);
-  }
+  r.body = body;
+  r.arg  = arg;
+  rb_exec_recursive(ca_reading_step, ca_recursion_key(ca, CA_RECURSION_READ),
+                    (VALUE) &r);
 }
 
 /* ------------------------------------------------------------------- */

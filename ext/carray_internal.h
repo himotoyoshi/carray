@@ -425,19 +425,16 @@ void        ca_check_rank_fits (long ndim, const char *name);
 #define CA_FLAG_LENT        2048
 #define CA_FLAG_LENT_VIEWED 4096
 
-/* An object array a kernel is computing over.  A cell whose value is the
-   array itself or a view of it makes the kernel call back into a kernel
-   over the same cells; entering it again is refused as cyclic, as reading
-   such a cell is (ca_test_cyclic_check).  The mark is on the root
-   (ca_root_array): a view that reorders the cells (transpose, an index
-   array) reaches the kernel as another struct, or as a copy, but shares
-   the root.  ca_set_computing returns the root it marked (the caller
-   clears it), or NULL when there is nothing to mark. */
-#define CA_FLAG_COMPUTING   8192
-VALUE   ca_iter_ensure_computing (CArray *ca, int32_t n, ca_iter_state *states,
-                                  VALUE (*body)(VALUE), VALUE arg);
-CArray *ca_set_computing (CArray *ca);
-void    ca_clear_computing (CArray *root);
+/* A computation over object arrays.  A cell whose value is the array
+   itself or a view of it makes the kernel call back into a computation
+   over the same cells; entering an array that the same method is already
+   computing over, in this thread and fiber, is refused as cyclic, as
+   reading such a cell is (ca_test_cyclic_check).  ca_computing_run runs
+   body(arg) with the object arrays among ops[0..n) recorded
+   (rb_exec_recursive, carray_core.c); nothing is written to the arrays. */
+VALUE ca_computing_run (int n, CArray **ops, VALUE (*body)(VALUE), VALUE arg);
+VALUE ca_iter_ensure_computing (CArray *ca, int32_t n, ca_iter_state *states,
+                                VALUE (*body)(VALUE), VALUE arg);
 
 #define CA_CHECK_DATA_TYPE_GIVEN(data_type) \
   do { \

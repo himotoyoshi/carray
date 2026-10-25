@@ -2919,33 +2919,21 @@ ca_iter_ensure (int32_t n, ca_iter_state *states,
   return rb_ensure(body, arg, ca_iter_ensure_close, (VALUE) &e);
 }
 
-/* ca_iter_ensure over the object array ca, marked as being computed over
-   (ca_set_computing) for the length of the call. */
+/* ca_iter_ensure over the object array ca, recorded as being computed
+   over (ca_computing_run) for the length of the body.  The record is taken
+   inside the ensure, so a refusal closes the states as a raise from the
+   body does. */
 typedef struct {
-  int32_t n;
-  ca_iter_state *states;
+  CArray *ca;
   VALUE (*body)(VALUE);
   VALUE arg;
-  CArray *ca;
-  CArray *marked;
 } ca_iter_computing_t;
 
 static VALUE
 ca_iter_computing_body (VALUE arg)
 {
   ca_iter_computing_t *c = (ca_iter_computing_t *) arg;
-  c->marked = ca_set_computing(c->ca);
-  return ca_iter_ensure(c->n, c->states, c->body, c->arg);
-}
-
-static VALUE
-ca_iter_computing_close (VALUE arg)
-{
-  ca_iter_computing_t *c = (ca_iter_computing_t *) arg;
-  if ( c->marked ) {
-    ca_clear_computing(c->marked);
-  }
-  return Qnil;
+  return ca_computing_run(1, &c->ca, c->body, c->arg);
 }
 
 VALUE
@@ -2953,10 +2941,8 @@ ca_iter_ensure_computing (CArray *ca, int32_t n, ca_iter_state *states,
                           VALUE (*body)(VALUE), VALUE arg)
 {
   ca_iter_computing_t c;
-  c.n = n; c.states = states; c.body = body; c.arg = arg;
-  c.ca = ca; c.marked = NULL;
-  return rb_ensure(ca_iter_computing_body, (VALUE) &c,
-                   ca_iter_computing_close, (VALUE) &c);
+  c.ca = ca; c.body = body; c.arg = arg;
+  return ca_iter_ensure(n, states, ca_iter_computing_body, (VALUE) &c);
 }
 
 #ifdef CARRAY_DEV_BUILD

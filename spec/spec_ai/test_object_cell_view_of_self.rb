@@ -69,4 +69,60 @@ class TestObjectCellViewOfSelf < Test::Unit::TestCase
     assert_equal 10, o.transpose.sum
   end
 
+  # A cell holding a view of other cells of the same array is no cycle:
+  # those cells hold numbers.
+  def test_a_cell_holding_a_view_of_other_cells
+    o = CA_OBJECT([nil, 10, 20, 30]).copy
+    o[0..0] = [o[1..2]]
+    assert_equal [70, 80], o.sum.to_a
+    assert_equal [10, 20], o.abs[0].to_a
+  end
+
+  # The same frozen array, shared between Ractors and computed over at the
+  # same time, is no re-entry: each computation is the Ractor's own.
+  def test_a_shared_frozen_array_computed_from_ractors
+    a = Ractor.make_shareable(CA_OBJECT((1..2000).to_a).freeze)
+    rs = 8.times.map do
+      Ractor.new(a) do |x|
+        out = []
+        100.times do
+          out << begin
+                   [x.sum, x.max, x.abs.sum, x[1999], (x == x)]
+                 rescue => e
+                   e.message
+                 end
+        end
+        out.uniq
+      end
+    end
+    assert_equal [[2001000, 2000, 2001000, 2000, true]], rs.map(&:take).flatten(1).uniq
+  end
+
+  # An element operation called by the computation may compute over the
+  # array again.  Running the same computation again from there would never
+  # end, and is refused; another computation over the array is not.
+  class Element
+    attr_reader :v
+    def initialize (v) = @v = v
+    def + (o)
+      $carray_cell_view_probe.call
+      Element.new(v + (o.is_a?(Element) ? o.v : o))
+    end
+    def <=> (o) = v <=> o.v
+    def coerce (n) = [Element.new(n), self]
+  end
+
+  def test_an_element_operation_computing_over_the_array
+    a = CA_OBJECT([Element.new(3), Element.new(1), Element.new(2)])
+    $carray_cell_view_probe = -> { a.max }
+    assert_equal 6, a.sum.v
+    $carray_cell_view_probe = -> { a[0..1].max }
+    assert_equal 6, a.sum.v
+    $carray_cell_view_probe = -> { a.sum }
+    e = assert_raise(ArgumentError) { a.sum }
+    assert_match(/cyclic reference is not allowed in CArray/, e.message)
+  ensure
+    $carray_cell_view_probe = nil
+  end
+
 end

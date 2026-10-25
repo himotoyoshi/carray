@@ -237,7 +237,8 @@ typedef ca_u_float64_t ca_u_double;
    routines that walk a single ->parent test this flag and instead fold over
    the parents[] exposed by the CAMultiParent layout convention. */
 #define CA_FLAG_MULTI_PARENTS   32
-#define CA_FLAG_CYCLE_CHECK     64
+/* bit 64 (formerly CA_FLAG_CYCLE_CHECK) is free: a cyclic read is found
+   without writing to the array (ca_test_cyclic_check). */
 #define CA_FLAG_IS_FACE        128
 /* Face opt-in ordering/search flags.
    A Face declares that its numeric storage may be descended to for kernel
