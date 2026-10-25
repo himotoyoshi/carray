@@ -168,7 +168,6 @@ describe "TestCArrayAttribute " do
 
     b = CScalar.int32()
     is_asserted_by {  b.entity? == true }
-    is_asserted_by {  b[].entity? == true }
   end
 
   example "virtual?" do
@@ -180,7 +179,6 @@ describe "TestCArrayAttribute " do
 
     b = CScalar.int32()
     is_asserted_by {  b.virtual? == false }
-    is_asserted_by {  b[].virtual? == false }
   end
 
   example "valid_index?" do

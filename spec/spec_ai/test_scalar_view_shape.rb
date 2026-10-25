@@ -4,6 +4,9 @@
 # one cell along one axis.  A selection that picks no cell, or a refer that
 # reads the cell under another shape, is an array of that shape, and its
 # copy, its arithmetic and its conversions keep the shape.
+#
+# A CScalar takes no index, so the selections are made on a refer of it,
+# which is a scalar that does.
 
 require "test/unit"
 require "carray"
@@ -35,7 +38,7 @@ class TestScalarViewShape < Test::Unit::TestCase
   end
 
   def test_a_selection_of_no_cell
-    s = scalar
+    s = scalar.refer(CA_FLOAT64, [1])
     e = one_cell_entity
     assert_same_as_entity s[s.gt(10)], e[e.gt(10)], "scalar parent"
     no = CScalar.new(CA_BOOLEAN)
@@ -46,6 +49,7 @@ class TestScalarViewShape < Test::Unit::TestCase
   def test_a_selection_of_no_cell_of_a_masked_scalar
     s = scalar
     s[0] = UNDEF
+    s = s.refer(CA_FLOAT64, [1])
     v = s[s.gt(10)]
     assert_equal 0, v.elements
     assert_equal [], v.copy.to_a
@@ -61,7 +65,8 @@ class TestScalarViewShape < Test::Unit::TestCase
   # One cell along one axis is still a scalar.
   def test_one_cell_stays_a_scalar
     s = scalar
-    assert_kind_of CScalar, s[s.gt(0)].copy
+    r = s.refer(CA_FLOAT64, [1])
+    assert_kind_of CScalar, r[r.gt(0)].copy
     assert_kind_of CScalar, s.refer(CA_FLOAT64, [1]).copy
   end
 end

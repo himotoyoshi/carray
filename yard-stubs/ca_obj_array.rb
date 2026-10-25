@@ -272,18 +272,25 @@ class CScalar
 
   # @!group Indexing and slicing
 
-  # @overload [](*index)
-  #   Reads the scalar's value, whatever the index: a scalar reads the same
-  #   at every position, so an address or an index out of range still
-  #   gives the value (`s[3]`, `s[-7]`), and a range or a block form gives
-  #   the scalar itself (`s[2..3]`, `s[0...0]`).  An index with more entries
-  #   than the one axis raises.  Writing ({CArray#[]=}) checks the index as
-  #   for any array: `s[7] = 1` raises `IndexError`.
-  #   @param index [Array<Integer, Range, nil, CArray, Symbol>]
-  #   @return [Object, CScalar] the value (or `UNDEF` if masked) for an
-  #     address or an index; `self` for a range or a block form.
-  #   @raise [IndexError] when the index has more than one entry.
+  # @overload []
+  # @overload [](0)
+  #   Reads the scalar's value.  A CScalar is one cell and takes no index:
+  #   `s[]` and `s[0]` both name that cell, and any other index (another
+  #   integer, a range, `nil`, an index array, a symbol) is refused.  A view
+  #   of the scalar, such as `s.refer(s.data_type, [1])`, takes the usual
+  #   indexes.
+  #   @return [Object] the value, or `UNDEF` if it is masked.
+  #   @raise [ArgumentError] when any other index is given.
   def [](*index); end
+
+  # @overload []=(value)
+  # @overload []=(0, value)
+  #   Writes the scalar's value.  `s[] = v` and `s[0] = v` both write it;
+  #   any other index is refused.
+  #   @param value [Object] the value, or `UNDEF` to mask the cell.
+  #   @return [Object] value
+  #   @raise [ArgumentError] when any other index is given.
+  def []=(*index_and_value); end
 
   # @!endgroup
 
