@@ -840,6 +840,30 @@ ca_clear_cyclic_check(void *ap)
   }
 }
 
+/* Marks an object array a kernel computes over; 1 when this call set the
+   mark (the caller clears it), 0 when there is nothing to mark.  Raises
+   when the array is already being computed over: a cell's value led the
+   computation back into it. */
+int
+ca_set_computing (CArray *ca)
+{
+  if ( ! ca_is_object_type(ca) ) {
+    return 0;
+  }
+  if ( ca_test_flag(ca, CA_FLAG_COMPUTING) ) {
+    rb_raise(rb_eArgError, "%s: cyclic reference is not allowed in CArray",
+             ca_calling_method_name());
+  }
+  ca_set_flag(ca, CA_FLAG_COMPUTING);
+  return 1;
+}
+
+void
+ca_clear_computing (CArray *ca)
+{
+  ca_unset_flag(ca, CA_FLAG_COMPUTING);
+}
+
 void
 ca_test_cyclic_check(void *ap, void *ptr)
 {

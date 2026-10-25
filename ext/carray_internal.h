@@ -425,6 +425,16 @@ void        ca_check_rank_fits (long ndim, const char *name);
 #define CA_FLAG_LENT        2048
 #define CA_FLAG_LENT_VIEWED 4096
 
+/* An object array a kernel is computing over.  A cell whose value is the
+   array itself (or a view of it) makes the kernel call back into a kernel
+   over the same array; entering it again is refused as cyclic, as reading
+   such a cell is (ca_test_cyclic_check). */
+#define CA_FLAG_COMPUTING   8192
+VALUE ca_iter_ensure_computing (CArray *ca, int32_t n, ca_iter_state *states,
+                                VALUE (*body)(VALUE), VALUE arg);
+int   ca_set_computing (CArray *ca);
+void  ca_clear_computing (CArray *ca);
+
 #define CA_CHECK_DATA_TYPE_GIVEN(data_type) \
   do { \
     int ca_dt_ = (data_type); \

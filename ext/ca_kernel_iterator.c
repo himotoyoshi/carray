@@ -2919,6 +2919,46 @@ ca_iter_ensure (int32_t n, ca_iter_state *states,
   return rb_ensure(body, arg, ca_iter_ensure_close, (VALUE) &e);
 }
 
+/* ca_iter_ensure over the object array ca, marked as being computed over
+   (ca_set_computing) for the length of the call. */
+typedef struct {
+  int32_t n;
+  ca_iter_state *states;
+  VALUE (*body)(VALUE);
+  VALUE arg;
+  CArray *ca;
+  int marked;
+} ca_iter_computing_t;
+
+static VALUE
+ca_iter_computing_body (VALUE arg)
+{
+  ca_iter_computing_t *c = (ca_iter_computing_t *) arg;
+  c->marked = ca_set_computing(c->ca);
+  return ca_iter_ensure(c->n, c->states, c->body, c->arg);
+}
+
+static VALUE
+ca_iter_computing_close (VALUE arg)
+{
+  ca_iter_computing_t *c = (ca_iter_computing_t *) arg;
+  if ( c->marked ) {
+    ca_clear_computing(c->ca);
+  }
+  return Qnil;
+}
+
+VALUE
+ca_iter_ensure_computing (CArray *ca, int32_t n, ca_iter_state *states,
+                          VALUE (*body)(VALUE), VALUE arg)
+{
+  ca_iter_computing_t c;
+  c.n = n; c.states = states; c.body = body; c.arg = arg;
+  c.ca = ca; c.marked = 0;
+  return rb_ensure(ca_iter_computing_body, (VALUE) &c,
+                   ca_iter_computing_close, (VALUE) &c);
+}
+
 #ifdef CARRAY_DEV_BUILD
 /* ============================================================
  * smoke surface (dev-only, stripped in release)

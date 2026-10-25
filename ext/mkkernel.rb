@@ -1887,7 +1887,11 @@ module MkKernel
     out.puts "{"
     out.puts "  #{frame} fr;"
     params.each { |_, name| out.puts "  fr.#{name} = #{name};" }
-    out.puts "  return ca_iter_ensure(#{states.size}, fr.states, #{fn}_body, (VALUE) &fr);"
+    if params.any? { |type, name| name == "ca" && type.include?("CArray") } && fn.end_with?("_object")
+      out.puts "  return ca_iter_ensure_computing(ca, #{states.size}, fr.states, #{fn}_body, (VALUE) &fr);"
+    else
+      out.puts "  return ca_iter_ensure(#{states.size}, fr.states, #{fn}_body, (VALUE) &fr);"
+    end
     out.puts "}"
     out.print rest
     out.string

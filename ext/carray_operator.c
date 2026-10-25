@@ -450,12 +450,26 @@ typedef struct {
   int        n;
   CArray   **held;
   const char *mode;     /* per held array: 'r' read, 'w' written in place */
+  CArray    *marked[4]; /* the object arrays this call marked as computed over */
+  int        nmarked;
 } ca_op_guard_t;
 
 static VALUE
 ca_op_guard_body (VALUE varg)
 {
   ca_op_guard_t *g = (ca_op_guard_t *) varg;
+  int k, j;
+  for ( k = 0; k < g->n && g->nmarked < 4; k++ ) {
+    CArray *ca = g->held[k];
+    int seen = 0;
+    if ( ! ca ) continue;
+    for ( j = 0; j < g->nmarked; j++ ) {
+      if ( g->marked[j] == ca ) seen = 1;
+    }
+    if ( ! seen && ca_set_computing(ca) ) {
+      g->marked[g->nmarked++] = ca;
+    }
+  }
   g->run(g->arg);
   g->done = 1;
   return Qnil;
@@ -476,6 +490,10 @@ ca_op_guard_release (VALUE varg)
 {
   ca_op_guard_t *g = (ca_op_guard_t *) varg;
   int k;
+  for ( k = 0; k < g->nmarked; k++ ) {
+    ca_clear_computing(g->marked[k]);
+  }
+  g->nmarked = 0;
   if ( g->done ) {
     return Qnil;
   }
@@ -508,6 +526,7 @@ ca_op_guarded (VALUE (*run)(VALUE), void *call,
   g.n    = n;
   g.held = held;
   g.mode = mode;
+  g.nmarked = 0;
   rb_ensure(ca_op_guard_body, (VALUE) &g, ca_op_guard_release, (VALUE) &g);
 }
 
