@@ -72,7 +72,7 @@ sales.select(/^r/).column_names                   # => ["revenue", "rating"]
 sales.select(:numeric).column_names               # => ["visitors", "revenue", "rating"]
 ```
 
-The kinds are `:numeric`, `:string`, `:time`, `:timedelta` and `:categorical`, or a data type such as `:float64`. `drop` takes the same.
+The kinds are `:numeric`, `:float`, `:integer`, `:complex`, `:string`, `:time`, `:timedelta` and `:categorical`, or a data type such as `:float64`. `:float` picks every float column, whatever its width; `:float64` picks only that width. `drop` takes the same.
 
 To leave out a few columns instead of naming the ones to keep, use `drop`:
 

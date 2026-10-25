@@ -443,17 +443,24 @@ class CAFrame
 
   # The names of the columns of a kind, in the frame's order:
   #   :numeric      numbers (CArray#numeric?: integers, floats, complex)
+  #   :float        floats of any width (CArray#float?)
+  #   :integer      integers of any width, signed or not (CArray#integer?)
+  #   :complex      complex numbers of any width (CArray#complex?)
   #   :string       text: CAString, CAConstString, CAFixlenString, or an
   #                 object column whose present cells are all Strings
   #   :time         CATime
   #   :timedelta    CATimedelta
   #   :categorical  CACategorical
   # or a data type as cast names it (:float64, :int32, :boolean, ...), which
-  # picks the columns of that type that are not a Face.
+  # picks the columns of that type that are not a Face. :float, :integer and
+  # :complex are the kinds, not the C type names cast reads them as.
   private def columns_of_kind(kind, verb)
     matches =
       case kind
       when :numeric     then ->(col) { col.numeric? }
+      when :float       then ->(col) { !col.face? && col.float? }
+      when :integer     then ->(col) { !col.face? && col.integer? }
+      when :complex     then ->(col) { !col.face? && col.complex? }
       when :string      then ->(col) { string_kind_column?(col) }
       when :time        then ->(col) { col.is_a?(CATime) }
       when :timedelta   then ->(col) { col.is_a?(CATimedelta) }
@@ -464,8 +471,9 @@ class CAFrame
                  CArray.data_type_name(kind)
                rescue ArgumentError, TypeError, CArray::DataTypeError
                  CAFrame.__send__(:column_key, kind, verb,
-                                  hint: "a Symbol names a kind of column (:numeric, :string, " \
-                                        ":time, :timedelta, :categorical) or a data type")
+                                  hint: "a Symbol names a kind of column (:numeric, :float, " \
+                                        ":integer, :complex, :string, :time, :timedelta, " \
+                                        ":categorical) or a data type")
                end
         ->(col) { !col.face? && CArray.data_type_name(col.data_type) == name }
       end

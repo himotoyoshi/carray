@@ -69,4 +69,18 @@ class TestCAFrameSelectKinds < Test::Unit::TestCase
     assert_match(/a Symbol names a kind of column/, e.message)
     assert_raise(ArgumentError) { df.select(:numeric, "i") }          # i twice
   end
+
+  # :float, :integer and :complex pick the columns of that family at any
+  # width (float?, integer?, complex?); a width is named as a data type.
+  def test_families_of_any_width
+    df = CAFrame.new("a" => CA_FLOAT32([1]), "b" => CA_FLOAT64([1]), "i" => CA_INT8([1]),
+                     "u" => CA_UINT64([1]), "c" => CA_CMPLX128([1]),
+                     "t" => CArray.time(["2024-01-01"]))
+    assert_equal %w[a b], df.select(:float).column_names
+    assert_equal %w[i u], df.select(:integer).column_names
+    assert_equal %w[c], df.select(:complex).column_names
+    assert_equal %w[b], df.select(:float64).column_names
+    assert_equal %w[i u c t], df.drop(:float).column_names
+    assert_equal %w[a b], df.transform(:float) { |col| col * 2 }.select(:float).column_names
+  end
 end
