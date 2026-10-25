@@ -74,6 +74,14 @@ class CABlockIterator < CAIterator
             "blocks: expected #{source.ndim} tile sizes (one per axis), " \
             "got #{blocks.size}"
     end
+    # Each tile is read through a view with one axis per tile position and
+    # one per cell in the tile, twice the source's rank.
+    if 2 * source.ndim > CA_RANK_MAX
+      raise ArgumentError,
+            "blocks: a rank #{source.ndim} array would need #{2 * source.ndim} " \
+            "axes for its tiles, beyond the limit of #{CA_RANK_MAX}; " \
+            "blocks works up to rank #{CA_RANK_MAX / 2}"
+    end
 
     @sndim   = source.ndim
     offsets  = Array.new(@sndim, 0)
@@ -857,6 +865,8 @@ class CArray
   #   first for "valid" tiling.
   #   @param blocks [Array<Integer, Range>] per-axis tile sizes (or ranges).
   #   @return [CABlockIterator]
+  #   @raise [ArgumentError] when `self` has a rank above `CA_RANK_MAX / 2`
+  #     (8): the tiles are read through a view of twice the rank.
   def blocks (*blocks)
     CABlockIterator.new(self, *blocks)
   end
