@@ -278,11 +278,15 @@ ca_stride_compose_through (CAStride *leaf, CAStride *parent,
 
   /* Compose each leaf dim's stride.
      Validity rule: leaf dim k must advance exactly one parent dim
-     (not cross multiple parent dims) AND stay within that parent
-     dim's bounds across leaf's full extent *given the base position*.
-     Otherwise the leaf's traversal would wrap across parent dim
-     boundaries, which is a non-strided access pattern that cannot
-     be folded. */
+     (not cross multiple parent dims), and every parent dim must stay
+     within its bounds across the leaf's full extent *given the base
+     position*.  Several leaf dims can advance the same parent dim (a block
+     of a reshape: rows step 4 parent columns, columns step 1), so the
+     bound is on the sum of their extents, kept in lo[] / hi[].  Otherwise
+     the leaf's traversal would wrap across parent dim boundaries, which
+     is a non-strided access pattern that cannot be folded. */
+  ca_size_t lo[CA_RANK_MAX], hi[CA_RANK_MAX];
+  for (m = 0; m < parent->ndim; m++) lo[m] = hi[m] = base_idx[m];
   for (k = 0; k < leaf->ndim; k++) {
     if (leaf->strides[k] % parent->bytes != 0) return 0;
     ca_size_t advance = leaf->strides[k] / parent->bytes;
@@ -302,20 +306,15 @@ ca_stride_compose_through (CAStride *leaf, CAStride *parent,
     }
     if (advance != 0) return 0;
     if (nonzero_count > 1) return 0;   /* crosses parent dims */
-    if (nonzero_count == 1) {
-      /* Final position in parent dim after the full leaf extent.
-         For a forward step it must stay strictly below dim; for a
-         backward step it must stay at or above 0. */
-      ca_size_t final_pos =
-        base_idx[nonzero_dim] + (leaf->dim[k] - 1) * nonzero_step;
-      if (nonzero_step > 0) {
-        if (final_pos >= parent->dim[nonzero_dim]) return 0;
-      } else {
-        if (final_pos < 0) return 0;
-      }
+    if (nonzero_count == 1 && leaf->dim[k] > 1) {
+      ca_size_t extent = (leaf->dim[k] - 1) * nonzero_step;
+      if (extent > 0) hi[nonzero_dim] += extent;
+      else            lo[nonzero_dim] += extent;
     }
     out_strides[k] = composed;
   }
+  for (m = 0; m < parent->ndim; m++)
+    if (lo[m] < 0 || hi[m] >= parent->dim[m]) return 0;
 
   /* A leaf cell wider than the remainder of its first parent element
      (CARefer reinterpreting two float64 as one complex128) covers several
