@@ -780,6 +780,12 @@ ca_meld_xfer_all_ma_internal (CAMeld *ca, void *data, int dir,
     ca_size_t voff;
     int8_t i;
 
+    /* A parent with no cells moves nothing.  The walks below copy one
+       chunk before they look at the outer extents, so a parent empty along
+       an outer axis would copy a chunk out of a 0-byte buffer.  sync comes
+       here without the slot's own check on the view. */
+    if ( p->elements == 0 ) continue;
+
     buf = ALLOCV_N(char, holder, slab_bytes);
 
     if ( dir == CA_XFER_GET ) {
