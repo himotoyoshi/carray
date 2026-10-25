@@ -269,7 +269,8 @@ kinds exist:
 - **`CArray`** with `obj_type == CA_OBJ_ARRAY` — the regular case.
   `ptr` owns a buffer allocated by `xmalloc`, freed by `ca_free`.
   `ndim` is 1 or more.
-- **`CScalar`** (`CA_OBJ_SCALAR`) — a zero-dimensional array. Layout
+- **`CScalar`** (`CA_OBJ_SCALAR`) — one cell on one axis (`ndim` 1,
+  `dim[0]` 1). Layout
   is identical to `CArray` plus a single trailing `ca_size_t _dim`
   cell that `dim` points to. `xfree(ca->dim)` is therefore incorrect
   for a `CScalar`; the `dim` storage is part of the struct.
@@ -475,7 +476,7 @@ most of what an extension needs:
 /* Where the array sits in the hierarchy */
 #define ca_is_entity(ca)   (ca_func[(ca)->obj_type].entity_type == CA_REAL_ARRAY)
 int  ca_is_virtual    (void *ap);   /* derived view */
-int  ca_is_scalar     (void *ap);   /* CScalar (ndim 0) */
+int  ca_is_scalar     (void *ap);   /* CScalar: one cell on one axis */
 
 /* Attachment / writability state */
 #define ca_is_attached(ca) ((ca)->ptr != NULL)

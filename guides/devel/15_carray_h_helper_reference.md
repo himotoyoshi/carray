@@ -89,7 +89,7 @@ the lifecycle marker (see [ch. 4](04_attach_lifecycle.md), R1–R6 contract).
 | `CArray *carray_new(int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes, CArray *mask)` | Fresh entity, **C-side** (returns `CArray *`). Use when you need the raw struct, e.g. for a temporary entity that never becomes a Ruby object. |
 | `VALUE rb_carray_new(int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes, CArray *mask)` | Same, but boxed in a Ruby object — the normal entry point for kernel output. |
 | `VALUE rb_carray_new_safe(...)` | Like `rb_carray_new` but with explicit overflow checks on `Π dim[i] * bytes`. Use when `dim[]` comes from untrusted Ruby input. |
-| `VALUE rb_cscalar_new(int8_t data_type, ca_size_t bytes, CArray *mask)` | Fresh rank-0 CScalar (a CArray whose `ndim == 0`). |
+| `VALUE rb_cscalar_new(int8_t data_type, ca_size_t bytes, CArray *mask)` | Fresh CScalar (one cell on one axis: `ndim` 1, `dim[0]` 1). |
 | `VALUE rb_carray_wrap_ptr(int8_t data_type, int8_t ndim, ca_size_t *dim, ca_size_t bytes, CArray *mask, char *ptr, VALUE refer)` | CAWrap around an externally-owned buffer (used by `from_memory_view` etc.). `refer` is the GC anchor for the underlying owner. |
 
 `bytes` is `0` for typed elements (use the auto-resolved

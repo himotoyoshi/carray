@@ -244,7 +244,8 @@ class CScalar
   # @!group Construction
 
   # @overload initialize(data_type)
-  #   Allocates a CScalar (0-D CArray) of the given `data_type`.
+  #   Allocates a CScalar of the given `data_type`: one cell on one axis
+  #   (`ndim` 1, `shape` `[1]`).
   #   @param data_type [Symbol, Integer, Class, String]
   #   @return [self]
   # @overload initialize(data_type, bytes:)
@@ -266,6 +267,23 @@ class CScalar
   #   @return [self]
   #   @api private
   def initialize_copy(other); end
+
+  # @!endgroup
+
+  # @!group Indexing and slicing
+
+  # @overload [](*index)
+  #   Reads the scalar's value, whatever the index: a scalar reads the same
+  #   at every position, so an address or an index out of range still
+  #   gives the value (`s[3]`, `s[-7]`), and a range or a block form gives
+  #   the scalar itself (`s[2..3]`, `s[0...0]`).  An index with more entries
+  #   than the one axis raises.  Writing ({CArray#[]=}) checks the index as
+  #   for any array: `s[7] = 1` raises `IndexError`.
+  #   @param index [Array<Integer, Range, nil, CArray, Symbol>]
+  #   @return [Object, CScalar] the value (or `UNDEF` if masked) for an
+  #     address or an index; `self` for a range or a block form.
+  #   @raise [IndexError] when the index has more than one entry.
+  def [](*index); end
 
   # @!endgroup
 

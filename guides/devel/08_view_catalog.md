@@ -20,7 +20,7 @@ first), **reject** (not expressible).
 |------|----------|------|----|
 | CArray | `CA_OBJ_ARRAY` | `ca_obj_array.c` | direct |
 | CAWrap | `CA_OBJ_ARRAY_WRAP` | `ca_obj_array.c` | direct |
-| CScalar | `CA_OBJ_SCALAR` | `ca_obj_array.c` | direct (0-D) |
+| CScalar | `CA_OBJ_SCALAR` | `ca_obj_array.c` | direct (one cell on one axis) |
 | CASource | (abstract) | `ca_obj_source.c` | — |
 
 The entity end ([ch. 2](02_core_data_structures.md)). CAWrap borrows foreign

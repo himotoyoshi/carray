@@ -411,7 +411,7 @@ v.window(-1..5).class     #  => CAWindow
 
 There are a few more specialised view classes (`CAReduce`, `CAFake`, `CAField`, `CABitarray`, `CABitfield`, `CAObject`) which you may encounter when using advanced features such as window scans, fixed-size record fields, or sub-byte storage. These follow the same rule: they are views onto data they do not own, so writing through them updates the source.
 
-An entity — a real, data-owning array — has class `CArray` (or, for a zero-dimensional value, `CScalar`). The check `ca.entity?` returns `true` for those and `false` for any of the view classes above:
+An entity — a real, data-owning array — has class `CArray` (or, for a single value, `CScalar`). The check `ca.entity?` returns `true` for those and `false` for any of the view classes above:
 
 ```ruby
 a = CArray.int32(3, 3).seq
