@@ -205,7 +205,9 @@ ca_select_setup (CASelect *ca, CArray *parent, CArray *snapshot)
   ca->dim       = &(ca->_dim);
   ca->dim[0]    = ca->elements;
 
-  if ( ca_is_scalar(snapshot) ) {
+  /* A selection of a scalar is one only while it picks the cell: a scalar
+     is one cell along one axis. */
+  if ( ca_is_scalar(snapshot) && ca->elements == 1 ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
   }
 

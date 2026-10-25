@@ -145,9 +145,10 @@ ca_refer_setup (CARefer *ca, CArray *parent,
   ca_stride_setup_view((CAStride *) ca, CA_OBJ_REFER, parent,
                        data_type, bytes, ndim, dim, strides, base_offset);
 
-  /* A refer of a scalar stays one only while it has the one cell: read as
-     narrower elements it is an array of several. */
-  if (ca_is_scalar(parent) && ca->elements == 1) {
+  /* A refer of a scalar stays one only while it is one cell along one
+     axis, as a scalar is: read as narrower elements it is an array of
+     several, and read under another shape it is an array of that shape. */
+  if (ca_is_scalar(parent) && ca->elements == 1 && ca->ndim == 1) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
   }
   return 0;
