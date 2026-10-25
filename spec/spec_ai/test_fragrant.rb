@@ -138,8 +138,6 @@ class TestCyclicReference < Test::Unit::TestCase
       "a[i] = a view"    => ->(a) { a[0] = a[1..2] },
       "elem_store"       => ->(a) { a.elem_store(0, a) },
       "map!"             => ->(a) { a.map! { a } },
-      "seq!(a)"          => ->(a) { a.seq!(a) },
-      "seq!(0, a view)"  => ->(a) { a.seq!(0, a[0..1]) },
       "attach!"          => ->(a) { a.attach! { |x| x[0] = a } },
     }
     writes.each do |name, write|
@@ -185,6 +183,48 @@ class TestCyclicReference < Test::Unit::TestCase
     assert_raise(ArgumentError) { a[0] }
     a[0] = 42
     assert_equal 42, a[0]
+  end
+
+  # A computation over an array that holds itself -- arithmetic, a
+  # reduction, a sort, a comparison -- calls the same computation again on
+  # the cell's value; entering it again is refused as cyclic, as a read is,
+  # rather than recursing until the stack runs out.  Twice in one process,
+  # since a second overflow used to kill it.
+  def test_a_computation_over_an_array_that_holds_itself_is_refused
+    ops = {
+      "+"      => ->(a) { a + 0 },
+      "-@"     => ->(a) { -a },
+      "sum"    => ->(a) { a.sum },
+      "mean"   => ->(a) { a.mean },
+      "max"    => ->(a) { a.max },
+      "sort"   => ->(a) { a.sort },
+      "median" => ->(a) { a.median },
+      "cumsum" => ->(a) { a.cumsum },
+      "lt"     => ->(a) { a.lt(2) },
+      "=="     => ->(a) { a == a },
+      "seq!"   => ->(a) { a.seq!(a) },
+    }
+    2.times do
+      ops.each do |name, op|
+        a = object_array
+        a[0..0] = [a]
+        e = assert_raise(ArgumentError, name) { op.call(a) }
+        assert_match(/cyclic reference is not allowed in CArray/, e.message, name)
+        a[0] = 9
+        assert_equal 9, a[0], "#{name}: the array stays usable"
+      end
+    end
+  end
+
+  # Arrays nested without a cycle still compute and compare.
+  def test_nested_arrays_without_a_cycle
+    a = CArray.object(1); a[0] = CA_OBJECT([1])
+    b = CArray.object(1); b[0] = CA_OBJECT([1])
+    assert_equal true, a == b
+    x = object_array
+    x.sum
+    x.sort
+    assert_equal [1, 2, 3], x.to_a
   end
 
   # An error that is not a cyclic reference leaves the array usable.
