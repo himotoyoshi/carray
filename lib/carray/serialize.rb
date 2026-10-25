@@ -714,8 +714,15 @@ end
 
     private
 
+    # Marshal writes the instance variables of an object that has _dump
+    # after the String it returns, unless the String has instance
+    # variables of its own.  A view keeps its parent in one, so a view of
+    # a large array would carry the whole parent, and a parent holding the
+    # view in a cell would be an object cycle.  The String is given one of
+    # its own, which _load ignores.
     def dump_payload
       Marshal.dump(CArray.instance_method(:marshal_dump).bind_call(self))
+             .tap { |s| s.instance_variable_set(:@carray_payload, true) }
     end
   end
 end
