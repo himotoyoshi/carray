@@ -316,4 +316,21 @@ class TestTimeUnitChange < Test::Unit::TestCase
     assert_raise(ArgumentError) { m[0] = off[0] }
   end
 
+  # to_unit is a cast: the result is a new array whether or not the unit
+  # changes.  The same unit used to hand back the original's storage, so a
+  # write into the result rewrote the original.
+  def test_to_unit_to_the_same_unit_returns_a_new_array
+    t = CArray.int64(3).seq!.time(unit: :s)
+    u = t.to_unit(:s)
+    u[0] = t[2]
+    assert_equal [0, 1, 2], t.ticks.to_a
+    assert_equal [2, 1, 2], u.ticks.to_a
+
+    d = CArray.int64(3).seq!.timedelta(unit: :s)
+    w = d.to_unit(:s)
+    w[0] = d[2]
+    assert_equal [0, 1, 2], d.ticks.to_a
+    assert_equal [2, 1, 2], w.ticks.to_a
+  end
+
 end

@@ -1122,6 +1122,9 @@ class CATime
   #   @raise [RangeError] when the widened ticks overflow int64.
   def to_unit(unit)
     to = CATime::Resolution.parse(unit)
+    # The conversion hands back the storage itself when the unit does not
+    # change; the result is a new array whichever unit is asked for.
+    return face_storage.copy.time(unit: to) if to == self.unit
     CATimeUnitAlgebra.convert_instant_floor(face_storage, self.unit, to).time(unit: to)
   end
 
@@ -1830,6 +1833,8 @@ class CATimedelta
   #   @raise [RangeError] when the widened ticks overflow int64.
   def to_unit(unit)
     to = CATime::Resolution.parse(unit)
+    # As CATime#to_unit: a new array even when the unit does not change.
+    return face_storage.copy.timedelta(unit: to) if to == self.unit
     CATimeUnitAlgebra.convert_scale_trunc(face_storage, self.unit, to).timedelta(unit: to)
   end
 
