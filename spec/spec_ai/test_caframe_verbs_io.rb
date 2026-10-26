@@ -191,7 +191,7 @@ class TestCAFrameFromCsv < Test::Unit::TestCase
 
   def test_dsl_column_names_headerless
     with_csv("Tokyo,28.5\nOsaka,29.8\n") do |path|
-      df = CAFrame.read_csv(path, types: :string) { it.column_names "station", "temp"; it.data }
+      df = CAFrame.read_csv(path, types: :string) { |r| r.column_names "station", "temp"; r.data }
       assert_equal ["station", "temp"], df.column_names
       assert_equal ["Tokyo", "Osaka"], df["station"].to_a
     end

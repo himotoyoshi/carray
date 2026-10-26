@@ -59,7 +59,6 @@ class TestCAFrameCSVLayout < Test::Unit::TestCase
   def test_the_same_as_the_block
     blocked = read(TEXT) { |r| r.skip 2; r.header; r.skip 1; r.data }
     assert_equal cells(blocked), cells(read(TEXT, header: 2, data: 4))
-    assert_equal cells(blocked), cells(read(TEXT) { it.skip 2; it.header; it.skip 1; it.data })
   end
 
   # A record that starts in the range is read whole, and a blank line at its
