@@ -81,10 +81,16 @@ class CArray
   #   `String` of the exact size, or any object responding to
   #   `read(n, buf = nil)`. Into a boolean array, a non-zero byte is
   #   read as 1 (true).
+  #   From an IO into an array that owns its memory, the bytes are written
+  #   as they are read, so that no second copy of the data is held; when the
+  #   IO runs out before the array is full, what the array holds afterwards
+  #   is not defined (the part read so far may already be in it).  Into a
+  #   view the whole data is read first and nothing is written on a short
+  #   read.
   #   @param io [String, IO, #read]
   #   @return [self]
-  #   @raise [RuntimeError] on a short read.
-  #   @raise [ArgumentError] when a String source is not the array's size.
+  #   @raise [ArgumentError] on a short read, and when a String source is
+  #     not the array's size.
   #   @raise [CArray::DataTypeError] if `self.data_type` is
   #     `:object`.
   def load_binary(io); end
