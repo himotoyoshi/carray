@@ -826,9 +826,12 @@ ca_stride_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 
   /* A reshape over a 1-D cold root (ndim != root->ndim): the request has no
      box in the root's single axis, but the root cells it touches lie in one
-     flat span.  Ask the root for that span once and walk the request over
-     it, as xfer_all does for the whole view.  A PUT reads the span first so
-     the cells between the requested ones go back unchanged. */
+     flat span.  A GET asks the root for that span once and walks the
+     request over it, as xfer_all does for the whole view.  A PUT hands the
+     root the list of the requested cells' addresses instead: sending the
+     span back would write the cells between them too, and a root that
+     repeats its cells (CATile) would have a stale copy land after the
+     written one. */
   if (aligned && !root->ptr && ca_func[root->obj_type].xfer_stride
        && ca->bytes == root->bytes && root->ndim == 1
        && root_base % root->bytes == 0) {
@@ -841,15 +844,32 @@ ca_stride_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     }
     if ( span_lo >= 0 && span_hi <= root->elements * root->bytes ) {
       volatile VALUE holder;
-      ca_size_t rlo    = span_lo / root->bytes;
-      ca_size_t rcount = (span_hi - span_lo) / root->bytes;
-      ca_size_t rstep  = root->bytes;
-      char     *scratch = ALLOCV_N(char, holder, rcount * root->bytes);
-      ca_xfer_stride(root, &rlo, &rcount, &rstep, scratch, CA_XFER_GET);
-      ca_xfer_strided_walk(scratch + (root_base - span_lo), ca->bytes, ndim,
-                           counts, root_stride, d, dir);
       if ( dir == CA_XFER_PUT ) {
-        ca_xfer_stride(root, &rlo, &rcount, &rstep, scratch, CA_XFER_PUT);
+        ca_size_t  n = 1, m = 0, idx[CA_RANK_MAX];
+        ca_size_t *addrs;
+        for (k = 0; k < ndim; k++) {
+          n *= counts[k];
+          idx[k] = 0;
+        }
+        addrs = ALLOCV_N(ca_size_t, holder, n);
+        while (1) {
+          ca_size_t off = root_base;
+          for (k = 0; k < ndim; k++) off += idx[k] * root_stride[k];
+          addrs[m++] = off / root->bytes;
+          k = ndim - 1;
+          while (k >= 0) { if (++idx[k] < counts[k]) break; idx[k] = 0; k--; }
+          if (k < 0) break;
+        }
+        ca_xfer_addrs(root, n, addrs, d, CA_XFER_PUT);
+      }
+      else {
+        ca_size_t rlo    = span_lo / root->bytes;
+        ca_size_t rcount = (span_hi - span_lo) / root->bytes;
+        ca_size_t rstep  = root->bytes;
+        char     *scratch = ALLOCV_N(char, holder, rcount * root->bytes);
+        ca_xfer_stride(root, &rlo, &rcount, &rstep, scratch, CA_XFER_GET);
+        ca_xfer_strided_walk(scratch + (root_base - span_lo), ca->bytes, ndim,
+                             counts, root_stride, d, dir);
       }
       ALLOCV_END(holder);
       return;
@@ -1442,8 +1462,10 @@ ca_stride_func_xfer_all (void *ap, void *data, int dir)
          the request is exact) and ca->bytes == root->bytes (no byte
          reinterpret, so the span endpoints are whole root elements).  A wider
          lazy root has no single strided box to ask for, so it takes the
-         whole-root fallback below -- correct, just not partial. */
-      if ( root->ndim == 1 && ca->bytes == root->bytes ) {
+         whole-root fallback below -- correct, just not partial.  Reads only:
+         a write goes to the root as the list of its cells below, since
+         sending the span back would write the cells between them too. */
+      if ( dir == CA_XFER_GET && root->ndim == 1 && ca->bytes == root->bytes ) {
         ca_size_t span_lo = composed_base;
         ca_size_t span_hi = composed_base + ca->bytes;
         int8_t k;
@@ -1460,13 +1482,10 @@ ca_stride_func_xfer_all (void *ap, void *data, int dir)
           char     *scratch = ALLOCV_N(char, holder, rcount * root->bytes);
           ca_xfer_stride(root, &rlo, &rcount, &rstep, scratch, CA_XFER_GET);
           ca->ptr = ptr;
-          ca_stride_xfer_with_layout(ca, (dir == CA_XFER_PUT) ? 1 : 0,
+          ca_stride_xfer_with_layout(ca, 0,
                                      scratch + (composed_base - span_lo),
                                      composed_strides);
           ca->ptr = ptr0;
-          if ( dir == CA_XFER_PUT ) {
-            ca_xfer_stride(root, &rlo, &rcount, &rstep, scratch, CA_XFER_PUT);
-          }
           ALLOCV_END(holder);
         }
         return;

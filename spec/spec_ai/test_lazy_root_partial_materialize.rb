@@ -54,6 +54,24 @@ class TestLazyRootPartialMaterialize < Test::Unit::TestCase
     assert_equal want.to_a, got.to_a
   end
 
+  # A write through a reshape over a 1-D cold root reaches only the cells
+  # it addresses.  Sending the root's span back would write the cells
+  # between them too: a tile's stale copy of a cell would land after the
+  # one written, and a lossy root would bring them back changed.
+  def test_write_through_reshape_over_cold_root_reaches_only_its_cells
+    r = CArray.int32(3).seq!
+    r.tile(2).reshape(3, 2)[0..2, 0..0] = CA_INT32([[10], [20], [30]])
+    assert_equal [10, 30, 20], r.to_a
+    r = CArray.int32(3).seq!
+    r.tile(2).reshape(3, 2)[nil, 0] = CA_INT32([10, 20, 30])
+    assert_equal [10, 30, 20], r.to_a
+    r = CArray.int32(6).seq!
+    v = r.swap_bytes.swap_bytes.reshape(3, 2)
+    v[2, 1] = 8
+    v[0..1, 0..0] = CA_INT32([[9], [7]])
+    assert_equal [9, 1, 7, 3, 4, 8], r.to_a
+  end
+
   # --- performance: cost scales with the view, not the root -----------
   #
   # The defining property of the fix. A fixed-size view over a root grown
