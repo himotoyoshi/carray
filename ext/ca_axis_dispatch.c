@@ -1101,6 +1101,12 @@ ca_axis_view_xfer_all (void *ap, ca_axis_view_fast_t fast, int region_ok,
   if ( ca_attach_is_alias(parent) ) {
     ca_attach(parent);   /* window: an alias attach, cannot raise */
     fast(ca, (char *) data, dir);
+    /* An entity that keeps no buffer at rest (the mask of a CAObject, a
+       CASource) attaches a copy, which only its sync writes back; for
+       memory it lends, the sync does nothing. */
+    if ( dir == CA_XFER_PUT ) {
+      ca_sync(parent);
+    }
     ca_detach(parent);
     return;
   }
