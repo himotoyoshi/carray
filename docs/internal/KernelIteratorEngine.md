@@ -139,15 +139,15 @@ Each tests `ca_fast_path()` with its name, so `CARRAY_SHORTCUTS_OFF=name` sends 
 
 Every shortcut in the engine carries a name tag in a comment beside its code: the layer it handles, what it speeds up, the measured reason, when it is taken, the promises of §6 it keeps, the switch, and the rows of the matrix that check it. `grep -n "Shortcut " ext/ca_kernel_iterator.c` lists them:
 
-| name | layer | measured against its general route | checked by |
+| name | layer | measured switched off alone, M2 Max / Xeon 6369P (2026-10-26) | checked by |
 |---|---|---|---|
-| `PUSH_ALL_CHANGED` | write-back | about 5% | the matrix, whole writes |
-| `SHIFT_WHOLE_VIEW` | data | about 1.5x | the matrix, slab-axis rows of the shift and window views |
-| `PER_SLAB_HOIST` | data | about 1.6x on a mean over two slab axes of a grid (it is not taken with one slab axis) | the matrix, two-slab-axes rows of the grid parent |
-| `STACK` | data and fiber | about 2x | the matrix, stack parent along axis 0 |
-| `STACK_OUTER_K` | data | about 11x | the matrix, stack parent along axes 1 and 2 |
-| `PER_FIBER_FUSED` (conversion views) | all three, per fiber | no difference | the matrix, fiber rows of the fake parent |
-| `PROTECT_ONLY_MAY_RAISE` | exits | about 1.5x | `test_iter_raise_cleanup.rb`, the detectors' raise rows |
+| `PUSH_ALL_CHANGED` | write-back | about 5% (an older measure, M2 Max) | the matrix, whole writes |
+| `SHIFT_WHOLE_VIEW` | data | 1.5x / 1.1x on a median of a shift view, 3.1x / 2.2x on a sum of a window | the matrix, slab-axis rows of the shift and window views |
+| `PER_SLAB_HOIST` | data | 1.6x (M2 Max) on a mean over two slab axes of a grid; not taken with one slab axis | the matrix, two-slab-axes rows of the grid parent |
+| `STACK` | data and fiber | 1.2x / 1.3x | the matrix, stack parent along axis 0 |
+| `STACK_OUTER_K` | data | 1.0x / 1.0x on a mean along axis 1, which the generated loop interchange answers first (3.5x / 3.8x with that off too); 1.1x / 1.2x on a median | the matrix, stack parent along axes 1 and 2 |
+| `PER_FIBER_FUSED` (conversion views) | all three, per fiber | 1.0x / 1.1x on a sort, 1.05x / 1.2x on a median | the matrix, fiber rows of the fake parent |
+| `PROTECT_ONLY_MAY_RAISE` | exits | 1.55x / 1.4x | `test_iter_raise_cleanup.rb`, the detectors' raise rows |
 
 ---
 

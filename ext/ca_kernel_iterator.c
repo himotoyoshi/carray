@@ -1078,8 +1078,10 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
        Layer       data; the fiber layer (ki_fiber_contig_*) sits on top.
        Speeds up   read walks of a CAWindow / CAShift whose slab has a
                    SHIFT axis and not the innermost axis.
-       Why         about 1.5x on a median along axis 0 of a 2000x2000
-                   shift view.
+       Why         measured switched off alone (CARRAY_SHORTCUTS_OFF) on an
+                   M2 Max / a Xeon 6369P, 2026-10-26: 1.5x / 1.1x on a
+                   median along axis 0 of a 2000x2000 shift view, 3.1x /
+                   2.2x on a sum along axis 0 of a window.
        Enters      a non-stride slab axis, no INDEX slab axis, the
                    innermost axis outside the slab, a read walk.
        Promises    2 and 6 (the mask is copied by ki_take_mask_copy, and
@@ -1122,8 +1124,9 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
                    parents through a tile cache.
        Speeds up   read walks of an unmasked CAStack whose one slab axis
                    is the stack axis.
-       Why         about 2x on a mean along the stack axis of 4 parents
-                   of 500x2000.
+       Why         measured switched off alone (CARRAY_SHORTCUTS_OFF) on an
+                   M2 Max / a Xeon 6369P, 2026-10-26: 1.2x / 1.3x on a mean
+                   along the stack axis of 4 parents of 500x2000.
        Enters      a CAStack whose parents all have an attach slot, no
                    mask, a read walk, one slab axis that is k_axis.
        Promises    1 (the slab is contiguous), 6 (no mask exists to touch).
@@ -1144,8 +1147,11 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
        Speeds up   read walks of a CAStack whose stack axis is an outer
                    axis: each slab is cut from the one parent the outer
                    index picks, without gathering the stack.
-       Why         about 11x on a mean along axis 1 of 4 parents of
-                   500x2000.
+       Why         measured switched off alone (CARRAY_SHORTCUTS_OFF) on an
+                   M2 Max / a Xeon 6369P, 2026-10-26: 1.0x / 1.0x on a mean
+                   along axis 1 of 4 parents of 500x2000, which the
+                   generated loop interchange answers first (3.5x / 3.8x
+                   with that off too); 1.1x / 1.2x on a median along axis 2.
        Enters      a CAStack whose parents all have an attach slot, a read
                    walk, the stack axis outside the slab.
        Promises    2 (the parents' masks are copied), 6 (masks are read
@@ -1168,8 +1174,10 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
                    gathering the whole view.
        Speeds up   a read of a fiber of a fake or byte-swap view, or of a
                    lazy monop that only casts, along its innermost axis.
-       Why         no difference measured on a sort along the last axis
-                   of a 2000x2000 fake view.
+       Why         measured switched off alone (CARRAY_SHORTCUTS_OFF) on an
+                   M2 Max / a Xeon 6369P, 2026-10-26: 1.0x / 1.1x on a sort
+                   and 1.05x / 1.2x on a median along the last axis of a
+                   2000x2000 fake view.
        Enters      CA_KERNEL_FIBER_CONTIG, one slab axis, a read walk, and
                    ca_iter_should_per_fiber_fused.
        Promises    1, 2 and 4, as the CAWindow / CAShift hook above.  A
@@ -1479,7 +1487,10 @@ ki_open_l2 (ca_iter_state *st, CArray *src, ca_slab_policy_t policy,
                    and with no SHIFT axis in the view: the outer and
                    non-innermost slab offsets are hoisted and the inner
                    run is copied with memcpy.
-       Why         no difference measured on a row-selected 2-D read.
+       Why         measured switched off alone (CARRAY_SHORTCUTS_OFF) on an
+                   M2 Max, 2026-10-26: 1.6x on a mean over two slab axes of
+                   a 400x200x200 array with rows selected.  Not taken with
+                   one slab axis.
        Enters      at least one slab axis, the innermost slab axis
                    STRIDE, no SHIFT axis.
        Promises    2 and 6 (the mask is copied by ki_take_mask_copy, and
@@ -2445,7 +2456,9 @@ typedef struct {
      Layer       the exits (promise 4): which walks run next_slab /
                  sync_slab under rb_protect.
      Speeds up   walks that cannot raise there: they skip rb_protect.
-     Why         about 1.5x on a per-axis sum over 200k short fibers.
+     Why         measured switched off alone (CARRAY_SHORTCUTS_OFF) on an
+                 M2 Max / a Xeon 6369P, 2026-10-26: 1.55x / 1.4x on a
+                 per-axis sum over 200k short fibers.
      Enters      the route is not PER_FIBER_FUSED and the walk does not
                  write back out of scratch.
      Promises    4 (a walk left out cannot raise between init and finish).
