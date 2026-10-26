@@ -71,6 +71,38 @@ class CAIterator
     end
   end
 
+  # A member that keeps what it built from its source's values or mask (a
+  # padded copy, the views over it, counts of the cells present) names those
+  # instance variables here.  They are dropped when a public method of the
+  # member is entered from outside, so every call reads the source as it is
+  # then; within one call the helpers it runs share them.  What follows from
+  # the source's shape alone is kept for good.
+  def self.read_source_per_call (*state)
+    names = public_instance_methods(false)
+    prepend(Module.new do
+      module_eval(<<~RUBY, __FILE__, __LINE__ + 1)
+        private def forget_source_state
+          #{state.inspect}.each { |v| remove_instance_variable(v) if instance_variable_defined?(v) }
+        end
+      RUBY
+      names.each do |name|
+        module_eval(<<~RUBY, __FILE__, __LINE__ + 1)
+          def #{name} (...)
+            return super if @reading_source
+            forget_source_state
+            @reading_source = true
+            begin
+              super
+            ensure
+              @reading_source = false
+            end
+          end
+        RUBY
+      end
+    end)
+  end
+  private_class_method :read_source_per_call
+
   def self.reduce_keywords (op, kw) # :nodoc:
     if kw.key?(:axis)
       raise ArgumentError, "#{op}: unknown keyword: :axis (the iterator sets the axes)"

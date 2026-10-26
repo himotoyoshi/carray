@@ -151,14 +151,15 @@ class CAWindowIterator < CAIterator
 
   # ---- padded entity + sliding_windows view -----------------------------
   #
-  # The engine: pad the source once (:skip -> UNDEF, :nearest -> edge, :constant
+  # The engine: pad the source (:skip -> UNDEF, :nearest -> edge, :constant
   # -> value; :truncate does not pad), then take a sliding_windows view.  Both
-  # are memoised: every named reduction reuses the one pad + one view.
+  # are kept for one call, so the helpers a reduction runs share one pad and
+  # one view, and the next call pads the source as it is then.
 
   # @overload sliding_view
   #   Returns the sliding_windows view feeding the reductions.  For :truncate
   #   this is the source's own view (zero-copy); otherwise it is the view over
-  #   the padded entity.
+  #   a padded copy made from the source as it is at this call.
   #   @return [CArray]
   def sliding_view
     @sliding_view ||= @shape.include?(0) ? no_windows : anchored_buffer.sliding_windows(*@widths)
@@ -1150,6 +1151,9 @@ class CAWindowIterator < CAIterator
       yield idx
     end
   end
+
+  read_source_per_call :@sliding_view, :@padded_entity, :@neutral_value,
+                       :@offset_fold_base, :@window_cell_counts
 end
 
 

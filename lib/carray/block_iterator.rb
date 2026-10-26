@@ -825,7 +825,7 @@ class CABlockIterator < CAIterator
   # A padded entity whose interior holds the source and whose partial-edge
   # margin is masked (UNDEF), sized to exactly cover the ceil tile grid.  When
   # the source already divides evenly this is the source itself (no copy), so
-  # the tiles alias it.  Memoised; feeds the iterate escape hatches.
+  # the tiles alias it.  Kept for one call; feeds the iterate escape hatches.
   def padded_source
     @padded_source ||= begin
       pshape = @sndim.times.map { |i| @shape[i] * @sizes[i] }
@@ -853,6 +853,8 @@ class CABlockIterator < CAIterator
     def lag (*args, **keywords) = @source.__send__(:carry_attrs, super)
     def strip_mask (**keywords) = @source.__send__(:carry_attrs, super)
   end)
+
+  read_source_per_call :@padded_source, :@tile_grid_view
 end
 
 

@@ -30,7 +30,7 @@ a.windows(-1..1).correlate(CA_FLOAT64([0.25, 0.5, 0.25]))
 
 ## How the engine works
 
-The iterator builds a **padded copy** of the source once (the source in the
+For each call, the iterator builds a **padded copy** of the source (the source in the
 interior, the margins filled by the boundary policy), takes its
 [`sliding_windows`](../../ext/ca_obj_stride.c) view (a zero-copy strided view of
 every window), and runs one vectorized core reduction over the trailing window
@@ -40,8 +40,13 @@ data type / mask / empty / epsilon contracts unchanged.
 
 The practical consequence — which drives the [performance guidance](#performance-and-recommended-settings)
 below — is that the iterator itself adds essentially **no** overhead over
-`sliding_windows` + a core reduction; the only costs on top are the one-time
-pad copy and, for a masked margin, the mask-aware reduction path.
+`sliding_windows` + a core reduction; the only costs on top are the pad copy
+and, for a masked margin, the mask-aware reduction path.
+
+Each call reads the source as it is then: change the source after a call, and
+the next call answers from the changed values and mask. The pad is made again
+on every call (`:truncate` makes none), so calling several reductions on one
+iterator costs one pad each.
 
 ## Construction and window geometry
 
