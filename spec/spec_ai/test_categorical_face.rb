@@ -592,4 +592,19 @@ class TestCACategoricalFace < Test::Unit::TestCase
     assert_equal [0, 1, 3, 2], cat.group_addr.to_a
   end
 
+  # The grouping plan is shared by every later call and by CAFrame group
+  # verbs, so a write into it would change their answers; it is frozen.
+  def test_grouping_plan_arrays_are_frozen
+    cat = CA_OBJECT(%w[a b a c b a]).categorize
+    [:category_sizes, :reduceat_index, :group_addr].each do |m|
+      assert_raise(FrozenError, m.to_s) { cat.public_send(m)[0] = 1 }
+    end
+    assert_equal [3, 2, 1], cat.category_sizes.to_a
+    assert_equal [0, 2, 5, 1, 4, 3], cat.group_addr.to_a
+    scratch = cat.category_sizes.copy
+    scratch[0] = 9
+    assert_equal [9, 2, 1], scratch.to_a
+    assert_equal [3, 2, 1], cat.category_sizes.to_a
+  end
+
 end
