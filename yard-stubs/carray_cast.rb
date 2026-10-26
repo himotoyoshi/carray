@@ -202,10 +202,13 @@ class CArray
   # -- as_type: reinterpreting view (no copy) ---------------------------
 
   # @overload as_type(data_type, bytes: nil)
-  #   Returns a {CAFake} view of `self` reinterpreted as `data_type`
-  #   (with `bytes:` for `:fixlen`). Reads and writes cast on the fly
-  #   through the shared parent storage; no copy is made. For an eager
-  #   copy use `arr.as_type(...).to_ca` or {#to_type}.
+  #   Returns a view of `self` reinterpreted as `data_type` (with
+  #   `bytes:` for `:fixlen`): a {CAMonOp} for a numeric type, a {CAFake}
+  #   otherwise. Reads and writes cast on the fly through the shared
+  #   parent storage; no copy is made. The view is a new array also when
+  #   `data_type` is `self`'s own, so an attribute set on it or a freeze
+  #   of it does not reach `self`. For an eager copy use
+  #   `arr.as_type(...).copy` or {#to_type}.
   #
   #   Note: for an `:object` source the on-the-fly cast to a numeric type
   #   uses the lenient path and does NOT mask parse failures — a
@@ -225,7 +228,7 @@ class CArray
   #   @param data_type [Symbol, Integer, Class, String] target element type.
   #   @param bytes [Integer, nil] element width in bytes, required for
   #     `:fixlen`.
-  #   @return [CAFake]
+  #   @return [CAMonOp, CAFake]
   #   @raise [TypeError] when `self` is a Face and the request would read its
   #     storage under another type.
   #   @raise [FloatDomainError] when a NaN cell that is not masked is read

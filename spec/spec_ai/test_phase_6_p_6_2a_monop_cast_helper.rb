@@ -211,4 +211,25 @@ class TestPhase6P62aMonopCastHelper < Test::Unit::TestCase
     v2[2..4] = 100
     assert_equal b1.to_a, b2.to_a, "lossy round-trip must match CAFake"
   end
+  # A view of the receiver's own type is a new array, like any other type's:
+  # an attribute set on it, a freeze or a read-only flag stays with the view,
+  # while its cells are the receiver's.
+  def test_as_type_of_the_own_type_is_a_view
+    [[:int32, CArray.int32(3).seq!], [:float64, CArray.float64(3).seq!],
+     [:object, CA_OBJECT([1, "a", nil])], [:cmplx128, CA_CMPLX128([1, 2, 3])]].each do |type, a|
+      v = a.as_type(type)
+      assert_not_same a, v
+      assert_equal a.to_a, v.to_a
+      v.set_attr(:unit, "m")
+      assert_nil a.attr(:unit), type.to_s
+      v[0] = a[1]
+      assert_equal a[1], a[0], type.to_s
+      b = a.copy
+      b.as_type(type).freeze
+      assert_equal false, b.frozen?, type.to_s
+      c = a.copy
+      c.as_type(type).set_read_only_flag
+      assert_equal false, c.read_only?, type.to_s
+    end
+  end
 end
