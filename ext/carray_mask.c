@@ -424,6 +424,25 @@ ca_view_func_create_mask (void *ap)
                                      CA_BOOLEAN, ca->ndim, ca->dim, 0, 0);
 }
 
+/* The sync slot of a view whose mask came from ca_view_func_create_mask
+   calls this after syncing its parent.  The view's mask is a refer over
+   the parent's mask, and when the parent's mask is itself a view, both
+   hold a buffer while the window is open; the refer writes past the
+   parent's buffer to the root.  Syncing the parent then writes its
+   buffer, from before the view's mask was written, back over the root,
+   so the view's mask is synced once more. */
+
+void
+ca_view_sync_mask_after_parent (void *ap)
+{
+  CAView *ca = (CAView *) ap;
+  if ( ca->mask != NULL && ca->mask->ptr != NULL
+       && ca->parent->mask != NULL && ca->parent->mask->ptr != NULL
+       && ca_is_view(ca->parent->mask) ) {
+    ca_sync(ca->mask);
+  }
+}
+
 /* create mask array if array has mask but has not mask array */
 
 void

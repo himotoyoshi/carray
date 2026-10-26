@@ -310,12 +310,13 @@ ca_fake_func_sync (void *ap)
   ca_update_mask(ca);
   if ( ca->mask ) {
     ca_cast_block_with_mask(ca->elements, ca, ca->ptr, ca->parent, ca->parent->ptr, 
-                            (boolean8_t *)ca->parent->mask->ptr);
+                            (boolean8_t *)ca->mask->ptr);
   }
   else {
     ca_cast_block(ca->elements, ca, ca->ptr, ca->parent, ca->parent->ptr);
   }
   ca_sync(ca->parent);
+  ca_view_sync_mask_after_parent(ca);
 }
 
 static void
