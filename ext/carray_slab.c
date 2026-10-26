@@ -526,8 +526,12 @@ ca_slab_advance_slab_view (ca_slab_iter_state_t *st,
     if ( slab_cs->mask != NULL ) {
       CAStride *mask_cs = (CAStride *) slab_cs->mask;
       if ( m_in != NULL ) {
+        /* m_in points into the walk's copy of the source's mask, not into
+           the source's mask itself, so the offset is taken from the data
+           cell: it is what the slab reads once the copy is gone. */
         mask_cs->ptr         = (char *) m_in;
-        mask_cs->base_offset = (ca_size_t) ((char *) m_in - src->mask->ptr);
+        mask_cs->base_offset = (ca_size_t) ((p_in - src->ptr) / src->bytes)
+                               * src->mask->bytes;
       }
       else {
         /* The walk was opened on a source without a mask and the block
@@ -1202,7 +1206,9 @@ slab_state_run_body (VALUE arg)
    held by the carrier, and the internal output view lets go of its
    buffer.  The copy is made into the array ca_slab_prepare_backing set
    aside, so nothing here allocates.  A slab that is a window onto the
-   source itself points into the source and needs nothing. */
+   source keeps reading the source's data, but its mask points into the
+   walk's copy of the mask, which finish frees: it lets go of that copy
+   and reads the source's mask from then on. */
 static void
 slab_state_release_views (ca_slab_iter_state_t *st)
 {
@@ -1210,6 +1216,13 @@ slab_state_release_views (ca_slab_iter_state_t *st)
     CArray *ov;
     TypedData_Get_Struct(st->output_slab_view, CArray, &carray_data_type, ov);
     ov->ptr = NULL;
+  }
+  if ( st->carrier == Qnil && st->slab_view != Qnil ) {
+    CArray *cs;
+    TypedData_Get_Struct(st->slab_view, CArray, &carray_data_type, cs);
+    if ( cs->mask ) {
+      cs->mask->ptr = NULL;
+    }
   }
   if ( st->carrier != Qnil && st->slab_view != Qnil ) {
     CArray *cw, *cs, *backing;

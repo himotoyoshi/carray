@@ -269,4 +269,20 @@ class TestEachSlabBeta4 < Test::Unit::TestCase
                  a.reduce_slab(axis: 1) { |row| row.sum }.to_a
   end
 
+  # A slab kept past the walk shows the last slab, mask included.  A slab
+  # that is a window onto the source read its mask from the walk's copy of
+  # the source's mask, which finish frees.
+  def test_a_kept_window_slab_shows_the_last_slab_with_its_mask
+    a = CArray.int32(4, 5).seq!
+    a[[0, 2], 1] = UNDEF
+    a[3, 4] = UNDEF
+    kept = nil
+    a.each_slab(axis: 1) { |row| kept = row }
+    GC.start
+    junk = Array.new(64) { CArray.int32(4, 5).seq!.tap { |j| j[] = 7; j.mask = 1 } }
+    assert_equal [15, 16, 17, 18, UNDEF], kept.to_a
+    assert_equal [false, false, false, false, true], kept.mask.to_a
+    junk.clear
+  end
+
 end
