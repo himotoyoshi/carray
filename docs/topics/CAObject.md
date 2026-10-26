@@ -264,30 +264,28 @@ declare the array immutable and skip writing entirely.
 ### Mask: declare the lifecycle hook
 
 `CAObject` rejects mask creation by default
-(`"can't create mask for CAObject"`). To enable masking you write two
-pieces of code, each of which corresponds 1:1 to a piece of the C
-operation table that a future C extension would have to provide:
+(`"can't create mask for CAObject"`). To enable masking, override
+`create_mask` (an empty method is fine). This is the Ruby mirror of
+the `func_create_mask` slot in `ca_operation_function_t`. The engine
+looks for it with `respond_to?` before calling `ca_create_mask(ca)`.
+Writing `def create_mask; end` is the standard form: the body delegates
+to the engine default, and the *presence* of the method declares "this
+CArray kind participates in mask lifecycle". When you later promote
+this prototype to a C extension, this is where you would write
+`ca_xxx_func_create_mask` (or alias `ca_array_func_create_mask`).
 
-1. **Override `create_mask` (no-op is fine).** This is the Ruby
-   mirror of the `func_create_mask` slot in
-   `ca_operation_function_t`. The engine looks for it with
-   `respond_to?` before calling `ca_create_mask(ca)`. Writing
-   `def create_mask; end` is the standard form — the body delegates
-   to the engine default, but the *presence* of the method declares
-   "this CArray kind participates in mask lifecycle". When you later
-   promote this prototype to a C extension, this is where you would
-   write `ca_xxx_func_create_mask` (or alias `ca_array_func_create_mask`).
-2. **Call `self.mask = 0` in `initialize`** (only if `copy_data` will
-   write `UNDEF` into the data buffer). This eagerly allocates the
-   mask buffer so that bulk-path `UNDEF` writes survive the materialise
-   step. Without it, a `UNDEF` written inside `copy_data` is silently
-   discarded.
+With `create_mask` defined, an `UNDEF` from your callbacks marks the
+cell masked: a fetcher (`fetch_addr` / `fetch_index`) that answers
+`UNDEF`, and a `copy_data` that writes `UNDEF` into the array it is
+handed (`data[i] = UNDEF`, or `data[] = src` with `src` masked). The
+first such `UNDEF` creates the mask. A bulk read and a cell-by-cell
+read give the same answer, in either order. Without `create_mask`,
+an `UNDEF` from either callback raises `TypeError`.
 
 ```ruby
 class MaskedRandom < CAObject
   def initialize(n)
     super(CA_INT32, [n])
-    self.mask = 0           # eager-allocate mask buffer
   end
 
   private
@@ -305,22 +303,13 @@ class MaskedRandom < CAObject
 end
 ```
 
-Why two steps? CArray's mask is **lazy + sticky** everywhere: an
-entity (or any CArray subclass) does not allocate a mask buffer until
-something asks for one, and once allocated it stays even when all
-bits are cleared. The engine call that copies a `CAObject` to a
-materialised buffer checks `source.has_mask?` *before* invoking your
-`copy_data`. If you write `UNDEF` inside `copy_data` to a CAObject
-that had no mask buffer at entry, the mask bit lands on the internal
-data wrapper but is not seen by the caller — the materialised result
-ends up without a mask. Calling `self.mask = 0` up-front means
-`has_mask?` is already true when the engine inspects the source, so
-the mask is copied out alongside the data.
-
-The single-element path (`fetch_addr` returning `UNDEF`) is a
-separate code path that allocates and writes the mask directly on
-the `CAObject` itself, so it works whether or not you pre-allocated
-the mask buffer.
+The mask records the `UNDEF`s that reads have met. A question about
+the mask alone (`has_mask?`, `count_masked`, `is_masked`) asked before
+any value has been read finds none, because no callback has been asked
+yet. Read the values first (`to_a`, `copy`, a reduction) when you need
+the mask they produce, or keep the mask in the source and answer it
+through the `mask_*` hooks below, which the mask questions call
+directly.
 
 A mask written onto the object — `b[3] = UNDEF`, `b.mask = ...` — is
 the object's own and stays when its values are read: a value your
@@ -717,15 +706,16 @@ the surface is the whole point.
 - **MemoryView protocol** — `CAObject` is currently rejected as a
   MemoryView producer (no stable contiguous backing buffer). Use
   `obj.copy` first if you need to hand the data to another library.
-- **Mask** — fetchers may return `CA_UNDEF` to mark an element masked;
-  the engine creates the mask lazily on first such return.
+- **Mask** — fetchers may return `CA_UNDEF`, and `copy_data` may write
+  it, to mark an element masked; the engine creates the mask on the
+  first one.
 
 ---
 
 ## 6. Advanced: customising the mask itself (`mask_*` hooks)
 
 Most users never touch this. The default mask story (return `UNDEF`
-from a fetcher, optionally pre-allocate via `self.mask = 0`) covers
+from a fetcher or write it in `copy_data`) covers
 almost every case. This section documents the `mask_*` callback family
 for the rare scenario where you want **the mask bits themselves** to
 come from Ruby code rather than from a real boolean buffer — for
