@@ -17,15 +17,16 @@ class TestShortcutSwitch < Test::Unit::TestCase
     lib = File.expand_path("../../lib", __dir__)
     ext = File.expand_path("../../ext", __dir__)
     code = "require 'carray'; p #{names.inspect}.map { |n| CArray.__fast_paths_enabled__(n) }"
+    env = { "CARRAY_GENERAL_PATH" => nil, "CARRAY_SHORTCUTS_OFF" => nil }.merge(env)
     out, err, = Open3.capture3(env, RbConfig.ruby, "-I#{ext}", "-I#{lib}", "-e", code)
     [eval(out), err]
   end
 
   def test_every_name_answers_on_by_default
-    assert_equal true, CArray.__fast_paths_enabled__
-    %i[stack keep_scratch meld_reduce window_fold_by_offset].each do |name|
-      assert_equal true, CArray.__fast_paths_enabled__(name), name
-    end
+    names = %i[stack stack_outer_k meld_reduce window_fold_by_offset]
+    got, err = answer_in_child({}, names)
+    assert_equal [true] * names.size, got
+    assert_equal "", err
   end
 
   def test_an_unknown_name_is_refused
@@ -46,7 +47,7 @@ class TestShortcutSwitch < Test::Unit::TestCase
   end
 
   def test_the_general_path_turns_every_name_off
-    got, = answer_in_child({ "CARRAY_GENERAL_PATH" => "1" }, %i[stack keep_scratch])
+    got, = answer_in_child({ "CARRAY_GENERAL_PATH" => "1" }, %i[stack stack_outer_k])
     assert_equal [false, false], got
   end
 
