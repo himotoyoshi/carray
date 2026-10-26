@@ -593,8 +593,56 @@ ca_mask_parts (CArray *m, CArray ***parents, CArray ***standins, int32_t *n)
       || ca_meld_mask_parts(m, parents, standins, n);
 }
 
+static int ca_mask_refusal_below (CArray *ca, int depth);
+
+/* For a stack or meld holding data: its parents and their number. */
+static int
+ca_data_parts (CArray *ca, CArray ***parents, int32_t *n)
+{
+  return ca_stack_data_parts(ca, parents, n)
+      || ca_meld_data_parts(ca, parents, n);
+}
+
+static CArray *
+ca_data_like (CArray *like, CArray **parents)
+{
+  CArray **p;
+  int32_t  n;
+  return ca_stack_data_parts(like, &p, &n) ? ca_stack_like(like, parents)
+                                           : ca_meld_like(like, parents);
+}
+
+/* True if a true written into the mask `ca` does not have yet, as its
+   stand-in, can be refused: `ca` is a stack or meld with a part that can
+   have no mask, there or further down. */
+static int
+ca_data_can_refuse (CArray *ca, int depth)
+{
+  CArray **parts;
+  int32_t  n, k;
+  if ( depth > 64 || ! ca_data_parts(ca, &parts, &n) ) {
+    return 0;
+  }
+  for ( k = 0; k < n; k++ ) {
+    CArray *q = parts[k];
+    if ( ca_mask_standin_parent_unmaskable(q) ) {
+      return 1;
+    }
+    if ( ca_has_mask(q) ) {
+      if ( q->mask != NULL && ca_mask_refusal_below(q->mask, depth + 1) ) {
+        return 1;
+      }
+    }
+    else if ( ca_data_can_refuse(q, depth + 1) ) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 /* True if a write to `ca` can reach the part of a stack or meld mask that
-   reads the stand-in of a parent which can have no mask. */
+   reads the stand-in of a parent which can have no mask, or of a stack or
+   meld that can refuse one. */
 static int
 ca_mask_refusal_below (CArray *ca, int depth)
 {
@@ -607,7 +655,8 @@ ca_mask_refusal_below (CArray *ca, int depth)
     CAMultiParent *mp = (CAMultiParent *) ca;
     for ( k = 0; standins != NULL && k < n; k++ ) {
       if ( standins[k] != NULL && mp->parents[k] == standins[k]
-           && ca_mask_standin_parent_unmaskable(parents[k]) ) {
+           && ( ca_mask_standin_parent_unmaskable(parents[k])
+                || ca_data_can_refuse(parents[k], depth + 1) ) ) {
         return 1;
       }
     }
@@ -634,13 +683,16 @@ ca_mask_write_needs_check (CArray *ca)
       && ca_mask_refusal_below(ca, 0);
 }
 
-/* One part of a stack or meld mask put aside for the trial. */
+/* What the trial put in place: part k of the stack or meld mask `mask`
+   replaced (saved, to put back), and an array the trial made (owned, to
+   free) -- a blank, or a stack or meld over blanks standing for a mask
+   not made yet. */
 typedef struct {
-  CArray  *mask;      /* the stack or meld mask */
+  CArray  *mask;
   int32_t  k;
-  CArray  *saved;     /* its part k */
-  CArray  *blank;     /* the blank in its place */
-  int      refusing;  /* a true here refuses the write */
+  CArray  *saved;
+  CArray  *owned;
+  int      refusing;  /* owned is a blank, and a true in it refuses the write */
   int      value;     /* the refusing parent is a value array */
 } ca_mask_trial_part_t;
 
@@ -651,6 +703,93 @@ typedef struct {
   VALUE   (*body)(VALUE);
   VALUE     arg;
 } ca_mask_trial_t;
+
+static ca_mask_trial_part_t *
+ca_mask_trial_add (ca_mask_trial_t *t)
+{
+  ca_mask_trial_part_t *e;
+  if ( t->n == t->cap ) {
+    t->cap = t->cap ? 2 * t->cap : 8;
+    REALLOC_N(t->parts, ca_mask_trial_part_t, t->cap);
+  }
+  e = &t->parts[t->n++];
+  e->mask     = NULL;
+  e->k        = 0;
+  e->saved    = NULL;
+  e->owned    = NULL;
+  e->refusing = 0;
+  e->value    = 0;
+  return e;
+}
+
+/* An all-false boolean array shaped as `like`, owned by the trial. */
+static CArray *
+ca_mask_trial_blank (ca_mask_trial_t *t, CArray *like, int refusing)
+{
+  ca_mask_trial_part_t *e = ca_mask_trial_add(t);
+  CArray *z;
+  e->refusing = refusing;
+  e->value    = ca_is_value_array(like);
+  z = carray_new(CA_BOOLEAN, like->ndim, like->dim, 0, NULL);
+  MEMZERO(z->ptr, boolean8_t, z->elements);
+  t->parts[t->n - 1].owned = z;
+  return z;
+}
+
+static void ca_mask_trial_put_aside (ca_mask_trial_t *t, CArray *ca, int depth);
+
+/* For a stack or meld `ca` with no mask yet: what its mask would be, built
+   over blanks (and over the parts' own masks, themselves put aside), so a
+   true written into it lands in the part it would reach. */
+static CArray *
+ca_mask_trial_shadow (ca_mask_trial_t *t, CArray *ca, int depth)
+{
+  volatile VALUE holder = 0;
+  CArray **parts, **shadows, *like;
+  int32_t  n, k;
+  ca_data_parts(ca, &parts, &n);
+  shadows = ALLOCV_N(CArray *, holder, n);
+  for ( k = 0; k < n; k++ ) {
+    CArray *q = parts[k];
+    if ( ca_mask_standin_parent_unmaskable(q) ) {
+      shadows[k] = ca_mask_trial_blank(t, q, 1);
+    }
+    else if ( ca_has_mask(q) ) {
+      ca_create_mask(q);
+      if ( ca_mask_refusal_below(q->mask, depth + 1) ) {
+        ca_mask_trial_put_aside(t, q->mask, depth + 1);
+        shadows[k] = q->mask;
+      }
+      else {
+        shadows[k] = ca_mask_trial_blank(t, q, 0);
+      }
+    }
+    else if ( ca_data_can_refuse(q, depth + 1) ) {
+      shadows[k] = ca_mask_trial_shadow(t, q, depth + 1);
+    }
+    else {
+      shadows[k] = ca_mask_trial_blank(t, q, 0);
+    }
+  }
+  like = ca_data_like(ca, shadows);
+  ca_mask_trial_add(t)->owned = like;
+  ALLOCV_END(holder);
+  return like;
+}
+
+static void
+ca_mask_trial_swap (ca_mask_trial_t *t, CArray *mask, int32_t k, CArray *with)
+{
+  CAMultiParent *mp = (CAMultiParent *) mask;
+  ca_mask_trial_part_t *e = ca_mask_trial_add(t);
+  e->mask  = mask;
+  e->k     = k;
+  e->saved = mp->parents[k];
+  mp->parents[k] = with;
+  if ( k == 0 ) {
+    CAVIEW(mask)->parent = with;
+  }
+}
 
 static void
 ca_mask_trial_put_aside (ca_mask_trial_t *t, CArray *ca, int depth)
@@ -664,30 +803,25 @@ ca_mask_trial_put_aside (ca_mask_trial_t *t, CArray *ca, int depth)
     CAMultiParent *mp = (CAMultiParent *) ca;
     for ( k = 0; k < n; k++ ) {
       CArray *p = mp->parents[k];
-      ca_mask_trial_part_t *e;
       int standing_in = ( standins != NULL && standins[k] != NULL
                           && p == standins[k] );
-      if ( ! standing_in && ca_mask_refusal_below(p, depth + 1) ) {
-        ca_mask_trial_put_aside(t, p, depth + 1);
-        continue;
+      if ( ! standing_in ) {
+        if ( ca_mask_refusal_below(p, depth + 1) ) {
+          ca_mask_trial_put_aside(t, p, depth + 1);
+        }
+        else {
+          ca_mask_trial_swap(t, ca, k, ca_mask_trial_blank(t, p, 0));
+        }
       }
-      if ( t->n == t->cap ) {
-        t->cap = t->cap ? 2 * t->cap : 8;
-        REALLOC_N(t->parts, ca_mask_trial_part_t, t->cap);
+      else if ( ca_mask_standin_parent_unmaskable(parents[k]) ) {
+        ca_mask_trial_swap(t, ca, k, ca_mask_trial_blank(t, p, 1));
       }
-      e = &t->parts[t->n];
-      e->mask     = ca;
-      e->k        = k;
-      e->saved    = p;
-      e->blank    = NULL;
-      e->refusing = standing_in && ca_mask_standin_parent_unmaskable(parents[k]);
-      e->value    = ca_is_value_array(parents[k]);
-      t->n++;
-      e->blank = carray_new(CA_BOOLEAN, p->ndim, p->dim, 0, NULL);
-      MEMZERO(e->blank->ptr, boolean8_t, e->blank->elements);
-      mp->parents[k] = e->blank;
-      if ( k == 0 ) {
-        CAVIEW(ca)->parent = e->blank;
+      else if ( ca_data_can_refuse(parents[k], depth + 1) ) {
+        ca_mask_trial_swap(t, ca, k,
+                           ca_mask_trial_shadow(t, parents[k], depth + 1));
+      }
+      else {
+        ca_mask_trial_swap(t, ca, k, ca_mask_trial_blank(t, p, 0));
       }
     }
     return;
@@ -706,7 +840,7 @@ ca_mask_trial_run (VALUE p)
   return Qnil;
 }
 
-/* Put every part back, last first, so a part put aside twice ends as it was. */
+/* Put every part back, last first. */
 static VALUE
 ca_mask_trial_restore (VALUE p)
 {
@@ -714,6 +848,9 @@ ca_mask_trial_restore (VALUE p)
   int32_t i;
   for ( i = t->n - 1; i >= 0; i-- ) {
     ca_mask_trial_part_t *e = &t->parts[i];
+    if ( e->mask == NULL ) {
+      continue;
+    }
     ((CAMultiParent *) e->mask)->parents[e->k] = e->saved;
     if ( e->k == 0 ) {
       CAVIEW(e->mask)->parent = e->saved;
@@ -726,9 +863,9 @@ static void
 ca_mask_trial_free (ca_mask_trial_t *t)
 {
   int32_t i;
-  for ( i = 0; i < t->n; i++ ) {
-    if ( t->parts[i].blank ) {
-      ca_free(t->parts[i].blank);
+  for ( i = t->n - 1; i >= 0; i-- ) {
+    if ( t->parts[i].owned ) {
+      ca_free(t->parts[i].owned);
     }
   }
   xfree(t->parts);
@@ -744,7 +881,7 @@ ca_mask_write_trial_and_run (VALUE p)
   int refused = -1;
   rb_ensure(ca_mask_trial_run, p, ca_mask_trial_restore, p);
   for ( i = 0; i < t->n && refused < 0; i++ ) {
-    CArray *z = t->parts[i].blank;
+    CArray *z = t->parts[i].owned;
     if ( ! t->parts[i].refusing ) {
       continue;
     }

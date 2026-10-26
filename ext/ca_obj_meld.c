@@ -1030,6 +1030,27 @@ ca_meld_put_body (VALUE arg)
   return Qnil;
 }
 
+/* For a CAMeld holding data (not the mask of one): its parents and their
+   number.  0 for any other array. */
+int
+ca_meld_data_parts (CArray *ca, CArray ***parents, int32_t *n)
+{
+  if ( ca->obj_type != CA_OBJ_MELD || ((CAMeld *) ca)->mask_owner != NULL ) {
+    return 0;
+  }
+  *parents = ((CAMeld *) ca)->parents;
+  *n       = ((CAMeld *) ca)->n_parents;
+  return 1;
+}
+
+/* A CAMeld over `parents`, laid out as the CAMeld `like`. */
+CArray *
+ca_meld_like (CArray *like, CArray **parents)
+{
+  CAMeld *l = (CAMeld *) like;
+  return (CArray *) ca_meld_new(l->n_parents, parents, l->meld_axis);
+}
+
 /* For the mask of a CAMeld: the CAMeld it belongs to, as its data parents,
    their stand-ins and their number.  0 for any other array. */
 int

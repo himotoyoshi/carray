@@ -64,4 +64,41 @@ class TestRefusedMaskWriteThroughView < Test::Unit::TestCase
     s[CA_INT([0]), nil] = UNDEF
     assert_equal [UNDEF, UNDEF, UNDEF], b.to_a
   end
+
+  # The inner stack has no mask yet: the outer one reads a stand-in for it,
+  # and the write reaches the inner stack's parts only when it settles.
+  def test_a_stack_inside_a_stack
+    writes = {
+      "boolean"   => ->(s) { s[s.value.gt(0)] = UNDEF },
+      "method"    => ->(s) { s[:gt, 0] = UNDEF },
+      "whole"     => ->(s) { s[] = UNDEF },
+      "fill"      => ->(s) { s.fill(UNDEF) },
+    }
+    writes.each do |name, write|
+      [:inner_first, :inner_last].each do |order|
+        a, b = parts
+        c = CArray.float64(2, 3).seq(1)
+        inner = CArray.stack([b, a.value])
+        s = order == :inner_first ? CArray.stack([inner, c]) : CArray.stack([c, inner])
+        refused_and_unchanged(b, "#{name} #{order}: b") { write.call(s) }
+        assert_equal false, c.has_mask?, "#{name} #{order}: c"
+        assert_equal false, inner.has_mask?, "#{name} #{order}: inner"
+      end
+    end
+  end
+
+  def test_a_meld_inside_a_stack
+    a, b = parts
+    inner = CArray.meld(b, a.value, axis: 0)
+    s = CArray.stack([inner, CArray.float64(6).seq])
+    refused_and_unchanged(b, "meld in stack") { s[s.value.gt(0)] = UNDEF }
+  end
+
+  # A write into the inner stack's part that can take a mask goes through.
+  def test_a_write_into_the_maskable_part_of_an_inner_stack_goes_through
+    a, b = parts
+    s = CArray.stack([CArray.stack([b, a.value]), CArray.float64(2, 3)])
+    s[0, 0, nil] = UNDEF
+    assert_equal [UNDEF, UNDEF, UNDEF], b.to_a
+  end
 end

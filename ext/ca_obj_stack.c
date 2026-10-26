@@ -1047,6 +1047,27 @@ ca_stack_put_body (VALUE arg)
   return Qnil;
 }
 
+/* For a CAStack holding data (not the mask of one): its parents and their
+   number.  0 for any other array. */
+int
+ca_stack_data_parts (CArray *ca, CArray ***parents, int32_t *n)
+{
+  if ( ca->obj_type != CA_OBJ_STACK || ((CAStack *) ca)->mask_owner != NULL ) {
+    return 0;
+  }
+  *parents = ((CAStack *) ca)->parents;
+  *n       = ((CAStack *) ca)->n_parents;
+  return 1;
+}
+
+/* A CAStack over `parents`, laid out as the CAStack `like`. */
+CArray *
+ca_stack_like (CArray *like, CArray **parents)
+{
+  CAStack *l = (CAStack *) like;
+  return (CArray *) ca_stack_new_with_axis(l->n_parents, parents, l->k_axis);
+}
+
 /* For the mask of a CAStack: the CAStack it belongs to, as its data parents,
    their stand-ins and their number.  0 for any other array. */
 int
