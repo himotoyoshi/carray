@@ -18,7 +18,6 @@ Gem::Specification.new do |s|
   s.license     = "MIT"
   s.platform    = Gem::Platform::RUBY
   s.required_ruby_version = ">= 3.3"
-  # CArray.fuse reads its block with Prism; Node#breadth_first_search is 1.0's.
   s.add_dependency "prism", ">= 1.0"
   s.files       = [
     *Dir.glob("lib/**/*.rb"),
