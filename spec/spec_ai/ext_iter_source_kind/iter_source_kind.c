@@ -46,6 +46,7 @@
 static int8_t CA_OBJ_ITER_OFFSET;
 static int8_t CA_OBJ_ITER_OFFSET_UNREG;
 static int8_t CA_OBJ_ITER_OFFSET_NOXFER;
+static int8_t CA_OBJ_ITER_OFFSET_NOATTACH;
 
 static VALUE rb_cCAIterOffset;
 static VALUE rb_cCAIterOffsetMask;
@@ -53,6 +54,8 @@ static VALUE rb_cCAIterOffsetUnreg;
 static VALUE rb_cCAIterOffsetUnregMask;
 static VALUE rb_cCAIterOffsetNoXfer;
 static VALUE rb_cCAIterOffsetNoXferMask;
+static VALUE rb_cCAIterOffsetNoAttach;
+static VALUE rb_cCAIterOffsetNoAttachMask;
 
 typedef struct {
   /* CAView prefix — field-for-field identical to the core's views */
@@ -296,6 +299,11 @@ OFFSET_DATA_TYPE(caiteroffsetnoxfer_data_type, "CAIterOffsetNoXfer",
                  caview_data_type, ca_free)
 OFFSET_DATA_TYPE(caiteroffsetnoxfer_mask_data_type, "CAIterOffsetNoXferMask",
                  caiteroffsetnoxfer_data_type, ca_free_nop)
+OFFSET_DATA_TYPE(caiteroffsetnoattach_data_type, "CAIterOffsetNoAttach",
+                 caview_data_type, ca_free)
+OFFSET_DATA_TYPE(caiteroffsetnoattach_mask_data_type,
+                 "CAIterOffsetNoAttachMask",
+                 caiteroffsetnoattach_data_type, ca_free_nop)
 
 /* --- constructor ---------------------------------------------------- */
 
@@ -344,6 +352,7 @@ rb_offset_wrap (VALUE klass, VALUE parent_obj, VALUE roffset)
 
   ca = offset_new((klass == rb_cCAIterOffset)      ? CA_OBJ_ITER_OFFSET
                   : (klass == rb_cCAIterOffsetNoXfer) ? CA_OBJ_ITER_OFFSET_NOXFER
+                  : (klass == rb_cCAIterOffsetNoAttach) ? CA_OBJ_ITER_OFFSET_NOATTACH
                   : CA_OBJ_ITER_OFFSET_UNREG,
                   parent, (int32_t) NUM2INT(roffset));
   obj = ca_wrap_struct(ca);
@@ -418,6 +427,12 @@ rb_offset_register (VALUE klass, VALUE robj_type, VALUE rkind)
 
 static ca_operation_function_t noxfer_func;
 static int noxfer_fail_sync = 0;
+
+/* A registered view with no allocate / attach / sync / detach slots: it
+   is reached through its transfer slots only, and no route may attach
+   it (a CAStack over such views took a shortcut that attached its
+   parents). */
+static ca_operation_function_t noattach_func;
 
 static void
 noxfer_func_sync (void *ap)
@@ -537,6 +552,24 @@ Init_iter_source_kind (void)
                         &caiteroffsetnoxfer_mask_data_type,
                         &noxfer_func, sizeof(noxfer_func));
 
+  noattach_func = offset_func;
+  noattach_func.allocate = NULL;
+  noattach_func.attach   = NULL;
+  noattach_func.sync     = NULL;
+  noattach_func.detach   = NULL;
+  rb_cCAIterOffsetNoAttach     = rb_define_class("CAIterOffsetNoAttach",
+                                                 rb_cCAView);
+  rb_cCAIterOffsetNoAttachMask = rb_define_class("CAIterOffsetNoAttachMask",
+                                                 rb_cCAIterOffsetNoAttach);
+  CA_OBJ_ITER_OFFSET_NOATTACH =
+    ca_install_obj_type(rb_cCAIterOffsetNoAttach,
+                        &caiteroffsetnoattach_data_type,
+                        rb_cCAIterOffsetNoAttachMask,
+                        &caiteroffsetnoattach_mask_data_type,
+                        &noattach_func, sizeof(noattach_func));
+  ca_iter_register_source_kind(CA_OBJ_ITER_OFFSET_NOATTACH,
+                               CA_ITER_SRC_ATTACH);
+
   stride_reg_func = ca_stride_func;
   stride_reg_func.attach   = stride_reg_func_attach;
   stride_reg_func.allocate = stride_reg_func_attach;
@@ -576,6 +609,8 @@ Init_iter_source_kind (void)
   rb_define_singleton_method(rb_cCAIterStrideReg, "wrap",
                              rb_stride_reg_wrap, 1);
   rb_define_singleton_method(rb_cCAIterOffsetNoXfer, "wrap",
+                             rb_offset_wrap, 2);
+  rb_define_singleton_method(rb_cCAIterOffsetNoAttach, "wrap",
                              rb_offset_wrap, 2);
   rb_define_singleton_method(rb_cCAIterOffsetNoXfer, "fail_sync=",
                              rb_noxfer_set_fail_sync, 1);

@@ -1236,13 +1236,14 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
                    is the stack axis.
        Why         about 2x on a mean along the stack axis of 4 parents
                    of 500x2000.
-       Enters      a CAStack, no mask, a read walk, one slab axis that is
-                   k_axis.
+       Enters      a CAStack whose parents all have an attach slot, no
+                   mask, a read walk, one slab axis that is k_axis.
        Promises    1 (the slab is contiguous), 6 (no mask exists to touch).
        Switch      ca_fast_paths_enabled(): off, the transfer walk.
        Checked by  the slab-axis and fiber rows of the stack parent along
                    axis 0 in the delivery matrix. */
     if ( ca_func[src->obj_type].attach == ca_stack_func.attach
+         && ca_stack_parents_attachable(src)
          && !ca_has_mask(src)
          && !(flags & CA_KERNEL_WRITE)
          && naxes == 1 && axes[0] == ((CAStack *) src)->k_axis
@@ -1257,7 +1258,8 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
                    index picks, without gathering the stack.
        Why         about 11x on a mean along axis 1 of 4 parents of
                    500x2000.
-       Enters      a CAStack, a read walk, the stack axis outside the slab.
+       Enters      a CAStack whose parents all have an attach slot, a read
+                   walk, the stack axis outside the slab.
        Promises    2 (the parents' masks are copied), 6 (masks are read
                    only when a parent has one), 8 (alias_ptr stays NULL,
                    so no slab is lent as a window).
@@ -1265,6 +1267,7 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
        Checked by  the slab-axis, fiber and two-slab-axes rows of the
                    stack parent along axes 1 and 2 in the delivery matrix. */
     if ( ca_func[src->obj_type].attach == ca_stack_func.attach
+         && ca_stack_parents_attachable(src)
          && !(flags & CA_KERNEL_WRITE)
          && naxes >= 1 && !in_slab[((CAStack *) src)->k_axis]
          && ca_fast_paths_enabled() ) {

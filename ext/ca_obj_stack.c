@@ -1060,6 +1060,25 @@ ca_stack_data_parts (CArray *ca, CArray ***parents, int32_t *n)
   return 1;
 }
 
+/* Whether every parent of the CAStack `ca` has an attach slot.  The
+   shortcuts that read the parents' buffers directly (the kernel
+   iterator's STACK / STACK_OUTER_K, the generated loop interchange)
+   attach them; an external view type may leave the slot NULL and is
+   reached through its transfer slots only. */
+int
+ca_stack_parents_attachable (CArray *ca)
+{
+  CAStack *st = (CAStack *) ca;
+  int32_t  k;
+
+  for (k=0; k<st->n_parents; k++) {
+    if ( ! ca_func[st->parents[k]->obj_type].attach ) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 /* A CAStack over `parents`, laid out as the CAStack `like`. */
 CArray *
 ca_stack_like (CArray *like, CArray **parents)

@@ -159,4 +159,21 @@ class TestIterSourceKindRegistration < Test::Unit::TestCase
     assert_equal 6, view.max
   end
 
+  # A registered view with no attach slot is reached through its transfer
+  # slots.  A CAStack of such views takes no shortcut that attaches its
+  # parents: every axis of every stack layout answers as its copy does.
+  def test_stack_of_views_without_an_attach_slot
+    mk = ->(shape) { CAIterOffsetNoAttach.wrap(CArray.int32(*shape).seq!, 100) }
+    [[[4, 3], 0], [[4, 3], 1], [[64, 64], 0], [[64, 64], 1],
+     [[3, 64, 64], 0], [[3, 64, 64], 2]].each do |shape, k|
+      s = CArray.stack([mk.(shape), mk.(shape)], axis: k)
+      s.ndim.times do |ax|
+        assert_equal s.copy.sum(axis: ax).to_a, s.sum(axis: ax).to_a,
+                     "sum shape=#{shape} k=#{k} axis=#{ax}"
+        assert_equal s.copy.median(axis: ax).to_a, s.median(axis: ax).to_a,
+                     "median shape=#{shape} k=#{k} axis=#{ax}"
+      end
+    end
+  end
+
 end
