@@ -577,6 +577,13 @@ ca_mask_overlay_or_body (VALUE arg)
    Each operand other than a scalar has ca_out's number of elements
    (ArgumentError otherwise); at most 8 operands.
 
+   A bang operation's ca_out can share its root with an operand, so its
+   mask buffer may be the root's mask that a later operand's mask reads
+   (`r.fma!(m, r.flip(0))`).  When more than one operand is read and one
+   of them shares ca_out's root, the operands' masks are folded into a
+   scratch first and ORed into ca_out's mask at the end, so every operand
+   is read before ca_out's mask changes.
+
    This gathers the full mask once; a per-chunk mask gather inside the
    chunked branch is a possible future optimisation. */
 void
@@ -584,7 +591,7 @@ ca_mask_overlay_safe (CArray *ca_out, int n, ...)
 {
   va_list ap;
   CArray *slist[8];
-  int i, any_mask = 0;
+  int i, any_mask = 0, n_read = 0, shares = 0;
 
   if ( n < 0 || n > 8 ) {
     rb_raise(rb_eRuntimeError, "ca_mask_overlay_safe: n out of range");
@@ -610,23 +617,46 @@ ca_mask_overlay_safe (CArray *ca_out, int n, ...)
 
   if ( ! any_mask ) return;
 
+  for ( i = 0; i < n; i++ ) {
+    CArray *cs = slist[i];
+    if ( ! cs || cs == ca_out ) {
+      continue;
+    }
+    n_read++;
+    if ( ca_shares_root(ca_out, cs) ) {
+      shares = 1;
+    }
+  }
+
   ca_update_mask(ca_out);
   {
     int created_new = 0;
+    volatile VALUE hacc = 0;
+    boolean8_t *mout, *ma;
+    ca_size_t elements = ca_out->elements;
+
     if ( ! ca_out->mask ) {
       ca_create_mask(ca_out);
       created_new = 1;
     }
 
-    boolean8_t *ma = (boolean8_t *) ca_out->mask->ptr;
-    ca_size_t elements = ca_out->elements;
+    mout = (boolean8_t *) ca_out->mask->ptr;
+    if ( n_read > 1 && shares ) {
+      ma = ALLOCV_N(boolean8_t, hacc, elements);
+      memset(ma, 0, elements);
+    }
+    else {
+      ma = mout;
+    }
 
     /* Fresh mask → zero-init.  Existing mask (= bang variant where
        ca_out IS one of the operands) → preserve as initial accumulator
        (= ca_out's own contribution is already in `ma`, OR in others).
        This is structurally equivalent to ca_copy_mask_overlay_n's
        behavior which OR'd into existing mask without clearing.        */
-    if ( created_new ) memset(ma, 0, elements);
+    if ( created_new ) {
+      memset(mout, 0, elements);
+    }
 
     for ( i = 0; i < n; i++ ) {
       CArray *cs = slist[i];
@@ -647,6 +677,14 @@ ca_mask_overlay_safe (CArray *ca_out, int n, ...)
         ca_lazy_arena_protect(ca_mask_overlay_or_body,
                               ca_lazy_arena_release_held, (VALUE) &o);
       }
+    }
+
+    if ( ma != mout ) {
+      ca_size_t j;
+      for (j=0; j<elements; j++) {
+        mout[j] |= ma[j];
+      }
+      ALLOCV_END(hacc);
     }
   }
 }

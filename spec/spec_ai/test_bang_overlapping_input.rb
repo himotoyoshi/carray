@@ -71,6 +71,24 @@ class TestBangOverlappingInput < Test::Unit::TestCase
     bang_matches_plain(a[1..n], :fma!, r, r)
   end
 
+  # The masks too are read before the target's mask changes: the second
+  # operand's mask must not pick up the bits the first one ORed in.
+  def test_triop_masks_of_inputs_sharing_the_target
+    [:fma!, :fms!].each do |op|
+      [:int32, :float64].each do |t|
+        a = CArray.new(t, [4]).seq!(1)
+        bang_matches_plain(a, op, CArray.new(t, [4]).seq!.tap { |m| m[1] = UNDEF }, a.flip(0))
+        a = CArray.new(t, [6]).seq!(1)
+        a[3] = UNDEF
+        m = CArray.new(t, [5]).seq!.tap { |x| x[1] = UNDEF }
+        bang_matches_plain(a[0..4], op, m, a[1..5])
+        a = CArray.new(t, [6]).seq!(1)
+        a[3] = UNDEF
+        bang_matches_plain(a[0..4], op, a[1..5], a[1..5].copy)
+      end
+    end
+  end
+
   def test_input_from_another_array_is_unaffected
     a = CArray.int32(5).seq!
     b = CArray.int32(5).seq!(10)
