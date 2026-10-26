@@ -25,20 +25,25 @@ mechanically pins the frozen names.
 
 **Frozen** (never rename / re-arity / change semantics — additions only):
 
-- the author macros — `CA_FOR_EACH_SLAB`, the `_FIBER` family and the
-  `_WHOLE` pair; the
-  `CA_SLAB_REDUCE_T*` / `CA_SLAB_MAP_T` / `CA_SLAB_SCAN_T` / `CA_SLAB_SCAN_TA`
-  suites; `CA_L2_FOR_EACH` and its UNMASKED variant; the `CA_FOR_EACH_UNMASKED`
-  family;
+- the author macros — the `CA_FOR_EACH_SLAB` (and `_SLAB_INOUT`),
+  `_FIBER` (including `_FIBER_PAIR` / `_FIBER_PAIR_MASKED`) and `_WHOLE`
+  families; the `CA_SLAB_REDUCE_*` / `CA_SLAB_MAP_T` / `CA_SLAB_SCAN_T` /
+  `CA_SLAB_SCAN_TA` suites, except the macros only the kernel generator
+  emits; `CA_L2_FOR_EACH`; the mask helper `CA_FOR_EACH_UNMASKED`;
 - the raw entry points the macros expand to — `ca_iter_state_init_l1`,
-  `ca_iter_state_init_l2`, `ca_iter_state_next_slab`,
-  `ca_iter_state_next_slab_axes`, `ca_iter_state_sync_slab`,
-  `ca_iter_state_finish`;
+  `ca_iter_state_init_l2`, `ca_iter_state_init_l2_paired`,
+  `ca_iter_state_next_slab`, `ca_iter_state_next_slab_axes`,
+  `ca_iter_state_sync_slab`, `ca_iter_state_finish`,
+  `ca_iter_state_close`, `ca_iter_check_init`, `ca_iter_check_same_shape`;
+- the author entry points beside them — `ca_iter_ensure` (a body that can
+  raise) and `ca_iter_register_source_kind` (an externally installed view
+  class);
 - the tokens authors write literally — `CA_SLAB_AXES`, `CA_SLAB_WHOLE`,
-  `CA_SLAB_FREE`, `CA_KERNEL_WRITE`, `CA_KERNEL_NO_MASK`,
-  `CA_KERNEL_FIBER_CONTIG`, `CA_KERNEL_CHUNK_HINT`, `CA_ITER_OK`,
+  `CA_KERNEL_WRITE`, `CA_KERNEL_NO_MASK`, `CA_ITER_OK`,
   `CA_ITER_ERR_NOT_CHEAP`, `CA_ITER_ERR_POLICY`, `CA_ITER_ERR_FLAGS`,
-  `CA_ITER_ERR_READONLY`, `CA_ITER_ERR_MASK`, `CA_ITER_ERR_MASK_NOT_ALLOWED`;
+  `CA_ITER_ERR_READONLY`, `CA_ITER_ERR_MASK`, `CA_ITER_ERR_MASK_NOT_ALLOWED`
+  (`CA_SLAB_FREE`, `CA_KERNEL_FIBER_CONTIG` and the routing tokens are
+  internal; `CA_KERNEL_CHUNK_HINT` is reserved and refused);
 - the slab-delivery state fields a kernel reads — `slab_ndim`, `slab_dims`,
   `slab_strides`, `slab_mask_strides`, `slab_elements`, `outer_ndim`,
   `outer_axes`, `outer_dims`;
@@ -82,8 +87,8 @@ The iterator delivers data at one of three granularities:
   is the right grain for kernels that *require* contiguity — sort, search,
   per-axis SIMD, handing a fiber to libc `qsort`.
 
-The four FIBER forms compose the contiguity guarantee with masking and an
-output operand:
+The six FIBER forms compose the contiguity guarantee with masking, an
+output operand and a second source:
 
 | Form | What it delivers |
 |------|------------------|
@@ -442,8 +447,8 @@ Choose them based on what the kernel needs:
 
 ```c
 #define CA_ITER_OK                     0
-#define CA_ITER_ERR_NOT_CHEAP          1   /* src needs materialize */
-#define CA_ITER_ERR_POLICY             2   /* policy not implemented */
+#define CA_ITER_ERR_NOT_CHEAP          1   /* source not recognised (a view with no attach slot) */
+#define CA_ITER_ERR_POLICY             2   /* policy not implemented, or axes refused */
 #define CA_ITER_ERR_FLAGS              3   /* flag combination invalid; also NULL st / src */
 #define CA_ITER_ERR_READONLY           4   /* WRITE on read-only view */
 #define CA_ITER_ERR_MASK               5   /* reserved: never returned */
@@ -636,7 +641,9 @@ A kernel that writes back declares `CA_KERNEL_WRITE`. The engine then:
    the view's access pattern requires gather + scatter).
 3. After the kernel's body, `sync_slab` either is a no-op (alias) or
    sends back the cells the kernel changed in the slab (scratch path).
-4. On `finish`, any remaining scratch is freed and the parent is detached.
+4. On `close`, a slab the body left without syncing (a `break`) is sent
+   back, then the walk finishes: any remaining scratch is freed and the
+   parent is detached.  `finish` alone drops such a slab.
 
 The CA_KERNEL_FIBER_CONTIG path additionally caches a per-fiber data
 offset (`last_data_off`) so `sync_slab` can compute the right scatter
@@ -722,8 +729,8 @@ Constraints (the same across the family):
   does not allow two different-typed declarations in a `for` init clause,
   so they live in the surrounding scope.
 - `break;` from the body exits cleanly (= the outer for's teardown clause
-  runs `finish`). In a write walk `finish` writes back the slab the body
-  was in.
+  runs `ca_iter_state_close`). In a write walk `close` writes back the
+  slab the body was in before it finishes the walk.
 - `return;` from the body LEAKS resources (scratch, parent attach). If
   you need early return, drop to the raw API.
 - A body that **raises** leaks the same way. The walk releases what it

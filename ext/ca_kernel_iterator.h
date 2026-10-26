@@ -208,7 +208,8 @@ typedef enum {
 #define CA_ITER_SRC_ATTACH     3     /* every other view the classifier
                                         knows (conversion views, CATile,
                                         CARoll, CAStack, CAMeld, CARemap,
-                                        CAObject, the lazy views) and any
+                                        CAReduce, CAObject, the lazy
+                                        views) and any
                                         registered external obj_type: the
                                         view's own transfer gathers it */
 #define CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE 4
@@ -526,7 +527,9 @@ int  ca_iter_state_init_l1 (ca_iter_state    *st,
      - entity / CAStride contig: alias_mode = CONTIG, the slab reads
        the source's own memory
      - CAStride non-contig: alias_mode = STRIDED, the slab reads the
-       root through the composed strides. No scratch.
+       root through the composed strides, without a scratch, when the
+       root lends memory; over a root that does not (a conversion view,
+       a CAObject, a CAStack, ...) the view is gathered into scratch
      - descriptor views: aliased when the innermost axis is a STRIDE
        axis, otherwise gathered into scratch (per slab when a slab axis
        is an INDEX or SHIFT axis)
@@ -700,7 +703,8 @@ void ca_iter_state_close (ca_iter_state *st);
 int ca_iter_check_init (int rc);
 
 /* Raise ArgumentError unless the two arrays have the same shape.  The
-   INOUT and PAIR fiber macros call this before opening either walk. */
+   INOUT, SLAB_INOUT and PAIR macros call this before opening either
+   walk. */
 int ca_iter_check_same_shape (struct _CArray *a, struct _CArray *b);
 
 /* Run body(arg) so that the walks in states[0..n) are finished however the
