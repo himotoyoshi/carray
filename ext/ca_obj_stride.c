@@ -852,6 +852,7 @@ ca_stride_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
           idx[k] = 0;
         }
         addrs = ALLOCV_N(ca_size_t, holder, n);
+        /* empty: the slot returns on an empty region at its entry */
         while (1) {
           ca_size_t off = root_base;
           for (k = 0; k < ndim; k++) off += idx[k] * root_stride[k];
