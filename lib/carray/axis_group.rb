@@ -923,9 +923,15 @@ class CAGroupIterator
   # paths off (a development build run with CARRAY_GENERAL_PATH set) each
   # group is reduced by the core instead -- except a band folded into the
   # statistic (+fused+), which has no route but the kernel.
+  #
+  # With no band axis the core groups the whole value in one pass, which is
+  # faster than the kernel for every group size (1M cells on an M2 Max: 7.5
+  # to 12.5 ms against 15 ms), so the kernel is taken only with a band.
   def kernel_reads_value? (fused = [])
     return false if value.face? || ! (value.integer? || value.float?)
-    CArray.__fast_paths_enabled__(:axis_group_reduce_kernel) || ! fused.empty?
+    return true unless fused.empty?
+    return false if spec.slot_meta.none? { |m| m[:kind] == :band }
+    CArray.__fast_paths_enabled__(:axis_group_reduce_kernel)
   end
 
   # Whether the scan kernel gives the core's answer: it reads an integer,
