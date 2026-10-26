@@ -905,9 +905,17 @@ class CASegmentIterator < CAIterator
   # segment's first or last slot and kept when it falls inside the segment.
   # A read-only Face cannot take UNDEF cell by cell, so its answers are
   # collected segment by segment, as its other reductions are.
+  #
+  # The running minimum or maximum costs the same for every cell, and the
+  # segment-by-segment way the same for every segment, so long segments
+  # are faster one by one: from an average of about 300 cells for :first
+  # and 2000 for :last (1M cells on an M2 Max).
+  EDGE_KERNEL_MAX_LENGTH = { first: 300, last: 2000 }.freeze
+
   def edge_values (op)
     n = grouped.elements
-    if n.zero? || (@value.face? && ! face_output?) || ! CArray.__fast_paths_enabled__(:segment_edge_kernel)
+    if n.zero? || (@value.face? && ! face_output?) || ! CArray.__fast_paths_enabled__(:segment_edge_kernel) ||
+       n >= EDGE_KERNEL_MAX_LENGTH.fetch(op) * @k
       return per_segment(core_reduce_kind(op)) { |s| s.public_send(op) }
     end
     slot = CArray.int64(n).seq!
