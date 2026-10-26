@@ -48,8 +48,18 @@ void
 ca_face_sync (void *ap)
 {
   CAView *cav = (CAView *) ap;
+  CArray *ca  = (CArray *) ap;
   /* alias means no copy-back is needed; parent sync propagates */
   ca_sync(cav->parent);
+  /* The Face's mask is a view over the parent's mask, attached with a
+     buffer of its own, and the parent's mask has one too: syncing the
+     parent writes back the parent's copy, from before the Face's mask was
+     written.  The Face's mask, synced before, is synced again after it. */
+  if ( ca->mask != NULL && ca->mask->ptr != NULL
+       && cav->parent->mask != NULL && cav->parent->mask->ptr != NULL
+       && ca_is_view(cav->parent->mask) ) {
+    ca_sync(ca->mask);
+  }
 }
 
 void
