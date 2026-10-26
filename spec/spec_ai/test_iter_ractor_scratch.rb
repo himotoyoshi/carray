@@ -2,10 +2,9 @@ require "test/unit"
 require "rbconfig"
 require "carray"
 
-# Reductions in several Ractors at once.  The kernel iterator keeps one
-# large scratch buffer for the next walk, and holds the object cells of
-# its scratch for the GC; each Ractor keeps its own of both, so walks
-# running at the same time never share them.  The lazy arena, which also
+# Reductions in several Ractors at once.  The kernel iterator holds the
+# object cells of its scratch for the GC; each Ractor keeps its own table,
+# so walks running at the same time never share it.  The lazy arena, which also
 # lends scratch to eager code (the mask of a view), is per Ractor too.
 
 class TestIterRactorScratch < Test::Unit::TestCase

@@ -289,12 +289,7 @@ ca_stack_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
     rb_raise(rb_eIndexError, "CAStack k-axis (axis %d) index %lld out of range [0, %d)",
              (int) k_axis, (long long) k, (int) ca->n_parents);
   }
-  if ( k_axis == 0 && ca_fast_path(CA_SC_STACK_INDEX_K0) ) {
-    /* Fast path: parent_idx = idx[1..ndim-1]; pass idx+1 directly. */
-    ca_xfer_index(ca->parents[k], idx + 1, data, dir);
-    return;
-  }
-  /* General case: build parent_idx by removing the k_axis slot. */
+  /* The parent index is idx without the k_axis slot. */
   {
     ca_size_t pidx[CA_RANK_MAX];
     int8_t a, pndim = ca->ndim - 1;

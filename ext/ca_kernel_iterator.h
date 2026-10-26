@@ -136,13 +136,12 @@ typedef enum {
                                           non-innermost slab offsets are
                                           computed once per slab row and
                                           the inner run is a memcpy. */
-#define CA_ITER_ALIAS_PER_FIBER_FUSED 6 /* each fiber is fetched (and on a
-                                          write put back) with the view's
-                                          ca_xfer_stride, without
+#define CA_ITER_ALIAS_PER_FIBER_FUSED 6 /* each fiber is fetched with the
+                                          view's ca_xfer_stride, without
                                           gathering the whole view: a
-                                          CAWindow / CAShift fiber, or a
                                           read of the innermost fiber of
-                                          a conversion view.  Chosen by
+                                          a conversion view (a write takes
+                                          the transfer walk).  Chosen by
                                           ca_iter_should_per_fiber_fused.
                                           The fiber is handed out from
                                           fiber_data_scratch, its mask

@@ -1933,16 +1933,13 @@ unsigned char ca_shortcut_off[CA_SC_COUNT];
 
 /* In the order of enum ca_shortcut. */
 static const char *ca_shortcut_names[CA_SC_COUNT] = {
-  "keep_scratch",
   "push_all_changed",
-  "fiber_fused_shift",
   "shift_whole_view",
   "stack",
   "stack_outer_k",
   "fiber_fused_conversion",
   "per_slab_hoist",
   "protect_only_may_raise",
-  "stack_index_k0",
   "stack_addrs_k0",
   "stack_stride_box",
   "stack_stride_reloc",

@@ -44,7 +44,6 @@
 
 #include <assert.h>
 #include <string.h>
-#include <ruby/ractor.h>
 
 /* Private flags bit, kept in ca_iter_state.flags like
    CA_ITER_FLAG_WALK_MAY_RAISE below: src is a copy the walk owns (see
@@ -53,69 +52,7 @@
 
 /* Data scratch.  A scratch of object cells holds VALUEs no Ruby object
    owns while the kernel calls Ruby for each cell, so it is filled with
-   Qnil and held for the GC until finish releases it.
-
-   One large scratch is kept when a walk frees it and handed to the next
-   walk that fits in it: a fresh allocation of that size costs the page
-   faults of touching it, which for a reduction is several times the
-   reduction itself.  The kept buffer is owned by nobody, and a walk that
-   takes it owns it alone until it frees it again.  Each Ractor keeps its
-   own (ractor-local storage), since walks in different Ractors run at
-   the same time.
-
-   Shortcut KEEP_SCRATCH (name tag; docs/internal/KernelIteratorEngine.md
-   section 3.4 has the table of all shortcuts).
-     Layer       data: where a scratch comes from.  The walk is unchanged.
-     Speeds up   walks with a scratch of 1 MiB or more, run one after
-                 another.
-     Why         no difference measured on macOS (a per-axis sum of a
-                 2000x2000 fake view); the page faults it
-                 avoids are expected to cost more on Linux (unmeasured).
-     Enters      ki_data_alloc: bytes >= KI_KEEP_MIN and a kept buffer
-                 that fits; ki_data_free: KI_KEEP_MIN <= bytes <=
-                 KI_KEEP_MAX.
-     Promises    4 (a kept buffer has no owner, so no exit can leave it
-                 held); 7 (object cells are cleared and held either way).
-     Switch      ca_fast_path(): off, every scratch is fresh.
-     Checked by  test_iter_ractor_scratch.rb; the buffer count in
-                 test_iter_delivery_detectors.rb. */
-
-#define KI_KEEP_MIN ((ca_size_t) 1 << 20)
-#define KI_KEEP_MAX ((ca_size_t) 64 << 20)
-
-typedef struct {
-  void      *p;
-  ca_size_t  bytes;
-} ki_kept_t;
-
-static rb_ractor_local_key_t ki_kept_key;
-
-static void
-ki_kept_free (void *ptr)
-{
-  ki_kept_t *k = (ki_kept_t *) ptr;
-  if ( k ) {
-    if ( k->p ) ruby_xfree(k->p);
-    ruby_xfree(k);
-  }
-}
-
-static const struct rb_ractor_local_storage_type ki_kept_type = {
-  NULL, ki_kept_free
-};
-
-static ki_kept_t *
-ki_kept_slot (void)
-{
-  ki_kept_t *k = (ki_kept_t *) rb_ractor_local_storage_ptr(ki_kept_key);
-  if ( k == NULL ) {
-    k = ALLOC(ki_kept_t);
-    k->p     = NULL;
-    k->bytes = 0;
-    rb_ractor_local_storage_ptr_set(ki_kept_key, k);
-  }
-  return k;
-}
+   Qnil and held for the GC until finish releases it. */
 
 /* Development build: the number of buffers ki_data_alloc has handed out
    that ki_data_free has not taken back (CArray.__iter_buffers__).  A walk
@@ -132,19 +69,9 @@ static long ki_buffers_out = 0;
 static void *
 ki_data_alloc (int8_t data_type, ca_size_t bytes)
 {
-  void *p = NULL;
+  void *p;
   KI_BUFFERS_OUT(1);
-  if ( bytes >= KI_KEEP_MIN && ca_fast_path(CA_SC_KEEP_SCRATCH) ) {
-    ki_kept_t *k = ki_kept_slot();
-    if ( k->p && bytes <= k->bytes ) {
-      p = k->p;
-      k->p = NULL;
-      k->bytes = 0;
-    }
-  }
-  if ( p == NULL ) {
-    p = xmalloc(bytes > 0 ? bytes : 1);
-  }
+  p = xmalloc(bytes > 0 ? bytes : 1);
   if ( data_type == CA_OBJECT ) {
     ca_size_t n = bytes / (ca_size_t) sizeof(VALUE);
     ca_object_cells_clear(p, n);
@@ -153,24 +80,11 @@ ki_data_alloc (int8_t data_type, ca_size_t bytes)
   return p;
 }
 
-/* `bytes` is the size p was allocated with (0 when unknown: never kept). */
 static void
-ki_data_free (void *p, ca_size_t bytes)
+ki_data_free (void *p)
 {
   KI_BUFFERS_OUT(-1);
   ca_gc_release_buffer(p);
-  if ( bytes >= KI_KEEP_MIN && bytes <= KI_KEEP_MAX && ca_fast_path(CA_SC_KEEP_SCRATCH) ) {
-    ki_kept_t *k = ki_kept_slot();
-    if ( bytes > k->bytes ) {
-      void *old = k->p;
-      k->p     = p;
-      k->bytes = bytes;
-      if ( old ) {
-        xfree(old);
-      }
-      return;
-    }
-  }
   xfree(p);
 }
 
@@ -1136,33 +1050,6 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
 
   if ( plan->src_kind == CA_ITER_SRC_DESCRIPTOR
        || plan->src_kind == CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE ) {
-    /* Shortcut PER_FIBER_FUSED (CAWindow / CAShift).
-       Layer       all three, per fiber: each fiber is fetched with the
-                   view's ca_xfer_stride (which fills out-of-bounds
-                   cells itself) and put back the same way.
-       Speeds up   a fiber walk of a CAWindow / CAShift whose innermost
-                   axis is SHIFT.
-       Why         none measured: about 8% slower than the descriptor
-                   route on a sort of a 2000x2000 shift view.
-       Enters      CA_KERNEL_FIBER_CONTIG, one slab axis, the view's
-                   own rank, and ca_iter_should_per_fiber_fused.  An
-                   outer-only SHIFT arrives as L2_ALIASABLE and never
-                   reaches this hook.
-       Promises    1 (the fiber scratch is contiguous), 2 (the mask is
-                   fetched into the fiber mask scratch), 3 (ca_xfer_stride
-                   PUT of a fiber that neither converts nor repeats a
-                   cell), 4 (CA_ITER_FLAG_WALK_MAY_RAISE).
-       Switch      ca_fast_path(): off, the descriptor route.
-       Checked by  the fiber rows of the "shift" view in the delivery
-                   matrix. */
-    if ( (flags & CA_KERNEL_FIBER_CONTIG) && naxes == 1
-         && plan->ndesc == src->ndim && ca_fast_path(CA_SC_FIBER_FUSED_SHIFT)
-         && ca_iter_should_per_fiber_fused(src, plan->src_kind, axes[0],
-                                           row_bytes[axes[0]], flags) ) {
-      plan->route = KI_L2_FIBER_FUSED;
-      return CA_ITER_OK;
-    }
-
     /* The rank check guards a descriptor whose rank differs from the
        view's (it would not expose the axis partition slab_axes names).
        Every describe_axes in the engine reports the view's rank, so the
@@ -1749,7 +1636,7 @@ ki_fiber_contig_data (ca_iter_state *st, char *data, ca_size_t step)
     return data;
   }
   if ( st->fiber_data_scratch_cap < need ) {
-    if ( st->fiber_data_scratch ) ki_data_free(st->fiber_data_scratch, st->fiber_data_scratch_cap);
+    if ( st->fiber_data_scratch ) ki_data_free(st->fiber_data_scratch);
     st->fiber_data_scratch     = (char *) ki_data_alloc(st->src->data_type, need);
     st->fiber_data_scratch_cap = need;
   }
@@ -2130,7 +2017,7 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
     ca_size_t  counts[CA_RANK_MAX];
 
     if ( st->fiber_data_scratch_cap < need ) {
-      if ( st->fiber_data_scratch ) ki_data_free(st->fiber_data_scratch, st->fiber_data_scratch_cap);
+      if ( st->fiber_data_scratch ) ki_data_free(st->fiber_data_scratch);
       st->fiber_data_scratch     = (char *) ki_data_alloc(st->src->data_type, need);
       st->fiber_data_scratch_cap = need;
     }
@@ -2393,7 +2280,7 @@ ca_iter_state_finish (ca_iter_state *st)
          at init.  ca_detach, or ca_sync_detach on a WRITE walk.
        - else (alias paths): src was attached at init, detach. */
   if ( st->scratch_ptr ) {
-    ki_data_free(st->scratch_ptr, st->scratch_cap);
+    ki_data_free(st->scratch_ptr);
     st->scratch_ptr = NULL;
     st->scratch_cap = 0;
   }
@@ -2403,7 +2290,7 @@ ca_iter_state_finish (ca_iter_state *st)
   }
   /* The per-fiber scratch. */
   if ( st->fiber_data_scratch ) {
-    ki_data_free(st->fiber_data_scratch, st->fiber_data_scratch_cap);
+    ki_data_free(st->fiber_data_scratch);
     st->fiber_data_scratch     = NULL;
     st->fiber_data_scratch_cap = 0;
   }
@@ -2426,7 +2313,7 @@ ca_iter_state_finish (ca_iter_state *st)
   }
   /* The STACK tile cache. */
   if ( st->stack_tile_cache ) {
-    ki_data_free(st->stack_tile_cache, 0);
+    ki_data_free(st->stack_tile_cache);
     st->stack_tile_cache = NULL;
     st->stack_tile_cap   = 0;
     st->stack_tile_pos   = 0;
@@ -4253,8 +4140,6 @@ rb_ki_buffers_out (VALUE klass)
 void
 Init_ca_kernel_iterator (void)
 {
-  ki_kept_key = rb_ractor_local_storage_ptr_newkey(&ki_kept_type);
-
 #ifdef CARRAY_DEV_BUILD
   /* ==== smoke surface registrations (dev-only, stripped in release) ====
    * All `t1_smoke_*`, `caf_smoke_*`,

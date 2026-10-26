@@ -840,22 +840,19 @@ ca_obj_equal (VALUE a, VALUE b)
 ---------------------------------------------------------------------------- */
 
 /* Each fast path has a name, so that a development build can switch it off
-   alone: CARRAY_SHORTCUTS_OFF=stack,keep_scratch in the environment turns
+   alone: CARRAY_SHORTCUTS_OFF=stack,stack_outer_k in the environment turns
    off the ones named, CARRAY_GENERAL_PATH=1 all of them.  A fast path tests
    ca_fast_path(CA_SC_name) alongside its own condition.  The names are in
    ca_shortcut_names (carray_core.c) in this order; the Ruby ones are asked
    through CArray.__fast_paths_enabled__(:name). */
 enum ca_shortcut {
-  CA_SC_KEEP_SCRATCH,
   CA_SC_PUSH_ALL_CHANGED,
-  CA_SC_FIBER_FUSED_SHIFT,
   CA_SC_SHIFT_WHOLE_VIEW,
   CA_SC_STACK,
   CA_SC_STACK_OUTER_K,
   CA_SC_FIBER_FUSED_CONVERSION,
   CA_SC_PER_SLAB_HOIST,
   CA_SC_PROTECT_ONLY_MAY_RAISE,
-  CA_SC_STACK_INDEX_K0,
   CA_SC_STACK_ADDRS_K0,
   CA_SC_STACK_STRIDE_BOX,
   CA_SC_STACK_STRIDE_RELOC,
