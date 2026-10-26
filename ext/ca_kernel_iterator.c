@@ -112,7 +112,7 @@ extern ca_operation_function_t ca_window_func;
    engine gathers its cells into a scratch buffer of its own through the
    view's transfer (ki_gather_view = ca_xfer_all GET) and, on a WRITE
    walk, sends back the cells the kernel changed (ki_scratch_push_changed
-   = ca_xfer_addrs, or ca_xfer_all PUT when every cell changed).  The
+   = ca_xfer_addrs).  The
    view's attach / sync slots are not called.  Cast / byte swap / bit
    unpack / reduction views: */
 extern ca_operation_function_t ca_fake_func;
@@ -732,19 +732,7 @@ ki_scratch_push_changed (ca_iter_state *st)
     }
   }
 
-  /* Shortcut PUSH_ALL_CHANGED.
-       Layer       write-back.
-       Speeds up   a whole-view write walk that changed every cell: one
-                   ca_xfer_all PUT instead of a list of all the addresses.
-       Why         about 5% on a whole write of a fake view of 1M cells.
-       Enters      whole && n_changed == n.
-       Promises    3 (the same cells go back; the list would hold them all).
-       Switch      ca_fast_path(): off, the address list.
-       Checked by  the write rows of the delivery matrix (L1 / L2 whole). */
-  if ( whole && n_changed == n && ca_fast_path(CA_SC_PUSH_ALL_CHANGED) ) {
-    ca_xfer_all(src, now, CA_XFER_PUT);
-  }
-  else if ( n_changed > 0 ) {
+  if ( n_changed > 0 ) {
     ca_xfer_addrs(src, n_changed, addrs, vals, CA_XFER_PUT);
   }
   ALLOCV_END(h_vals);

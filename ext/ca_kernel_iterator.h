@@ -233,9 +233,8 @@ typedef enum {
    CA_ITER_SRC_ATTACH is the only kind that may be registered.  It is the
    one whose contract an external class can meet on its own: the engine
    reads the cells with ca_xfer_all GET and, on a WRITE walk, sends back
-   the changed cells with ca_xfer_addrs (or ca_xfer_all PUT when every
-   cell changed), so the view's transfer slots are all it needs -- the
-   slots every view already implements.  The view's attach / sync slots
+   the changed cells with ca_xfer_addrs, so the view's transfer slots
+   are all it needs -- the slots every view already implements.  The view's attach / sync slots
    are not called.  The other kinds are not open to registration: SRC_CASTRIDE
    asserts the struct *is* a CAStride (the engine reads its strides
    directly, and a class that really is one is already classified by its
@@ -640,8 +639,8 @@ int  ca_iter_state_next_slab_axes (ca_iter_state *st,
        alias_ptr.  When the alias is into a view root's own buffer, that
        buffer is written back once, by finish (ca_sync_detach)
      - scratch path, at L1 or L2: the cells the kernel changed are sent
-       back through the source (ki_scratch_push_changed: ca_xfer_addrs,
-       or ca_xfer_all PUT when every cell changed); a write over a
+       back through the source (ki_scratch_push_changed: ca_xfer_addrs);
+       a write over a
        descriptor view takes this path, opened as a transfer walk
 
    A view that shows one root cell more than once (a repeated index, a

@@ -91,7 +91,7 @@ On a development build run with `CARRAY_GENERAL_PATH=2`, the classifier returns 
 
 ### 3.1 The transfer walk (`SRC_ATTACH`, `alias_mode = NONE`)
 
-`ki_open_by_transfer`: the whole view is gathered into the walk's scratch with `ca_xfer_all(src, scratch, GET)`, its mask likewise. The kernel works in the scratch. On a write, `ki_scratch_push_changed` compares the scratch with the copy kept of what was gathered and sends back only the changed cells (`ca_xfer_addrs` PUT, or `ca_xfer_all` PUT when every cell changed).
+`ki_open_by_transfer`: the whole view is gathered into the walk's scratch with `ca_xfer_all(src, scratch, GET)`, its mask likewise. The kernel works in the scratch. On a write, `ki_scratch_push_changed` compares the scratch with the copy kept of what was gathered and sends back only the changed cells (`ca_xfer_addrs` PUT).
 
 Every promise this walk keeps is kept by the view's own transfer — what a cell is, which root cell a write lands on, how a conversion goes back — so the walk itself holds none. That is why it is the reference (§5), and why it is where a source the engine knows nothing more about goes.
 
@@ -141,7 +141,6 @@ Every shortcut in the engine carries a name tag in a comment beside its code: th
 
 | name | layer | measured switched off alone, M2 Max / Xeon 6369P (2026-10-26) | checked by |
 |---|---|---|---|
-| `PUSH_ALL_CHANGED` | write-back | about 5% (an older measure, M2 Max) | the matrix, whole writes |
 | `SHIFT_WHOLE_VIEW` | data | 1.5x / 1.1x on a median of a shift view, 3.1x / 2.2x on a sum of a window | the matrix, slab-axis rows of the shift and window views |
 | `PER_SLAB_HOIST` | data | 1.6x (M2 Max) on a mean over two slab axes of a grid; not taken with one slab axis | the matrix, two-slab-axes rows of the grid parent |
 | `STACK` | data and fiber | 1.2x / 1.3x | the matrix, stack parent along axis 0 |

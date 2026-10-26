@@ -846,7 +846,6 @@ ca_obj_equal (VALUE a, VALUE b)
    ca_shortcut_names (carray_core.c) in this order; the Ruby ones are asked
    through CArray.__fast_paths_enabled__(:name). */
 enum ca_shortcut {
-  CA_SC_PUSH_ALL_CHANGED,
   CA_SC_SHIFT_WHOLE_VIEW,
   CA_SC_STACK,
   CA_SC_STACK_OUTER_K,
