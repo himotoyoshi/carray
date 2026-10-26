@@ -36,6 +36,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.6 (unreleased)
 
+- Fix: `CArray.fuse` works on Ruby 3.0 to 3.3. The gem now depends on
+  prism 1.0 or later, which `gem install` and Bundler bring in on a Ruby
+  that ships none or an older one; Ruby 3.4 and later already ship it.
+
 ## 3.0.5
 
 - New: `GroupedFrame#aggregate` takes a block instead of a spec. The block
