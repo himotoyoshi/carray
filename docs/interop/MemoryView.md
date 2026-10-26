@@ -378,6 +378,22 @@ The view is held alive by a small TypedData "holder" attached to the returned wr
 
 Multiple borrowers of the same source coexist safely (Ruby's MemoryView machinery refcounts the source).
 
+#### A producer that locks while it is borrowed
+
+Some producers restrict what can be done to their memory while a MemoryView of it is out. `IO::Buffer`, which exports a MemoryView from Ruby 4.1, is one: it stays locked until every view is released, and `resize`, `free` and (for a mapped file) unmapping raise `IO::Buffer::LockedError` in the meantime. Reading into the buffer is not blocked, so a loop that reads into the same buffer and processes it through the wrap keeps working.
+
+The wrap gives the view back when it is garbage-collected, not when your code stops using it. Views made from the wrap (`w.reshape(...)`, `w[0..9]`, a slab kept from `each_slab`) keep it reachable as well. So after the last use, the buffer can stay locked until the next collection:
+
+```ruby
+buf = IO::Buffer.map(File.open("data.bin"), nil, 0, IO::Buffer::READONLY)
+w   = CArray::Float32.wrap_memory_view(buf).reshape(nt, ny, nx)
+# ... use w ...
+w = nil
+buf.free          # may raise IO::Buffer::LockedError: w is not collected yet
+```
+
+To release the producer at a known point, either import with `from_memory_view` (a copy, which holds no view at all), or drop every reference to the wrap and its views and run `GC.start` before you resize or free the buffer. CArray has no method that gives the view back early: an array whose memory can disappear while views of it are alive would make many ordinary operations unsafe.
+
 ---
 
 ## 10. Performance: zero-copy via layout design

@@ -102,6 +102,13 @@ class CArray
     #   returned object via internal ivars; the source is released
     #   when the wrap is garbage-collected.
     #
+    #   Views made from the wrap keep it reachable too, so the view is
+    #   given back only once all of them are collected. A producer that
+    #   locks while it is borrowed (`IO::Buffer` refuses `resize` and
+    #   `free`) stays locked until then; import with
+    #   {.from_memory_view} to hold no view at all. See
+    #   {file:docs/interop/MemoryView.md MemoryView} §9.
+    #
     #   Contiguous typed producers return a `CAWrap`. Strided typed
     #   producers return a `CAStride` over a byte `CAWrap` of the
     #   bytes its elements reach, preserving the full stride pattern
