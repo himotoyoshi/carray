@@ -101,4 +101,42 @@ class TestRefusedMaskWriteThroughView < Test::Unit::TestCase
     s[0, 0, nil] = UNDEF
     assert_equal [UNDEF, UNDEF, UNDEF], b.to_a
   end
+
+  # inherit_mask_replace clears the mask and then ORs the sources in: the
+  # two writes are one, so a refused one leaves the cleared part as it was.
+  def test_inherit_mask_replace_refused
+    a, b = parts
+    b[2] = UNDEF
+    s = CArray.stack([b, a.value])
+    x = CArray.float64(2, 3).seq
+    x[1, 0] = UNDEF
+    refused_and_unchanged(b, "stack") { s.inherit_mask_replace(x) }
+
+    a, b = parts
+    b[2] = UNDEF
+    m = CArray.meld(b, a.value)
+    y = CArray.float64(6).seq
+    y[4] = UNDEF
+    refused_and_unchanged(b, "meld") { m.inherit_mask_replace(y) }
+
+    a, b = parts
+    b[2] = UNDEF
+    c = CArray.float64(2, 3).seq
+    c[0, 0] = UNDEF
+    s = CArray.stack([CArray.stack([b, a.value]), c])
+    z = CArray.float64(2, 2, 3).seq
+    z[0, 1, 0] = UNDEF
+    refused_and_unchanged(b, "stack in stack: b") { s.inherit_mask_replace(z) }
+    assert_equal [true, false, false], c.is_masked[0, nil].to_a
+  end
+
+  def test_inherit_mask_replace_into_the_maskable_part_goes_through
+    a, b = parts
+    b[2] = UNDEF
+    s = CArray.stack([b, a.value])
+    x = CArray.float64(2, 3).seq
+    x[0, 0] = UNDEF
+    s.inherit_mask_replace(x)
+    assert_equal [UNDEF, 2.0, 3.0], b.to_a
+  end
 end

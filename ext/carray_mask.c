@@ -1180,6 +1180,9 @@ typedef struct {
   int          k;         /* entries in list */
   int          ns;        /* sources */
   ca_size_t    elements;
+  CArray      *dest;      /* the destination */
+  int          overwrite; /* clear the destination's mask first */
+  char        *modes;     /* attach modes, one per entry of list */
 } ca_mask_overlay_t;
 
 static VALUE
@@ -1203,6 +1206,31 @@ ca_mask_overlay_body (VALUE arg)
       ca_mask_word_or(ma, ms, o->elements);
     }
   }
+  return Qnil;
+}
+
+/* Clear the destination's mask if asked, and OR the sources into it. */
+static VALUE
+ca_mask_overlay_write (VALUE arg)
+{
+  ca_mask_overlay_t *o = (ca_mask_overlay_t *) arg;
+  CArray *ca = o->dest;
+  int i;
+  if ( o->overwrite ) {
+    boolean8_t zero = 0;
+    ca_fill(ca->mask, &zero);
+  }
+  o->k = 0;
+  o->list[o->k]    = ca->mask;
+  o->modes[o->k++] = 'w';
+  for (i=0; i<o->ns; i++) {
+    if ( o->att[i] ) {
+      o->list[o->k]    = o->att[i];
+      o->modes[o->k++] = 'r';
+    }
+  }
+  o->modes[o->k] = '\0';
+  ca_attach_window(o->k, o->list, o->modes, ca_mask_overlay_body, arg);
   return Qnil;
 }
 
@@ -1290,22 +1318,17 @@ ca_copy_mask_overlay_core (CArray *ca, ca_size_t elements, int n,
   }
 
   ca_create_mask(ca);
-  if ( overwrite ) {
-    boolean8_t zero = 0;
-    ca_fill(ca->mask, &zero);
+  o.dest      = ca;
+  o.overwrite = overwrite;
+  o.modes     = modes;
+  /* Clearing and OR-ing are two writes; a stack or meld that refuses the
+     second must see them as one, or the clearing would stay. */
+  if ( overwrite && ca_mask_write_needs_check(ca->mask) ) {
+    ca_mask_write_checked(ca->mask, ca_mask_overlay_write, (VALUE) &o);
   }
-
-  o.k = 0;
-  o.list[o.k]  = ca->mask;
-  modes[o.k++] = 'w';
-  for (i=0; i<o.ns; i++) {
-    if ( o.att[i] ) {
-      o.list[o.k]  = o.att[i];
-      modes[o.k++] = 'r';
-    }
+  else {
+    ca_mask_overlay_write((VALUE) &o);
   }
-  modes[o.k] = '\0';
-  ca_attach_window(o.k, o.list, modes, ca_mask_overlay_body, (VALUE) &o);
 
   for (i=0; i<n; i++) {
     if ( holders[i] ) {
