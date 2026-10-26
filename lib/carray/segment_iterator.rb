@@ -337,9 +337,17 @@ class CASegmentIterator < CAIterator
   #   with the distinctness of `CArray#nunique` (every NaN is one value,
   #   -0.0 is 0.0).  A segment with no present value counts 0.
   #   @return [CArray]
+  # Coding every cell costs the same for every cell, and the segment-by-
+  # segment way the same for every segment, so long segments are faster one
+  # by one: from an average of about 100 cells (1M cells on an M2 Max).
+  NUNIQUE_KERNEL_MAX_LENGTH = 100
+
   def nunique (axis: nil)
     return axis_by_core(axis, :nunique) if axis
-    return per_segment(CA_INT64) { |s| s.nunique } unless CArray.__fast_paths_enabled__(:segment_nunique)
+    if ! CArray.__fast_paths_enabled__(:segment_nunique) ||
+       grouped.elements >= NUNIQUE_KERNEL_MAX_LENGTH * @k
+      return per_segment(CA_INT64) { |s| s.nunique }
+    end
     out = CArray.int64(@k)
     return out if grouped.elements.zero?
     # Each cell's value becomes a code, so a distinct (segment, value) pair is
