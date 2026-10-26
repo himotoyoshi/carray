@@ -713,6 +713,20 @@ void        ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
    every parent's mask and refuse it with that TypeError if it put a true
    into such a parent's part.  A refused write then changes no parent.
    Does nothing when no such parent is there. */
+/* A write entering at the mask view `mask` that can reach the part of a
+   stack or meld mask whose parent can have no mask: run `body(arg)` once
+   against blank masks in place of every real mask it can reach, refuse it
+   with TypeError if it put a true into such a part, and run it for real
+   otherwise.  ca_mask_write_needs_check says whether a write needs this.
+   Writes nested inside are not checked again. */
+int         ca_mask_write_needs_check (CArray *ca);
+void        ca_mask_write_checked (CArray *mask, VALUE (*body)(VALUE),
+                                   VALUE arg);
+int         ca_stack_mask_parts (CArray *mask, CArray ***parents,
+                                 CArray ***standins, int32_t *n);
+int         ca_meld_mask_parts (CArray *mask, CArray ***parents,
+                                CArray ***standins, int32_t *n);
+
 void        ca_multi_parent_mask_refuse_first (CArray *mask, CArray **parents,
                                                CArray **standins, int32_t n,
                                                VALUE (*body)(VALUE),

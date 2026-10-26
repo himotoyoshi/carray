@@ -1047,6 +1047,25 @@ ca_stack_put_body (VALUE arg)
   return Qnil;
 }
 
+/* For the mask of a CAStack: the CAStack it belongs to, as its data parents,
+   their stand-ins and their number.  0 for any other array. */
+int
+ca_stack_mask_parts (CArray *mask, CArray ***parents, CArray ***standins, int32_t *n)
+{
+  CAStack *o;
+  if ( mask->obj_type != CA_OBJ_STACK ) {
+    return 0;
+  }
+  o = (CAStack *) ((CAStack *) mask)->mask_owner;
+  if ( o == NULL ) {
+    return 0;
+  }
+  *parents  = o->parents;
+  *standins = o->mask_standins;
+  *n        = o->n_parents;
+  return 1;
+}
+
 static void
 ca_stack_mask_refuse_first (ca_stack_put_t *a)
 {

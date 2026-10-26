@@ -1030,6 +1030,25 @@ ca_meld_put_body (VALUE arg)
   return Qnil;
 }
 
+/* For the mask of a CAMeld: the CAMeld it belongs to, as its data parents,
+   their stand-ins and their number.  0 for any other array. */
+int
+ca_meld_mask_parts (CArray *mask, CArray ***parents, CArray ***standins, int32_t *n)
+{
+  CAMeld *o;
+  if ( mask->obj_type != CA_OBJ_MELD ) {
+    return 0;
+  }
+  o = (CAMeld *) ((CAMeld *) mask)->mask_owner;
+  if ( o == NULL ) {
+    return 0;
+  }
+  *parents  = o->parents;
+  *standins = o->mask_standins;
+  *n        = o->n_parents;
+  return 1;
+}
+
 static void
 ca_meld_mask_refuse_first (ca_meld_put_t *a)
 {

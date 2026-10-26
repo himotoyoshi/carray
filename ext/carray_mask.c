@@ -13,6 +13,7 @@
 #include "carray.h"
 #include "carray_internal.h"   /* ca_lazy_arena_* */
 #include "ca_obj_face.h"  /* CA_FACE_LIFT_IF_FACE for the mask-lift path */
+#include <ruby/ractor.h>
 
 /* ============================================================================
  *  Word-bulk mask substrate helpers.
@@ -553,6 +554,237 @@ ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
   CAVIEW(mask)->parent = mp->parents[0];
 }
 
+/* ---- A mask write through a view, checked as one write ----
+
+   A view may hand one write to the mask of a stack or meld in several
+   pieces (a grid, one call per index; a stack, one call per part).  The
+   stack or meld checks a piece against blank masks before writing it, so a
+   piece refused late would leave the pieces before it written.  The write
+   is therefore checked once, where it enters at the outermost mask: it runs
+   against blank masks in place of every real mask it can reach, and is
+   refused if it put a true into the part of a stack or meld that can have
+   no mask.  Writes nested inside a checked write are not checked again
+   (the depth below). */
+
+static rb_ractor_local_key_t ca_mask_write_depth_key;
+
+static long
+ca_mask_write_depth (void)
+{
+  VALUE v;
+  if ( ca_mask_write_depth_key
+       && rb_ractor_local_storage_value_lookup(ca_mask_write_depth_key, &v) ) {
+    return FIX2LONG(v);
+  }
+  return 0;
+}
+
+static void
+ca_mask_write_depth_add (long d)
+{
+  rb_ractor_local_storage_value_set(ca_mask_write_depth_key,
+                                    LONG2FIX(ca_mask_write_depth() + d));
+}
+
+static int
+ca_mask_parts (CArray *m, CArray ***parents, CArray ***standins, int32_t *n)
+{
+  return ca_stack_mask_parts(m, parents, standins, n)
+      || ca_meld_mask_parts(m, parents, standins, n);
+}
+
+/* True if a write to `ca` can reach the part of a stack or meld mask that
+   reads the stand-in of a parent which can have no mask. */
+static int
+ca_mask_refusal_below (CArray *ca, int depth)
+{
+  CArray **parents, **standins;
+  int32_t n, k;
+  if ( ca == NULL || depth > 64 || ! ca_is_view(ca) ) {
+    return 0;
+  }
+  if ( ca_mask_parts(ca, &parents, &standins, &n) ) {
+    CAMultiParent *mp = (CAMultiParent *) ca;
+    for ( k = 0; standins != NULL && k < n; k++ ) {
+      if ( standins[k] != NULL && mp->parents[k] == standins[k]
+           && ca_mask_standin_parent_unmaskable(parents[k]) ) {
+        return 1;
+      }
+    }
+    for ( k = 0; k < n; k++ ) {
+      if ( ca_mask_refusal_below(mp->parents[k], depth + 1) ) {
+        return 1;
+      }
+    }
+    return 0;
+  }
+  if ( ca_test_flag(ca, CA_FLAG_MULTI_PARENTS) ) {
+    return 0;
+  }
+  return ca_mask_refusal_below(CAVIEW(ca)->parent, depth + 1);
+}
+
+int
+ca_mask_write_needs_check (CArray *ca)
+{
+  return ca_mask_write_depth_key != 0
+      && ca_is_view(ca)
+      && ca_mask_write_depth() == 0
+      && ca_is_mask_array(ca)
+      && ca_mask_refusal_below(ca, 0);
+}
+
+/* One part of a stack or meld mask put aside for the trial. */
+typedef struct {
+  CArray  *mask;      /* the stack or meld mask */
+  int32_t  k;
+  CArray  *saved;     /* its part k */
+  CArray  *blank;     /* the blank in its place */
+  int      refusing;  /* a true here refuses the write */
+  int      value;     /* the refusing parent is a value array */
+} ca_mask_trial_part_t;
+
+typedef struct {
+  CArray   *mask;
+  ca_mask_trial_part_t *parts;
+  int32_t   n, cap;
+  VALUE   (*body)(VALUE);
+  VALUE     arg;
+} ca_mask_trial_t;
+
+static void
+ca_mask_trial_put_aside (ca_mask_trial_t *t, CArray *ca, int depth)
+{
+  CArray **parents, **standins;
+  int32_t n, k;
+  if ( ca == NULL || depth > 64 || ! ca_is_view(ca) ) {
+    return;
+  }
+  if ( ca_mask_parts(ca, &parents, &standins, &n) ) {
+    CAMultiParent *mp = (CAMultiParent *) ca;
+    for ( k = 0; k < n; k++ ) {
+      CArray *p = mp->parents[k];
+      ca_mask_trial_part_t *e;
+      int standing_in = ( standins != NULL && standins[k] != NULL
+                          && p == standins[k] );
+      if ( ! standing_in && ca_mask_refusal_below(p, depth + 1) ) {
+        ca_mask_trial_put_aside(t, p, depth + 1);
+        continue;
+      }
+      if ( t->n == t->cap ) {
+        t->cap = t->cap ? 2 * t->cap : 8;
+        REALLOC_N(t->parts, ca_mask_trial_part_t, t->cap);
+      }
+      e = &t->parts[t->n];
+      e->mask     = ca;
+      e->k        = k;
+      e->saved    = p;
+      e->blank    = NULL;
+      e->refusing = standing_in && ca_mask_standin_parent_unmaskable(parents[k]);
+      e->value    = ca_is_value_array(parents[k]);
+      t->n++;
+      e->blank = carray_new(CA_BOOLEAN, p->ndim, p->dim, 0, NULL);
+      MEMZERO(e->blank->ptr, boolean8_t, e->blank->elements);
+      mp->parents[k] = e->blank;
+      if ( k == 0 ) {
+        CAVIEW(ca)->parent = e->blank;
+      }
+    }
+    return;
+  }
+  if ( ! ca_test_flag(ca, CA_FLAG_MULTI_PARENTS) ) {
+    ca_mask_trial_put_aside(t, CAVIEW(ca)->parent, depth + 1);
+  }
+}
+
+static VALUE
+ca_mask_trial_run (VALUE p)
+{
+  ca_mask_trial_t *t = (ca_mask_trial_t *) p;
+  ca_mask_trial_put_aside(t, t->mask, 0);
+  t->body(t->arg);
+  return Qnil;
+}
+
+/* Put every part back, last first, so a part put aside twice ends as it was. */
+static VALUE
+ca_mask_trial_restore (VALUE p)
+{
+  ca_mask_trial_t *t = (ca_mask_trial_t *) p;
+  int32_t i;
+  for ( i = t->n - 1; i >= 0; i-- ) {
+    ca_mask_trial_part_t *e = &t->parts[i];
+    ((CAMultiParent *) e->mask)->parents[e->k] = e->saved;
+    if ( e->k == 0 ) {
+      CAVIEW(e->mask)->parent = e->saved;
+    }
+  }
+  return Qnil;
+}
+
+static void
+ca_mask_trial_free (ca_mask_trial_t *t)
+{
+  int32_t i;
+  for ( i = 0; i < t->n; i++ ) {
+    if ( t->parts[i].blank ) {
+      ca_free(t->parts[i].blank);
+    }
+  }
+  xfree(t->parts);
+  t->parts = NULL;
+}
+
+static VALUE
+ca_mask_write_trial_and_run (VALUE p)
+{
+  ca_mask_trial_t *t = (ca_mask_trial_t *) p;
+  int32_t i;
+  ca_size_t j;
+  int refused = -1;
+  rb_ensure(ca_mask_trial_run, p, ca_mask_trial_restore, p);
+  for ( i = 0; i < t->n && refused < 0; i++ ) {
+    CArray *z = t->parts[i].blank;
+    if ( ! t->parts[i].refusing ) {
+      continue;
+    }
+    for ( j = 0; j < z->elements && ! ((boolean8_t *) z->ptr)[j]; j++ ) ;
+    if ( j < z->elements ) {
+      refused = i;
+    }
+  }
+  if ( refused >= 0 ) {
+    rb_raise(rb_eTypeError, "%s: can not create mask array for the %s array",
+             ca_calling_method_name(), t->parts[refused].value ? "value" : "mask");
+  }
+  t->body(t->arg);
+  return Qnil;
+}
+
+static VALUE
+ca_mask_write_check_done (VALUE p)
+{
+  ca_mask_trial_t *t = (ca_mask_trial_t *) p;
+  ca_mask_trial_free(t);
+  ca_mask_write_depth_add(-1);
+  return Qnil;
+}
+
+void
+ca_mask_write_checked (CArray *mask, VALUE (*body)(VALUE), VALUE arg)
+{
+  ca_mask_trial_t t;
+  t.mask  = mask;
+  t.parts = NULL;
+  t.n     = 0;
+  t.cap   = 0;
+  t.body  = body;
+  t.arg   = arg;
+  ca_mask_write_depth_add(1);
+  rb_ensure(ca_mask_write_trial_and_run, (VALUE) &t,
+            ca_mask_write_check_done, (VALUE) &t);
+}
+
 typedef struct {
   CArray  *mask;
   CArray **blanks;
@@ -608,7 +840,7 @@ ca_multi_parent_mask_refuse_first (CArray *mask, CArray **parents,
   volatile VALUE h_blank = 0, h_saved = 0;
   ca_mp_trial_t t;
   int32_t k, refused = -1;
-  if ( standins == NULL ) {
+  if ( standins == NULL || ca_mask_write_depth() > 0 ) {
     return;
   }
   for ( k = 0; k < n; k++ ) {
@@ -2457,6 +2689,8 @@ rb_ca_inherit_mask_replace_ruby (int argc, VALUE *argv, VALUE self)
 void
 Init_carray_mask (void)
 {
+  ca_mask_write_depth_key = rb_ractor_local_storage_value_newkey();
+
   rb_define_private_method(rb_cCArray, "add_mask", rb_ca_create_mask, 0);
   /*
   rb_define_private_method(rb_cCArray, "__update_mask__", rb_ca_update_mask, 0);

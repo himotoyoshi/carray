@@ -1039,6 +1039,66 @@ ca_store_addr (void *ap, ca_size_t addr, void *pval)
    public C-API for external ext gems).  Every view supplies an
    xfer_index slot. */
 
+/* ---- Writes to a mask view checked as one write (ca_mask_write_checked) ----
+   A view that is attached writes into its own buffer; its write reaches
+   the parents when it is synced, and is checked there. */
+
+typedef struct {
+  int        kind;
+  CArray    *ca;
+  ca_size_t *idx;
+  ca_size_t  n;
+  ca_size_t *addrs;
+  ca_size_t *starts;
+  ca_size_t *counts;
+  ca_size_t *strides;
+  void      *data;
+  ca_size_t  base;
+  int8_t     ndim;
+  ca_size_t *steps;
+} ca_checked_put_t;
+
+enum { CA_CHECKED_INDEX, CA_CHECKED_ADDRS, CA_CHECKED_STRIDE, CA_CHECKED_ALL,
+       CA_CHECKED_FILL, CA_CHECKED_FILL_STRIDE, CA_CHECKED_FILL_ADDRS,
+       CA_CHECKED_SYNC };
+
+static VALUE
+ca_checked_put_body (VALUE arg)
+{
+  ca_checked_put_t *a = (ca_checked_put_t *) arg;
+  switch ( a->kind ) {
+  case CA_CHECKED_INDEX:
+    ca_xfer_index(a->ca, a->idx, a->data, CA_XFER_PUT); break;
+  case CA_CHECKED_ADDRS:
+    ca_xfer_addrs(a->ca, a->n, a->addrs, a->data, CA_XFER_PUT); break;
+  case CA_CHECKED_STRIDE:
+    ca_xfer_stride(a->ca, a->starts, a->counts, a->strides, a->data, CA_XFER_PUT); break;
+  case CA_CHECKED_ALL:
+    ca_xfer_all(a->ca, a->data, CA_XFER_PUT); break;
+  case CA_CHECKED_FILL:
+    ca_fill_data(a->ca, a->data); break;
+  case CA_CHECKED_FILL_STRIDE:
+    ca_fill_stride(a->ca, a->base, a->ndim, a->counts, a->steps, a->data); break;
+  case CA_CHECKED_FILL_ADDRS:
+    ca_fill_addrs(a->ca, a->n, a->addrs, a->data); break;
+  case CA_CHECKED_SYNC:
+    ca_sync(a->ca); break;
+  }
+  return Qnil;
+}
+
+static inline int
+ca_put_needs_check (CArray *ca)
+{
+  return ca->ptr == NULL && ca_mask_write_needs_check(ca);
+}
+
+#define CA_CHECKED_PUT(...) \
+  do { \
+    ca_checked_put_t a_ = { __VA_ARGS__ }; \
+    ca_mask_write_checked(a_.ca, ca_checked_put_body, (VALUE) &a_); \
+  } while (0)
+
 static inline void
 ca_xfer_index_dispatch (CArray *ca, ca_size_t *idx, void *data, int dir)
 {
@@ -1075,6 +1135,11 @@ ca_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 
   if ( dir == CA_XFER_PUT && ca_is_readonly(ca) ) {
     ca_refuse_read_only();
+  }
+
+  if ( dir == CA_XFER_PUT && ca_put_needs_check(ca) ) {
+    CA_CHECKED_PUT(CA_CHECKED_INDEX, ca, idx, 0, NULL, NULL, NULL, NULL, data);
+    return;
   }
 
   /* Fast path: non-CA_OBJECT element type needs no GC protection. */
@@ -1226,6 +1291,11 @@ ca_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data, int dir)
 
   if ( dir == CA_XFER_PUT && ca_is_readonly(ca) ) {
     ca_refuse_read_only();
+  }
+
+  if ( dir == CA_XFER_PUT && ca_put_needs_check(ca) ) {
+    CA_CHECKED_PUT(CA_CHECKED_ADDRS, ca, NULL, n, addrs, NULL, NULL, NULL, data);
+    return;
   }
 
   /* Fast path: non-CA_OBJECT element type needs no GC protection. */
@@ -1684,6 +1754,11 @@ ca_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 
   if ( ca_region_is_empty(ca->ndim, counts) ) return;
 
+  if ( dir == CA_XFER_PUT && ca_put_needs_check(ca) ) {
+    CA_CHECKED_PUT(CA_CHECKED_STRIDE, ca, NULL, 0, NULL, starts, counts, strides, data);
+    return;
+  }
+
   if ( ca->data_type != CA_OBJECT ) {
     ca_xfer_stride_dispatch(ca, starts, counts, strides, data, dir);
     return;
@@ -1753,6 +1828,10 @@ ca_xfer_all (void *ap, void *data, int dir)
   }
   /* An empty view moves nothing; see ca_xfer_stride. */
   if ( ca->elements == 0 ) {
+    return;
+  }
+  if ( dir == CA_XFER_PUT && ca_put_needs_check(ca) ) {
+    CA_CHECKED_PUT(CA_CHECKED_ALL, ca, NULL, 0, NULL, NULL, NULL, NULL, data);
     return;
   }
   /* Universal arena lifetime hook.  ca_xfer_all is the single universal
@@ -2306,6 +2385,11 @@ ca_sync (void *ap)
     ca_refuse_read_only();
   }
 
+  if ( ca_is_view(ca) && ! CAVIEW(ca)->nosync && ca_mask_write_needs_check(ca) ) {
+    CA_CHECKED_PUT(CA_CHECKED_SYNC, ca, NULL, 0, NULL, NULL, NULL, NULL, NULL);
+    return;
+  }
+
   /* Only a mask that exists can hold writes: one made inside the window
      is attached with the view (ca_create_mask).  Making one here would
      read the parent's mask while the window closes, and a parent that
@@ -2537,6 +2621,11 @@ ca_fill_data (void *ap, void *aptr)
     ca_refuse_read_only();
   }
 
+  if ( ca_put_needs_check(ca) ) {
+    CA_CHECKED_PUT(CA_CHECKED_FILL, ca, NULL, 0, NULL, NULL, NULL, NULL, aptr);
+    return;
+  }
+
   if ( ca_is_view(ca) ) {   /* view array */
     if ( ca_is_attached(ca) ) { /* ca is to be attached */
       ca_func[CA_OBJ_ARRAY].fill_data(ap, ptr);
@@ -2592,6 +2681,12 @@ ca_fill_stride (void *ap, ca_size_t base, int8_t ndim,
   }
 
   if ( ca_region_is_empty(ndim, counts) ) return;
+
+  if ( ca_put_needs_check(ca) ) {
+    CA_CHECKED_PUT(CA_CHECKED_FILL_STRIDE, ca, NULL, 0, NULL, NULL, counts, NULL,
+                   ptr, base, ndim, steps);
+    return;
+  }
 
   if ( ca_func[ca->obj_type].fill_stride ) {
     ca_func[ca->obj_type].fill_stride(ap, base, ndim, counts, steps, ptr);
@@ -2709,6 +2804,11 @@ ca_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
 
   if ( ca_is_readonly(ca) ) {
     ca_refuse_read_only();
+  }
+
+  if ( ca_put_needs_check(ca) ) {
+    CA_CHECKED_PUT(CA_CHECKED_FILL_ADDRS, ca, NULL, n, addrs, NULL, NULL, NULL, ptr);
+    return;
   }
 
   if ( ca_func[ca->obj_type].fill_addrs ) {
