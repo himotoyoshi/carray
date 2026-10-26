@@ -369,7 +369,8 @@ rb_ca_convert (int argc, VALUE *argv, VALUE self)
 
   list[0] = c.ca;
   list[1] = c.co;
-  ca_attach_window(2, list, "rw", ca_convert_body, (VALUE) &c);
+  ca_attach_window_yielding(rb_assoc_new(self, obj), 2, list, "rw",
+                            ca_convert_body, (VALUE) &c);
 
   return obj;
 }

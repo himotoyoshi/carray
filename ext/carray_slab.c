@@ -13,7 +13,8 @@
 
   Internals:
     - ca_slab_iter_state_t (see carray_slab.h) is the per-call state struct.
-    - Each entry point stack-allocates a zeroed state, populates it via
+    - Each entry point heap-allocates a zeroed state under a window guard
+      (slab_state_new), populates it via
       slab_state_init (= nofail; only validation + scalar field fills),
       then rb_ensure-runs slab_state_run_body (= acquires T1 substrate +
       scratch + output, runs per-form loop) and slab_state_finish (= frees
@@ -21,9 +22,8 @@
     - All heap acquisition lives in run_body so init-time rb_raise paths
       cannot leak; rb_ensure guarantees finish on both normal and
       exception exit.
-    - Conservative stack scan keeps the state struct's VALUE fields alive
-      across rb_yield; no dmark callback is required because the state is
-      not Ruby-wrapped.
+    - The guard marks the state's VALUE fields, and runs slab_state_finish
+      from a finalizer if the block's Fiber is abandoned mid-walk.
 
   --------------------------------------------------------------------------- */
 
@@ -122,9 +122,9 @@ slab_state_init (ca_slab_iter_state_t *st, VALUE source, int8_t form,
 {
   CArray *src;
 
-  /* Caller stack-allocates with `{0}` which sets VALUE fields to Qfalse
-     (= 0). Body code uses `== Qnil` to distinguish unset slots from
-     populated CArray handles, so we must promote them to Qnil here. */
+  /* The state arrives zeroed, which leaves VALUE fields Qfalse (= 0).
+     Body code uses `== Qnil` to distinguish unset slots from populated
+     CArray handles, so we must promote them to Qnil here. */
   st->self             = Qnil;
   st->slab_view        = Qnil;
   st->carrier          = Qnil;
@@ -1275,6 +1275,72 @@ slab_state_finish (VALUE arg)
 /* Entry points: CArray#map_slab / #reduce_slab / #each_slab           */
 /* ------------------------------------------------------------------- */
 
+/* The walk yields to the block with its windows open.  The state lives on
+   the heap under a window guard, so that if the block's Fiber is abandoned
+   (an Enumerator stopped with #next and dropped) the guard's finalizer
+   still runs slab_state_finish and the source is let go. */
+
+static void
+slab_state_mark (void *p)
+{
+  ca_slab_iter_state_t *st = (ca_slab_iter_state_t *) p;
+  rb_gc_mark(st->self);
+  rb_gc_mark(st->slab_view);
+  rb_gc_mark(st->carrier);
+  rb_gc_mark(st->mask_carrier);
+  rb_gc_mark(st->output);
+  rb_gc_mark(st->output_slab_view);
+  rb_gc_mark(st->init_val);
+}
+
+static void
+slab_state_finish_abandoned (void *p)
+{
+  slab_state_finish((VALUE)(uintptr_t) p);
+}
+
+typedef struct {
+  ca_slab_iter_state_t *st;
+  VALUE guard;
+  VALUE sentinel;
+} slab_run_t;
+
+static VALUE
+slab_run_body (VALUE arg)
+{
+  return slab_state_run_body((VALUE)(uintptr_t) ((slab_run_t *) arg)->st);
+}
+
+static VALUE
+slab_run_close (VALUE arg)
+{
+  slab_run_t *r = (slab_run_t *) arg;
+  ca_window_guard_disarm(r->guard, r->sentinel);
+  return slab_state_finish((VALUE)(uintptr_t) r->st);
+}
+
+/* Allocates the state; slab_state_init fills it, then slab_run walks. */
+static ca_slab_iter_state_t *
+slab_state_new (slab_run_t *r)
+{
+  ca_slab_iter_state_t *st = ZALLOC(ca_slab_iter_state_t);
+  st->self = st->slab_view = st->carrier = st->mask_carrier = Qnil;
+  st->output = st->output_slab_view = st->init_val = Qnil;
+  r->st    = st;
+  r->guard = ca_window_guard_arm(slab_state_finish_abandoned, slab_state_mark,
+                                 st, &r->sentinel);
+  return st;
+}
+
+static VALUE
+slab_run (slab_run_t *r)
+{
+  VALUE result = rb_ensure(slab_run_body, (VALUE) r, slab_run_close, (VALUE) r);
+  RB_GC_GUARD(r->guard);
+  RB_GC_GUARD(r->sentinel);
+  return result;
+}
+
 /* Shared kwarg parse: returns axis (required) + data_type / init via
    out-params.  init_out is set to Qundef if the `:init` key was absent
    (= caller distinguishes per-slab vs per-element reduce forms).      */
@@ -1322,7 +1388,7 @@ slab_extract_kwargs (int argc, VALUE *argv, const char *method_name)
 static VALUE
 rb_ca_map_slab (int argc, VALUE *argv, VALUE self)
 {
-  ca_slab_iter_state_t st = {0};
+  slab_run_t r;
   VALUE kw, axis, data_type, init_unused;
   VALUE result;
 
@@ -1335,10 +1401,9 @@ rb_ca_map_slab (int argc, VALUE *argv, VALUE self)
     rb_raise(rb_eLocalJumpError, "CArray#map_slab: block required");
   }
 
-  slab_state_init(&st, self, CA_SLAB_FORM_MAP, axis, data_type, Qundef);
+  slab_state_init(slab_state_new(&r), self, CA_SLAB_FORM_MAP, axis, data_type, Qundef);
 
-  result = rb_ensure(slab_state_run_body, (VALUE)(uintptr_t)&st,
-                     slab_state_finish,   (VALUE)(uintptr_t)&st);
+  result = slab_run(&r);
   RB_GC_GUARD(self);
   return result;
 }
@@ -1346,7 +1411,7 @@ rb_ca_map_slab (int argc, VALUE *argv, VALUE self)
 static VALUE
 rb_ca_reduce_slab (int argc, VALUE *argv, VALUE self)
 {
-  ca_slab_iter_state_t st = {0};
+  slab_run_t r;
   VALUE kw, axis, data_type, init_val;
   VALUE result;
   int8_t form;
@@ -1364,10 +1429,9 @@ rb_ca_reduce_slab (int argc, VALUE *argv, VALUE self)
   form = (init_val == Qundef) ? CA_SLAB_FORM_REDUCE_SLAB
                               : CA_SLAB_FORM_REDUCE_FIBER;
 
-  slab_state_init(&st, self, form, axis, data_type, init_val);
+  slab_state_init(slab_state_new(&r), self, form, axis, data_type, init_val);
 
-  result = rb_ensure(slab_state_run_body, (VALUE)(uintptr_t)&st,
-                     slab_state_finish,   (VALUE)(uintptr_t)&st);
+  result = slab_run(&r);
   RB_GC_GUARD(self);
   return result;
 }
@@ -1375,7 +1439,7 @@ rb_ca_reduce_slab (int argc, VALUE *argv, VALUE self)
 static VALUE
 rb_ca_each_slab (int argc, VALUE *argv, VALUE self)
 {
-  ca_slab_iter_state_t st = {0};
+  slab_run_t r;
   VALUE kw, axis, data_type_unused, init_unused;
   VALUE result;
 
@@ -1397,10 +1461,9 @@ rb_ca_each_slab (int argc, VALUE *argv, VALUE self)
                           2, args, RB_PASS_KEYWORDS);
   }
 
-  slab_state_init(&st, self, CA_SLAB_FORM_EACH, axis, Qnil, Qundef);
+  slab_state_init(slab_state_new(&r), self, CA_SLAB_FORM_EACH, axis, Qnil, Qundef);
 
-  result = rb_ensure(slab_state_run_body, (VALUE)(uintptr_t)&st,
-                     slab_state_finish,   (VALUE)(uintptr_t)&st);
+  result = slab_run(&r);
   RB_GC_GUARD(self);
   return result;
 }

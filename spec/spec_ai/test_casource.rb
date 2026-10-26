@@ -435,3 +435,76 @@ class TestCASourceInPlaceReads < Test::Unit::TestCase
   end
 
 end
+
+# A window that yields to a block is closed by an ensure, which Ruby does
+# not run for a suspended Fiber that is collected (an Enumerator stopped
+# with #next and dropped).  The hold it took has to come back once the
+# Fiber is gone, or the source stays published and stops checking its
+# backend.
+class TestCASourceAbandonedWindows < Test::Unit::TestCase
+
+  def source
+    CASmokeSource.new(("\0" * 12).dup, [3, 4]).tap { |s| s.seq!(1) }
+  end
+
+  # The abandoning happens in a method of its own, so that nothing on this
+  # frame still refers to the Enumerator or the Fiber.
+  def abandon_enumerator (src, name, **kw)
+    e = src.enum_for(name, **kw)
+    e.next
+    nil
+  end
+
+  def abandon_fiber (&block)
+    Fiber.new(&block).resume
+    nil
+  end
+
+  # Finalizers run after the collection that frees the Fiber, so give them
+  # a few chances.
+  def assert_hold_returns (src)
+    10.times do
+      break if src.hold_count == 0
+      GC.start(full_mark: true, immediate_sweep: true)
+      sleep 0.01
+    end
+    assert_equal 0, src.hold_count
+    assert_false src.attached?
+  end
+
+  def test_each_slab_enumerator
+    src = source
+    abandon_enumerator(src, :each_slab, axis: 1)
+    assert_hold_returns src
+  end
+
+  def test_map_bang_enumerator
+    src = source
+    abandon_enumerator(src, :map!)
+    assert_hold_returns src
+  end
+
+  def test_map_slab_and_reduce_slab_in_a_fiber
+    src = source
+    abandon_fiber { src.map_slab(axis: 1) { |s| Fiber.yield; s } }
+    abandon_fiber { src.reduce_slab(axis: 1) { |s| Fiber.yield; s.sum } }
+    assert_hold_returns src
+  end
+
+  def test_convert_in_a_fiber
+    src = source
+    abandon_fiber { src.convert(CA_INT32) { |v| Fiber.yield; v } }
+    assert_hold_returns src
+  end
+
+  def test_windows_that_close_normally_are_unchanged
+    src = source
+    src.each_slab(axis: 1) { }
+    src.each_slab(axis: 1) { break }
+    src.map! { |v| v + 1 }
+    assert_raise(RuntimeError) { src.map! { raise "stop" } }
+    assert_equal 0, src.hold_count
+    assert_equal [2, 3, 4, 5], src[0, nil].to_a
+  end
+
+end

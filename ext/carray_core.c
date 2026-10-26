@@ -2438,6 +2438,234 @@ ca_attach_window (int32_t n, CArray **list, const char *modes,
   return result;
 }
 
+/* ---- A window whose Fiber is abandoned ------------------------------------
+
+   A window that yields to a block is closed by rb_ensure.  Ruby does not
+   run the ensure of a Fiber that is suspended and then collected -- an
+   Enumerator stopped with #next and dropped is one -- so such a window
+   would stay open for good: a view keeps its attach, and a source that
+   publishes its ptr only while held (a CASource) keeps it published and
+   stops checking its backend.
+
+   The guard closes it from a finalizer instead.  The window's state lives
+   on the heap, owned by the guard; a sentinel object that only the
+   window's frame refers to carries a finalizer that holds the guard.  When
+   the Fiber is collected the sentinel goes with it, and the finalizer --
+   which runs outside GC, where Ruby may be called -- runs `cleanup`.  A
+   window that closes normally disarms the guard first.
+
+   `mark` marks the VALUEs `arg` holds, which nothing else does once the
+   frame that referred to them is gone.  The guard frees `arg` with xfree. */
+
+typedef struct {
+  void (*cleanup) (void *arg);
+  void (*mark)    (void *arg);
+  void  *arg;
+  int    armed;
+} ca_window_guard_t;
+
+static void
+ca_window_guard_mark (void *p)
+{
+  ca_window_guard_t *g = (ca_window_guard_t *) p;
+  if ( g->arg && g->mark ) {
+    g->mark(g->arg);
+  }
+}
+
+static void
+ca_window_guard_free (void *p)
+{
+  ca_window_guard_t *g = (ca_window_guard_t *) p;
+  xfree(g->arg);
+  xfree(g);
+}
+
+static const rb_data_type_t ca_window_guard_data_type = {
+  .wrap_struct_name = "CArrayWindowGuard",
+  .function = {
+    .dmark = ca_window_guard_mark,
+    .dfree = ca_window_guard_free,
+    .dsize = NULL,
+  },
+  .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+static VALUE
+ca_window_guard_cleanup_step (VALUE gv)
+{
+  ca_window_guard_t *g;
+  TypedData_Get_Struct(gv, ca_window_guard_t, &ca_window_guard_data_type, g);
+  g->cleanup(g->arg);
+  return Qnil;
+}
+
+/* The finalizer is the guard itself, called with the sentinel's object id.
+   A proc made here would capture the frame it is made in -- inside the
+   Fiber -- and keep the Fiber alive through the finalizer table. */
+static VALUE rb_cCAWindowGuard;
+
+static VALUE
+ca_window_guard_call (VALUE gv, VALUE object_id)
+{
+  ca_window_guard_t *g;
+  int tag = 0;
+  (void) object_id;
+  TypedData_Get_Struct(gv, ca_window_guard_t, &ca_window_guard_data_type, g);
+  if ( g->armed && g->cleanup ) {
+    g->armed = 0;
+    rb_protect(ca_window_guard_cleanup_step, gv, &tag);
+    if ( tag ) {
+      rb_set_errinfo(Qnil);
+    }
+  }
+  return Qnil;
+}
+
+/* Takes ownership of arg (allocated with xmalloc).  Returns the guard and
+   stores the sentinel; the caller keeps both on its frame (RB_GC_GUARD)
+   for as long as the window may be open. */
+VALUE
+ca_window_guard_arm (void (*cleanup)(void *), void (*mark)(void *), void *arg,
+                     VALUE *sentinel)
+{
+  ca_window_guard_t *g;
+  volatile VALUE gv, sv;
+  gv = TypedData_Make_Struct(rb_cCAWindowGuard, ca_window_guard_t,
+                             &ca_window_guard_data_type, g);
+  g->cleanup = cleanup;
+  g->mark    = mark;
+  g->arg     = arg;
+  g->armed   = 1;
+  sv = rb_class_new_instance(0, NULL, rb_cObject);
+  rb_define_finalizer(sv, gv);
+  *sentinel = sv;
+  return gv;
+}
+
+/* Called first thing when the window closes normally, so that cleanup
+   cannot also run from the finalizer. */
+void
+ca_window_guard_disarm (VALUE gv, VALUE sentinel)
+{
+  ca_window_guard_t *g;
+  TypedData_Get_Struct(gv, ca_window_guard_t, &ca_window_guard_data_type, g);
+  g->armed = 0;
+  /* rb_undefine_finalizer is declared in the headers but not exported by
+     every libruby (3.4.1 lacks it), so go through ObjectSpace. */
+  rb_funcall(rb_const_get(rb_cObject, rb_intern("ObjectSpace")),
+             rb_intern("undefine_finalizer"), 1, sentinel);
+}
+
+/* ca_attach_window for a window that yields to a block, closed by the
+   guard above if its Fiber is abandoned.  The context, the list and the
+   modes are copied to the heap, since the caller's frame goes with the
+   Fiber; `owners` keeps the arrays in list alive until then. */
+
+typedef struct {
+  ca_window_ctx_t w;
+  VALUE           owners;
+  CArray         *list[CA_RANK_MAX];
+  char            modes[CA_RANK_MAX + 1];
+} ca_guarded_window_t;
+
+static void
+ca_guarded_window_mark (void *p)
+{
+  ca_guarded_window_t *gw = (ca_guarded_window_t *) p;
+  rb_gc_mark(gw->owners);
+  rb_gc_mark(gw->w.masks);
+  rb_gc_mark(gw->w.sync_err);
+}
+
+static void
+ca_guarded_window_cleanup (void *p)
+{
+  ca_guarded_window_t *gw = (ca_guarded_window_t *) p;
+  ca_attach_window_close((VALUE) &gw->w);
+}
+
+typedef struct {
+  ca_guarded_window_t *gw;
+  VALUE guard;
+  VALUE sentinel;
+} ca_guarded_window_run_t;
+
+static VALUE
+ca_guarded_window_close (VALUE varg)
+{
+  ca_guarded_window_run_t *r = (ca_guarded_window_run_t *) varg;
+  ca_window_guard_disarm(r->guard, r->sentinel);
+  return ca_attach_window_close((VALUE) &r->gw->w);
+}
+
+VALUE
+ca_attach_window_yielding (VALUE owners, int32_t n, CArray **list,
+                           const char *modes, VALUE (*body)(VALUE), VALUE arg)
+{
+  ca_guarded_window_t *gw;
+  ca_guarded_window_run_t r;
+  volatile VALUE guard, sentinel;
+  VALUE result;
+  int   tag = 0;
+
+  if ( n < 1 || n > CA_RANK_MAX ) {
+    rb_raise(rb_eRuntimeError, "[BUG] ca_attach_window_yielding: %d arrays", (int) n);
+  }
+  gw = ZALLOC(ca_guarded_window_t);
+  gw->owners = owners;
+  memcpy(gw->list, list, sizeof(CArray *) * (size_t) n);
+  memcpy(gw->modes, modes, (size_t) n);
+  gw->w.n         = n;
+  gw->w.list      = gw->list;
+  gw->w.modes     = gw->modes;
+  gw->w.opened    = 0;
+  gw->w.body_done = 0;
+  gw->w.sync_tag  = 0;
+  gw->w.sync_err  = Qnil;
+  gw->w.body      = body;
+  gw->w.arg       = arg;
+  gw->w.masks     = Qnil;
+  guard = ca_window_guard_arm(NULL, ca_guarded_window_mark, gw, (VALUE *) &sentinel);
+  ca_attach_window_save_masks(&gw->w);
+
+  rb_protect(ca_attach_window_open, (VALUE) &gw->w, &tag);
+  if ( tag ) {
+    ca_window_guard_disarm(guard, sentinel);
+    while ( gw->w.opened > 0 ) {
+      gw->w.opened--;
+      if ( gw->w.list[gw->w.opened] ) {
+        ca_detach(gw->w.list[gw->w.opened]);
+      }
+    }
+    ca_attach_window_restore_masks(&gw->w);
+    rb_jump_tag(tag);
+  }
+
+  /* Only now is there something for the finalizer to close. */
+  {
+    ca_window_guard_t *g;
+    TypedData_Get_Struct(guard, ca_window_guard_t, &ca_window_guard_data_type, g);
+    g->cleanup = ca_guarded_window_cleanup;
+  }
+
+  r.gw       = gw;
+  r.guard    = guard;
+  r.sentinel = sentinel;
+  result = rb_ensure(ca_attach_window_body,   (VALUE) &gw->w,
+                     ca_guarded_window_close, (VALUE) &r);
+  if ( gw->w.sync_tag && RB_TYPE_P(gw->w.sync_err, T_OBJECT) &&
+       RTEST(rb_obj_is_kind_of(gw->w.sync_err, rb_eException)) ) {
+    VALUE err = gw->w.sync_err;
+    RB_GC_GUARD(guard);
+    RB_GC_GUARD(sentinel);
+    rb_exc_raise(err);
+  }
+  RB_GC_GUARD(guard);
+  RB_GC_GUARD(sentinel);
+  return result;
+}
+
 /* re-gather an attached view's buffer from its parent */
 
 void
@@ -3435,6 +3663,11 @@ Init_carray_core (void)
   ca_init_obj_type();
 
   rb_define_private_method(rb_cCArray, "refuse_reentry", rb_ca_refuse_reentry, 1);
+
+  rb_cCAWindowGuard = rb_define_class_under(rb_cCArray, "WindowGuard", rb_cObject);
+  rb_undef_alloc_func(rb_cCAWindowGuard);
+  rb_undef_method(CLASS_OF(rb_cCAWindowGuard), "new");
+  rb_define_method(rb_cCAWindowGuard, "call", ca_window_guard_call, 1);
 
 #ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCArray, "attach", rb_ca_s_attach, -1);

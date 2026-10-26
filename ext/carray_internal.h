@@ -191,6 +191,20 @@ void    ca_sync_all   (CArray **list, int32_t n);
 VALUE   ca_attach_window (int32_t n, CArray **list, const char *modes,
                           VALUE (*body)(VALUE), VALUE arg);
 
+/* A window that yields to a block can be left open for good: Ruby does not
+   run the ensure of a suspended Fiber that is collected (an Enumerator
+   stopped with #next and dropped).  ca_window_guard_arm makes a guard that
+   runs cleanup(arg) from a finalizer when that happens; the window disarms
+   it when it closes normally.  arg is heap memory the guard frees, and
+   mark marks the VALUEs it holds.  ca_attach_window_yielding is
+   ca_attach_window with such a guard; owners keeps the arrays alive. */
+VALUE   ca_window_guard_arm (void (*cleanup)(void *), void (*mark)(void *),
+                             void *arg, VALUE *sentinel);
+void    ca_window_guard_disarm (VALUE guard, VALUE sentinel);
+VALUE   ca_attach_window_yielding (VALUE owners, int32_t n, CArray **list,
+                                   const char *modes, VALUE (*body)(VALUE),
+                                   VALUE arg);
+
 /* ---- Filling a result Ruby does not own yet (carray_copy.c) ---------------
 
    A C builder that allocates its result with carray_new / ca_template and
