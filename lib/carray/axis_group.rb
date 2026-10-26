@@ -409,7 +409,7 @@ class CAGroupIterator
     # except for a band folded into the count, which has no route but the
     # engine.
     def core_counts? (kw)
-      return false if CArray.__fast_paths_enabled__
+      return false if CArray.__fast_paths_enabled__(:axis_group_count_kernel)
       has_group, fused = AxisGroup.parse_axis(kw[:axis])
       has_group && fused.empty?
     end
@@ -863,7 +863,7 @@ class CAGroupIterator
   # pass. With the fast paths off it goes through the band loop instead,
   # which then has one position.
   def whole_block? (bslots)
-    bslots.empty? && CArray.__fast_paths_enabled__
+    bslots.empty? && CArray.__fast_paths_enabled__(:axis_group_whole_block)
   end
 
   # Iterate the band positions of a band-preserving grouping. For each band
@@ -925,7 +925,7 @@ class CAGroupIterator
   # statistic (+fused+), which has no route but the kernel.
   def kernel_reads_value? (fused = [])
     return false if value.face? || ! (value.integer? || value.float?)
-    CArray.__fast_paths_enabled__ || ! fused.empty?
+    CArray.__fast_paths_enabled__(:axis_group_reduce_kernel) || ! fused.empty?
   end
 
   # Whether the scan kernel gives the core's answer: it reads an integer,
@@ -933,7 +933,7 @@ class CAGroupIterator
   # float64 (an object in object), cummax / cummin in the payload's data type
   # and cumcount in int64 -- not the core's answer for a boolean's running sum.
   def kernel_scans? (op)
-    return false unless CArray.__fast_paths_enabled__
+    return false unless CArray.__fast_paths_enabled__(:axis_group_scan_kernel)
     return false if value.face? || value.complex?
     return true if value.object? || op == :cumcount
     core = CAIterator.core_probe(value).public_send(op).data_type

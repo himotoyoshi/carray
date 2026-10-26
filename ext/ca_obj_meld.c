@@ -686,7 +686,7 @@ ca_meld_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     structural = 0;
   }
 
-  if ( ! structural || ! ca_fast_paths_enabled() ) {
+  if ( ! structural || ! ca_fast_path(CA_SC_MELD_STRIDE_BOX) ) {
     ca_meld_xfer_stride_per_cell(ca, starts, counts, strides, data, dir);
     return;
   }
@@ -852,7 +852,7 @@ ca_meld_xfer_all_ma_internal (CAMeld *ca, void *data, int dir,
 static void
 ca_meld_xfer_parents (CAMeld *ca, void *data, int dir, int into_buffers)
 {
-  if ( ca->meld_axis == 0 && ca_fast_paths_enabled() ) {
+  if ( ca->meld_axis == 0 && ca_fast_path(CA_SC_MELD_PARENTS_AXIS0) ) {
     ca_meld_xfer_all_ma0(ca, data, dir, into_buffers);
   } else {
     ca_meld_xfer_all_ma_internal(ca, data, dir, into_buffers);

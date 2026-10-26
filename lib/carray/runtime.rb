@@ -7,10 +7,11 @@ class CArray
 
   # A fast path answers by a different algorithm what a general path also
   # answers.  A development build defines this in C, false when run with
-  # CARRAY_GENERAL_PATH=1 so the test suite takes the general paths (see
+  # CARRAY_GENERAL_PATH=1 so the test suite takes the general paths, and
+  # false for a name listed in CARRAY_SHORTCUTS_OFF (see
   # ext/carray_internal.h); a release build has no switch.
   unless respond_to?(:__fast_paths_enabled__)
-    def self.__fast_paths_enabled__ # :nodoc:
+    def self.__fast_paths_enabled__ (name = nil) # :nodoc:
       true
     end
   end

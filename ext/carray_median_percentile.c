@@ -910,7 +910,7 @@ rb_ca_median_m_body (int argc, VALUE *argv, VALUE self)
        Switch      ca_fast_paths_enabled(): off, the per-fiber select. */
     VALUE res;
     if ( RTEST(rb_ca_has_mask(self)) || min_count > 0 || !NIL_P(fill_value)
-         || ! ca_fast_paths_enabled() )
+         || ! ca_fast_path(CA_SC_MEDIAN_PARTITION) )
       res = is_obj
         ? median_object_axis_masked(self, axis, min_count, fill_value, keep_axis)
         : median_axis_masked(self, axis, min_count, fill_value, keep_axis);
@@ -1366,7 +1366,7 @@ rb_ca_percentile_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
        uniform n.  These paths bake keep_axis into the reduced output.
        Switch      ca_fast_paths_enabled(): off, the per-fiber select. */
     int per_fiber = RTEST(rb_ca_has_mask(self)) || min_count > 0
-                    || !NIL_P(fill_value) || ! ca_fast_paths_enabled();
+                    || !NIL_P(fill_value) || ! ca_fast_path(CA_SC_PERCENTILE_PARTITION);
     if ( !is_obj ) {
       result = per_fiber
         ? pct_axis_masked(self, pers, axis, method, min_count, fill_value, keep_axis)

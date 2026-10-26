@@ -1925,14 +1925,114 @@ rb_ca_s_attached_views (VALUE klass)
   return LONG2NUM(__atomic_load_n(&ca_attached_views, __ATOMIC_RELAXED));
 }
 
-/* Set once at load from CARRAY_GENERAL_PATH; see carray_internal.h. */
+/* Set once at load from CARRAY_GENERAL_PATH and CARRAY_SHORTCUTS_OFF; see
+   carray_internal.h. */
 int ca_fast_paths_on = 1;
 int ca_iter_transfer_only_on = 0;
+unsigned char ca_shortcut_off[CA_SC_COUNT];
 
-static VALUE
-rb_ca_s_fast_paths_enabled (VALUE klass)
+/* In the order of enum ca_shortcut. */
+static const char *ca_shortcut_names[CA_SC_COUNT] = {
+  "keep_scratch",
+  "push_all_changed",
+  "fiber_fused_shift",
+  "shift_whole_view",
+  "stack",
+  "stack_outer_k",
+  "fiber_fused_conversion",
+  "per_slab_hoist",
+  "protect_only_may_raise",
+  "stack_index_k0",
+  "stack_addrs_k0",
+  "stack_stride_box",
+  "stack_stride_reloc",
+  "stack_parents_k0",
+  "stack_fold",
+  "meld_stride_box",
+  "meld_parents_axis0",
+  "median_partition",
+  "percentile_partition",
+  "loop_interchange",
+  "stack_loop_interchange",
+  "lazy_streaming_reduce",
+  "meld_reduce",
+  "segment_nunique",
+  "segment_scan_kernel",
+  "segment_edge_kernel",
+  "segment_reduce_kernel",
+  "segment_all_any_kernel",
+  "categorical_group_by_index",
+  "axis_group_count_kernel",
+  "axis_group_whole_block",
+  "axis_group_reduce_kernel",
+  "axis_group_scan_kernel",
+  "window_fold_by_offset",
+};
+
+static int
+ca_shortcut_lookup (const char *name, long len)
 {
-  return ca_fast_paths_on ? Qtrue : Qfalse;
+  int i;
+  for (i=0; i<CA_SC_COUNT; i++) {
+    if ( (long) strlen(ca_shortcut_names[i]) == len
+         && ! strncmp(ca_shortcut_names[i], name, len) ) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/* CARRAY_SHORTCUTS_OFF is a comma-separated list of names.  A name it does
+   not know is warned about, so a misspelt one does not leave the shortcut
+   on unnoticed. */
+static void
+ca_shortcuts_off_from_env (void)
+{
+  const char *p = getenv("CARRAY_SHORTCUTS_OFF");
+  if ( ! p ) {
+    return;
+  }
+  while ( *p ) {
+    const char *q = strchr(p, ',');
+    long len = q ? (long) (q - p) : (long) strlen(p);
+    if ( len > 0 ) {
+      int id = ca_shortcut_lookup(p, len);
+      if ( id < 0 ) {
+        rb_warn("CARRAY_SHORTCUTS_OFF: unknown shortcut %.*s", (int) len, p);
+      }
+      else {
+        ca_shortcut_off[id] = 1;
+      }
+    }
+    if ( ! q ) {
+      break;
+    }
+    p = q + 1;
+  }
+}
+
+/* CArray.__fast_paths_enabled__ answers whether the fast paths are on;
+   with a name, whether that one is. */
+static VALUE
+rb_ca_s_fast_paths_enabled (int argc, VALUE *argv, VALUE klass)
+{
+  VALUE rname;
+  int id;
+
+  rb_scan_args(argc, argv, "01", &rname);
+  if ( NIL_P(rname) ) {
+    return ca_fast_paths_on ? Qtrue : Qfalse;
+  }
+  if ( SYMBOL_P(rname) ) {
+    rname = rb_sym2str(rname);
+  }
+  StringValue(rname);
+  id = ca_shortcut_lookup(RSTRING_PTR(rname), RSTRING_LEN(rname));
+  if ( id < 0 ) {
+    rb_raise(rb_eArgError, "__fast_paths_enabled__: unknown shortcut %"PRIsVALUE,
+             rname);
+  }
+  return ca_fast_path(id) ? Qtrue : Qfalse;
 }
 
 static VALUE
@@ -3354,9 +3454,10 @@ Init_carray_core (void)
     const char *general = getenv("CARRAY_GENERAL_PATH");
     ca_fast_paths_on = !( general && general[0] && strcmp(general, "0") );
     ca_iter_transfer_only_on = ( general && ! strcmp(general, "2") );
+    ca_shortcuts_off_from_env();
   }
   rb_define_singleton_method(rb_cCArray, "__fast_paths_enabled__",
-                             rb_ca_s_fast_paths_enabled, 0);
+                             rb_ca_s_fast_paths_enabled, -1);
   rb_define_singleton_method(rb_cCArray, "__iter_by_transfer_only__",
                              rb_ca_s_iter_by_transfer_only, 0);
 #endif

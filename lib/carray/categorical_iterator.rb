@@ -551,7 +551,7 @@ class CACategoricalIterator < CASegmentIterator
     codes = @cat.codes
     # Classified along the axis, a group is taken by index; the general way,
     # masking the rest of a copy, gives the same cells.
-    if codes.shape == [h.shape[axis]] && CArray.__fast_paths_enabled__
+    if codes.shape == [h.shape[axis]] && CArray.__fast_paths_enabled__(:categorical_group_by_index)
       sel = none ? CArray.boolean(codes.elements) { false } : codes.eq(c)
       sel = sel.strip_mask(false) if sel.has_mask?
       idx = [nil] * h.ndim

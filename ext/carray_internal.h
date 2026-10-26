@@ -825,13 +825,61 @@ ca_obj_equal (VALUE a, VALUE b)
 
 ---------------------------------------------------------------------------- */
 
+/* Each fast path has a name, so that a development build can switch it off
+   alone: CARRAY_SHORTCUTS_OFF=stack,keep_scratch in the environment turns
+   off the ones named, CARRAY_GENERAL_PATH=1 all of them.  A fast path tests
+   ca_fast_path(CA_SC_name) alongside its own condition.  The names are in
+   ca_shortcut_names (carray_core.c) in this order; the Ruby ones are asked
+   through CArray.__fast_paths_enabled__(:name). */
+enum ca_shortcut {
+  CA_SC_KEEP_SCRATCH,
+  CA_SC_PUSH_ALL_CHANGED,
+  CA_SC_FIBER_FUSED_SHIFT,
+  CA_SC_SHIFT_WHOLE_VIEW,
+  CA_SC_STACK,
+  CA_SC_STACK_OUTER_K,
+  CA_SC_FIBER_FUSED_CONVERSION,
+  CA_SC_PER_SLAB_HOIST,
+  CA_SC_PROTECT_ONLY_MAY_RAISE,
+  CA_SC_STACK_INDEX_K0,
+  CA_SC_STACK_ADDRS_K0,
+  CA_SC_STACK_STRIDE_BOX,
+  CA_SC_STACK_STRIDE_RELOC,
+  CA_SC_STACK_PARENTS_K0,
+  CA_SC_STACK_FOLD,
+  CA_SC_MELD_STRIDE_BOX,
+  CA_SC_MELD_PARENTS_AXIS0,
+  CA_SC_MEDIAN_PARTITION,
+  CA_SC_PERCENTILE_PARTITION,
+  CA_SC_LOOP_INTERCHANGE,
+  CA_SC_STACK_LOOP_INTERCHANGE,
+  CA_SC_LAZY_STREAMING_REDUCE,
+  /* asked from lib/carray */
+  CA_SC_MELD_REDUCE,
+  CA_SC_SEGMENT_NUNIQUE,
+  CA_SC_SEGMENT_SCAN_KERNEL,
+  CA_SC_SEGMENT_EDGE_KERNEL,
+  CA_SC_SEGMENT_REDUCE_KERNEL,
+  CA_SC_SEGMENT_ALL_ANY_KERNEL,
+  CA_SC_CATEGORICAL_GROUP_BY_INDEX,
+  CA_SC_AXIS_GROUP_COUNT_KERNEL,
+  CA_SC_AXIS_GROUP_WHOLE_BLOCK,
+  CA_SC_AXIS_GROUP_REDUCE_KERNEL,
+  CA_SC_AXIS_GROUP_SCAN_KERNEL,
+  CA_SC_WINDOW_FOLD_BY_OFFSET,
+  CA_SC_COUNT
+};
+
 #ifdef CARRAY_DEV_BUILD
 extern int ca_fast_paths_on;
 extern int ca_iter_transfer_only_on;
+extern unsigned char ca_shortcut_off[CA_SC_COUNT];
 #define ca_fast_paths_enabled()    (ca_fast_paths_on)
+#define ca_fast_path(id)           (ca_fast_paths_on && ! ca_shortcut_off[id])
 #define ca_iter_by_transfer_only() (ca_iter_transfer_only_on)
 #else
 #define ca_fast_paths_enabled()    (1)
+#define ca_fast_path(id)           (1)
 #define ca_iter_by_transfer_only() (0)
 #endif
 

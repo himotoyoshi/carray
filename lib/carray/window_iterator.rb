@@ -553,7 +553,7 @@ class CAWindowIterator < CAIterator
   # Runs the fold by offset, or returns nil when this window is not one it can
   # answer for -- in which case the caller delegates as before.
   def fold_by_offset (op, min_count, fill_value = nil)
-    return nil unless CArray.__fast_paths_enabled__
+    return nil unless CArray.__fast_paths_enabled__(:window_fold_by_offset)
     need = CArray.__present_cells_needed_per_result_cell__(op, min_count, 0)
     return nil unless op == :mean || OFFSET_FOLD.key?(op)
     # The elementwise kernels act on a Face's storage; its reductions are its own.

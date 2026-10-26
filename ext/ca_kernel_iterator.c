@@ -31,7 +31,8 @@
 
   A route added for speed is a shortcut, tagged next to its code with
   "Shortcut NAME" and a fixed set of fields; each one is switched off by
-  ca_fast_paths_enabled().
+  ca_fast_path(CA_SC_name): by its name in CARRAY_SHORTCUTS_OFF, or with
+  the others by CARRAY_GENERAL_PATH=1 (carray_internal.h).
 
 ---------------------------------------------------------------------------- */
 
@@ -75,7 +76,7 @@
                  KI_KEEP_MAX.
      Promises    4 (a kept buffer has no owner, so no exit can leave it
                  held); 7 (object cells are cleared and held either way).
-     Switch      ca_fast_paths_enabled(): off, every scratch is fresh.
+     Switch      ca_fast_path(): off, every scratch is fresh.
      Checked by  test_iter_ractor_scratch.rb; the buffer count in
                  test_iter_delivery_detectors.rb. */
 
@@ -133,7 +134,7 @@ ki_data_alloc (int8_t data_type, ca_size_t bytes)
 {
   void *p = NULL;
   KI_BUFFERS_OUT(1);
-  if ( bytes >= KI_KEEP_MIN && ca_fast_paths_enabled() ) {
+  if ( bytes >= KI_KEEP_MIN && ca_fast_path(CA_SC_KEEP_SCRATCH) ) {
     ki_kept_t *k = ki_kept_slot();
     if ( k->p && bytes <= k->bytes ) {
       p = k->p;
@@ -158,7 +159,7 @@ ki_data_free (void *p, ca_size_t bytes)
 {
   KI_BUFFERS_OUT(-1);
   ca_gc_release_buffer(p);
-  if ( bytes >= KI_KEEP_MIN && bytes <= KI_KEEP_MAX && ca_fast_paths_enabled() ) {
+  if ( bytes >= KI_KEEP_MIN && bytes <= KI_KEEP_MAX && ca_fast_path(CA_SC_KEEP_SCRATCH) ) {
     ki_kept_t *k = ki_kept_slot();
     if ( bytes > k->bytes ) {
       void *old = k->p;
@@ -824,9 +825,9 @@ ki_scratch_push_changed (ca_iter_state *st)
        Why         about 5% on a whole write of a fake view of 1M cells.
        Enters      whole && n_changed == n.
        Promises    3 (the same cells go back; the list would hold them all).
-       Switch      ca_fast_paths_enabled(): off, the address list.
+       Switch      ca_fast_path(): off, the address list.
        Checked by  the write rows of the delivery matrix (L1 / L2 whole). */
-  if ( whole && n_changed == n && ca_fast_paths_enabled() ) {
+  if ( whole && n_changed == n && ca_fast_path(CA_SC_PUSH_ALL_CHANGED) ) {
     ca_xfer_all(src, now, CA_XFER_PUT);
   }
   else if ( n_changed > 0 ) {
@@ -1151,11 +1152,11 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
                    fetched into the fiber mask scratch), 3 (ca_xfer_stride
                    PUT of a fiber that neither converts nor repeats a
                    cell), 4 (CA_ITER_FLAG_WALK_MAY_RAISE).
-       Switch      ca_fast_paths_enabled(): off, the descriptor route.
+       Switch      ca_fast_path(): off, the descriptor route.
        Checked by  the fiber rows of the "shift" view in the delivery
                    matrix. */
     if ( (flags & CA_KERNEL_FIBER_CONTIG) && naxes == 1
-         && plan->ndesc == src->ndim && ca_fast_paths_enabled()
+         && plan->ndesc == src->ndim && ca_fast_path(CA_SC_FIBER_FUSED_SHIFT)
          && ca_iter_should_per_fiber_fused(src, plan->src_kind, axes[0],
                                            row_bytes[axes[0]], flags) ) {
       plan->route = KI_L2_FIBER_FUSED;
@@ -1196,13 +1197,13 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
                    innermost axis outside the slab, a read walk.
        Promises    2 and 6 (the mask is copied by ki_take_mask_copy, and
                    only when the view has one).
-       Switch      ca_fast_paths_enabled(): off, the per-slab gather.
+       Switch      ca_fast_path(): off, the per-slab gather.
        Checked by  the slab-axis rows of the "shift" and "window" views
                    in the delivery matrix. */
     int whole_view = slab_has_non_stride && ! slab_has_index
                      && ! in_slab[src->ndim - 1]
                      && ! ( flags & CA_KERNEL_WRITE )
-                     && ca_fast_paths_enabled();
+                     && ca_fast_path(CA_SC_SHIFT_WHOLE_VIEW);
 
     /* The descriptor engine's gathers (per slab and whole view) read
        only.  A write takes the transfer walk instead: the view is
@@ -1239,7 +1240,7 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
        Enters      a CAStack whose parents all have an attach slot, no
                    mask, a read walk, one slab axis that is k_axis.
        Promises    1 (the slab is contiguous), 6 (no mask exists to touch).
-       Switch      ca_fast_paths_enabled(): off, the transfer walk.
+       Switch      ca_fast_path(): off, the transfer walk.
        Checked by  the slab-axis and fiber rows of the stack parent along
                    axis 0 in the delivery matrix. */
     if ( ca_func[src->obj_type].attach == ca_stack_func.attach
@@ -1247,7 +1248,7 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
          && !ca_has_mask(src)
          && !(flags & CA_KERNEL_WRITE)
          && naxes == 1 && axes[0] == ((CAStack *) src)->k_axis
-         && ca_fast_paths_enabled() ) {
+         && ca_fast_path(CA_SC_STACK) ) {
       plan->route = KI_L2_STACK;
       return CA_ITER_OK;
     }
@@ -1263,14 +1264,14 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
        Promises    2 (the parents' masks are copied), 6 (masks are read
                    only when a parent has one), 8 (alias_ptr stays NULL,
                    so no slab is lent as a window).
-       Switch      ca_fast_paths_enabled(): off, the transfer walk.
+       Switch      ca_fast_path(): off, the transfer walk.
        Checked by  the slab-axis, fiber and two-slab-axes rows of the
                    stack parent along axes 1 and 2 in the delivery matrix. */
     if ( ca_func[src->obj_type].attach == ca_stack_func.attach
          && ca_stack_parents_attachable(src)
          && !(flags & CA_KERNEL_WRITE)
          && naxes >= 1 && !in_slab[((CAStack *) src)->k_axis]
-         && ca_fast_paths_enabled() ) {
+         && ca_fast_path(CA_SC_STACK_OUTER_K) ) {
       plan->route = KI_L2_STACK_OUTER_K;
       return CA_ITER_OK;
     }
@@ -1286,11 +1287,11 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
                    ca_iter_should_per_fiber_fused.
        Promises    1, 2 and 4, as the CAWindow / CAShift hook above.  A
                    write takes the transfer walk (promise 3).
-       Switch      ca_fast_paths_enabled(): off, the transfer walk.
+       Switch      ca_fast_path(): off, the transfer walk.
        Checked by  the fiber rows of the fake parent in the delivery
                    matrix. */
     if ( (flags & CA_KERNEL_FIBER_CONTIG) && naxes == 1
-         && ca_fast_paths_enabled()
+         && ca_fast_path(CA_SC_FIBER_FUSED_CONVERSION)
          && ca_iter_should_per_fiber_fused(src, CA_ITER_SRC_ATTACH, axes[0],
                                            row_bytes[axes[0]], flags) ) {
       plan->route = KI_L2_FIBER_FUSED;
@@ -1596,11 +1597,11 @@ ki_open_l2 (ca_iter_state *st, CArray *src, ca_slab_policy_t policy,
                    STRIDE, no SHIFT axis.
        Promises    2 and 6 (the mask is copied by ki_take_mask_copy, and
                    only when the view has one).
-       Switch      ca_fast_paths_enabled(): off, the PER_SLAB gather.
+       Switch      ca_fast_path(): off, the PER_SLAB gather.
        Checked by  the two-slab-axes rows of the grid parent in the
                    delivery matrix. */
     ca_size_t slab_bytes = st->slab_elements * src->bytes;
-    int       hoist      = (st->slab_ndim > 0) && ca_fast_paths_enabled()
+    int       hoist      = (st->slab_ndim > 0) && ca_fast_path(CA_SC_PER_SLAB_HOIST)
                            && plan->descs[st->slab_axes_buf[st->slab_ndim - 1]].kind
                               == CA_AXIS_KIND_STRIDE;
     for ( k = 0; hoist && k < src->ndim; k++ ) {
@@ -2561,14 +2562,14 @@ typedef struct {
      Enters      the route is not PER_FIBER_FUSED and the walk does not
                  write back out of scratch.
      Promises    4 (a walk left out cannot raise between init and finish).
-     Switch      ca_fast_paths_enabled(): off, every walk is protected.
+     Switch      ca_fast_path(): off, every walk is protected.
      Checked by  test_iter_raise_cleanup.rb; the raise rows of
                  test_iter_delivery_detectors.rb. */
 static void
 ca_iter_mark_walk_may_raise (ca_iter_state *st)
 {
   if ( st == NULL ) return;
-  if ( ! ca_fast_paths_enabled() ) {
+  if ( ! ca_fast_path(CA_SC_PROTECT_ONLY_MAY_RAISE) ) {
     /* the general path protects every walk */
     st->flags |= CA_ITER_FLAG_WALK_MAY_RAISE;
     return;

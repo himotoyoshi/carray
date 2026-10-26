@@ -289,7 +289,7 @@ ca_stack_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
     rb_raise(rb_eIndexError, "CAStack k-axis (axis %d) index %lld out of range [0, %d)",
              (int) k_axis, (long long) k, (int) ca->n_parents);
   }
-  if ( k_axis == 0 && ca_fast_paths_enabled() ) {
+  if ( k_axis == 0 && ca_fast_path(CA_SC_STACK_INDEX_K0) ) {
     /* Fast path: parent_idx = idx[1..ndim-1]; pass idx+1 directly. */
     ca_xfer_index(ca->parents[k], idx + 1, data, dir);
     return;
@@ -331,7 +331,7 @@ ca_stack_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
   paddrs = ALLOCV_N(ca_size_t, holder1, n);
   pdata  = ALLOCV_N(char, holder2, n * bytes);
 
-  if ( k_axis == 0 && ca_fast_paths_enabled() ) {
+  if ( k_axis == 0 && ca_fast_path(CA_SC_STACK_ADDRS_K0) ) {
     /* Fast path: addr = k * parent_elements + parent_addr (row-major over
        view shape with K at axis 0). */
     for ( k = 0; k < ca->n_parents; k++ ) {
@@ -479,7 +479,7 @@ ca_stack_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
        ! ca_xfer_stride_request_is_axis_box(ca, starts, counts, strides) ) {
     structural = 0;
   }
-  if ( ! ca_fast_paths_enabled() ) structural = 0;
+  if ( ! ca_fast_path(CA_SC_STACK_STRIDE_BOX) ) structural = 0;
 
   if ( structural ) {
     ca_size_t k_lo = starts[k_axis];
@@ -571,7 +571,7 @@ ca_stack_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
      with native[k_axis] removed, in order. */
   {
     int8_t p = -1;
-    int    reloc = ca_fast_paths_enabled();
+    int    reloc = ca_fast_path(CA_SC_STACK_STRIDE_RELOC);
     for ( i = 0; i < ca->ndim; i++ ) {
       if ( strides[i] == native[k_axis] ) { p = i; break; }
     }
@@ -709,7 +709,7 @@ ca_stack_xfer_parents (CAStack *ca, char *d, int dir, int into_buffers)
      counts. */
   if ( ca->elements == 0 ) return;
 
-  if ( k_axis == 0 && ca_fast_paths_enabled() ) {
+  if ( k_axis == 0 && ca_fast_path(CA_SC_STACK_PARENTS_K0) ) {
     ca_size_t parent_bytes_total = ca->parents[0]->elements * bytes;
     for ( k = 0; k < ca->n_parents; k++ ) {
       if ( into_buffers ) {
@@ -969,7 +969,7 @@ ca_stack_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
      through to CAStack.xfer_stride (k_axis-aware), which still delivers
      correct (if non-folded) per-parent dispatch. */
   if ( ca->k_axis != 0 ) return 0;
-  if ( ! ca_fast_paths_enabled() ) return 0;
+  if ( ! ca_fast_path(CA_SC_STACK_FOLD) ) return 0;
   if ( pbt == 0 ) return 0;                         /* empty parents: no parent holds the box */
 
   for ( i = 0; i < f->ndim; i++ ) {

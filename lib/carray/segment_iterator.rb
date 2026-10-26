@@ -339,7 +339,7 @@ class CASegmentIterator < CAIterator
   #   @return [CArray]
   def nunique (axis: nil)
     return axis_by_core(axis, :nunique) if axis
-    return per_segment(CA_INT64) { |s| s.nunique } unless CArray.__fast_paths_enabled__
+    return per_segment(CA_INT64) { |s| s.nunique } unless CArray.__fast_paths_enabled__(:segment_nunique)
     out = CArray.int64(@k)
     return out if grouped.elements.zero?
     # Each cell's value becomes a code, so a distinct (segment, value) pair is
@@ -748,7 +748,7 @@ class CASegmentIterator < CAIterator
   # cumcount in int64 -- which is not the core's answer for every data type
   # (the core counts a boolean's running sum in uint64).
   def kernel_scans? (op, answer)
-    return false unless CArray.__fast_paths_enabled__
+    return false unless CArray.__fast_paths_enabled__(:segment_scan_kernel)
     return false if @value.face? || answer.face? || @value.complex?
     kernel_type =
       case op
@@ -907,7 +907,7 @@ class CASegmentIterator < CAIterator
   # collected segment by segment, as its other reductions are.
   def edge_values (op)
     n = grouped.elements
-    if n.zero? || (@value.face? && ! face_output?) || ! CArray.__fast_paths_enabled__
+    if n.zero? || (@value.face? && ! face_output?) || ! CArray.__fast_paths_enabled__(:segment_edge_kernel)
       return per_segment(core_reduce_kind(op)) { |s| s.public_send(op) }
     end
     slot = CArray.int64(n).seq!
@@ -954,7 +954,7 @@ class CASegmentIterator < CAIterator
   # CARRAY_GENERAL_PATH set reduces every group by the core instead, which
   # is how the two are compared.
   def kernel_reads? (data_type = grouped.data_type)
-    MONOID_TYPES.include?(data_type) && CArray.__fast_paths_enabled__
+    MONOID_TYPES.include?(data_type) && CArray.__fast_paths_enabled__(:segment_reduce_kernel)
   end
 
   def moments
@@ -990,7 +990,7 @@ class CASegmentIterator < CAIterator
   def all_any
     return @all_any if defined?(@all_any)
     @all_any =
-      if grouped.data_type == CA_BOOLEAN && CArray.__fast_paths_enabled__
+      if grouped.data_type == CA_BOOLEAN && CArray.__fast_paths_enabled__(:segment_all_any_kernel)
         a = CArray.boolean(@k)
         o = CArray.boolean(@k)
         grouped.send(:__reduceat_all_any__, @offsets, a, o)
