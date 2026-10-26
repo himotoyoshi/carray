@@ -2605,7 +2605,7 @@ ca_attach_window_yielding (VALUE owners, int32_t n, CArray **list,
   VALUE result;
   int   tag = 0;
 
-  if ( n < 1 || n > CA_RANK_MAX ) {
+  if ( n < 1 || n > CA_RANK_MAX ) {   /* rank-check: a count of arrays, bounded by gw->list */
     rb_raise(rb_eRuntimeError, "[BUG] ca_attach_window_yielding: %d arrays", (int) n);
   }
   gw = ZALLOC(ca_guarded_window_t);
