@@ -25,6 +25,7 @@
 #include "carray.h"
 #include "carray_internal.h"   /* ca_attach_window */
 #include <math.h>
+#include <float.h>
 
 /* Edges are the bin boundaries and must read as such: no masked edge (its
    stored value is no boundary), no NaN, and no edge below the one before
@@ -88,6 +89,8 @@ typedef struct {
   const double *ep;
   ca_size_t     n;            /* number of bins */
   double        lo, hi, inv_dx;
+  double        window;       /* fraction of a bin within which the
+                                 linearised floor is checked */
   int           uniform;
   int           include_max;
 } histbin_axis_t;
@@ -115,7 +118,7 @@ histbin_index (const histbin_axis_t *ax, double v)
        Interior values (the bulk) skip the data-dependent edge loads, keeping
        the fast path vectorisable. */
     frac = pos - (double) k;
-    if ( frac < 1e-9 || frac > 1.0 - 1e-9 ) {
+    if ( frac < ax->window || frac > 1.0 - ax->window ) {
       while ( k + 1 < ax->n && v >= ax->ep[k + 1] ) k++;
       while ( k > 0       && v <  ax->ep[k]     ) k--;
     }
@@ -136,7 +139,7 @@ histbin_axis_setup (histbin_axis_t *ax, const double *ep, ca_size_t ne,
                     int include_max)
 {
   ca_size_t kk;
-  double    dx, tol;
+  double    dx, tol, maxdev;
 
   ax->ep = ep;
   ax->n  = ne - 1;
@@ -149,8 +152,22 @@ histbin_axis_setup (histbin_axis_t *ax, const double *ep, ca_size_t ne,
      width infinite, and a subnormal width makes the reciprocal infinite.
      Either turns the position into NaN, which has no integer. */
   ax->uniform = isfinite(dx) && dx != 0.0 && isfinite(1.0 / dx);
+  maxdev      = 0.0;
   for ( kk = 0; ax->uniform && kk <= ax->n; kk++ ) {
-    if ( fabs(ax->ep[kk] - (ax->lo + (double) kk * dx)) > tol ) { ax->uniform = 0; break; }
+    double dev = fabs(ax->ep[kk] - (ax->lo + (double) kk * dx));
+    if ( dev > tol ) { ax->uniform = 0; break; }
+    if ( dev > maxdev ) maxdev = dev;
+  }
+  /* A value can land on the wrong side of the linearised floor by as much
+     as an edge strays from the straight line, plus the rounding of the
+     position itself, which grows with the number of bins.  Values within
+     that much of a boundary are checked against the stored edges.  When
+     the window covers a good part of a bin, the binary search is cheaper. */
+  ax->window = ( ax->uniform )
+             ? maxdev / fabs(dx) + (double) (ax->n + 2) * 8.0 * DBL_EPSILON + 1e-9
+             : 0.0;
+  if ( ax->window > 0.25 ) {
+    ax->uniform = 0;
   }
   ax->inv_dx      = (dx != 0.0) ? 1.0 / dx : 0.0;
   ax->include_max = include_max;
