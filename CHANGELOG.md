@@ -36,9 +36,14 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.6 (unreleased)
 
-- Fix: `CArray.fuse` works on Ruby 3.0 to 3.3. The gem now depends on
-  prism 1.0 or later, which `gem install` and Bundler bring in on a Ruby
-  that ships none or an older one; Ruby 3.4 and later already ship it.
+- Change: CArray requires Ruby 3.3 or later, up from 3.0. On an older
+  Ruby, `gem install carray` does not offer this release; install a
+  newer Ruby with a version manager such as rbenv or mise, or stay on
+  3.0.5.
+
+- Fix: `CArray.fuse` works on Ruby 3.3. The gem now depends on prism 1.0
+  or later, which `gem install` and Bundler bring in on Ruby 3.3, whose
+  own prism is too old; Ruby 3.4 and later already ship it.
 
 ## 3.0.5
 
