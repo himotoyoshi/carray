@@ -32,12 +32,12 @@ class CArray
   autoload_method "marshal_load",        serialize_rb
 end
 
-# A view, a wrap and a scalar are marshalled through _dump / self._load,
+# A view, a mask, a wrap and a scalar are marshalled through _dump / self._load,
 # which return a new array: with marshal_dump Marshal records the class and
 # loads into an empty instance of it, which the plain array the payload
 # holds cannot become.  A record array keeps marshal_dump, under which it
 # already round-trips with its class.
-[CAView, CAWrap, CScalar].each do |klass|
+[CAView, CAWrap, CScalar, CArrayMask, CAObjectMask].each do |klass|
   klass.class_eval do
     undef_method :marshal_dump
     autoload_method "_dump",               "carray/serialize"

@@ -685,11 +685,11 @@ class CArray
 
 end
 
-# Marshal of a view and a scalar: the {CArray#marshal_dump} payload, loaded
-# back by the class method rather than into an empty instance.  A view comes
-# back as a plain array (a copy owns its memory, as #copy gives); a scalar
-# comes back a scalar.  A wrap is refused below.
-[CAView, CAWrap, CScalar].each do |klass|
+# Marshal of a view, a mask and a scalar: the {CArray#marshal_dump} payload,
+# loaded back by the class method rather than into an empty instance.  A
+# view and a mask come back as a plain array (a copy owns its memory, as
+# #copy gives); a scalar comes back a scalar.  A wrap is refused below.
+[CAView, CAWrap, CScalar, CArrayMask, CAObjectMask].each do |klass|
   klass.class_eval do
     # A Face other than a record is refused: the payload would carry its
     # storage without what makes it the Face (a unit, labels), and load
@@ -727,9 +727,9 @@ end
   end
 end
 
-class CAView
+[CAView, CArrayMask, CAObjectMask].each do |klass|
   # @return [CArray] the plain array a {#_dump} string describes.
-  def self._load (str)
+  klass.define_singleton_method(:_load) do |str|
     CArray.send(:array_from_marshal_payload, Marshal.load(str))
   end
 end
