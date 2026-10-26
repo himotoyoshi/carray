@@ -231,6 +231,10 @@ class CArray
   #   integer base with a negative integer exponent truncates toward
   #   zero rather than producing a fraction (`2 ** -1` is `0`). Cast to
   #   a float `data_type` first when a fractional power is wanted.
+  #   A float or complex array raised to an Integer is computed by
+  #   repeated multiplication rather than by `pow`, so the last bit can
+  #   differ from `Float#**` and from the same exponent given as a Float;
+  #   the exponent can be any Integer that fits 64 bits.
   #   Masked elements stay masked.
   #   @param other [CArray, Numeric] exponent, broadcast to `self.shape`.
   #   @return [CArray] result of the promoted `data_type` of the two

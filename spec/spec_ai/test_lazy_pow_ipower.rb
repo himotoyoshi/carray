@@ -138,4 +138,17 @@ class TestLazyPowIpower < Test::Unit::TestCase
     assert_equal [1, 0, 0], (CA_UINT8([1, 2, 255]) ** CA_INT64([-1, -1, -1])).to_a
     assert_raise(ZeroDivisionError) { CA_INT32([0]) ** -1 }
   end
+  # An exponent beyond 32 bits is taken by the eager path as by the lazy one,
+  # up to the int64 range.
+  def test_exponent_beyond_32_bits
+    x = CA_FLOAT64([1.0, -1.0, 1.0000001, 0.5])
+    [2**31, 2**31 + 1, -(2**31) - 1, 2**62, -(2**63)].each do |k|
+      want = (x.lazy ** k).copy.to_a
+      assert_equal want, (x ** k).to_a, k.to_s
+      y = x.copy
+      y.pow!(k)
+      assert_equal want, y.to_a, k.to_s
+    end
+    assert_raise(RangeError) { x ** 2**64 }
+  end
 end
