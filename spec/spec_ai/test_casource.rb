@@ -23,6 +23,7 @@
 # See devel/PROPOSAL_CASOURCE.md §10.1.
 
 require "test/unit"
+require "tempfile"
 require "carray"
 
 ext_dir = File.expand_path("ext_source_smoke", __dir__)
@@ -399,6 +400,38 @@ class TestCASourceElemAccess < Test::Unit::TestCase
     assert_equal 0, src[0, 0]
     assert_true src.elem_masked?(1)
     assert_still_cold src
+  end
+
+end
+
+# Other paths that read an entity's ptr in place: a source has none at
+# rest, so they gather or copy instead.
+class TestCASourceInPlaceReads < Test::Unit::TestCase
+
+  def source
+    CASmokeSource.new(("\0" * 12).dup, [3, 4]).tap { |s| s.seq!(1) }
+  end
+
+  def test_dump_binary_to_a_file
+    src = source
+    Tempfile.create("casource") do |f|
+      f.binmode
+      src.dump_binary(f)
+      f.flush
+      assert_equal (1..12).to_a, File.binread(f.path).bytes
+    end
+    assert_false src.attached?
+  end
+
+  # Taking at least the whole axis goes through the stable ordering pass,
+  # which reads the fibers of an entity in place.
+  def test_nlargest_and_nsmallest_over_the_whole_last_axis
+    src = source
+    assert_equal [[4, 3, 2, 1], [8, 7, 6, 5], [12, 11, 10, 9]],
+                 src.nlargest(4, axis: 1).to_a
+    assert_equal [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]],
+                 src.nsmallest(5, axis: 1).to_a
+    assert_false src.attached?
   end
 
 end

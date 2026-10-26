@@ -5146,15 +5146,16 @@ module MkKernel
     # The object lane calls Ruby for every cell of the case B/C walk, which
     # runs between a direct attach and detach of self and val; a raise there
     # would leave both attached.  An entity holds no attach, so the lane
-    # reads an entity copy of whichever is a view.
+    # reads an entity copy of whichever is a view, or an entity that leaves
+    # ptr NULL at rest (a CASource).
     entity_bc = if is_object
                   <<~C.chomp
                     volatile VALUE vca_entity = self;
-                            if ( ! ca_is_entity(ca) ) {
+                            if ( ! ca_is_entity(ca) || ! ca->ptr ) {
                               vca_entity = rb_ca_copy(self);
                               GetCArray(vca_entity, ca);
                             }
-                            if ( ! ca_is_entity(cv) ) {
+                            if ( ! ca_is_entity(cv) || ! cv->ptr ) {
                               vsrc_val = rb_ca_copy(vsrc_val);
                               GetCArray(vsrc_val, cv);
                             }

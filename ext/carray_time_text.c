@@ -383,7 +383,7 @@ rb_ca_parse_time_text (int argc, VALUE *argv, VALUE self)
   if ( ca->data_type != CA_OBJECT ) {
     rb_raise(rb_eArgError, "time text reading needs an object array");
   }
-  if ( ! ca_is_entity(ca) ) {
+  if ( ! ca_is_entity(ca) || ! ca->ptr ) {
     src = rb_ca_copy(src);
     TypedData_Get_Struct(src, CArray, &carray_data_type, ca);
   }
@@ -1077,7 +1077,7 @@ rb_ca_strptime_fields (VALUE self, VALUE rformat, VALUE rstrict)
   if ( ca->data_type != CA_OBJECT ) {
     rb_raise(rb_eArgError, "strptime reading needs an object array");
   }
-  if ( ! ca_is_entity(ca) ) {
+  if ( ! ca_is_entity(ca) || ! ca->ptr ) {
     src = rb_ca_copy(src);
     TypedData_Get_Struct(src, CArray, &carray_data_type, ca);
   }

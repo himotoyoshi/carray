@@ -417,9 +417,11 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
     ca_size_t total = ca_length(ca);
     GetOpenFile(io, iop);
     rb_io_check_writable(iop);
-    if ( ca_is_entity(ca) ) {
+    if ( ca_is_entity(ca) && ca->ptr ) {
       /* Owned ca->ptr: write through the IO buffer machinery so peak
-         stays at ca_length instead of doubling via a Ruby String. */
+         stays at ca_length instead of doubling via a Ruby String.  An
+         entity that leaves ptr NULL at rest (a CASource) takes the
+         gather below. */
       ssize_t n = rb_io_bufwrite(io, ca->ptr, (size_t) total);
       if ( n < 0 || (ca_size_t) n != total ) {
         rb_raise(rb_eRuntimeError,
@@ -428,7 +430,8 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
       }
     }
     else {
-      /* View: no chunked gather API, so materialise into one buffer. */
+      /* View, or entity without a ptr: no chunked gather API, so
+         materialise into one buffer. */
       volatile VALUE buf = rb_str_new(NULL, total);
       ca_copy_data(ca, RSTRING_PTR(buf));
       rb_io_write(io, buf);
