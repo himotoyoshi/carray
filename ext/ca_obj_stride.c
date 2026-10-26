@@ -1611,6 +1611,51 @@ ca_stride_func_xfer_all (void *ap, void *data, int dir)
   }
 }
 
+/* Whether a layout of `ndim` axes (dims, byte strides, byte base) addresses
+   each cell of a packed array of the same number of cells exactly once:
+   ordered by the size of their strides, the axes longer than one must be
+   packed (the smallest stride is `bytes`, each next one the previous times
+   its axis length), and the lowest address must be 0.  Equal counts alone
+   do not say this: a zero or repeated stride covers fewer cells. */
+static int
+ca_stride_layout_is_permutation (int8_t ndim, const ca_size_t *dim,
+                                 const ca_size_t *strides, ca_size_t base,
+                                 ca_size_t bytes)
+{
+  int8_t    order[CA_RANK_MAX];
+  int8_t    n = 0, i, j;
+  ca_size_t lowest = base, expect = bytes;
+
+  for (i=0; i<ndim; i++) {
+    if ( dim[i] <= 1 ) {
+      continue;
+    }
+    if ( strides[i] < 0 ) {
+      lowest += (dim[i] - 1) * strides[i];
+    }
+    for (j=n; j>0; j--) {
+      ca_size_t a = strides[order[j-1]], b = strides[i];
+      if ( (a < 0 ? -a : a) <= (b < 0 ? -b : b) ) {
+        break;
+      }
+      order[j] = order[j-1];
+    }
+    order[j] = i;
+    n++;
+  }
+  if ( lowest != 0 ) {
+    return 0;
+  }
+  for (i=0; i<n; i++) {
+    ca_size_t s = strides[order[i]];
+    if ( (s < 0 ? -s : s) != expect ) {
+      return 0;
+    }
+    expect *= dim[order[i]];
+  }
+  return 1;
+}
+
 static void
 ca_stride_func_fill_data (void *ap, void *ptr)
 {
@@ -1646,7 +1691,9 @@ ca_stride_func_fill_data (void *ap, void *ptr)
      into scratch only to overwrite every byte with *ptr -- wasted
      work.  Delegate to root.fill_data instead.
      Safety gates:
-       (1) elements match -- our view covers every root cell;
+       (1) elements match and the composed layout addresses each root cell
+           exactly once -- our view covers every root cell (a zero or
+           repeated stride has as many cells but covers fewer);
        (2) bytes match -- our cell width equals root's cell width.
      Without (2), a type-reinterpreting CAStride (CAField over a
      complex entity for `.real`/`.imag`) would corrupt root: root
@@ -1658,7 +1705,9 @@ ca_stride_func_fill_data (void *ap, void *ptr)
   if ( ca_func[root->obj_type].attach != ca_stride_func.attach &&
        ca_func[root->obj_type].attach != ca_window_func.attach &&
        ca->elements == root->elements &&
-       ca->bytes    == root->bytes ) {
+       ca->bytes    == root->bytes &&
+       ca_stride_layout_is_permutation(ca->ndim, ca->dim, composed_strides,
+                                       composed_base, bytes) ) {
     ca_func[root->obj_type].fill_data(root, ptr);
     return;
   }

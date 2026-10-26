@@ -234,4 +234,25 @@ class TestFillDataWastedGather < Test::Unit::TestCase
     end
     assert_equal expected, a.to_a   # untouched
   end
+
+  # The delegate is taken only when the view addresses each root cell
+  # exactly once.  A zero or repeated stride has as many cells as the root
+  # but covers fewer, and the fill must not reach the others.
+  def test_no_delegate_when_the_view_repeats_root_cells
+    r = CArray.int32(4).seq!
+    r.fake(:int32).as_strided(shape: [4], strides: [0]).fill(9)
+    assert_equal [9, 1, 2, 3], r.to_a
+    r = CArray.int32(4).seq!
+    r.fake(:int32).as_strided(shape: [2, 2], strides: [0, 4]).fill(9)
+    assert_equal [9, 9, 2, 3], r.to_a
+  end
+
+  def test_delegate_for_a_permutation_of_the_root
+    r = CArray.int32(2, 3).seq!
+    r.fake(:int32).transpose.fill(5)
+    assert_equal [[5, 5, 5], [5, 5, 5]], r.to_a
+    r = CArray.int32(4).seq!
+    r.fake(:int32)[-1..0].fill(6)
+    assert_equal [6, 6, 6, 6], r.to_a
+  end
 end
