@@ -56,10 +56,17 @@ class TestWsumWmeanPerFiber < Test::Unit::TestCase
     assert_in_delta(30.0, a.wsum(cs), 1e-12)
   end
 
+  # An array with a single element is not a scalar: it is held to the shapes,
+  # as an operand of an operator is.
   def test_W_A1_single_element_carray
     a = CArray.float64(5).seq!(1.0, 1.0)
-    w_1x1 = CArray.float64(1) { 2.0 }   # 1-D length 1 = single element
-    assert_in_delta(30.0, a.wsum(w_1x1), 1e-12)
+    w_1 = CArray.float64(1) { 2.0 }
+    assert_raise(ArgumentError) { a.wsum(w_1) }
+    assert_raise(ArgumentError) { a.wmean(w_1) }
+    assert_raise(ArgumentError) { CArray.float64(3, 4).wsum(CArray.float64(1, 1) { 2.0 }) }
+    assert_raise(ArgumentError) { a.to_type(:object).wsum(w_1) }
+    one = CArray.float64(1).seq!(1.0, 1.0)
+    assert_in_delta(2.0, one.wsum(w_1), 1e-12)        # self.shape [1]
   end
 
   # ----------------------------------------------------------------

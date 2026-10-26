@@ -100,15 +100,16 @@ class CArray
   end
   private :wmean_object
 
-  # The weights of wsum / wmean as a scalar or an array of self.shape.  An
-  # array of the shape of the reduced axes (in ascending axis order) is
+  # The weights of wsum / wmean as a scalar or an array of self.shape.  A
+  # CScalar is a scalar; any other array, one with a single element included,
+  # is held to the shapes.  An array of the shape of the reduced axes (in ascending axis order) is
   # repeated along the kept axes; any other shape is refused, with the same
   # message as the numeric kernel.
   def weights_over_self_shape (weights, axis, name) # :nodoc:
     unless weights.is_a?(CArray)
       return weights
     end
-    if weights.elements == 1
+    if weights.scalar?
       return weights[0]
     end
     if weights.shape == self.shape

@@ -3544,12 +3544,12 @@ module MkKernel
       io.puts "  }"
       io.puts "  volatile VALUE rweights = argv[0];"
       io.puts "  argc--; argv++;"
-      # rev5 A1: convert a single-element CArray (CScalar / [1] 1-D / all
-      # dim==1) to a Ruby Numeric and route it through the scalar path.
+      # A CScalar is a scalar weight.  Any other array, one with a single
+      # element included, is held to the shape rules below.
       io.puts "  if ( rb_obj_is_carray(rweights) ) {"
       io.puts "    CArray *cv_pre_;"
       io.puts "    GetCArray(rweights, cv_pre_);"
-      io.puts "    if ( cv_pre_->elements == 1 ) {"
+      io.puts "    if ( ca_is_scalar(cv_pre_) ) {"
       io.puts "      rweights = rb_funcall(rweights, rb_intern(\"[]\"), 1, INT2NUM(0));"
       io.puts "    }"
       io.puts "  }"
