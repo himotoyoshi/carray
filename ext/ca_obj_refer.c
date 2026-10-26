@@ -16,6 +16,7 @@
 #include "carray.h"
 #include "carray_internal.h"   /* per-obj_type view constructors */
 #include "ca_obj_face.h"  /* CA_FACE_LIFT_IF_FACE for CARecord parent */
+#include "ruby/thread_native.h"
 
 extern ca_operation_function_t ca_stride_func;
 
@@ -335,6 +336,59 @@ ca_keep_chain_flags (CArray *view, CArray *src)
   if ( ca_is_mask_array(src) ) {
     ca_set_flag(view, CA_FLAG_MASK_ARRAY);
   }
+}
+
+/* The sources of folded views (CA_FLAG_FOLDED), keyed by the view.  Views are
+   made and freed in any Ractor, so the table is taken under a lock. */
+static st_table *ca_fold_sources;
+static rb_nativethread_lock_t ca_fold_lock;
+
+void
+ca_fold_note_source (CArray *view, CArray *src)
+{
+  rb_native_mutex_lock(&ca_fold_lock);
+  st_insert(ca_fold_sources, (st_data_t) view, (st_data_t) src);
+  rb_native_mutex_unlock(&ca_fold_lock);
+  ca_set_flag(view, CA_FLAG_FOLDED);
+}
+
+CArray *
+ca_fold_source (CArray *view)
+{
+  st_data_t src = 0;
+  rb_native_mutex_lock(&ca_fold_lock);
+  st_lookup(ca_fold_sources, (st_data_t) view, &src);
+  rb_native_mutex_unlock(&ca_fold_lock);
+  return (CArray *) src;
+}
+
+void
+ca_fold_forget (CArray *view)
+{
+  st_data_t key = (st_data_t) view;
+  rb_native_mutex_lock(&ca_fold_lock);
+  st_delete(ca_fold_sources, &key, NULL);
+  rb_native_mutex_unlock(&ca_fold_lock);
+}
+
+/* Builds the folded view of `ca` for reshape / flatten: a CAStride over
+   `root`.  When `ca` is not `root` itself, it is recorded as the view's
+   source. */
+static VALUE
+ca_reshape_folded (VALUE self, CArray *ca, CArray *root, int8_t ndim,
+                   ca_size_t *dim, ca_size_t *strides, ca_size_t base)
+{
+  volatile VALUE obj;
+  CAStride *cs = ca_stride_new(CA_OBJ_STRIDE, root, ca->data_type, ca->bytes,
+                               ndim, dim, strides, base);
+  ca_keep_chain_flags((CArray *) cs, ca);
+  obj = ca_wrap_struct(cs);
+  rb_ca_set_parent(obj, self);
+  if ( root != ca ) {
+    ca_fold_note_source((CArray *) cs, ca);
+  }
+  CA_WRAPPER_LIFT(obj, self, ca);
+  return obj;
 }
 
 static int
@@ -722,15 +776,8 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
     ca_size_t out_base;
     if (ca_reshape_try_strides(ca, new_dim, (int8_t) argc,
                                &out_root, out_strides, &out_base)) {
-      CAStride *cs = ca_stride_new(CA_OBJ_STRIDE, out_root,
-                                   ca->data_type, ca->bytes,
-                                   (int8_t) argc, new_dim,
-                                   out_strides, out_base);
-      ca_keep_chain_flags((CArray *) cs, ca);
-      obj = ca_wrap_struct(cs);
-      rb_ca_set_parent(obj, self);
-      CA_WRAPPER_LIFT(obj, self, ca);
-      return obj;
+      return ca_reshape_folded(self, ca, out_root, (int8_t) argc, new_dim,
+                               out_strides, out_base);
     }
   }
 
@@ -761,14 +808,8 @@ rb_ca_flatten (VALUE self)
     ca_size_t out_strides[1];
     ca_size_t out_base;
     if (ca_reshape_try_strides(ca, dim, 1, &out_root, out_strides, &out_base)) {
-      CAStride *cs = ca_stride_new(CA_OBJ_STRIDE, out_root,
-                                   ca->data_type, ca->bytes,
-                                   1, dim, out_strides, out_base);
-      ca_keep_chain_flags((CArray *) cs, ca);
-      obj = ca_wrap_struct(cs);
-      rb_ca_set_parent(obj, self);
-      CA_WRAPPER_LIFT(obj, self, ca);
-      return obj;
+      return ca_reshape_folded(self, ca, out_root, 1, dim,
+                               out_strides, out_base);
     }
   }
 
@@ -848,6 +889,9 @@ Init_ca_obj_refer (void)
   /* rb_cCARefer, CA_OBJ_REFER are defined in ruby_carray.c /
      carray_core.c.  Build the custom op table and override the
      baseline registration installed by Init_carray_core. */
+  ca_fold_sources = st_init_numtable();
+  rb_native_mutex_initialize(&ca_fold_lock);
+
   ca_refer_func = ca_stride_func;
   ca_refer_func.free_object = free_ca_refer;
   ca_refer_func.clone       = ca_refer_func_clone;

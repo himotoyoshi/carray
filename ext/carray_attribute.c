@@ -223,6 +223,14 @@ ca_is_readonly (void *ap)
         return 1;
       }
     }
+    if ( ca_test_flag(ca, CA_FLAG_FOLDED) ) {
+      /* a folded reshape: its source is not on the parent chain */
+      CArray *src = ca_fold_source(ca);
+      if ( src && ca_is_readonly(src) ) {
+        ca_set_flag(ca, CA_FLAG_READ_ONLY);
+        return 1;
+      }
+    }
     return 0;                                            /* all test -> false */
   }
 }

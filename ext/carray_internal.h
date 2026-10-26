@@ -35,6 +35,18 @@
    CArray#initialize_dup / #initialize_clone. */
 void ca_keep_chain_flags (CArray *view, CArray *src);
 
+/* A reshape / flatten folded onto the root of its source (CA_FLAG_FOLDED,
+   ca_obj_refer.c).  The source is not on the view's C parent chain, so a
+   read-only flag it takes after the view is made would not be seen by
+   ca_is_readonly.  The view records its source here; ca_is_readonly asks the
+   source of a view that carries the flag.  The source stays alive while the
+   view does (the view's @parent).  ca_fold_source answers NULL for a view
+   with no record; ca_fold_forget drops the record when the view is freed. */
+#define CA_FLAG_FOLDED 8192
+void    ca_fold_note_source (CArray *view, CArray *src);
+CArray *ca_fold_source (CArray *view);
+void    ca_fold_forget (CArray *view);
+
 /* ---- bulk bit pack / unpack (ca_obj_bitarray.c) --------------------------
 
    Drive the CABitarray whole-view xfer_all / xfer_addrs fast paths, which

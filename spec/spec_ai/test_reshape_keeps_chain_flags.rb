@@ -46,6 +46,22 @@ class TestReshapeKeepsChainFlags < Test::Unit::TestCase
     assert_equal [1, 2, 3], x.to_a
   end
 
+  # The array skipped over can become read-only after the reshape is made.
+  def test_read_only_taken_later_reaches_the_reshape
+    [:freeze, :set_read_only_flag].each do |how|
+      x = CArray.int32(4, 6).seq!
+      b = x[1..2, nil]
+      views = [b.reshape(3, 4), b.flatten, b.reshape(12).dup]
+      assert_equal false, views.first.read_only?
+      b.__send__(how)
+      views.each do |r|
+        assert_equal true, r.read_only?, how
+        assert_raise(RuntimeError) { r[0] = 99 }
+      end
+      assert_equal CArray.int32(4, 6).seq!.to_a, x.to_a
+    end
+  end
+
   def test_plain_reshape_still_writes_and_masks
     x = masked
     r = x.reshape(4, 3)

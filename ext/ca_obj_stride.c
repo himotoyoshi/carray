@@ -183,6 +183,9 @@ free_ca_stride (void *ap)
 {
   CAStride *ca = (CAStride *) ap;
   if (ca == NULL) return;
+  if ( ca_test_flag(ca, CA_FLAG_FOLDED) ) {
+    ca_fold_forget((CArray *) ca);
+  }
   ca_free(ca->mask);
   if (ca->_pool) {
     /* Pool path: one xfree covers dim/strides via the pool buffer,
@@ -2170,6 +2173,13 @@ rb_cs_initialize_copy (VALUE self, VALUE other)
   ca_stride_setup(ca, cs->obj_type, cs->parent, cs->data_type, cs->bytes,
                   cs->ndim, cs->dim, cs->strides, cs->base_offset);
   rb_ca_set_parent(self, rb_ca_parent(other));
+  if ( ca_test_flag(cs, CA_FLAG_FOLDED) ) {
+    /* the copy has the same @parent, so it answers to the same source */
+    CArray *src = ca_fold_source((CArray *) cs);
+    if ( src ) {
+      ca_fold_note_source((CArray *) ca, src);
+    }
+  }
   return self;
 }
 
