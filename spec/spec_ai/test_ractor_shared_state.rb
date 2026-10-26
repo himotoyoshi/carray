@@ -9,9 +9,13 @@ require "carray"
 
 class TestRactorSharedState < Test::Unit::TestCase
 
-  # The script is a file, so that fuse can read a block's source.
+  # The script is a file, so that fuse can read a block's source.  The child
+  # is given carray's own directories only: this process's whole load path
+  # holds Ruby's library directory, whose bundled prism would be found before
+  # the prism gem fuse needs when this process has not loaded prism yet.
   def run_child (src, env = {}, limit = 90)
-    inc = $LOAD_PATH.map { |d| ["-I", d] }.flatten
+    root = File.expand_path("../..", __dir__)
+    inc = ["-I", File.join(root, "ext"), "-I", File.join(root, "lib")]
     script = Tempfile.new(["ractor_child", ".rb"])
     script.write(src)
     script.close
