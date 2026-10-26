@@ -474,6 +474,12 @@ ca_stack_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
        ! ca_xfer_stride_request_is_axis_box(ca, starts, counts, strides) ) {
     structural = 0;
   }
+  /* With the stack axis between the first and the last, each parent's box
+     lands in dst one cell at a time below; the reloc walk further down
+     takes the same box a contiguous row at a time, about 5x faster on a
+     block of a 500x4x2000 stack.  With it last the reloc walk goes cell by
+     cell instead, so the box stays here. */
+  if ( k_axis != 0 && k_axis != ca->ndim - 1 ) structural = 0;
   if ( ! ca_fast_path(CA_SC_STACK_STRIDE_BOX) ) structural = 0;
 
   if ( structural ) {
