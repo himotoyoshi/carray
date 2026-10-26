@@ -82,8 +82,9 @@ elem_probe_mask (CArray *ca)
 
 /* Entity-array fast path: compute flat addr from idx[] and access ptr directly.
    Bypasses ca_func[ARRAY].xfer_index function-pointer dispatch.
-   Caller must ensure ca_is_entity(ca) and ca->ptr is attached (= entity
-   arrays are always attached by definition). */
+   Caller must ensure ca_is_entity(ca) and ca->ptr != NULL: an entity can
+   leave ptr NULL at rest (a CASource), and then the dispatched path is
+   the way in. */
 static inline ca_size_t
 elem_entity_addr (CArray *ca, ca_size_t *idx)
 {
@@ -273,7 +274,7 @@ rb_ca_elem_store (VALUE self, VALUE ridx, VALUE obj)
      Bypasses rb_ca_store_index/addr -> ca_update_mask + rb_ca_obj2ptr ->
      cast_table dispatch.  Falls through to general path for: views,
      existing mask, non-numeric data type, UNDEF, or non-Numeric obj. */
-  if ( ca_is_entity(ca) && ! ca->mask && obj != CA_UNDEF ) {
+  if ( ca_is_entity(ca) && ca->ptr && ! ca->mask && obj != CA_UNDEF ) {
     int8_t dt = ca->data_type;
     if ( dt == CA_FLOAT64 || dt == CA_FLOAT32 ||
          dt == CA_INT64   || dt == CA_INT32  ||
@@ -383,7 +384,7 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
     /* Super-hot path: entity + common numeric data type + no mask.
        Bypass ca_fetch_index dispatch AND rb_ca_ptr2obj_storage cast-table dispatch.
        Covers the bench's float64 / int64 / int32 cases. */
-    if ( ca_is_entity(ca) && ! ca->mask ) {
+    if ( ca_is_entity(ca) && ca->ptr && ! ca->mask ) {
       ca_size_t addr = elem_entity_addr(ca, idx);
       char *p = ca->ptr + ca->bytes * addr;
       switch ( ca->data_type ) {
@@ -406,7 +407,7 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
        TypedData_Get_Struct).  Semantics identical to rb_ca_fetch_index. */
     if ( ca->bytes <= 64 ) {
       char v[64];
-      if ( ca_is_entity(ca) ) {
+      if ( ca_is_entity(ca) && ca->ptr ) {
         ca_size_t addr = elem_entity_addr(ca, idx);
         memcpy(v, ca->ptr + ca->bytes * addr, ca->bytes);
       }
@@ -444,7 +445,7 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
   else {
     ca_size_t addr = elem_parse_idx_scalar(ca, ridx);
     /* Super-hot flat-addr path: entity + numeric + no mask. */
-    if ( ca_is_entity(ca) && ! ca->mask ) {
+    if ( ca_is_entity(ca) && ca->ptr && ! ca->mask ) {
       char *p = ca->ptr + ca->bytes * addr;
       switch ( ca->data_type ) {
       case CA_FLOAT64: return rb_float_new(*(double *)p);
@@ -493,7 +494,7 @@ rb_ca_elem_incr (VALUE self, VALUE ridx1)
 
   /* Super-hot path: entity + no mask + integer data type.
      Reads p directly, modifies in place — no separate fetch/store dispatch. */
-  if ( ca_is_entity(ca) && ! has_mask ) {
+  if ( ca_is_entity(ca) && ca->ptr && ! has_mask ) {
     ca_size_t addr;
     if ( TYPE(ridx1) == T_ARRAY ) {
       elem_parse_idx_array(ca, ridx1, idx1);
@@ -583,7 +584,7 @@ rb_ca_elem_decr (VALUE self, VALUE ridx1)
   has_mask = elem_probe_mask(ca);
 
   /* Super-hot path: mirror of elem_incr. */
-  if ( ca_is_entity(ca) && ! has_mask ) {
+  if ( ca_is_entity(ca) && ca->ptr && ! has_mask ) {
     ca_size_t addr;
     if ( TYPE(ridx1) == T_ARRAY ) {
       elem_parse_idx_array(ca, ridx1, idx1);
@@ -798,7 +799,7 @@ rb_ca_elem_unmask (VALUE self, VALUE ridx)
    general path, which compares in Ruby and stores as `self[idx] = v`
    does, so a value that wins but does not fit raises. */
 #define ELEM_MINMAX_BODY(OP) do { \
-  if ( ca_is_entity(ca) ) { \
+  if ( ca_is_entity(ca) && ca->ptr ) { \
     ca_size_t addr; \
     if ( TYPE(ridx) == T_ARRAY ) { \
       elem_parse_idx_array(ca, ridx, idx); \

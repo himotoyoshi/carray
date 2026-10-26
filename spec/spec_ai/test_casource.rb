@@ -345,3 +345,60 @@ class TestCASourceSubclass < Test::Unit::TestCase
   end
 
 end
+
+# The elem_* fast paths read an entity's ptr directly.  A source is an
+# entity that leaves ptr NULL at rest, so they must fall back to the
+# dispatched path rather than read through NULL.
+class TestCASourceElemAccess < Test::Unit::TestCase
+
+  def source
+    CASmokeSource.new(("\0" * 12).dup, [3, 4]).tap { |s| s.seq!(1) }
+  end
+
+  def assert_still_cold (src)
+    assert_false src.attached?
+    assert_equal 0, src.hold_count
+  end
+
+  def test_elem_fetch
+    src = source
+    assert_equal 1, src.elem_fetch(0)
+    assert_equal 7, src.elem_fetch([1, 2])
+    assert_still_cold src
+  end
+
+  def test_elem_store
+    src = source
+    src.elem_store(0, 90)
+    src.elem_store([2, 3], 91)
+    assert_equal [90, 91], [src[0, 0], src[2, 3]]
+    assert_still_cold src
+  end
+
+  def test_elem_incr_and_decr
+    src = source
+    assert_equal 2, src.elem_incr(0)
+    assert_equal 5, src.elem_decr([1, 1])
+    assert_equal [2, 5], [src[0, 0], src[1, 1]]
+    assert_still_cold src
+  end
+
+  def test_elem_min_and_max
+    src = source
+    src.elem_min(0, 0)
+    src.elem_max([2, 3], 99)
+    assert_equal [0, 99], [src[0, 0], src[2, 3]]
+    assert_still_cold src
+  end
+
+  def test_elem_min_with_a_mask
+    src = source
+    src.elem_mask(1)
+    src.elem_min(0, 0)
+    src.elem_min(1, 0)
+    assert_equal 0, src[0, 0]
+    assert_true src.elem_masked?(1)
+    assert_still_cold src
+  end
+
+end
