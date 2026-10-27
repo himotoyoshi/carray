@@ -232,9 +232,12 @@ class CArray
   #   zero rather than producing a fraction (`2 ** -1` is `0`). Cast to
   #   a float `data_type` first when a fractional power is wanted.
   #   A float or complex array raised to an Integer is computed by
-  #   repeated multiplication rather than by `pow`, so the last bit can
-  #   differ from `Float#**` and from the same exponent given as a Float;
-  #   the exponent can be any Integer that fits 64 bits.
+  #   repeated multiplication rather than by `pow`.  Its rounding error
+  #   grows roughly in proportion to the exponent (tens of ulps at 100,
+  #   hundreds of thousands at a million), where `Float#**` and the same
+  #   exponent given as a Float are within an ulp or so; give the exponent
+  #   as a Float when a large one needs full precision.  The exponent can
+  #   be any Integer that fits 64 bits.
   #   Masked elements stay masked.
   #   @param other [CArray, Numeric] exponent, broadcast to `self.shape`.
   #   @return [CArray] result of the promoted `data_type` of the two
