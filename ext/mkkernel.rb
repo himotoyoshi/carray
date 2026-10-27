@@ -1379,6 +1379,12 @@ module MkKernel
              when "_STAR" then "CA_SLAB_REDUCE_STAR8_EX"
              end
     acc_c = resolve_state_type(k[:state][acc_var], oi, si, src)
+    # An 8- or 16-bit integer cell converted to double does not vectorize;
+    # the narrow form sums blocks in int32 first.
+    if macro8 == "CA_SLAB_REDUCE_SUM8_EX" && %i[i8 u8 i16 u16].include?(src) &&
+       acc_c == DTYPES[:f64][:c]
+      macro8 = "CA_SLAB_REDUCE_SUM8_NARROW_EX"
+    end
     expr_macro = "__#{k[:name]}_#{src}_EXPR"
     io.puts "#define #{expr_macro}(__x) ((#{acc_c})(__x))"
     io.puts "#{indent}#{macro8}(#{si[:c]}, #{acc_c}, st, p, m, #{acc_var}, #{acc_init}, #{expr_macro}, #{masked_cnt_var});"

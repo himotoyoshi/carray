@@ -1574,6 +1574,88 @@ ca_slab_is_flat (const ca_iter_state *st, const ca_size_t *strides,
     }                                                                        \
   } while (0)
 
+/* CA_SLAB_REDUCE_SUM8_NARROW_EX:
+ *   CA_SLAB_REDUCE_SUM8_EX for an 8- or 16-bit integer source summed into
+ *   a floating accumulator (sum and mean).  Converting each cell to double
+ *   does not vectorize for these widths, so the contig run is summed in
+ *   int32 over blocks of 32768 cells (|cell| <= 2^15, so a block cannot
+ *   overflow) and only the block sums meet the accumulator.  The block
+ *   sums are exact, so the answer is at least as close as the per-cell
+ *   form.  EXPR(x) converts a block sum to ACC_T.  The masked and
+ *   non-contig branches are the same as CA_SLAB_REDUCE_SUM8_EX.
+ *
+ *   The block loop has no omp simd pragma: an integer sum vectorizes on
+ *   its own, and with the pragma GCC left a scalar copy of the loop in
+ *   the large generated kernels.
+ */
+#define CA_SLAB_REDUCE_SUM8_NARROW_EX(T, ACC_T, st, p, m, acc, INIT, EXPR, masked_cnt) do { \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
+    (acc) = (INIT);                                                          \
+    int8_t    __srK       = (st).slab_ndim;                                  \
+    int8_t    __srOuterK  = __srK - 1;                                       \
+    ca_size_t __srInnerN  = (st).slab_dims[__srK - 1];                       \
+    ca_size_t __srInnerS  = (st).slab_strides[__srK - 1];                    \
+    ca_size_t __srInnerMS = (st).slab_mask_strides[__srK - 1];               \
+    int       __srContig  = (__srInnerS == (ca_size_t) sizeof(T));           \
+    int       __srMaskU   = (__srInnerMS == 1);                              \
+    ca_size_t __srOC      = 1;                                               \
+    for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ )                       \
+      __srOC *= (st).slab_dims[__sk];                                        \
+    /* fold all slab axes into one flat loop when the slab is row-major      \
+       contiguous (ca_slab_is_flat) */                                       \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL) ) { \
+      __srInnerN = (st).slab_elements;                                       \
+      __srOC     = 1;                                                        \
+    }                                                                        \
+    ca_size_t __srIdx[CA_RANK_MAX] = { 0 };                                  \
+    for ( ca_size_t __so = 0; __so < __srOC; __so++ ) {                      \
+      ca_size_t __srDoff = 0, __srMoff = 0;                                  \
+      for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ ) {                   \
+        __srDoff += __srIdx[__sk] * (st).slab_strides[__sk];                 \
+        __srMoff += __srIdx[__sk] * (st).slab_mask_strides[__sk];            \
+      }                                                                      \
+      const char *__srQ = (const char *)(p) + __srDoff;                      \
+      if ( (m) == NULL ) {                                                   \
+        if ( __srContig ) {                                                  \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                \
+          for ( ca_size_t __sb = 0; __sb < __srInnerN; __sb += 32768 ) {     \
+            ca_size_t __se = ( __srInnerN - __sb < 32768 )                   \
+                             ? __srInnerN : __sb + 32768;                    \
+            int32_t __sp = 0;                                                \
+            for ( ca_size_t __sj = __sb; __sj < __se; __sj++ )               \
+              __sp += __srSrc[__sj];                                         \
+            (acc) += EXPR(__sp);                                             \
+          }                                                                  \
+        } else {                                                             \
+          for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
+            T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                   \
+            (acc) += EXPR(v);                                                \
+          }                                                                  \
+        }                                                                    \
+      } else {                                                               \
+        const boolean8_t *__srMM = (const boolean8_t *)(m) + __srMoff;       \
+        if ( __srContig && __srMaskU ) {                                     \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
+          for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
+            if ( ! __srMM[__sj] ) { T v = __srSrc[__sj]; (acc) += EXPR(v); } \
+            else { (masked_cnt)++; }                                         \
+          }                                                                  \
+        } else {                                                             \
+          for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
+            if ( ! __srMM[__sj * __srInnerMS] ) {                            \
+              T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                 \
+              (acc) += EXPR(v);                                              \
+            } else { (masked_cnt)++; }                                       \
+          }                                                                  \
+        }                                                                    \
+      }                                                                      \
+      for ( int8_t __sk = __srOuterK - 1; __sk >= 0; __sk-- ) {               \
+        if ( ++__srIdx[__sk] < (st).slab_dims[__sk] ) break;                  \
+        __srIdx[__sk] = 0;                                                    \
+      }                                                                      \
+    }                                                                        \
+  } while (0)
+
 /* CA_SLAB_REDUCE_MIN8_EX / _MAX8_EX / _STAR8_EX (the SUM8_EX pattern for
  * the other standard reducers):
  *
