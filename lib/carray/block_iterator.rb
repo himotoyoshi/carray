@@ -101,7 +101,9 @@ class CABlockIterator < CAIterator
     # Absorb a leading offset with a zero-copy pre-slice, so the tile geometry
     # below always starts at index 0.
     @source =
-      if offsets.all?(&:zero?)
+      if source.scalar?
+        source.flatten        # a CScalar takes no index; its one-cell view does
+      elsif offsets.all?(&:zero?)
         source
       else
         source[*offsets.map { |o| o..-1 }]

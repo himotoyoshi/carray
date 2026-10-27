@@ -219,8 +219,9 @@ class CArray
             "conditional: cond must be a boolean CArray with same shape as self"
     end
 
-    x_then = self[cond]
-    x_else = self[cond.not]
+    src    = scalar? ? flatten : self   # a CScalar takes no index
+    x_then = src[cond]
+    x_else = src[cond.not]
     y_then = then_fn.call(x_then)
     y_else = else_fn.call(x_else)
     text = !data_type && CArray.send(:selection_text?, [y_then, y_else])

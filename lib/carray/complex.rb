@@ -74,7 +74,7 @@ class CArray
              when CA_CMPLX128 then field(0, CA_FLOAT64)
              end
            else
-             self[]
+             scalar? ? self : self[]
            end
     frozen? ? view : (@__real__ = view)
   end

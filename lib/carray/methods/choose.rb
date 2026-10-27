@@ -41,11 +41,12 @@ class CArray
       data_type = ca.empty? ? CA_OBJECT : CArray.result_type(*ca)
     end
     out = template(data_type)
+    dst = out.scalar? ? out.flatten : out   # a CScalar takes no index
     choices.each_with_index do |v, i|
       s = self.eq(i)
-      out[s] = v.is_a?(CArray) ? v[s] : v
+      dst[s] = !v.is_a?(CArray) ? v : v.scalar? ? v.flatten[s] : v[s]
     end
-    out[self.is_masked] = UNDEF if has_mask?
+    dst[self.is_masked] = UNDEF if has_mask?
     text ? CAString.wrap(out) : out
   end
 

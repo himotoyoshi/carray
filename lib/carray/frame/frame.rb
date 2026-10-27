@@ -1054,7 +1054,9 @@ class CAFrame
     unless ca.is_a?(CArray)
       raise ArgumentError, "column did not convert to a CArray (got #{ca.class})"
     end
-    ca
+    # A CScalar takes no index but [] and [0]; a column is selected by rows,
+    # so the scalar enters as the one-cell array it views.
+    ca.scalar? ? ca.flatten : ca
   end
 
   private def row(i)

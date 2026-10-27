@@ -2293,7 +2293,9 @@ ca_mask_copy_where (VALUE self, int argc, VALUE *argv)
   obj = rb_ca_copy(self);
   memcpy(all_args, argv, argc * sizeof(VALUE));
   all_args[argc] = CA_UNDEF;
-  rb_funcallv(obj, rb_intern("[]="), argc + 1, all_args);
+  /* a CScalar takes no index; its one-cell view does */
+  rb_funcallv(ca_is_scalar(ca) ? rb_funcall(obj, rb_intern("flatten"), 0) : obj,
+              rb_intern("[]="), argc + 1, all_args);
   return obj;
 }
 
