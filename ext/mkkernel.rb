@@ -6101,6 +6101,9 @@ module MkKernel
     # `op_powi_<type>` resolves to `op_powi_int8_t` for int8 source).
     # Substitution uses math_suffix (= typedef name, matches the suffix
     # used in op_powi macro instantiations in ca_op_powi.h).
+    # An object body calls Ruby on every cell and does not vectorize; the
+    # pragma there only adds a "loop not vectorized" warning.
+    simd = ( src == :object ) ? "" : "#pragma omp simd"
     expr_body = raw.gsub(/#1/, "*p1").gsub(/#2/, "*p2").gsub(/#3/, "*p3").gsub(/<type>/, suffix)
     # Option B+C pilot (binop emit substrate hardening, MEMO_BINOP_STRIDED_AUDIT.md):
     # The no-mask body is split into a contig branch (i1==i2==i3==1) using the
@@ -6153,7 +6156,7 @@ module MkKernel
             #{c_type} * __restrict__ r1 = q1;
             #{c_type} * __restrict__ r2 = q2;
             #{c_type} * __restrict__ r3 = q3;
-            #pragma omp simd
+            #{simd}
             for (k=0; k<n; k++) {
               p1 = r1 + k; p2 = r2 + k; p3 = r3 + k;
               { #{expr_body} }
@@ -6161,7 +6164,7 @@ module MkKernel
           }
           else if ( ( apart1 || a1 == a3 ) && ( apart2 || a2 == a3 ) ) {
             /* in place: an iteration reads and writes only its own cell */
-            #pragma omp simd
+            #{simd}
             for (k=0; k<n; k++) {
               p1 = q1 + k; p2 = q2 + k; p3 = q3 + k;
               { #{expr_body} }
@@ -6188,14 +6191,14 @@ module MkKernel
             if ( a3 + nb <= aa || aa + nb <= a3 ) {
               #{c_type} * __restrict__ ra = qa;
               #{c_type} * __restrict__ r3 = q3;
-              #pragma omp simd
+              #{simd}
               for (k=0; k<n; k++) {
                 p2 = ra + k; p3 = r3 + k;
                 { #{expr_body} }
               }
             }
             else if ( aa == a3 ) {
-              #pragma omp simd
+              #{simd}
               for (k=0; k<n; k++) {
                 p2 = qa + k; p3 = q3 + k;
                 { #{expr_body} }
@@ -6213,14 +6216,14 @@ module MkKernel
             if ( a3 + nb <= aa || aa + nb <= a3 ) {
               #{c_type} * __restrict__ ra = qa;
               #{c_type} * __restrict__ r3 = q3;
-              #pragma omp simd
+              #{simd}
               for (k=0; k<n; k++) {
                 p1 = ra + k; p3 = r3 + k;
                 { #{expr_body} }
               }
             }
             else if ( aa == a3 ) {
-              #pragma omp simd
+              #{simd}
               for (k=0; k<n; k++) {
                 p1 = qa + k; p3 = q3 + k;
                 { #{expr_body} }

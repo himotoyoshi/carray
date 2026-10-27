@@ -1578,8 +1578,8 @@ ca_slab_is_flat (const ca_iter_state *st, const ca_size_t *strides,
  *   CA_SLAB_REDUCE_SUM8_EX for an 8- or 16-bit integer source summed into
  *   a floating accumulator (sum and mean).  Converting each cell to double
  *   does not vectorize for these widths, so the contig run is summed in
- *   int32 over blocks of 32768 cells (|cell| <= 2^15, so a block cannot
- *   overflow) and only the block sums meet the accumulator.  The block
+ *   int32 over blocks of 32768 cells (|cell| < 2^16, so a block sum stays
+ *   below 2^31) and only the block sums meet the accumulator.  The block
  *   sums are exact, so the answer is at least as close as the per-cell
  *   form.  EXPR(x) converts a block sum to ACC_T.  The masked and
  *   non-contig branches are the same as CA_SLAB_REDUCE_SUM8_EX.
