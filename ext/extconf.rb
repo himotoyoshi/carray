@@ -118,6 +118,17 @@ if try_compile("int main(void) { return 0; }", "-fwrapv")
   $carray_build_flags << "-fwrapv"
 end
 
+# --- math functions do not set errno (`-fno-math-errno`)
+#
+# Nothing in carray reads errno after a math call.  With errno kept, GCC
+# must call sqrt() for every cell instead of using the vector square root,
+# so `sqrt` ran 2-4x slower than it could.  The values do not change.
+# Apple clang already defaults to this.
+if try_compile("int main(void) { return 0; }", "-fno-math-errno")
+  $CFLAGS += " -fno-math-errno"
+  $carray_build_flags << "-fno-math-errno"
+end
+
 # --- probe for `-fopenmp-simd` (SL.1.0, PROPOSAL_REDUCTION_SIMD_LICENSE)
 #
 # `-fopenmp-simd` enables `#pragma omp simd` (and its `reduction(+:acc)`
