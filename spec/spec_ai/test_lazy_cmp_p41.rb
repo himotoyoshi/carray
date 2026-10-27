@@ -164,4 +164,19 @@ class TestLazyCmpP41 < Test::Unit::TestCase
     lazy  = view.to_ca
     assert_equal eager.to_a, lazy.to_a
   end
+
+  # A comparison with UNDEF answers as the eager one does: `eq` / `ne` ask
+  # the mask, the others refuse.
+  def test_comparison_with_undef_answers_as_eager
+    a = CArray.float64(5).seq!
+    a[1] = UNDEF
+    lz = a.lazy + 1
+    ea = a + 1
+    assert_equal ea.eq(UNDEF).to_a, lz.eq(UNDEF).to_a
+    assert_equal ea.ne(UNDEF).to_a, lz.ne(UNDEF).to_a
+    %i[< > <= >= lt gt le ge feq].each do |op|
+      assert_raise(ArgumentError, op.to_s) { lz.send(op, UNDEF) }
+    end
+    assert_raise(ArgumentError) { lz.is_close(UNDEF, 0.1) }
+  end
 end
