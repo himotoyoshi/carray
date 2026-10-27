@@ -363,7 +363,8 @@ functions it calls, an error slot), and it passes one `userdata` pointer
 through untouched for them.
 
 `sweep` is that call made from Ruby. `function` is the address of a
-`ca_cslab_r_t`, `fsync` CArray's one character per operand, and `arrays`
+`ca_cslab_r_t`, `fsync` CArray's one character per operand (`0` read, `1`
+written; any other character is refused), and `arrays`
 one to seven operands (the arities the family is generated for). `userdata`
 is a table of pointers, one per entry of `parts`, each to the bytes of that
 String.

@@ -117,6 +117,8 @@ class TestAddressBasisSweep < Test::Unit::TestCase
     assert_raise(ArgumentError) { CArray::AddressBasis.sweep(slab.to_i, "0", [a, a]) }
     assert_raise(ArgumentError) { CArray::AddressBasis.sweep(slab.to_i, "0" * 8, [a] * 8) }
     assert_raise(ArgumentError) { CArray::AddressBasis.sweep(0, "0", [a]) }
+    # Neither read nor written: a view written under it would drop the write.
+    assert_raise(ArgumentError) { CArray::AddressBasis.sweep(slab.to_i, "0x", [a, a]) }
     assert_raise(ArgumentError) {
       CArray::AddressBasis.sweep(slab.to_i, "0", [a], *Array.new(1025) { "\0" * 8 })
     }

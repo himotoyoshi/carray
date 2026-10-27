@@ -1031,6 +1031,13 @@ address_basis_sweep (int argc, VALUE *argv, VALUE module)
     rb_raise(rb_eArgError, "%s: fsync has %d characters for %d arrays",
              ca_calling_method_name(), (int) strlen(fsync), n);
   }
+  for ( i = 0; i < n; i++ ) {
+    if ( fsync[i] != '0' && fsync[i] != '1' ) {
+      rb_raise(rb_eArgError,
+               "%s: fsync character %d is '%c', not '0' (read) or '1' (written)",
+               ca_calling_method_name(), i, fsync[i]);
+    }
+  }
   function = (ca_cslab_r_t) (uintptr_t) NUM2ULL(rfunction);
   if ( ! function ) {
     rb_raise(rb_eArgError, "%s: the slab function's address is zero",
