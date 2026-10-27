@@ -384,12 +384,6 @@ class CArray
     alias_method word, op
   end
 
-  # `pow` is the canonical C method (defined by rb_define_method in
-  # ext/ca_op_ipower.c) that `**` is rb_define_alias'd to.  The `**`
-  # dispatch in this file does not reach `pow` through the C alias, so
-  # `a.lazy.pow(2)` would fall to eager; `pow` is aliased again here.
-  alias_method :pow, :**
-
   # `fmax` / `fmin` are rb_define_alias'd to `pmax` / `pmin` at Init
   # time (the same C alias); they are aliased again beside them, in
   # LazyDispatch.
@@ -473,6 +467,14 @@ class CArray
       end
     end
   end
+
+  # `pow` is the canonical C method (defined by rb_define_method in
+  # ext/ca_op_ipower.c) that `**` is rb_define_alias'd to.  The `**`
+  # dispatch in this file does not reach `pow` through the C alias, so
+  # `a.lazy.pow(2)` would fall to eager; `pow` is aliased again here.
+  # An alias copies the method as it is at that moment, so this follows
+  # the integer-exponent `**` above, not the template one.
+  alias_method :pow, :**
 
   # coerce: when self is a lazy view and the scalar appears on the LEFT
   # (e.g. `2 * a.lazy`), Ruby's Numeric#* calls a.lazy.coerce(2).  The

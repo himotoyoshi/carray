@@ -151,4 +151,15 @@ class TestLazyPowIpower < Test::Unit::TestCase
     end
     assert_raise(RangeError) { x ** 2**64 }
   end
+
+  # `pow` is the word form of `**` and takes the same integer-exponent node:
+  # pow(1e30, 3) and binary exponentiation differ in the last bit.
+  def test_pow_word_form_takes_the_integer_exponent_path
+    f = CArray.float64(3) { |i| [1e30, 3.0, 2.0][i] }
+    assert_equal CABinOp::OP_IPOWER, f.lazy.pow(3).__op_id__
+    assert_equal f.pow(3).to_a, f.lazy.pow(3).copy.to_a
+    assert_equal (f.lazy ** 3).copy.to_a, f.lazy.pow(3).copy.to_a
+    c = CA_CMPLX128([1.1 + 2.3i])
+    assert_equal c.pow(5).to_a, c.lazy.pow(5).copy.to_a
+  end
 end
