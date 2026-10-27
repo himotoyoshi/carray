@@ -966,6 +966,115 @@ address_basis_tier (VALUE module, VALUE object)
 }
 
 /* ------------------------------------------------------------------- */
+
+/*
+ * call-seq:
+ *   CArray::AddressBasis.sweep(function, fsync, arrays, *parts) -> nil
+ *
+ * Runs ca_call_cslab_N_r over `arrays` with the slab function at the address
+ * `function`, and hands it as `userdata` a table of pointers to the bytes of
+ * each of `parts`, in order.
+ *
+ * This is what a consumer did through Fiddle: copy the parts into memory
+ * from malloc, write the table in front of them, and call the family member
+ * for the arity.  The copy was there because a String's bytes may be moved
+ * by GC compaction, and the sweep allocates -- so a collection can run
+ * between taking an address and the slab reading it.  It is not needed
+ * here.  The parts arrive as arguments, which puts every one of them on the
+ * VM stack for the length of this call, and an object referenced from there
+ * is pinned: compaction leaves it where it is.  That is also why they are
+ * taken as a splat rather than as an Array -- what an Array holds is not
+ * pinned by the Array being reachable.
+ *
+ * A part that is not frozen is the slab's to write (an error slot), and is
+ * made unshared first so the write lands in that String alone.  A frozen
+ * part is read only.  Each part has to start on an 8-byte boundary, since a
+ * slab reads doubles and int64s out of them.
+ */
+static VALUE
+address_basis_sweep (int argc, VALUE *argv, VALUE module)
+{
+  volatile VALUE rfunction, rfsync, rarrays;
+  ca_cslab_r_t function;
+  const char *fsync;
+  VALUE vholder = 0;
+  void **table;
+  VALUE *arrays;
+  int i, n, nparts;
+
+  rb_check_arity(argc, 3, UNLIMITED_ARGUMENTS);
+  rfunction = argv[0];
+  rfsync    = argv[1];
+  rarrays   = argv[2];
+  nparts    = argc - 3;
+
+  Check_Type(rarrays, T_ARRAY);
+  n = (int) RARRAY_LEN(rarrays);
+  if ( n < 1 || n > 7 ) {
+    rb_raise(rb_eArgError, "%s: a sweep takes 1 to 7 arrays, got %d",
+             ca_calling_method_name(), n);
+  }
+  fsync = StringValueCStr(rfsync);
+  if ( (int) strlen(fsync) != n ) {
+    rb_raise(rb_eArgError, "%s: fsync has %d characters for %d arrays",
+             ca_calling_method_name(), (int) strlen(fsync), n);
+  }
+  function = (ca_cslab_r_t) (uintptr_t) NUM2ULL(rfunction);
+  if ( ! function ) {
+    rb_raise(rb_eArgError, "%s: the slab function's address is zero",
+             ca_calling_method_name());
+  }
+
+  arrays = RARRAY_PTR(rarrays);
+  for ( i = 0; i < n; i++ ) {
+    if ( ! rb_obj_is_kind_of(arrays[i], rb_cCArray) ) {
+      rb_raise(rb_eTypeError, "%s: array %d is not a CArray",
+               ca_calling_method_name(), i);
+    }
+  }
+
+  for ( i = 0; i < nparts; i++ ) {
+    StringValue(argv[3 + i]);
+    if ( ! OBJ_FROZEN(argv[3 + i]) ) {
+      rb_str_modify(argv[3 + i]);
+    }
+    if ( (uintptr_t) RSTRING_PTR(argv[3 + i]) & 7 ) {
+      rb_raise(rb_eArgError, "%s: part %d does not start on an 8-byte boundary",
+               ca_calling_method_name(), i);
+    }
+  }
+
+  /* Taken after every check, so a refusal has nothing to free.  The sweep
+     itself can raise (a shape that will not broadcast); then the table is
+     left to ALLOCV's own holder, which the GC reclaims. */
+  table = ALLOCV_N(void *, vholder, nparts > 0 ? nparts : 1);
+  for ( i = 0; i < nparts; i++ ) {
+    table[i] = RSTRING_PTR(argv[3 + i]);
+  }
+
+  switch ( n ) {
+  case 1: ca_call_cslab_1_r(function, fsync, arrays[0], table); break;
+  case 2: ca_call_cslab_2_r(function, fsync, arrays[0], arrays[1], table); break;
+  case 3: ca_call_cslab_3_r(function, fsync, arrays[0], arrays[1], arrays[2],
+                            table); break;
+  case 4: ca_call_cslab_4_r(function, fsync, arrays[0], arrays[1], arrays[2],
+                            arrays[3], table); break;
+  case 5: ca_call_cslab_5_r(function, fsync, arrays[0], arrays[1], arrays[2],
+                            arrays[3], arrays[4], table); break;
+  case 6: ca_call_cslab_6_r(function, fsync, arrays[0], arrays[1], arrays[2],
+                            arrays[3], arrays[4], arrays[5], table); break;
+  case 7: ca_call_cslab_7_r(function, fsync, arrays[0], arrays[1], arrays[2],
+                            arrays[3], arrays[4], arrays[5], arrays[6],
+                            table); break;
+  }
+
+  ALLOCV_END(vholder);
+  RB_GC_GUARD(rarrays);
+  RB_GC_GUARD(rfsync);
+  return Qnil;
+}
+
+/* ------------------------------------------------------------------- */
 /* Init_carray_address_basis                                            */
 /* ------------------------------------------------------------------- */
 
@@ -978,6 +1087,7 @@ Init_carray_address_basis (void)
   rb_define_singleton_method(mAddressBasis, "classify",
                              address_basis_classify, 1);
   rb_define_singleton_method(mAddressBasis, "tier", address_basis_tier, 1);
+  rb_define_singleton_method(mAddressBasis, "sweep", address_basis_sweep, -1);
 
   rb_define_const(mAddressBasis, "TIER_ENTITY", INT2NUM(TIER_ENTITY));
   rb_define_const(mAddressBasis, "TIER_STRIDE", INT2NUM(TIER_STRIDE));

@@ -349,6 +349,40 @@ array, a missing flag). A caller that runs code of its own in the block tells
 the two apart by it: `Fusion` keeps a registered evaluator when the failure
 is CArray's, and lets the walk meet the same array.
 
+## The sweep
+
+```ruby
+CArray::AddressBasis.sweep(function, fsync, arrays, *parts)   #=> nil
+```
+
+A kernel with no neighbour in it — an element-wise pass — does not need a
+basis at all: CArray's chunked sweep (`ca_call_cslab_N_r`) can acquire the
+operands, broadcast them and hand the kernel a chunk at a time. What the
+sweep cannot carry is the kernel's other inputs (captured scalars, the C
+functions it calls, an error slot), and it passes one `userdata` pointer
+through untouched for them.
+
+`sweep` is that call made from Ruby. `function` is the address of a
+`ca_cslab_r_t`, `fsync` CArray's one character per operand, and `arrays`
+one to seven operands (the arities the family is generated for). `userdata`
+is a table of pointers, one per entry of `parts`, each to the bytes of that
+String.
+
+**The bytes are the Strings' own, not a copy.** That is sound because a
+String's bytes do not move while the call runs: the parts arrive as
+arguments, which puts each on the VM stack, and compaction does not move an
+object referenced from there. The sweep allocates, so a collection can run
+in the middle of the call; the pin is what makes that harmless. It is also
+why the parts are a splat and not an Array — what an Array holds is not
+pinned by the Array being reachable.
+
+A part that is not frozen is the kernel's to write, and is made unshared
+before its address is taken, so the write lands in that String alone. A
+frozen part is read only. Every part must start on an 8-byte boundary, since
+a kernel reads doubles and int64s out of them; one that does not — a frozen
+tail of a longer String, which shares its bytes one byte in — is refused
+(`ArgumentError`).
+
 ## What a basis does not guard
 
 **Two bases that write the same cell.** Opening one array twice, or an array
@@ -380,6 +414,13 @@ compiled outside carray (`spec/spec_ai/ext_address_basis/`): a stencil over
 entities, folded views, gathered views, conversions, lazy expressions and a
 CAObject, a box write that leaves the cells outside the box alone, and a
 raising body whose write still lands.
+
+`spec/spec_ai/test_address_basis_sweep.rb` covers `sweep`, with the kernel a
+Ruby block behind a Fiddle closure. That kernel's first act is the most
+thorough compaction Ruby has (`GC.verify_compaction_references` toward an
+empty heap), after which it checks that every part is still where its
+pointer says; a String held only by an Array is moved by the same
+compaction, which is what says the compaction was real.
 
 ## Related chapters
 
