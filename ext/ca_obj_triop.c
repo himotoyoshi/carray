@@ -267,9 +267,11 @@ pull_operand (CArray *op, int is_scalar, const ca_lazy_req_t *req,
 
 /* Evaluate the cells a request names into `data` (packed, n cells). */
 static void
-ca_triop_eval (CATriOp *to, const ca_lazy_req_t *req, void *data)
+ca_triop_eval_cells (void *node, const ca_lazy_req_t *req, void *data, int dir)
 {
+  CATriOp  *to = (CATriOp *) node;
   ca_size_t slab_n = req->n;
+  (void) dir;
   void     *scratch2, *scratch3;
   ca_size_t op2_step, op3_step;
 
@@ -314,6 +316,12 @@ ca_triop_eval (CATriOp *to, const ca_lazy_req_t *req, void *data)
 
   ca_lazy_arena_release(scratch3);
   ca_lazy_arena_release(scratch2);
+}
+
+static void
+ca_triop_eval (CATriOp *to, const ca_lazy_req_t *req, void *data)
+{
+  ca_lazy_eval_recorded(to, 3, to->operands, 0, NULL, ca_triop_eval_cells, req, data, CA_XFER_GET);
 }
 
 static void

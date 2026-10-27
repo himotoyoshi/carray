@@ -453,8 +453,9 @@ pull_leaf_with_optional_cast (CArray *leaf, uint16_t innermost_op,
 /* Evaluate (GET) or write (PUT, writable views only) the cells a request
    names; `data` holds them packed. */
 static void
-ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
+ca_monop_eval_cells (void *node, const ca_lazy_req_t *req, void *data, int dir)
 {
+  CAMonOp *mo = (CAMonOp *) node;
   uint16_t op_chain[CA_MAX_LAZY_DEPTH];
   int chain_len = 0;
   CArray  *leaf;
@@ -639,6 +640,26 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
     memcpy(out, work, slab_n * mo->bytes);
     ca_lazy_arena_release(work);
   }
+}
+
+/* A chain is evaluated from its leaf without evaluating the nodes under
+   the top one, so those nodes are recorded with it: a cell that holds an
+   expression over one of them is caught when it comes back, before a
+   longer chain over the same cells is built. */
+static void
+ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
+{
+  CArray *chain[CA_MAX_LAZY_DEPTH];
+  CArray *leaf = mo->parent;
+  int     nchain = 0;
+  while ( nchain < CA_MAX_LAZY_DEPTH &&
+          ( leaf->obj_type == CA_OBJ_MONOP ||
+            leaf->obj_type == CA_OBJ_LAZY_MARKER ) ) {
+    chain[nchain++] = leaf;
+    leaf = ((CAView *) leaf)->parent;
+  }
+  ca_lazy_eval_recorded(mo, 1, &leaf, nchain, chain, ca_monop_eval_cells,
+                        req, data, dir);
 }
 
 static void

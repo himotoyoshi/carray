@@ -834,16 +834,19 @@ ca_index2addr (void *ap, ca_size_t *idx)
    not written to, so a frozen array, or one shared between Ractors, is
    read and computed over as any other.
 
-   A read and a computation are recorded apart (CA_RECURSION_READ /
-   CA_RECURSION_COMPUTE): a computation reads the cells it computes over. */
+   A read, a computation and the evaluation of a lazy expression are
+   recorded apart (CA_RECURSION_READ / CA_RECURSION_COMPUTE /
+   CA_RECURSION_EVAL): a computation reads the cells it computes over, and
+   a reduction over a lazy expression evaluates it. */
 
 #define CA_RECURSION_COMPUTE 0
 #define CA_RECURSION_READ    1
+#define CA_RECURSION_EVAL    2
 
 static VALUE
 ca_recursion_key (CArray *ca, int kind)
 {
-  /* the struct of an array is aligned, so the low bit is free */
+  /* the struct of an array is aligned, so the low two bits are free */
   return ULL2NUM(((unsigned long long) (uintptr_t) ca) | (unsigned long long) kind);
 }
 
@@ -862,6 +865,7 @@ ca_refuse_cyclic (int kind)
 typedef struct {
   int        n;
   CArray   **ops;
+  int        kind;       /* CA_RECURSION_COMPUTE or CA_RECURSION_EVAL */
   int        k;
   VALUE    (*body)(VALUE);
   VALUE      arg;
@@ -874,7 +878,7 @@ ca_computing_step (VALUE key, VALUE varg, int recursive)
 {
   (void) key;
   if ( recursive ) {
-    ca_refuse_cyclic(CA_RECURSION_COMPUTE);
+    ca_refuse_cyclic(CA_RECURSION_COMPUTE);   /* names the method */
   }
   return ca_computing_next((ca_computing_t *) varg);
 }
@@ -885,16 +889,68 @@ ca_computing_next (ca_computing_t *c)
   while ( c->k < c->n ) {
     CArray *ca = c->ops[c->k++];
     int j, seen = 0;
-    if ( ! ca || ! ca_is_object_type(ca) ) continue;
+    if ( ! ca || ( c->kind == CA_RECURSION_COMPUTE && ! ca_is_object_type(ca) ) ) continue;
     for ( j = 0; j < c->k - 1; j++ ) {
       if ( c->ops[j] == ca ) seen = 1;
     }
     if ( seen ) continue;
     return rb_exec_recursive(ca_computing_step,
-                             ca_recursion_key(ca, CA_RECURSION_COMPUTE),
+                             ca_recursion_key(ca, c->kind),
                              (VALUE) c);
   }
   return c->body(c->arg);
+}
+
+static VALUE ca_recursion_probe (VALUE key, VALUE arg, int recursive);
+
+/* Whether ca is, or reaches through its parents, a lazy node being
+   evaluated (recorded by ca_computing_run_nodes).  A cell value that does
+   would come back into that evaluation when it is computed.  The walk is
+   bounded; past the bound the value is not refused here, and is caught when
+   it is evaluated, as a deeper expression is. */
+static int
+ca_reaches_evaluating_walk (CArray *ca, int *budget)
+{
+  if ( --(*budget) < 0 ) {
+    return 0;
+  }
+  if ( RTEST(rb_exec_recursive(ca_recursion_probe,
+                               ca_recursion_key(ca, CA_RECURSION_EVAL),
+                               Qnil)) ) {
+    return 1;
+  }
+  if ( ca_is_entity(ca) ) {
+    return 0;
+  }
+  if ( ca_test_flag(ca, CA_FLAG_MULTI_PARENTS) ) {
+    CAMultiParent *mp = (CAMultiParent *) ca;
+    int32_t k;
+    for ( k = 0; k < mp->n_parents; k++ ) {
+      if ( mp->parents[k] && ca_reaches_evaluating_walk(mp->parents[k], budget) ) {
+        return 1;
+      }
+    }
+    return 0;
+  }
+  return ((CAView *) ca)->parent
+           ? ca_reaches_evaluating_walk(((CAView *) ca)->parent, budget)
+           : 0;
+}
+
+void
+ca_refuse_cells_reaching_evaluation (ca_size_t n, const VALUE *cells)
+{
+  ca_size_t i;
+  for ( i = 0; i < n; i++ ) {
+    if ( rb_obj_is_carray(cells[i]) ) {
+      CArray *cv;
+      int budget = 1024;
+      TypedData_Get_Struct(cells[i], CArray, &carray_data_type, cv);
+      if ( ! ca_is_entity(cv) && ca_reaches_evaluating_walk(cv, &budget) ) {
+        ca_refuse_cyclic(CA_RECURSION_COMPUTE);
+      }
+    }
+  }
 }
 
 /* Runs body(arg), a computation over ops[0..n), with each object array
@@ -905,7 +961,19 @@ VALUE
 ca_computing_run (int n, CArray **ops, VALUE (*body)(VALUE), VALUE arg)
 {
   ca_computing_t c;
-  c.n = n; c.ops = ops; c.k = 0; c.body = body; c.arg = arg;
+  c.n = n; c.ops = ops; c.kind = CA_RECURSION_COMPUTE; c.k = 0; c.body = body; c.arg = arg;
+  return ca_computing_next(&c);
+}
+
+/* As ca_computing_run, for the nodes of a lazy expression evaluated over
+   object cells: every array of ops[0..n) is recorded whatever its data type
+   (a comparison is boolean), apart from computations, so a reduction over
+   the expression evaluating it is no re-entry. */
+VALUE
+ca_computing_run_nodes (int n, CArray **ops, VALUE (*body)(VALUE), VALUE arg)
+{
+  ca_computing_t c;
+  c.n = n; c.ops = ops; c.kind = CA_RECURSION_EVAL; c.k = 0; c.body = body; c.arg = arg;
   return ca_computing_next(&c);
 }
 

@@ -337,6 +337,21 @@ int     ca_lazy_req_is_packed (const ca_lazy_req_t *req, void *view);
 void    ca_lazy_req_pull   (void *operand, const ca_lazy_req_t *req,
                             void *buf, int dir);
 boolean8_t *ca_lazy_req_mask (const ca_lazy_req_t *req, int n, CArray **ops);
+
+/* Runs eval(node, req, data, dir), the evaluation of a lazy node over the
+   cells req names.  When the node or one of its operands ops[0..n) is an
+   object array, the evaluation calls Ruby on each cell, and a cell holding
+   an expression over the node comes back into it: the node, and the nodes
+   of its chain in chain[0..nchain), are then recorded as computed over
+   (ca_computing_run_nodes), so coming back is refused as cyclic.  The
+   operands are not recorded: an expression over the same operand that does
+   not need the node is no cycle.  Otherwise eval runs as it is. */
+typedef void (*ca_lazy_eval_fn) (void *node, const ca_lazy_req_t *req,
+                                 void *data, int dir);
+void    ca_lazy_eval_recorded (void *node, int n, CArray **ops,
+                               int nchain, CArray **chain,
+                               ca_lazy_eval_fn eval, const ca_lazy_req_t *req,
+                               void *data, int dir);
 VALUE   ca_lazy_settle_scalar (VALUE operand, int was_scalar);
 
 /* Non-zero iff the array a view's cells come from -- the parent, or the
@@ -463,6 +478,11 @@ void        ca_check_rank_fits (long ndim, const char *name);
    body(arg) with the object arrays among ops[0..n) recorded
    (rb_exec_recursive, carray_core.c); nothing is written to the arrays. */
 VALUE ca_computing_run (int n, CArray **ops, VALUE (*body)(VALUE), VALUE arg);
+VALUE ca_computing_run_nodes (int n, CArray **ops, VALUE (*body)(VALUE), VALUE arg);
+/* Refuses as cyclic a cell among cells[0..n) that is an array reaching a
+   lazy node being evaluated: computing it would come back into the node. */
+void  ca_refuse_cells_reaching_evaluation (ca_size_t n, const VALUE *cells);
+
 VALUE ca_iter_ensure_computing (CArray *ca, int32_t n, ca_iter_state *states,
                                 VALUE (*body)(VALUE), VALUE arg);
 
