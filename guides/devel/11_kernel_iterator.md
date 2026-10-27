@@ -490,6 +490,22 @@ count of masked cells (e.g. variance's `min_count` policy):
 CA_SLAB_REDUCE_T_EX(T, st, p, m, acc, INIT, REDUCE, masked_cnt);
 ```
 
+### Stopping once the answer is settled
+
+A fold whose result can be decided before the end of the slab (`any`
+at the first true cell, `all` at the first false one) can stop early:
+
+```c
+CA_SLAB_REDUCE_T_SETTLE(T, st, p, m, acc, INIT, REDUCE, SETTLED);
+        /* SETTLED: e.g. acc for any, !acc for all */
+```
+
+The slab is walked in blocks of `CA_SLAB_SETTLE_BLOCK` cells. Each block
+is the same branch-free loop as `CA_SLAB_REDUCE_T_EX`, and `SETTLED` is
+tested between blocks, so a slab that never settles keeps the speed of
+the plain fold. Masked cells are skipped. `idx` and the masked count are
+not provided.
+
 ### SIMD-licensed reductions
 
 A sum has a variant that licenses the compiler to reassociate the

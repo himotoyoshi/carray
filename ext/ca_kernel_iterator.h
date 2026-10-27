@@ -1277,6 +1277,84 @@ ca_slab_is_flat (const ca_iter_state *st, const ca_size_t *strides,
     (void) __sr_throwaway_mc;                                                \
   } while (0)
 
+/* CA_SLAB_REDUCE_T_SETTLE: a reduction that may stop before the end of
+   the slab.  SETTLED is an expression over `acc` that is true once no
+   further cell can change the result (`acc` for any, `!acc` for all).
+   The slab is walked in blocks of CA_SLAB_SETTLE_BLOCK cells; each block
+   is the same branch-free loop as CA_SLAB_REDUCE_T_EX, and SETTLED is
+   tested between blocks, so a slab that never settles costs one extra
+   test per block.  Masked cells are skipped as in CA_SLAB_REDUCE_T.
+   `idx` and the masked count are not provided. */
+#define CA_SLAB_SETTLE_BLOCK 16384
+#define CA_SLAB_REDUCE_T_SETTLE(T, st, p, m, acc, INIT, REDUCE, SETTLED) do { \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
+    (acc) = (INIT);                                                          \
+    int8_t    __srK       = (st).slab_ndim;                                  \
+    int8_t    __srOuterK  = __srK - 1;                                       \
+    ca_size_t __srInnerN  = (st).slab_dims[__srK - 1];                       \
+    ca_size_t __srInnerS  = (st).slab_strides[__srK - 1];                    \
+    ca_size_t __srInnerMS = (st).slab_mask_strides[__srK - 1];               \
+    int       __srContig  = (__srInnerS == (ca_size_t) sizeof(T));           \
+    int       __srMaskU   = (__srInnerMS == 1);                              \
+    ca_size_t __srOC      = 1;                                               \
+    for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ )                       \
+      __srOC *= (st).slab_dims[__sk];                                        \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL) ) { \
+      __srInnerN = (st).slab_elements;                                       \
+      __srOC     = 1;                                                        \
+    }                                                                        \
+    ca_size_t __srIdx[CA_RANK_MAX] = { 0 };                                  \
+    int       __srDone = 0;                                                  \
+    for ( ca_size_t __so = 0; __so < __srOC && ! __srDone; __so++ ) {        \
+      ca_size_t __srDoff = 0, __srMoff = 0;                                  \
+      for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ ) {                   \
+        __srDoff += __srIdx[__sk] * (st).slab_strides[__sk];                 \
+        __srMoff += __srIdx[__sk] * (st).slab_mask_strides[__sk];            \
+      }                                                                      \
+      const char *__srQ = (const char *)(p) + __srDoff;                      \
+      const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                    \
+      const boolean8_t *__srMM =                                             \
+        ( (m) == NULL ) ? NULL : (const boolean8_t *)(m) + __srMoff;         \
+      for ( ca_size_t __sb = 0; __sb < __srInnerN;                           \
+            __sb += CA_SLAB_SETTLE_BLOCK ) {                                 \
+        ca_size_t __se = ( __srInnerN - __sb > CA_SLAB_SETTLE_BLOCK )        \
+                         ? __sb + CA_SLAB_SETTLE_BLOCK : __srInnerN;         \
+        if ( __srMM == NULL ) {                                              \
+          if ( __srContig ) {                                                \
+            for ( ca_size_t __sj = __sb; __sj < __se; __sj++ ) {             \
+              T v = __srSrc[__sj];                                           \
+              REDUCE;                                                        \
+            }                                                                \
+          } else {                                                           \
+            for ( ca_size_t __sj = __sb; __sj < __se; __sj++ ) {             \
+              T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);          \
+              REDUCE;                                                        \
+            }                                                                \
+          }                                                                  \
+        } else if ( __srContig && __srMaskU ) {                              \
+          for ( ca_size_t __sj = __sb; __sj < __se; __sj++ ) {               \
+            if ( ! __srMM[__sj] ) {                                          \
+              T v = __srSrc[__sj];                                           \
+              REDUCE;                                                        \
+            }                                                                \
+          }                                                                  \
+        } else {                                                             \
+          for ( ca_size_t __sj = __sb; __sj < __se; __sj++ ) {               \
+            if ( ! __srMM[__sj * __srInnerMS] ) {                            \
+              T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);          \
+              REDUCE;                                                        \
+            }                                                                \
+          }                                                                  \
+        }                                                                    \
+        if ( SETTLED ) { __srDone = 1; break; }                              \
+      }                                                                      \
+      for ( int8_t __sk = __srOuterK - 1; __sk >= 0; __sk-- ) {               \
+        if ( ++__srIdx[__sk] < (st).slab_dims[__sk] ) break;                  \
+        __srIdx[__sk] = 0;                                                    \
+      }                                                                      \
+    }                                                                        \
+  } while (0)
+
 /* ----------------------------------------------------------------------
  * SIMD-licensed reduction variants
  *

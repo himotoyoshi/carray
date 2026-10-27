@@ -363,6 +363,12 @@ module MkKernel
                   identity_on_empty: false,
                   all_nan_result: nil,
                   undefined_if: nil,
+                  # settled: a C expression over `acc` that is true once no
+                  # further cell can change the result (any: "acc", all:
+                  # "!acc").  The slab walk then stops at the first block
+                  # where it holds (CA_SLAB_REDUCE_T_SETTLE).  Only for a
+                  # single-accumulator reduction without mask_policy.
+                  settled: nil,
                   outputs: 1,
                   # Two-pass centred algorithm (variance / stddev family).
                   # When algorithm: :two_pass_centred is set, `state / init /
@@ -448,6 +454,10 @@ module MkKernel
       single_acc = state.nil? || (state.is_a?(Hash) && state.size == 1)
       raise "#{name}: identity_on_empty requires a single-accumulator reduction (sum/prod/count/accumulate/wsum); mean/variance/wmean/minmax are excluded" \
         unless single_acc && outputs == 1
+    end
+    if settled
+      raise "#{name}: settled requires a single-accumulator reduction without mask_policy, value_arg or array_arg" \
+        unless state.nil? && mask_policy.nil? && value_arg.nil? && array_arg.nil? && outputs == 1
     end
     # SL.1.0: reduction_kind: licenses a SIMD-friendly contig-branch macro
     # variant (CA_SLAB_REDUCE_T_{PLUS,MIN,MAX,STAR,VAR}_EX).  default
@@ -662,6 +672,7 @@ module MkKernel
       identity_on_empty: identity_on_empty,
       all_nan_result:  all_nan_result,
       undefined_if:    undefined_if,
+      settled:         settled,
       outputs:         outputs,
       algorithm:       algorithm,
       divisor:         divisor,
@@ -2207,7 +2218,9 @@ module MkKernel
         # Non-mask_policy path: the slab macros always take a masked_cnt,
         # so hand them a throwaway.  The generic form (suffix "", the
         # :object lane) has a wrapper that hides it.
-        if suffix == ""
+        if k[:settled]
+          io.puts "      CA_SLAB_REDUCE_T_SETTLE(#{si[:c]}, st, p, m, #{acc_var}, #{acc_init}, #{reduce_stmt}, #{k[:settled]});"
+        elsif suffix == ""
           io.puts "      CA_SLAB_REDUCE_T(#{si[:c]}, st, p, m, #{acc_var}, #{acc_init}, #{reduce_stmt});"
         else
           io.puts "      ca_size_t __sr_throwaway_mc = 0;"
@@ -6989,11 +7002,10 @@ MkKernel.reduce :max,
 # its identity value (1 for all, 0 for any) for those cells.  An all-
 # masked slab returns the identity (all([]) == true, any([]) == false).
 #
-# Early-break is intentionally NOT implemented; idempotent acc &= v /
-# acc |= v is SIMD-friendly and the branch-free form usually wins on
-# modern CPUs.  For dramatically lopsided inputs (= mostly-false `all`
-# or mostly-true `any`) a profile-driven early-break variant can be
-# added later as a separate kernel.
+# The walk stops once the answer is settled (settled:): any at the first
+# true, all and none at the first false / true.  The test runs between
+# blocks of branch-free `acc |= v` / `acc &= v`, so a slab that never
+# settles keeps the speed of the plain fold.
 MkKernel.header_block <<~C
   /* The square root of a variance: an ε-negative from rounding becomes 0,
      a NaN stays NaN (fmax(NaN, 0.0) is 0.0). */
@@ -7017,6 +7029,7 @@ C
 MkKernel.reduce :all,
   init:            "1",
   reduce:          "acc &= v",
+  settled:         "!acc",
   source:          [:bool],
   output:          :bool,
   ruby_scalar:     :BOOL2VAL,
@@ -7026,6 +7039,7 @@ MkKernel.reduce :all,
 MkKernel.reduce :any,
   init:            "0",
   reduce:          "acc |= v",
+  settled:         "acc",
   source:          [:bool],
   output:          :bool,
   ruby_scalar:     :BOOL2VAL,
@@ -7040,6 +7054,7 @@ MkKernel.reduce :any,
 MkKernel.reduce :none,
   init:            "1",
   reduce:          "acc &= !v",
+  settled:         "!acc",
   source:          [:bool],
   output:          :bool,
   ruby_scalar:     :BOOL2VAL,

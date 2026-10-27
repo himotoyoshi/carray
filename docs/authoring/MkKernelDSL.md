@@ -218,6 +218,17 @@ This changes the floating-point reduction contract from bit-exact to
 suffix **must not** carry a `reduction_kind` — they keep the non-reassoc
 path.
 
+### Stopping once the answer is settled (`settled:`)
+
+`settled:` takes a C expression over `acc` that is true once no further
+cell can change the result: `"acc"` for `any`, `"!acc"` for `all` and
+`none`. The kernel then uses `CA_SLAB_REDUCE_T_SETTLE`, which walks the
+slab in blocks of branch-free folding and tests the expression between
+blocks, so `any` stops near the first true cell while a slab that never
+settles costs the same as the plain fold. It applies to a
+single-accumulator reduction without `mask_policy:`, `value_arg:` or
+`array_arg:`.
+
 ## The entry points
 
 ### `reduce`
