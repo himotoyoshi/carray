@@ -57,8 +57,9 @@ mechanically pins the frozen names.
 the macros only the kernel generator (`ext/mkkernel.rb`) emits —
 `CA_SLAB_REDUCE_SUM8_EX` / `MIN8_EX` / `MAX8_EX` / `STAR8_EX`,
 `CA_SLAB_REDUCE_T_MIN_EX` / `_MAX_EX` / `_STAR_EX`,
-`CA_SLAB_REDUCE_SUM8_NARROW_EX` / `M2_NARROW_EX`, `CA_SLAB_SCAN_T_GATED`
-and `CA_SLAB_REDUCE_T_VAR_EX`; the `alias_mode` / `src_kind` routing
+`CA_SLAB_REDUCE_SUM8_NARROW_EX` / `M2_NARROW_EX`,
+`CA_SLAB_REDUCE_T_SETTLE` with `CA_SLAB_SETTLE_BLOCK`,
+`CA_SLAB_SCAN_T_GATED` and `CA_SLAB_REDUCE_T_VAR_EX`; the `alias_mode` / `src_kind` routing
 constants (`CA_ITER_ALIAS_*` / `CA_ITER_SRC_*`, with
 `CA_KERNEL_FIBER_CONTIG` and `CA_SLAB_FREE`); and every non-frozen
 `ca_iter_state` field (scratch, fiber-cache, descriptor cache, stack-tile
@@ -445,7 +446,9 @@ Choose them based on what the kernel needs:
   rejected with `CA_ITER_ERR_READONLY`.
 - A kernel that genuinely cannot accept a masked source declares
   `CA_KERNEL_NO_MASK`; the engine then rejects a masked source rather
-  than silently dropping the mask. The `_FIBER` forms without MASKED in
+  than silently dropping the mask. A source that has a mask is refused
+  even when no cell is masked (after `unmask`, say): the engine looks at
+  whether the mask exists, not at its cells. The `_FIBER` forms without MASKED in
   the name hand out no mask cursor; without `CA_KERNEL_NO_MASK` a masked
   source is walked with its masked cells read as values.
 - `CA_KERNEL_FIBER_CONTIG` is set internally by the FIBER macros — direct
@@ -514,7 +517,8 @@ The slab is walked in blocks of `CA_SLAB_SETTLE_BLOCK` cells. Each block
 is the same branch-free loop as `CA_SLAB_REDUCE_T_EX`, and `SETTLED` is
 tested between blocks, so a slab that never settles keeps the speed of
 the plain fold. Masked cells are skipped. `idx` and the masked count are
-not provided.
+not provided. The kernel generator emits it for `all` / `any` / `none`;
+it is not part of the author surface.
 
 ### SIMD-licensed reductions
 

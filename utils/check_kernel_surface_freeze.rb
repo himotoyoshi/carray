@@ -16,6 +16,7 @@
 #               8-way SUM8 / MIN8 / MAX8 / STAR8 reductions,
 #               CA_SLAB_REDUCE_T_MIN_EX / _MAX_EX / _STAR_EX,
 #               CA_SLAB_REDUCE_SUM8_NARROW_EX / M2_NARROW_EX,
+#               CA_SLAB_REDUCE_T_SETTLE / CA_SLAB_SETTLE_BLOCK,
 #               CA_SLAB_SCAN_T_GATED, CA_SLAB_REDUCE_T_VAR_EX).  Free to
 #               refactor across 3.x.
 #

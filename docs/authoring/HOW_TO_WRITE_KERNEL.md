@@ -185,6 +185,7 @@ refactors without touching the catalog:**
   `CA_SLAB_REDUCE_SUM8_EX` / `MIN8_EX` / `MAX8_EX` / `STAR8_EX`,
   `CA_SLAB_REDUCE_T_MIN_EX` / `_MAX_EX` / `_STAR_EX`,
   `CA_SLAB_REDUCE_SUM8_NARROW_EX` / `M2_NARROW_EX`,
+  `CA_SLAB_REDUCE_T_SETTLE` / `CA_SLAB_SETTLE_BLOCK`,
   `CA_SLAB_SCAN_T_GATED`, `CA_SLAB_REDUCE_T_VAR_EX`.
 
 **Section 9 below still uses L1/L2 vocabulary directly for historical
@@ -1818,7 +1819,8 @@ the `_FIBER` family and `flags`, not by changing this representation.
 function bodies, `ca_iter_can_alias`, the macros only the kernel
 generator emits (`CA_SLAB_REDUCE_SUM8_EX` / `MIN8_EX` / `MAX8_EX` /
 `STAR8_EX`, `CA_SLAB_REDUCE_T_MIN_EX` / `_MAX_EX` / `_STAR_EX`,
-`CA_SLAB_REDUCE_SUM8_NARROW_EX` / `M2_NARROW_EX`, `CA_SLAB_SCAN_T_GATED`,
+`CA_SLAB_REDUCE_SUM8_NARROW_EX` / `M2_NARROW_EX`,
+`CA_SLAB_REDUCE_T_SETTLE` / `CA_SLAB_SETTLE_BLOCK`, `CA_SLAB_SCAN_T_GATED`,
 `CA_SLAB_REDUCE_T_VAR_EX`), the `alias_mode` / `src_kind` routing
 (`CA_ITER_ALIAS_*` / `CA_ITER_SRC_*` / `CA_KERNEL_FIBER_CONTIG` /
 `CA_SLAB_FREE`), every non-frozen `ca_iter_state` field, and the physical

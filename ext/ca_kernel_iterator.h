@@ -56,7 +56,8 @@
         idx), CA_SLAB_REDUCE_T_MIN_EX / _MAX_EX / _STAR_EX (what it emits
         when a :min / :max / :prod kernel does not take the 8-way form),
         CA_SLAB_REDUCE_SUM8_NARROW_EX / M2_NARROW_EX (8- and 16-bit
-        integer sum and centred sum of squares), CA_SLAB_SCAN_T_GATED,
+        integer sum and centred sum of squares), CA_SLAB_REDUCE_T_SETTLE
+        with CA_SLAB_SETTLE_BLOCK (all / any / none), CA_SLAB_SCAN_T_GATED,
         and CA_SLAB_REDUCE_T_VAR_EX (no caller)
       - alias_mode / src_kind routing (CA_ITER_ALIAS_* / CA_ITER_SRC_* /
         CA_KERNEL_FIBER_CONTIG / CA_SLAB_FREE)
@@ -98,7 +99,9 @@ typedef enum {
                                         there, even for a kernel that
                                         writes every cell                */
 #define CA_KERNEL_NO_MASK     0x2    /* the kernel cannot take a mask:
-                                        a masked source is refused     */
+                                        a source that has a mask is
+                                        refused, even with no cell
+                                        masked (no cell is scanned)    */
 #define CA_KERNEL_CHUNK_HINT  0x4    /* reserved: init refuses it
                                         with CA_ITER_ERR_FLAGS          */
 #define CA_KERNEL_FIBER_CONTIG 0x8   /* with policy=CA_SLAB_AXES and
