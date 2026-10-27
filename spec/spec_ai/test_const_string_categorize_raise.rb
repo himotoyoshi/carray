@@ -6,7 +6,10 @@
 # (ALLOCV), so a raise does not leave them behind.
 #
 # 32768 cells make the tables 768 KB, so a leak shows far above the 4 KB
-# threshold, measured by utils/measure_leak.rb.
+# threshold, measured by utils/measure_leak.rb.  The heap keeps about one
+# table's worth after the calls whether or not anything leaks, so the
+# measurement spreads it over 2000 calls; over 200 it alone came close to
+# the threshold (and crossed it in a clang build).
 
 require "test/unit"
 require "carray"
@@ -40,7 +43,7 @@ class TestConstStringCategorizeRaise < Test::Unit::TestCase
   end
 
   def test_a_raising_read_frees_the_tables
-    grown = LeakMeter.bytes_per_call("strings.categorize rescue nil", setup: SETUP)
+    grown = LeakMeter.bytes_per_call("strings.categorize rescue nil", setup: SETUP, calls: 2000)
     omit "measurement unavailable" if grown.nil?
     assert_operator grown, :<, 4096,
                     "categorize: the C heap grew #{grown.round} bytes per call"
