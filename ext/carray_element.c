@@ -440,6 +440,9 @@ rb_ca_elem_fetch (VALUE self, VALUE ridx)
     }
 
     CA_FACE_STORAGE_TO_ELEMENT_IF_FACE(out, self, ca);
+    if ( ca->data_type == CA_BOOLEAN ) {
+      out = RTEST(out) && out != INT2FIX(0) ? Qtrue : Qfalse;
+    }
     return out;
   }
   else {

@@ -183,4 +183,19 @@ class TestCountNonFloatQueries < Test::Unit::TestCase
     assert_equal 1, CA_INT32([0, 3]).count(BigDecimal("3"))
   end
 
+
+  # elem_fetch answers a boolean cell with true / false on every path, as []
+  # does: an index array over a view, and over a masked entity.
+  def test_elem_fetch_of_a_boolean_cell_is_true_or_false
+    b = CA_BOOLEAN([[1, 0], [0, 1]])
+    m = b.copy
+    m[1, 0] = UNDEF
+    [b, b.transpose, b[nil, nil], m].each do |a|
+      2.times do |i|
+        2.times do |j|
+          assert_equal a[i, j], a.elem_fetch([i, j]), "#{a.class} [#{i}, #{j}]"
+        end
+      end
+    end
+  end
 end
