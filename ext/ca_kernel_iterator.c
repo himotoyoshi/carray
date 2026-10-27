@@ -2248,9 +2248,9 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
 static VALUE ca_iter_finish_sync (VALUE arg);
 
 static VALUE
-ki_sync_detach_root (VALUE root)
+ki_sync_detach (VALUE ca)
 {
-  ca_sync_detach((CArray *) root);
+  ca_sync_detach((CArray *) ca);
   return Qnil;
 }
 
@@ -2351,7 +2351,7 @@ ca_iter_state_finish (ca_iter_state *st)
          block, a view lending no memory) gave a buffer of its own. */
       if ( write ) {
         /* protect: frees the iterator's own copy before the raise passes on */
-        rb_protect(ki_sync_detach_root, (VALUE) root, &tag);
+        rb_protect(ki_sync_detach, (VALUE) root, &tag);
       }
       else {
         ca_detach(root);
@@ -2361,8 +2361,15 @@ ca_iter_state_finish (ca_iter_state *st)
       /* alias path (CONTIG/STRIDED for CAStride family): we attached
          src directly at init, so detach it here.  A SRC_ATTACH walk owns
          its own scratch (alias_mode = NONE, freed above) and attached
-         nothing to detach. */
-      ca_detach(src);
+         nothing to detach.  A write walk syncs first: an entity whose
+         attach hands out a copy (a cold one such as a CAObject mask)
+         keeps what was written only through its sync slot. */
+      if ( write ) {
+        rb_protect(ki_sync_detach, (VALUE) src, &tag);
+      }
+      else {
+        ca_detach(src);
+      }
     }
     if ( own ) {
       if ( ca_is_object_type(own) ) {
