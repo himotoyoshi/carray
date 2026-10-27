@@ -160,11 +160,16 @@ histbin_axis_setup (histbin_axis_t *ax, const double *ep, ca_size_t ne,
   }
   /* A value can land on the wrong side of the linearised floor by as much
      as an edge strays from the straight line, plus the rounding of the
-     position itself, which grows with the number of bins.  Values within
-     that much of a boundary are checked against the stored edges.  When
-     the window covers a good part of a bin, the binary search is cheaper. */
+     position itself: v - lo is rounded at the scale of the edges' magnitude
+     (an ulp of lo or hi, which can be most of a bin when the edges are
+     close together far from zero), and the product grows with the number
+     of bins.  Values within that much of a boundary are checked against the
+     stored edges.  When the window covers a good part of a bin, the binary
+     search is cheaper. */
   ax->window = ( ax->uniform )
-             ? maxdev / fabs(dx) + (double) (ax->n + 2) * 8.0 * DBL_EPSILON + 1e-9
+             ? maxdev / fabs(dx)
+               + 4.0 * DBL_EPSILON * (fabs(ax->lo) + fabs(ax->hi)) / fabs(dx)
+               + (double) (ax->n + 2) * 8.0 * DBL_EPSILON + 1e-9
              : 0.0;
   if ( ax->window > 0.25 ) {
     ax->uniform = 0;

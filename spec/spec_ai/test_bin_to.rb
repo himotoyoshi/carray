@@ -86,6 +86,21 @@ class TestBinTo < Test::Unit::TestCase
     end
   end
 
+  # Edges close together far from zero: v - lo rounds at the scale of lo,
+  # which is a large part of a bin, so an edge value can fall a bin low if
+  # the boundary check does not take the edges' magnitude into account.
+  def test_close_edges_far_from_zero
+    [[3.0e8, 0.1, 3], [1.0e6, 1.0e-9, 100], [1.9755089798478122e14, 0.1, 10]].each do |lo, dx, n|
+      e = (0..n).map { |k| lo + k * dx }
+      vals = e.flat_map { |x| [x.prev_float, x, x.next_float] }
+      exp = vals.map { |v| e.count { |x| x <= v } }
+      edges = CArray.float64(e.size) { |i| e[i] }
+      x = CArray.float64(vals.size) { |i| vals[i] }
+      got = x.bin_to(edges, lfill: -1, ufill: n)
+      assert_equal exp.map { |b| b == 0 ? -1 : b - 1 }, got.to_a, "lo=#{lo} dx=#{dx}"
+    end
+  end
+
   def test_edges_validation
     assert_raise(ArgumentError) { CA_FLOAT64([1.0]).bin_to(CA_FLOAT64([0.0])) }       # < 2 edges
     assert_raise(ArgumentError) { CA_FLOAT64([1.0]).bin_to(CArray.float64(2, 2)) }    # not 1-D
