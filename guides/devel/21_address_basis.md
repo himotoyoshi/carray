@@ -369,12 +369,14 @@ is a table of pointers, one per entry of `parts`, each to the bytes of that
 String.
 
 **The bytes are the Strings' own, not a copy.** That is sound because a
-String's bytes do not move while the call runs: the parts arrive as
-arguments, which puts each on the VM stack, and compaction does not move an
-object referenced from there. The sweep allocates, so a collection can run
-in the middle of the call; the pin is what makes that harmless. It is also
-why the parts are a splat and not an Array — what an Array holds is not
-pinned by the Array being reachable.
+String's bytes do not move while the call runs: `sweep` holds every part in
+an array on the machine stack for the length of the call, and compaction does
+not move an object referenced from there. The sweep allocates, so a
+collection can run in the middle of the call; the pin is what makes that
+harmless. Being an argument is not enough by itself — a splat of 128 or more
+reaches a C method as a heap array, whose elements compaction moves — and the
+machine stack is why `sweep` takes at most 1024 parts (`ArgumentError`
+beyond).
 
 A part that is not frozen is the kernel's to write, and is made unshared
 before its address is taken, so the write lands in that String alone. A

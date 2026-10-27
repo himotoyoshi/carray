@@ -79,6 +79,26 @@ class TestAddressBasisSweep < Test::Unit::TestCase
     assert_equal 10, counted.unpack1("q")
   end
 
+  # A splat of 128 or more reaches a C method as a heap array, not on the VM
+  # stack, so being an argument does not pin the parts there.
+  def test_no_part_moves_when_there_are_many_parts
+    a = CArray.double(4).seq!
+    out = CArray.double(4)
+    parts = Array.new(200) { |i| [i.to_f].pack("d").freeze }
+    parts[1] = [0].pack("q")
+    moved = nil
+    slab = adding_slab(2) do |userdata|
+      next unless moved.nil?
+      GC.verify_compaction_references(expand_heap: true, toward: :empty)
+      pointers = Fiddle::Pointer.new(userdata)[0, 8 * parts.size].unpack("Q*")
+      moved = parts.each_index.count { |i| Fiddle::Pointer[parts[i]].to_i != pointers[i] }
+    end
+    CArray::AddressBasis.sweep(slab.to_i, "01", [a, out], *parts)
+    assert_equal 0, moved
+    assert_equal [0.0, 1.0, 2.0, 3.0], out.to_a
+    assert_equal 4, parts[1].unpack1("q")
+  end
+
   def test_a_shared_part_is_unshared_before_the_slab_writes_it
     a = CArray.double(4).seq!
     out = CArray.double(4)
@@ -97,6 +117,9 @@ class TestAddressBasisSweep < Test::Unit::TestCase
     assert_raise(ArgumentError) { CArray::AddressBasis.sweep(slab.to_i, "0", [a, a]) }
     assert_raise(ArgumentError) { CArray::AddressBasis.sweep(slab.to_i, "0" * 8, [a] * 8) }
     assert_raise(ArgumentError) { CArray::AddressBasis.sweep(0, "0", [a]) }
+    assert_raise(ArgumentError) {
+      CArray::AddressBasis.sweep(slab.to_i, "0", [a], *Array.new(1025) { "\0" * 8 })
+    }
     assert_raise(TypeError) { CArray::AddressBasis.sweep(slab.to_i, "0", [[1.0]]) }
     # The tail of a long String shares its bytes, one byte in.  (A slice
     # that stops short is copied, and lands aligned.)

@@ -980,11 +980,11 @@ address_basis_tier (VALUE module, VALUE object)
  * for the arity.  The copy was there because a String's bytes may be moved
  * by GC compaction, and the sweep allocates -- so a collection can run
  * between taking an address and the slab reading it.  It is not needed
- * here.  The parts arrive as arguments, which puts every one of them on the
- * VM stack for the length of this call, and an object referenced from there
- * is pinned: compaction leaves it where it is.  That is also why they are
- * taken as a splat rather than as an Array -- what an Array holds is not
- * pinned by the Array being reachable.
+ * here: every part is also held in an array on the machine stack for the
+ * length of this call, and an object referenced from there is pinned.  The
+ * VM stack is not enough by itself -- a splat of 128 or more arguments
+ * reaches a C method as a heap array, whose elements compaction moves.
+ * The machine stack is why the parts are limited to 1024.
  *
  * A part that is not frozen is the slab's to write (an error slot), and is
  * made unshared first so the write lands in that String alone.  A frozen
@@ -1000,6 +1000,7 @@ address_basis_sweep (int argc, VALUE *argv, VALUE module)
   VALUE vholder = 0;
   void **table;
   VALUE *arrays;
+  volatile VALUE *parts;
   int i, n, nparts;
 
   rb_check_arity(argc, 3, UNLIMITED_ARGUMENTS);
@@ -1007,6 +1008,17 @@ address_basis_sweep (int argc, VALUE *argv, VALUE module)
   rfsync    = argv[1];
   rarrays   = argv[2];
   nparts    = argc - 3;
+
+  if ( nparts > 1024 ) {
+    rb_raise(rb_eArgError, "%s: a sweep takes at most 1024 parts, got %d",
+             ca_calling_method_name(), nparts);
+  }
+  /* Held on the machine stack, which the GC scans conservatively and so
+     pins.  argv is not written: it may be the storage of a heap array. */
+  parts = ALLOCA_N(VALUE, nparts > 0 ? nparts : 1);
+  for ( i = 0; i < nparts; i++ ) {
+    parts[i] = argv[3 + i];
+  }
 
   Check_Type(rarrays, T_ARRAY);
   n = (int) RARRAY_LEN(rarrays);
@@ -1034,11 +1046,13 @@ address_basis_sweep (int argc, VALUE *argv, VALUE module)
   }
 
   for ( i = 0; i < nparts; i++ ) {
-    StringValue(argv[3 + i]);
-    if ( ! OBJ_FROZEN(argv[3 + i]) ) {
-      rb_str_modify(argv[3 + i]);
+    VALUE part = parts[i];
+    StringValue(part);
+    parts[i] = part;
+    if ( ! OBJ_FROZEN(part) ) {
+      rb_str_modify(part);
     }
-    if ( (uintptr_t) RSTRING_PTR(argv[3 + i]) & 7 ) {
+    if ( (uintptr_t) RSTRING_PTR(part) & 7 ) {
       rb_raise(rb_eArgError, "%s: part %d does not start on an 8-byte boundary",
                ca_calling_method_name(), i);
     }
@@ -1049,7 +1063,7 @@ address_basis_sweep (int argc, VALUE *argv, VALUE module)
      left to ALLOCV's own holder, which the GC reclaims. */
   table = ALLOCV_N(void *, vholder, nparts > 0 ? nparts : 1);
   for ( i = 0; i < nparts; i++ ) {
-    table[i] = RSTRING_PTR(argv[3 + i]);
+    table[i] = RSTRING_PTR(parts[i]);
   }
 
   switch ( n ) {
@@ -1069,6 +1083,9 @@ address_basis_sweep (int argc, VALUE *argv, VALUE module)
   }
 
   ALLOCV_END(vholder);
+  for ( i = 0; i < nparts; i++ ) {
+    RB_GC_GUARD(parts[i]);
+  }
   RB_GC_GUARD(rarrays);
   RB_GC_GUARD(rfsync);
   return Qnil;
