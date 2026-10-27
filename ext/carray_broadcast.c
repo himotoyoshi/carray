@@ -85,13 +85,12 @@ ca_broadcast_to_destination (VALUE dst, volatile VALUE *src)
     for ( i = 0; agree && i < dst_ndim; i++ ) {
       if ( dst_dim[i] != src_dim[i] ) agree = 0;
     }
-    if ( ! agree ) ca_broadcast_refuse_write(dst, *src);
-    return;
+    if ( agree ) return;
   }
 
   /* A size-1 axis repeated onto an axis of length 0 leaves the source
-     larger than an empty destination; the axes say it is a repeat all
-     the same. */
+     larger than an empty destination, or as large when it is empty too
+     ((1,0) onto (2,0)); the axes say it is a repeat all the same. */
   if ( ( cs->elements < cd->elements || cd->elements == 0 )
        && cs->ndim == cd->ndim ) {
     int i;
