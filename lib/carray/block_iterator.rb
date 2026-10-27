@@ -525,7 +525,7 @@ class CABlockIterator < CAIterator
       sview = saddr[*strip_ranges].block_view(*tiles)
       grid  = (0...@sndim).map { |i| vview.shape[i] }
       cells = tiles.inject(1) { |p, t| p * t }
-      order = vview.copy.reshape(*(grid + [cells])).sort_addr(axis: @sndim)
+      order = vview.copy.reshape(*(grid + [cells])).sort_index(axis: @sndim)
       src_sorted = sview.reshape(*(grid + [cells])).take_along_axis(order, axis: @sndim)
       out[*strip_ranges].block_view(*tiles)[] = src_sorted.reshape(*(grid + tiles))
     end
