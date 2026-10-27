@@ -36,14 +36,215 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 ## 3.0.6 (unreleased)
 
+- New: `CAFrame` answers the column reductions itself, as a frame of one
+  row (`df.mean`, `df.sum("rain", "temp")`), and the running values down
+  all its rows (`df.cumsum("rain")`, `order`), as a grouped frame does
+  down each group. `percentile(p, *names)` and `quantile` (a column per
+  quartile, `"rain_p0"` ... `"rain_p100"`) are added to the frame, groups
+  and windows.
+
+- New: `CAFrame` row picks: `nlargest` / `nsmallest` (also on
+  `GroupedFrame`), `drop_masked` for the rows with no masked cell,
+  `GroupedFrame#head` / `#tail` for the first and last rows of each group,
+  and `filter` given a boolean selector directly (`df.filter(df["n"] > 3)`).
+
+- New: `CAFrame#transform` computes columns with a block, keeping their
+  names and the index. `select`, `drop`, `transform` and `describe` pick
+  columns by a Range of names, a Regexp, a kind (`:float`, `:integer`,
+  `:complex`, `:timedelta`, ...) or a data type.
+
+- New: `CAFrame#value_counts` (how many rows hold each value, as a
+  frame), `#strip_mask` (the masked cells filled, in a new frame), `#to_a`
+  (the rows as Arrays, masked cells `UNDEF`), `#shape`, `#empty?`, and
+  `GroupedFrame#each` and `#size`. `CAFrame#==` compares two frames by
+  their table: names, columns, index and row axis name.
+
+- New: `CAFrame#lag` and `GroupedFrame#lag` take a distance of the key,
+  `before: "1 hour"` or `after:`, giving each row the value of the row at
+  exactly that distance (`UNDEF` where there is none). The key is the
+  index or the column `on:` names: a time, a duration or a number.
+
+- New: `join` and `join_asof` take a key named differently on the two
+  sides, and `view: :full`, which gives every column of the result as a
+  view, with holes for the unmatched rows, so a write reaches either
+  frame.
+
+- New: `df[name] = value` with a single value repeats it on every row.
+  `fill` takes several columns, an Array of names or a Hash of column =>
+  value; `rename` takes a block, can exchange two names, and renames the
+  index under its name. `sort_by_key` and `sort_by` take `descending:`.
+
+- New: `CAFrame#set_column_attrs` gives columns their names and common
+  attributes; `CArray#attrs_symkey` and `CAFrame#attrs_symkey` return the
+  attributes with Symbol keys. `CAFrame#to_csv` takes `precision:`.
+
+- New: `GroupedFrame#fill(name, :linear)` interpolates within each group.
+  On a frame, `:linear` reads an index that is not in order as one series
+  in index order.
+
+- New: `melt` brings number columns of different types (an `int64` and a
+  `float64` column) to their common type, still as a view. A mixture no
+  type holds without changing a value (`int64` beside `uint64`), or one
+  with text or time, is refused; cast the columns first.
+
+- New: `wsum` and `wmean` take weights shaped as the reduced axes, matched
+  in ascending axis order, besides a scalar and weights of the receiver's
+  shape.
+
+- New (C extensions and carray-jit): `CArray::AddressBasis.sweep(function,
+  fsync, arrays, *parts)` runs a chunked element-wise sweep
+  (`ca_call_cslab_N_r`, arities 1 to 7) from Ruby, handing the slab
+  pointers to the parts' own String bytes. An `fsync` character other than
+  `0` or `1` is refused.
+
 - Change: CArray requires Ruby 3.3 or later, up from 3.0. On an older
   Ruby, `gem install carray` does not offer this release; install a
   newer Ruby with a version manager such as rbenv or mise, or stay on
   3.0.5.
 
+- Change: CSV reading and writing are split by what they take.
+  `CAFrame.read_csv` and `#write_csv` take a path or an IO;
+  `CAFrame.from_csv` takes CSV text as a String and `#to_csv` returns it.
+  Code that gave `from_csv` a path or an IO calls `read_csv`, and
+  `to_csv(path)` becomes `write_csv(path)`. No aliases are kept.
+
+- Change: `read_csv` and `from_csv` infer the column types by default
+  (`int64`, `float64`, `boolean`, `time`, otherwise text); `types:` names
+  some columns and the rest are still inferred. Pass `types: :string` to
+  read every column as text, as before. A column with a blank but present
+  value (a quoted `""`) stays text.
+
+- Change: `CAFrame#set_index`, `#reset_index`, `#cast`, `#promote`,
+  `#parse_to_time` and `#to_time` return a new frame and leave the
+  receiver as it is (the two share their columns). Assign the result:
+  `df = df.set_index("time")`.
+
+- Change: a `GroupedFrame` reduction given column names returns a frame of
+  those columns, one row per group, labelled as without names; it
+  returned the `CArray` (one name) or an `Array` of them. Take the column
+  (`grp.mean("temp")["temp"]`) or reduce the group iterator
+  (`grp["temp"].mean`) for the values alone.
+
+- Change: a `GroupedFrame` or window value on the frame's rows given
+  several column names (`keep_rows: true`, the running values, `lag`,
+  `w.mean("a", "b")`) returns a frame of them on the frame's rows and
+  index, instead of an `Array`. One name still gives the `CArray`.
+
+- Change: `CAFrame#filter` no longer takes `keep_masked:`, so every row
+  selection is a view. To keep the rows whose condition is undetermined,
+  say so in the selector: `df.filter(cond.is_masked)` or
+  `df.filter(cond.strip_mask(true))`.
+
+- Change: `df[sel] = ...` refuses a Ruby Array as the row selector, as
+  `df[]` does; the column indexer would read `[0, 2]` as two rows from
+  row 0. Write `df[CA_INT64([0, 2])]` for rows 0 and 2.
+
+- Change: a group key named in a `GroupedFrame` reduction, and the index's
+  name given to a verb that reads or changes columns (`df[...]`,
+  `select`, `fill`, `cast`, the reductions), raise and point at `size`
+  or `df.index`. A key argument (`group_by`, `sort_by_key`, `join(on:)`)
+  still names the index.
+
+- Change: an `:inner` or `:right` `join` gives the other frame's columns
+  as views picked by row, not copies, so a write to them reaches that
+  frame. Call `copy` on the result to keep it apart.
+
+- Change: a `CScalar` takes only `s[]` and `s[0]`, reading or writing its
+  one cell; any other index (`s[3]`, a range, `nil`, an index array)
+  raises. A view such as `s.refer(s.data_type, [1])` takes the usual
+  indexes.
+
+- Change: `CArray#==` finds a NaN equal to a NaN, so an array holding NaN
+  equals its copy and the array read back from a file. The cell-by-cell
+  IEEE comparison is `eq`; `eql?` still compares bits.
+
+- Change: `CARemap#mapper` returns a read-only array; writing it raises.
+  The index array given to `a[idx]` is not affected.
+
+- Change: `as_type` returns a view also when the data type is the
+  receiver's own, and `CATime#to_unit` / `CATimedelta#to_unit` return a
+  new array when the unit does not change, so an attribute set on, or a
+  freeze of, the result does not reach the receiver.
+
+- Change: `wmean` gives `UNDEF` where the weights sum to zero, on every
+  path; numeric arrays gave NaN or an infinity. A weight array with one
+  element is no longer read as a scalar: give a Ruby number or a
+  `CScalar`.
+
+- Change: a computation over an object array that comes back into the
+  array (a cell holding the array, or a view of it) raises, as reading
+  such a cell does; it recursed until the process died. A lazy
+  expression over such an array (a cell holding `x + 1` for the array `x`)
+  raises the same way instead of overflowing the stack or not ending, and
+  so does `Marshal.dump` of an object view whose cells lead back to its
+  root.
+
+- Change (CAObject authors): a `CAObject` without `create_mask` raises
+  `TypeError` when its `copy_data` writes `UNDEF`, as it does when a
+  fetcher answers `UNDEF`; the `UNDEF` was dropped and read as a value.
+
+- Change (C extensions): `ca_install_obj_type` refuses an operation table
+  without `allocate`, `attach`, `sync` and `detach` slots;
+  `ca_iter_register_source_kind` refuses carray's own types; and the
+  kernel iterator's `FIBER_PAIR` forms refuse `CA_KERNEL_WRITE`.
+
+- Fix: `require "carray"` works on Ruby 4.0; it raised
+  `Ractor::IsolationError` since 3.0.4.
+
 - Fix: `CArray.fuse` works on Ruby 3.3. The gem now depends on prism 1.0
   or later, which `gem install` and Bundler bring in on Ruby 3.3, whose
   own prism is too old; Ruby 3.4 and later already ship it.
+
+- Fix: a block of a reshape over a strided view
+  (`a[1..2, 1..3].reshape(3, 2)[0..1, nil]`) read and wrote past the end
+  of a row, outside the buffer at the edges.
+
+- Fix: a frozen object array shared between Ractors can be computed over
+  in several at once; it was refused as cyclic. A cell holding a view of
+  other cells of the same array is no longer refused.
+
+- Fix: `Marshal.dump` of a view no longer writes its whole parent (a
+  one-cell view of a 100,000-cell array dumped about 400 KB), and an
+  array's mask marshals as a plain boolean array.
+
+- Fix: an `each_slab` Enumerator stopped part way with `next` leaves no
+  array attached once its Fiber is collected.
+
+- Fix: a window or block iterator reads its source afresh on each call;
+  after the source changed, a later reduction mixed new sums with old
+  counts.
+
+- Fix: a frozen or read-only `CArray.meld` refuses writes through a meld
+  of it (`CArray.meld(m, m)` wrote into the frozen root).
+
+- Fix: `blocks(...).sort_addr` works when the source holds more than one
+  tile; it failed with `IndexError`.
+
+- Fix: `elem_fetch` answers a boolean cell with `true` or `false` when given
+  an index array over a view, as `[]` does; it answered `0` or `1`.
+
+- Fix: `CAFrame#fill(:linear)` leaves a row with no coordinate out of the
+  interpolation; it was filled with 0.
+
+- Fix: `bin_to` and `histogram1d` put a value next to an edge in the bin
+  that edge bounds when the edges are nearly but not exactly equally
+  spaced.
+
+- Fix: `float ** Integer` takes any exponent that fits 64 bits, eagerly
+  as lazily, and `x.lazy.pow(k)` answers as `x.pow(k)`. A lazy array
+  compared with `UNDEF` (`eq`, `ne`) answers as the eager one does.
+
+- Fix: writing `UNDEF` through a widening `refer` (`r.refer(:float64,
+  ...)`) no longer masks parent cells outside the written cells, and a
+  mask written onto a `CAObject` without mask hooks survives the next
+  read of its values.
+
+- Fix: a masked cell that is not a String reads as `""` when a `CAString`
+  wraps a view, as it does over an entity.
+
+- Fix (CASource authors): a source that leaves its `ptr` NULL at rest no
+  longer crashes `elem_*`, `dump_binary` to a File or `nlargest` over a
+  whole axis.
 
 ## 3.0.5
 
