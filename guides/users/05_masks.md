@@ -355,4 +355,4 @@ a.count_masked    #  => 2
 
 ## `value`
 
-What a masked cell holds is not defined, and nothing should be built on it. `value` drops the mask and shows those cells anyway, so do not compute from it or build views on it. To take the mask off, use `unmask` or `strip_mask` and say what the gaps hold.
+What a masked cell holds is not defined, and nothing should be built on it. `value` drops the mask and shows those cells anyway, so do not compute from it, build views on it, or mix it with other arrays. To take the mask off, use `unmask` or `strip_mask` and say what the gaps hold.

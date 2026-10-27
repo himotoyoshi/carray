@@ -26,7 +26,16 @@ class CArray
   #   bypassing the mask. The returned view itself cannot carry a
   #   mask (`value_array? == true`).
   #
-  #   Use this to read or write the data slot of masked elements.
+  #   What a masked cell holds is not defined: a computation leaves there
+  #   whatever it happens to. Do not compute with a value array, and do
+  #   not mix it with other arrays (as an operand, or as a part of
+  #   {CArray.stack} or {CArray.meld}). To take the mask off, use
+  #   {#unmask} or {#strip_mask} and give the masked cells a value.
+  #
+  #   A library that handles the mask itself may use `value` to hand the
+  #   stored cells on together with {#mask}, as long as it reads nothing
+  #   from the masked ones.
+  #
   #   Nothing in a value array is masked, so `unmask` on it does nothing,
   #   while a write that would mask a cell (`UNDEF`, `mask=`,
   #   `invert_mask`) raises TypeError.

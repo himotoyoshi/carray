@@ -148,9 +148,9 @@ A kernel that genuinely cannot accept a masked source declares
 than silently dropping the mask (a "physically impossible" rejection in the
 deliver-the-materials sense, [ch. 10](10_author_surface_overview.md)).
 
-`value` — the mask-dropping view a user reaches for — is, at the C level, simply a
-**CARefer** over the parent's data buffer with the `mask` field left unset. No copy;
-it is a view that doesn't see the mask.
+`value` — the mask-dropping view — is, at the C level, simply a **CARefer** over
+the parent's data buffer with the `mask` field left unset. No copy; it is a view
+that doesn't see the mask.
 
 ## The contract: masked data is undefined, not protected
 
@@ -167,6 +167,19 @@ protect masked data. Any design premised on "the mask protects the value
 underneath" is rejected on this ground.
 This is precisely the kind of C-level invariant a developer must internalise and a
 user never needs to know.
+
+### `value` in a library
+
+`value` stays for a library that handles the mask itself: it can hand the stored
+cells to something that takes the data and the mask separately, reading `mask`
+alongside. What it must not do follows from the contract above:
+
+- read anything from a masked cell — its bytes are whatever was left there;
+- compute with a value array, or mix it with other arrays (as an operand, or as a
+  part of a stack or meld). A value array can never have a mask, so it cannot
+  take part in anything where the mask is carried;
+- use it to take the mask off. That is `unmask` or `strip_mask`, which give the
+  masked cells a value.
 
 ## Boolean storage is uint8
 
