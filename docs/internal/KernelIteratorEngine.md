@@ -130,23 +130,23 @@ Only the `STRIDED` route is written through: the kernel writes in place in the a
 
 | `alias_mode` | taken when | what it does | layers it handles |
 |---|---|---|---|
-| `PER_FIBER_FUSED` | a read of one contiguous fiber of a fake or byte-swap view (or a single-cast lazy monop) along its innermost axis | each fiber is fetched with `ca_xfer_stride` GET into the fiber scratch, and on a write put back with `ca_xfer_stride` PUT | data, fiber, write-back — all three per fiber, through the view's region transfer. A conversion view writes by transfer instead (a cell the kernel did not write would not come back through a lossy conversion unchanged) |
+| `PER_FIBER_FUSED` | a read of one contiguous fiber of a fake or byte-swap view (or a single-cast lazy monop) along its innermost axis | each fiber is fetched with `ca_xfer_stride` GET into the fiber scratch, its mask likewise into the fiber mask scratch | data and fiber, per fiber, through the view's region transfer. Read only: a write walk over a conversion view takes the transfer walk, which sends back only the changed cells (a cell the kernel did not write would not come back through a lossy conversion unchanged) |
 | `PER_SLAB` / `PER_SLAB_HOIST` | §3.3 | one slab gathered from the parent per index of the outer axes | data; the fiber layer sits on top |
 | `STACK` | a CAStack, read, unmasked, one slab axis that is the stack axis | the K parents are attached and read directly through a tile cache | data and fiber |
 | `STACK_OUTER_K` | a CAStack, read, the stack axis among the outer axes | the slab is cut from the parent the outer index picks; the parents' masks are copied | data; fiber on top |
 
-Each tests `ca_fast_path()` with its name, so `CARRAY_SHORTCUTS_OFF=name` sends that one, and `CARRAY_GENERAL_PATH=1` all of them, to the general route of their `src_kind`. A write never takes `STACK` or `STACK_OUTER_K`: init declines them and the walk goes by transfer.
+Each tests `ca_fast_path(CA_SC_name)`, so naming it in `CARRAY_SHORTCUTS_OFF` (the lower-case name in the table below, comma-separated for several) sends that one, and `CARRAY_GENERAL_PATH=1` all of them, to the general route of their `src_kind`. The names are listed in `ca_shortcut_names` (`ext/carray_core.c`); a name it does not know is warned about. A write never takes `STACK` or `STACK_OUTER_K`: init declines them and the walk goes by transfer.
 
 Every shortcut in the engine carries a name tag in a comment beside its code: the layer it handles, what it speeds up, the measured reason, when it is taken, the promises of §6 it keeps, the switch, and the rows of the matrix that check it. `grep -n "Shortcut " ext/ca_kernel_iterator.c` lists them:
 
-| name | layer | measured switched off alone, M2 Max / Xeon 6369P (2026-10-26) | checked by |
-|---|---|---|---|
-| `SHIFT_WHOLE_VIEW` | data | 1.5x / 1.1x on a median of a shift view, 3.1x / 2.2x on a sum of a window | the matrix, slab-axis rows of the shift and window views |
-| `PER_SLAB_HOIST` | data | 1.6x (M2 Max) on a mean over two slab axes of a grid; not taken with one slab axis | the matrix, two-slab-axes rows of the grid parent |
-| `STACK` | data and fiber | 1.2x / 1.3x | the matrix, stack parent along axis 0 |
-| `STACK_OUTER_K` | data | 1.0x / 1.0x on a mean along axis 1, which the generated loop interchange answers first (3.5x / 3.8x with that off too); 1.1x / 1.2x on a median | the matrix, stack parent along axes 1 and 2 |
-| `PER_FIBER_FUSED` (conversion views) | all three, per fiber | 1.0x / 1.1x on a sort, 1.05x / 1.2x on a median | the matrix, fiber rows of the fake parent |
-| `PROTECT_ONLY_MAY_RAISE` | exits | 1.55x / 1.4x | `test_iter_raise_cleanup.rb`, the detectors' raise rows |
+| name | `CARRAY_SHORTCUTS_OFF` | layer | measured switched off alone, M2 Max / Xeon 6369P (2026-10-26) | checked by |
+|---|---|---|---|---|
+| `SHIFT_WHOLE_VIEW` | `shift_whole_view` | data | 1.5x / 1.1x on a median of a shift view, 3.1x / 2.2x on a sum of a window | the matrix, slab-axis rows of the shift and window views |
+| `PER_SLAB_HOIST` | `per_slab_hoist` | data | 1.6x (M2 Max) on a mean over two slab axes of a grid; not taken with one slab axis | the matrix, two-slab-axes rows of the grid parent |
+| `STACK` | `stack` | data and fiber | 1.2x / 1.3x | the matrix, stack parent along axis 0 |
+| `STACK_OUTER_K` | `stack_outer_k` | data | 1.0x / 1.0x on a mean along axis 1, which the generated loop interchange answers first (3.5x / 3.8x with that off too); 1.1x / 1.2x on a median | the matrix, stack parent along axes 1 and 2 |
+| `PER_FIBER_FUSED` (conversion views) | `fiber_fused_conversion` | data and fiber, per fiber | 1.0x / 1.1x on a sort, 1.05x / 1.2x on a median | the matrix, fiber rows of the fake parent |
+| `PROTECT_ONLY_MAY_RAISE` | `protect_only_may_raise` | exits | 1.55x / 1.4x | `test_iter_raise_cleanup.rb`, the detectors' raise rows |
 
 ---
 
@@ -245,7 +245,7 @@ Found by reading the engine against the route table; left as they are.
 A route added for speed:
 
 1. is a value of `ki_l2_route`, chosen in `ki_choose_l2_route` (which decides and does nothing else) and built in `ki_open_l2` by its own case plus the shared layout;
-2. tests `ca_fast_paths_enabled()`, so `CARRAY_GENERAL_PATH=1` and `2` take the general route and the transfer walk instead;
+2. tests `ca_fast_path(CA_SC_name)` with a name of its own (an entry in the `CA_SC_*` list and in `ca_shortcut_names`, `ext/carray_core.c`), so `CARRAY_SHORTCUTS_OFF=name` switches it off alone, and `CARRAY_GENERAL_PATH=1` and `2` take the general route and the transfer walk instead;
 3. keeps the promises of §6 by calling the parts where they exist, and says in a comment which of the written-out ones it keeps and how;
 4. has rows in `test_iter_delivery_matrix.rb` that take it (check with `iw_route`; `iw_state` reports every layout field of the opened state, for checking that a change to init leaves them as they were);
 5. has a measured reason: how much slower the source is on the route it would otherwise take.

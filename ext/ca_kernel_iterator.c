@@ -422,10 +422,10 @@ ca_iter_build_rowmajor_strides (ca_size_t       *strides,
 /* ---- PER_FIBER_FUSED: which views take it ----------------------------- */
 
 /* A src_kind branch, then a check of the view's operation table, then of
-   the fiber axis's stride.  Returns nonzero for
+   the fiber axis's stride.  Returns nonzero for a read of
    CAFake / CAByteSwap / a single-cast CAMonOp under SRC_ATTACH when the
-   fiber is contiguous in the parent, and for CAWindow / CAShift under
-   SRC_DESCRIPTOR; zero otherwise.
+   fiber is contiguous in the parent (that is, the fiber runs along the
+   innermost axis); zero for a write walk and for every other view.
 
    The fiber_axis_stride argument is the effective byte stride of the
    fiber axis on the view (= what next_slab_axes would yield as
@@ -433,10 +433,10 @@ ca_iter_build_rowmajor_strides (ca_size_t       *strides,
    a contiguous run of the parent's memory, which is what lets the view's
    region transfer deliver it in one pass.
 
-   Called from two places in init_l2: the CA_SLAB_AXES descriptor branch
-   and the SRC_ATTACH branch, each before it would materialise.  When it
-   returns nonzero the caller skips the materialise and sets alias_mode =
-   CA_ITER_ALIAS_PER_FIBER_FUSED with the fiber dispatch state filled. */
+   Called from one place, the SRC_ATTACH branch of ki_choose_l2_route,
+   with src_kind = CA_ITER_SRC_ATTACH.  When it returns nonzero the route
+   is KI_L2_FIBER_FUSED: the whole view is not gathered and alias_mode is
+   CA_ITER_ALIAS_PER_FIBER_FUSED. */
 static int
 ca_iter_should_per_fiber_fused (CArray   *src,
                                 int       src_kind,
@@ -468,14 +468,11 @@ ca_iter_should_per_fiber_fused (CArray   *src,
     }
   }
 
-  /* CAShift / CAWindow: the view's region transfer fills out-of-bounds
-     cells itself, so a fiber can be fetched in one call instead of a
-     per-slab or whole-view gather (SRC_DESCRIPTOR).  A view that can
-     lend the parent's memory (SRC_DESCRIPTOR_L2_ALIASABLE, an interior
-     CAWindow) is already read in place; fetching it fiber by fiber was
-     measured slower (0.35-0.82x), so only SRC_DESCRIPTOR takes it. */
+  /* The one caller passes CA_ITER_SRC_ATTACH, so this SRC_DESCRIPTOR
+     branch is not reached: a CAWindow / CAShift is read by the
+     descriptor routes (KI_L2_PER_SLAB / KI_L2_DESC_WHOLE /
+     KI_L2_DESC_STRIDED), not fiber by fiber. */
   if ( src_kind == CA_ITER_SRC_DESCRIPTOR ) {
-    /* CAWindow and CAShift share ca_window_func.attach. */
     if ( attach == ca_window_func.attach ) {
       return 1;
     }
@@ -940,8 +937,8 @@ ca_iter_state_init_l1_unprotected (ca_iter_state    *st,
    state is assembled in one place and init_l2 has one way out. */
 
 typedef enum {
-  KI_L2_FIBER_FUSED,   /* PER_FIBER_FUSED: a CAWindow / CAShift fiber, or a
-                          read of a conversion view's innermost fiber */
+  KI_L2_FIBER_FUSED,   /* PER_FIBER_FUSED: a read of a conversion view's
+                          innermost fiber */
   KI_L2_PER_SLAB,      /* descriptor view, read, a slab axis INDEX or SHIFT:
                           one slab gathered at a time (PER_SLAB / _HOIST) */
   KI_L2_DESC_WHOLE,    /* descriptor view, read: the whole view gathered by
@@ -1178,8 +1175,9 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
                    2000x2000 fake view.
        Enters      CA_KERNEL_FIBER_CONTIG, one slab axis, a read walk, and
                    ca_iter_should_per_fiber_fused.
-       Promises    1, 2 and 4, as the CAWindow / CAShift hook above.  A
-                   write takes the transfer walk (promise 3).
+       Promises    1 (the fiber is fetched packed), 2 (its mask is fetched
+                   the same way into fiber_mask_scratch) and 4.  A write
+                   takes the transfer walk (promise 3).
        Switch      ca_fast_path(): off, the transfer walk.
        Checked by  the fiber rows of the fake parent in the delivery
                    matrix. */
@@ -2008,15 +2006,9 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
   /* PER_FIBER_FUSED: there is no whole-view buffer to alias from.  Build
      the fiber region from outer_idx + fiber_axis and call
      ca_xfer_stride(src, ..., GET) directly into fiber_data_scratch; the
-     view's region transfer (out-of-bounds filling for CAWindow / CAShift,
-     the conversion for a fake or byte-swap view) delivers it in one
-     pass.
-
-     last_data_off carries the fiber region's outer footprint so
-     sync_slab can reconstruct the same region for WRITE PUT.  Encode
-     it as the linear outer_idx position scaled by fiber_axis stride
-     equivalence; for PER_FIBER_FUSED sync_slab reads outer_idx state
-     directly rather than data_off so the value is informational. */
+     view's region transfer (the conversion for a fake, byte-swap or
+     single-cast lazy view) delivers it in one pass.  The route is read
+     only, so nothing is put back; last_data_off is not used. */
   if ( st->alias_mode == CA_ITER_ALIAS_PER_FIBER_FUSED ) {
     ca_size_t  fiber_n     = st->slab_dims[0];
     ca_size_t  need        = fiber_n * st->bytes;
@@ -2032,10 +2024,10 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
     }
 
     /* Build fiber region: fiber_axis spans the full fiber, all other
-       axes pinned to outer_idx position (count=1).  Cache starts[] in
-       state so sync_slab can rebuild the same region for WRITE PUT
-       (= captured BEFORE the outer_idx advance below, the same hazard as
-       last_data_off; see sync_slab). */
+       axes pinned to outer_idx position (count=1).  starts[] is also
+       recorded in fiber_region_starts (captured before the outer_idx
+       advance below), which only the PER_FIBER_FUSED block of sync_slab
+       reads. */
     {
       int8_t op = 0;
       for ( int8_t k = 0; k < nd; k++ ) {
@@ -2176,13 +2168,14 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
    * instead of reusing -- separate phase, separate design.
    * ====================================================================== */
 
-  /* PER_FIBER_FUSED write: the author
-     wrote into fiber_data_scratch and there is no whole-view buffer
-     to xfer_all PUT.  Rebuild the same fiber region from cached
-     fiber_region_starts[] (= captured pre-advance in next_slab_axes,
-     the same hazard as last_data_off) and call ca_xfer_stride(src, ...,
-     PUT), which puts the fiber back through the view's region transfer
-     in one pass. */
+  /* PER_FIBER_FUSED: not reached by the current routes, which take
+     PER_FIBER_FUSED for read walks only (ca_iter_should_per_fiber_fused
+     returns 0 under CA_KERNEL_WRITE) and return at the top of this
+     function on a read.  The block puts the fiber in fiber_data_scratch
+     back over the region recorded in fiber_region_starts with
+     ca_xfer_stride PUT.  That would send every cell of the fiber, not
+     only the changed ones, which a conversion view does not round-trip
+     (promise 3). */
   if ( st->alias_mode == CA_ITER_ALIAS_PER_FIBER_FUSED ) {
     ca_size_t fiber_n = st->slab_dims[0];
     int8_t    nd      = st->ndim;
@@ -2487,8 +2480,8 @@ ca_iter_mark_walk_may_raise (ca_iter_state *st)
             && (st->scratch_ptr != NULL
                 || st->src_kind == CA_ITER_SRC_ATTACH) ) {
     /* writes back out of iterator-owned scratch, through the source's
-       transfer (ki_scratch_push_changed: ca_xfer_addrs / ca_xfer_all PUT)
-       or the descriptor scatter.  A write into aliased memory needs no
+       transfer (ki_scratch_push_changed: the changed cells by
+       ca_xfer_addrs PUT).  A write into aliased memory needs no
        push-back at all: sync_slab returns at once. */
     st->flags |= CA_ITER_FLAG_WALK_MAY_RAISE;
   }
@@ -3664,7 +3657,7 @@ rb_t1_smoke_remap_read_strided (VALUE klass, VALUE vref, VALUE vidx)
 
 /* WRITE smoke: fill view's slab buffer with `val` (float64), let
    sync_slab send the changed cells back to ref through the view
-   (ki_scratch_push_changed: ca_xfer_addrs or ca_xfer_all PUT). */
+   (ki_scratch_push_changed: ca_xfer_addrs PUT). */
 static VALUE
 rb_t1_smoke_remap_write_fill_f64 (VALUE klass, VALUE vref, VALUE vidx,
                                   VALUE vval)

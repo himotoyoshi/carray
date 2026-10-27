@@ -29,7 +29,8 @@ mechanically pins the frozen names.
   `_FIBER` (including `_FIBER_PAIR` / `_FIBER_PAIR_MASKED`) and `_WHOLE`
   families; the `CA_SLAB_REDUCE_*` / `CA_SLAB_MAP_T` / `CA_SLAB_SCAN_T` /
   `CA_SLAB_SCAN_TA` suites, except the macros only the kernel generator
-  emits; `CA_L2_FOR_EACH`; the mask helper `CA_FOR_EACH_UNMASKED`;
+  emits (listed under Internal below); `CA_L2_FOR_EACH`; the mask helper
+  `CA_FOR_EACH_UNMASKED`;
 - the raw entry points the macros expand to — `ca_iter_state_init_l1`,
   `ca_iter_state_init_l2`, `ca_iter_state_init_l2_paired`,
   `ca_iter_state_next_slab`, `ca_iter_state_next_slab_axes`,
@@ -51,10 +52,15 @@ mechanically pins the frozen names.
   element), `r` (output cell), `w` (parallel-array weight), `acc`
   (accumulator), `idx` (flat slab index), `first` (first-unmasked flag).
 
-**Internal** (refactor freely): the state-machine bodies (`init_l1` /
-`next_slab` / `ca_iter_route_source` /
-`ca_iter_can_alias` internals), the `alias_mode` / `src_kind` routing
-constants (`CA_ITER_ALIAS_*` / `CA_ITER_SRC_*`), and every non-frozen
+**Internal** (refactor freely): the bodies of the state-machine functions
+(their names and signatures are frozen, above) and `ca_iter_can_alias`;
+the macros only the kernel generator (`ext/mkkernel.rb`) emits —
+`CA_SLAB_REDUCE_SUM8_EX` / `MIN8_EX` / `MAX8_EX` / `STAR8_EX`,
+`CA_SLAB_REDUCE_T_MIN_EX` / `_MAX_EX` / `_STAR_EX`,
+`CA_SLAB_REDUCE_SUM8_NARROW_EX` / `M2_NARROW_EX`, `CA_SLAB_SCAN_T_GATED`
+and `CA_SLAB_REDUCE_T_VAR_EX`; the `alias_mode` / `src_kind` routing
+constants (`CA_ITER_ALIAS_*` / `CA_ITER_SRC_*`, with
+`CA_KERNEL_FIBER_CONTIG` and `CA_SLAB_FREE`); and every non-frozen
 `ca_iter_state` field (scratch, fiber-cache, descriptor cache, stack-tile
 cache, …).
 
@@ -222,7 +228,10 @@ iterator delivered all of it.
 
 ## The state machine: full entry-point reference
 
-The five frozen entry points the macros expand to:
+The six frozen entry points every walk goes through (the other frozen
+functions, `init_l2_paired`, `close`, `ca_iter_check_init`,
+`ca_iter_check_same_shape`, `ca_iter_ensure` and
+`ca_iter_register_source_kind`, are listed in the freeze contract above):
 
 ```c
 int  ca_iter_state_init_l1 (ca_iter_state    *st,
@@ -252,7 +261,8 @@ void ca_iter_state_sync_slab         (ca_iter_state *st);
 void ca_iter_state_finish            (ca_iter_state *st);
 ```
 
-Plus the alias-eligibility predicate:
+Plus the alias-eligibility predicate, which is internal (not part of the
+freeze contract):
 
 ```c
 int  ca_iter_can_alias (void *ap, int level);   /* level = 1 | 2 | 3 */

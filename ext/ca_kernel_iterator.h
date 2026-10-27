@@ -274,14 +274,24 @@ typedef struct {
   /* --- CAStride compose-fold cache (L2 alias path) ---
      For CAStride-family sources at L2, init_l2 runs
      ca_stride_compose_to_root once to get the root + per-axis
-     byte strides + base offset, kept here for the author to read.  The
-     walk itself steps from composed_base by outer_strides (below), which
-     init builds from the composed strides.  Inline CA_RANK_MAX array (no
-     heap alloc).  root is the array attached at
-     init whose memory the walk reads: the compose-fold root of an L2
-     CAStride walk (an entity, or a view that lends memory) or the parent
-     of a descriptor view.  NULL when the walk reads src itself or a
-     scratch of its own. */
+     byte strides + base offset, recorded here.  These are engine
+     bookkeeping, not part of the author contract (a kernel reads the
+     slab_* / outer_* fields).  The walk itself steps from composed_base
+     by outer_strides (below), which init builds from the composed
+     strides.  Inline CA_RANK_MAX array (no heap alloc).
+
+     root is the array init attaches and finish detaches:
+       - the compose-fold root of an L2 CAStride walk (an entity, or a
+         view that lends memory), whose memory the slabs are cut from
+       - the parent of a descriptor view, on every descriptor route.  On
+         the strided route (DESC_STRIDED) the slabs are cut from its
+         memory; on the L1 descriptor walk, PER_SLAB / PER_SLAB_HOIST
+         and DESC_WHOLE (SHIFT_WHOLE_VIEW included) the descriptor
+         engine gathers from it into a scratch of the walk's own (once,
+         or per slab for PER_SLAB) and the kernel reads the scratch, but
+         root stays attached until finish.
+     NULL when the walk reads src itself, a scratch filled through the
+     view's own transfer, or a CAStack's parents. */
   struct _CArray   *root;              /* attached at init, detached (or
                                           synced and detached, on WRITE)
                                           by finish                        */
@@ -291,7 +301,7 @@ typedef struct {
   /* --- descriptor framework cache (descriptor sources) ---
      For CASelectAxis / CAGrid / CASelect / CAWindow / CAShift, init runs
      the view's *_describe_axes once then
-     reuses the P3 substrate (ca_axis_dispatch_prepare / _layout /
+     reuses the descriptor engine's substrate (ca_axis_dispatch_prepare / _layout /
      _classify_prefix) to derive the slab layout.  Cached inline so
      next_slab walks the prefix axes without re-doing the analysis. */
   ca_axis_desc_t      descs[CA_RANK_MAX];          /* post-merge axes */
@@ -408,9 +418,10 @@ typedef struct {
      over src->dim used in ca_xfer_stride strides[] argument. */
   int8_t            fiber_axis;
   ca_size_t         fiber_native_strides[CA_RANK_MAX];
-  /* fiber_region_starts[] cached by next_slab_axes BEFORE outer_idx
-     advance so sync_slab can reconstruct the same ca_xfer_stride
-     region for WRITE PUT.  The same hazard as last_data_off. */
+  /* fiber_region_starts[]: the starts of the fiber region fetched last,
+     recorded by next_slab_axes before the outer_idx advance.  Only the
+     PER_FIBER_FUSED block of sync_slab reads it, and PER_FIBER_FUSED is
+     taken by read walks only, so no walk reaches that block. */
   ca_size_t         fiber_region_starts[CA_RANK_MAX];
 
   /* --- CAStack read from its parents (STACK / STACK_OUTER_K) --- */
@@ -537,8 +548,9 @@ int  ca_iter_state_init_l1 (ca_iter_state    *st,
      - SRC_ATTACH views: iterator-owned scratch filled through
        ca_xfer_all, written back with ki_scratch_push_changed (only the
        changed cells).  A CAStack may instead be walked through its
-       parents, and a single FIBER_CONTIG fiber of a cast / byte-swap
-       view through ca_xfer_stride (PER_FIBER_FUSED)
+       parents, and on a READ walk a single FIBER_CONTIG fiber along the
+       innermost axis of a cast / byte-swap / single-cast lazy view
+       through ca_xfer_stride (PER_FIBER_FUSED)
      - a source with no attach slot: CA_ITER_ERR_NOT_CHEAP
 
    policy: CA_SLAB_AXES only.  CA_SLAB_WHOLE and CA_SLAB_FREE return
@@ -636,8 +648,8 @@ int  ca_iter_state_next_slab_axes (ca_iter_state *st,
      - per-fiber gather (CA_KERNEL_FIBER_CONTIG on a strided fiber):
        the fiber is scattered back from its scratch first
      - CAStack walked through its parents: READ only, no-op
-     - per-fiber fused (CA_ITER_ALIAS_PER_FIBER_FUSED): the fiber is put
-       back through the view with ca_xfer_stride
+     - per-fiber fused (CA_ITER_ALIAS_PER_FIBER_FUSED): READ only, so a
+       WRITE walk never has it
      - alias path (scratch_ptr == NULL): no-op — kernel wrote through
        alias_ptr.  When the alias is into a view root's own buffer, that
        buffer is written back once, by finish (ca_sync_detach)
@@ -2879,10 +2891,9 @@ ca_slab_is_flat (const ca_iter_state *st, const ca_size_t *strides,
   } while (0)
 
 /* ---- Ruby surface ---------------------------------------------------- */
-/* Called from Init_carray_ext (ruby_carray.c).  Creates the
-   Ractor-local key for the kept scratch buffer, and in a development
-   build (CARRAY_DEV_BUILD) registers the CArray.t1_* smoke entry points
-   the spec_ai kernel iterator tests use. */
+/* Called from Init_carray_ext (ruby_carray.c).  In a development build
+   (CARRAY_DEV_BUILD) it registers the CArray.t1_* smoke entry points the
+   spec_ai kernel iterator tests use; in a release build it does nothing. */
 void Init_ca_kernel_iterator (void);
 
 #endif /* CA_KERNEL_ITERATOR_H */

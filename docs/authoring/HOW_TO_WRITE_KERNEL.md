@@ -68,7 +68,7 @@ function still uses its macro, and that every block macro has a row here.
 | `CA_FOR_EACH_WHOLE` | the whole array as one contig run, row-major, no mask cursor | a kernel that wants every cell and no axes (whole-array scan, hashing the values, handing the buffer to a library) | ✓ Landed (§6.3) | `spec/spec_ai/ext_iter_write/iter_write.c` `iw_whole_write` |
 | `CA_FOR_EACH_WHOLE_MASKED` | the whole array as one contig run + contig mask | mask-aware whole-array kernel | ✓ Landed (§6.3) | `ext/carray_factorize.c` `fz_unique_flat_body` |
 | `CA_SLAB_REDUCE_T` | single-expression reduction kernel (1 line init + REDUCE) | sum / count / min / max / mean / variance | ✓ Landed (§6.5) | `ext/carray_factorize.c` `fz_nunique_body` |
-| `CA_SLAB_REDUCE_T_PLUS_EX` / `_MIN_EX` / `_MAX_EX` / `_STAR_EX` | SIMD-licensed reduction variants (`#pragma omp simd reduction(+/min/max/*:acc)` on contig no-mask path) | sum / mean / variance / prod with 8x throughput on f64 entity | ✓ Landed (§6.7, SL.1.x 2026-06-12) | `ext/mkkernel.rb` (generated kernels) |
+| `CA_SLAB_REDUCE_T_PLUS_EX` | SIMD-licensed sum reduction (`#pragma omp simd reduction(+:acc)` on contig no-mask path). The `_MIN_EX` / `_MAX_EX` / `_STAR_EX` siblings are emitted only by the kernel generator and are internal (§13.1) | sum / mean / variance with 8x throughput on f64 entity | ✓ Landed (§6.7, SL.1.x 2026-06-12) | `ext/mkkernel.rb` (generated kernels) |
 | `CA_SLAB_REDUCE_ARRAY_T_PLUS_EX` | SIMD-licensed weighted reduction (FMA `fmla.2d` + reassoc, dual-stream) | wsum / wmean | ✓ Landed (§6.7, SL.1.4b) | `ext/mkkernel.rb` (generated kernels) |
 | `CA_SLAB_MAP_T` | single-expression element-wise map kernel | sqrt / sin / cos / abs / negate | ✓ Landed (§6.5) | none |
 | `CA_SLAB_SCAN_T` | single-expression prefix-scan kernel | cumsum / cumprod / cummax / cummin / cumcount | ✓ Landed (§6.5) | `ext/mkkernel.rb` (generated kernels) |
@@ -157,9 +157,14 @@ internal because they look like enums):
 - **`CA_KERNEL_WRITE` / `CA_KERNEL_NO_MASK`** — passed as the `flags` arg.
 - **`CA_ITER_OK` / `CA_ITER_ERR_*`** — compared against `init_l2`'s return
   code in raw-API kernels (`if (rc != CA_ITER_OK) …`).
-- **`ca_iter_state_init_l2` / `next_slab_axes` / `sync_slab` / `finish`** —
-  the raw-API entry points the macros expand to; also called directly by
-  kernels that need explicit error reporting (§6.3).
+- **`CA_SLAB_WHOLE`** — the `policy` arg of `init_l1`, the whole array
+  as one contiguous slab (§9).
+- **`ca_iter_state_init_l1` / `next_slab` / `init_l2` / `init_l2_paired` /
+  `next_slab_axes` / `sync_slab` / `finish` / `close`** — the raw-API
+  entry points the macros expand to; also called directly by kernels that
+  need explicit error reporting (§6.3). `ca_iter_check_init` /
+  `ca_iter_check_same_shape`, `ca_iter_ensure` and
+  `ca_iter_register_source_kind` are frozen with them (§13.1).
 
 **INTERNAL — engine-only, may be renamed / restructured by engine
 refactors without touching the catalog:**
@@ -170,34 +175,35 @@ refactors without touching the catalog:**
   (`CA_KERNEL_FIBER_CONTIG`) that tells the engine to gather strided
   fibers into per-state scratch (`fiber_data_scratch`,
   `fiber_mask_scratch`) so author sees contig `p[i]` / `m[i]`.
-- **`ca_iter_state_init_l1` / `next_slab` /
-  `ca_iter_can_alias`** — alternate entry points not used by the catalog
-  macros (the L1 contig path; see §9). Not part of the author contract.
-- **`CA_SLAB_WHOLE` / `CA_SLAB_FREE`** — engine policy enums authors never
-  pass (`CA_SLAB_AXES` is the only policy a kernel writes).
+- **The bodies of the state-machine functions** (their names and
+  signatures are frozen) and **`ca_iter_can_alias`**.
+- **`CA_SLAB_FREE`** — an engine policy enum, not implemented (init
+  refuses it).
 - **`CA_ITER_ALIAS_*` / `CA_ITER_SRC_*` / `CA_KERNEL_FIBER_CONTIG`** —
   engine internal flags / enums.
+- **The macros only the kernel generator (`ext/mkkernel.rb`) emits** —
+  `CA_SLAB_REDUCE_SUM8_EX` / `MIN8_EX` / `MAX8_EX` / `STAR8_EX`,
+  `CA_SLAB_REDUCE_T_MIN_EX` / `_MAX_EX` / `_STAR_EX`,
+  `CA_SLAB_REDUCE_SUM8_NARROW_EX` / `M2_NARROW_EX`,
+  `CA_SLAB_SCAN_T_GATED`, `CA_SLAB_REDUCE_T_VAR_EX`.
 
 **Section 9 below still uses L1/L2 vocabulary directly for historical
 reasons; folding into §0 is deferred.**
 
-### 0.4 Performance note — per-source dispatch (F.6 phase)
+### 0.4 Performance note — per-source dispatch
 
 The author-facing catalog is unchanged, but the engine internally
-picks one of three materialisation paths per source kind:
+picks one of three delivery paths per source:
 
 | Engine path | Action | When chosen |
 |---|---|---|
-| **A. Alias** | `parent.ptr + offset` direct yield, no materialise | entity, contig CAStride, interior-only CAWindow (= F-1 STRIDE promotion) |
-| **B. Whole-view scratch** | `xfer_all` into scratch, slice from scratch | most SRC_DESCRIPTOR / SRC_ATTACH sources |
-| **C. Per-fiber fused** | `xfer_stride` per fiber, routes into the view's per-region fused fast path (X.1 / X.4) | CAFake / CAByteSwap with fiber-axis stride match; CAShift / CAWindow on the materialise path |
+| **A. Alias** | slabs cut directly from the source's or root's memory, no copy | entity, CAStride (through composed strides, when the root lends memory), a CAWindow / CASelectAxis / CAGrid whose slab axes are all STRIDE axes |
+| **B. Gathered scratch** | the view gathered into a scratch (whole, or one slab at a time) and the slabs cut from it | the other descriptor views (CAShift / CAWindow with out-of-bounds cells, INDEX axes) and the views delivered through their own transfer (conversion, bit, lazy, stack, …). A write walk over a gathered scratch sends back only the changed cells |
+| **C. Per-fiber fused** | each fiber fetched with the view's `ca_xfer_stride` into a fiber scratch, without gathering the whole view | a **read** of a `_FIBER` walk along the **innermost** axis of a CAFake / CAByteSwap or a lazy monop that only casts |
 
-The F.6 phase (2026-06-06) added path C to replace B for source
-kinds whose view has a fused per-region path (X.1 OOB-fused
-for CAShift / CAWindow, X.4 transform-fused for CAFake / CAByteSwap).
-Measured speedups: CAShift fiber sum 7.65x, CAByteSwap innermost
-1.34x, CAFake innermost 1.67x.  Path A is never substituted (=
-already materialise-free; adding C would only add call overhead).
+Path C is a read-only shortcut: a write walk over the same view takes
+path B. With the shortcut switched off alone, a sort or a median along
+the last axis of a 2000x2000 fake view was measured 1.0x to 1.2x slower.
 
 You do not need to think about which path the engine picks; the
 `_FIBER` catalog macros deliver the contig guarantee regardless.
@@ -1792,10 +1798,11 @@ The complete FROZEN set (mirrored by the banner in
 
 | Category | Frozen names |
 |---|---|
-| **Block macros** | `CA_FOR_EACH_SLAB`, `CA_FOR_EACH_SLAB_INOUT`, `CA_FOR_EACH_FIBER`, `CA_FOR_EACH_FIBER_MASKED`, `CA_FOR_EACH_FIBER_INOUT`, `CA_FOR_EACH_FIBER_INOUT_MASKED` |
+| **Block macros** | `CA_FOR_EACH_SLAB`, `CA_FOR_EACH_SLAB_INOUT`, `CA_FOR_EACH_FIBER`, `CA_FOR_EACH_FIBER_MASKED`, `CA_FOR_EACH_FIBER_INOUT`, `CA_FOR_EACH_FIBER_INOUT_MASKED`, `CA_FOR_EACH_FIBER_PAIR`, `CA_FOR_EACH_FIBER_PAIR_MASKED`, `CA_FOR_EACH_WHOLE`, `CA_FOR_EACH_WHOLE_MASKED` |
 | **Body macros** | `CA_SLAB_REDUCE_T` (+ `_EX` / `_PLUS_EX`), `CA_SLAB_REDUCE_ARRAY_T_EX` (+ `_PLUS_EX`), `CA_SLAB_MAP_T`, `CA_SLAB_SCAN_T`, `CA_SLAB_SCAN_TA`, `CA_FOR_EACH_UNMASKED`, `CA_L2_FOR_EACH` |
-| **Raw-API entry points** | `ca_iter_state_init_l2`, `ca_iter_state_next_slab_axes`, `ca_iter_state_sync_slab`, `ca_iter_state_finish` |
-| **Enum / status tokens** | `CA_SLAB_AXES`, `CA_KERNEL_WRITE`, `CA_KERNEL_NO_MASK`, `CA_ITER_OK`, `CA_ITER_ERR_*` |
+| **Raw-API entry points** | `ca_iter_state_init_l1`, `ca_iter_state_next_slab`, `ca_iter_state_init_l2`, `ca_iter_state_init_l2_paired`, `ca_iter_state_next_slab_axes`, `ca_iter_state_sync_slab`, `ca_iter_state_finish`, `ca_iter_state_close`, `ca_iter_check_init`, `ca_iter_check_same_shape` |
+| **Author entry points** | `ca_iter_ensure` (a body that can raise), `ca_iter_register_source_kind` (an externally installed view class) |
+| **Enum / status tokens** | `CA_SLAB_AXES`, `CA_SLAB_WHOLE`, `CA_KERNEL_WRITE`, `CA_KERNEL_NO_MASK`, `CA_ITER_OK`, `CA_ITER_ERR_*` |
 | **Slab-delivery representation** (`ca_iter_state` fields a kernel reads) | `slab_ndim`, `slab_dims[]`, `slab_strides[]`, `slab_mask_strides[]`, `slab_elements`, `outer_ndim`, `outer_axes[]`, `outer_dims[]` |
 | **Injected expression identifiers** | `v`, `r`, `w`, `acc`, `idx`, `first` |
 
@@ -1808,11 +1815,14 @@ own freedom (always-contig delivery, fused gather, …) is exercised through
 the `_FIBER` family and `flags`, not by changing this representation.
 
 **Everything else is INTERNAL and refactors freely**: the state-machine
-function bodies, `init_l1` / `next_slab` /
-`ca_iter_can_alias`, the `alias_mode` / `src_kind` routing
+function bodies, `ca_iter_can_alias`, the macros only the kernel
+generator emits (`CA_SLAB_REDUCE_SUM8_EX` / `MIN8_EX` / `MAX8_EX` /
+`STAR8_EX`, `CA_SLAB_REDUCE_T_MIN_EX` / `_MAX_EX` / `_STAR_EX`,
+`CA_SLAB_REDUCE_SUM8_NARROW_EX` / `M2_NARROW_EX`, `CA_SLAB_SCAN_T_GATED`,
+`CA_SLAB_REDUCE_T_VAR_EX`), the `alias_mode` / `src_kind` routing
 (`CA_ITER_ALIAS_*` / `CA_ITER_SRC_*` / `CA_KERNEL_FIBER_CONTIG` /
-`CA_SLAB_WHOLE` / `CA_SLAB_FREE`), every non-frozen `ca_iter_state` field,
-and the physical struct layout.
+`CA_SLAB_FREE`), every non-frozen `ca_iter_state` field, and the physical
+struct layout.
 
 **How the surface still evolves within 3.x** — additively, never by
 mutation:

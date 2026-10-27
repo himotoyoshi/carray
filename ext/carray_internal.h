@@ -833,7 +833,7 @@ ca_obj_equal (VALUE a, VALUE b)
 /* ---- fast paths (carray_core.c) --------------------------------------------
 
    A fast path answers what a general path also answers, by a different
-   algorithm.  Each one tests ca_fast_paths_enabled() alongside its own
+   algorithm.  Each one tests ca_fast_path(CA_SC_name) alongside its own
    condition, so a development build run with CARRAY_GENERAL_PATH=1 in the
    environment takes the general path everywhere and the test suite
    compares the two.  A release build has no switch: the test is the
