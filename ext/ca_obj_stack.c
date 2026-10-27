@@ -982,6 +982,16 @@ ca_stack_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
   if ( k < 0 || k >= ca->n_parents ) return 0;
   if ( hi >= (k + 1) * pbt ) return 0;              /* box spans >1 parent */
 
+  /* A view folded past this stack is built on the parent's root and asks
+     that root for its mask.  Whether the parent is a value array or a mask
+     array is answered along the parent's own chain, which the folded view
+     is not on (ca_keep_chain_flags reads the chain of the view folded,
+     and it stops at a stack): the view would read the root's mask through
+     a value array.  Such a parent stays behind the stack's transfer. */
+  if ( ca_is_value_array(ca->parents[k]) || ca_is_mask_array(ca->parents[k]) ) {
+    return 0;
+  }
+
   f->base -= k * pbt;
   for ( i = 0; i < f->ndim; i++ ) {                 /* degenerate the (size-1) K axis */
     if ( f->strides[i] == pbt ) f->strides[i] = 0;
