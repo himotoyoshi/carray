@@ -170,8 +170,11 @@ user never needs to know.
 
 ### `value` in a library
 
-`value` stays for a library that handles the mask itself: it can hand the stored
-cells to something that takes the data and the mask separately, reading `mask`
+`value` is for peeking at the internal state of an array, and nothing more. Use it
+on the spot — `a.value.copy`, `a.value[nil, 1].copy`, `a.value[nil, 1] = 2` — and
+do not keep the view to carry around (`b = a.value`, `b = a.value[nil, 1]`). A
+library that handles the mask itself may use it that way to hand the stored cells
+to something that takes the data and the mask separately, reading `mask`
 alongside. What it must not do follows from the contract above:
 
 - read anything from a masked cell — its bytes are whatever was left there;
