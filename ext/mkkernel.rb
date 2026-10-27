@@ -8984,22 +8984,23 @@ MkKernel.monfunc :rad_pi,
 # Float NaN included), maximum / minimum let it win.  In both flavours, of
 # two zeros the max is +0 and the min is -0 in either order.  C's fmax /
 # fmin leave that choice to the library (glibc and macOS answer
-# differently), so the float branch does not call them.
+# differently), so the float branch does not call them.  The sign of a
+# zero is read with copysign(1, x) rather than signbit(x): GCC does not
+# vectorize signbit on a double, which left the float64 kernels 17x
+# slower than float32.  NaN is handled before, so copysign never sees one.
 MkKernel.binop :pmax,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) > (#2) ? (#1) : (#2);",
-    float:  "(#3) = isnan(#1) ? (#2) : isnan(#2) ? (#1) : ((#1) > (#2) || ((#1) == (#2) && !signbit(#1))) ? (#1) : (#2);",
     object: '(#3) = ca_obj_extremum_replaces((#2), (#1), rb_intern(">")) ? (#2) : (#1);',
-  }
+  }.merge(MkKernel.float_widths("(#3) = isnan(#1) ? (#2) : isnan(#2) ? (#1) : ((#1) > (#2) || ((#1) == (#2) && copysign<f>(1, (#1)) > 0)) ? (#1) : (#2);"))
 
 MkKernel.binop :pmin,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) < (#2) ? (#1) : (#2);",
-    float:  "(#3) = isnan(#1) ? (#2) : isnan(#2) ? (#1) : ((#1) < (#2) || ((#1) == (#2) && signbit(#1))) ? (#1) : (#2);",
     object: '(#3) = ca_obj_extremum_replaces((#2), (#1), rb_intern("<")) ? (#2) : (#1);',
-  }
+  }.merge(MkKernel.float_widths("(#3) = isnan(#1) ? (#2) : isnan(#2) ? (#1) : ((#1) < (#2) || ((#1) == (#2) && copysign<f>(1, (#1)) < 0)) ? (#1) : (#2);"))
 
 # NaN-propagate variants.  Float
 # branch tests both operands for NaN and short-circuits to NaN; non-
@@ -9010,17 +9011,15 @@ MkKernel.binop :maximum,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) > (#2) ? (#1) : (#2);",
-    float:  "(#3) = isnan(#1) ? (#1) : isnan(#2) ? (#2) : ((#1) > (#2) || ((#1) == (#2) && !signbit(#1))) ? (#1) : (#2);",
     object: '(#3) = CA_OBJ_ISNAN(#1) ? (#1) : CA_OBJ_ISNAN(#2) ? (#2) : ca_obj_cmp((#2), (#1)) > 0 ? (#2) : (#1);',
-  }
+  }.merge(MkKernel.float_widths("(#3) = isnan(#1) ? (#1) : isnan(#2) ? (#2) : ((#1) > (#2) || ((#1) == (#2) && copysign<f>(1, (#1)) > 0)) ? (#1) : (#2);"))
 
 MkKernel.binop :minimum,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) < (#2) ? (#1) : (#2);",
-    float:  "(#3) = isnan(#1) ? (#1) : isnan(#2) ? (#2) : ((#1) < (#2) || ((#1) == (#2) && signbit(#1))) ? (#1) : (#2);",
     object: '(#3) = CA_OBJ_ISNAN(#1) ? (#1) : CA_OBJ_ISNAN(#2) ? (#2) : ca_obj_cmp((#2), (#1)) < 0 ? (#2) : (#1);',
-  }
+  }.merge(MkKernel.float_widths("(#3) = isnan(#1) ? (#1) : isnan(#2) ? (#2) : ((#1) < (#2) || ((#1) == (#2) && copysign<f>(1, (#1)) < 0)) ? (#1) : (#2);"))
 
 # + and - work on the parts independently, so one generic expression
 # covers every numeric data_type at any width.
