@@ -790,6 +790,7 @@ ca_monop_func_sync (void *ap)
     ca_byte_swap_buffer(ca->data_type, ca->bytes, ca->elements,
                         ca->parent->ptr);
   }
+  ca_view_pass_mask_to_parent(ca);
   ca_sync(ca->parent);
   ca_view_sync_mask_after_parent(ca);
 }

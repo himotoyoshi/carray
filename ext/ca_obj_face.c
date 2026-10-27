@@ -49,6 +49,7 @@ ca_face_sync (void *ap)
 {
   CAView *cav = (CAView *) ap;
   /* alias means no copy-back is needed; parent sync propagates */
+  ca_view_pass_mask_to_parent(cav);
   ca_sync(cav->parent);
   ca_view_sync_mask_after_parent(cav);
 }

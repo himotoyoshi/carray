@@ -54,4 +54,23 @@ class TestConvertingViewUnmaskThroughView < Test::Unit::TestCase
       end
     end
   end
+
+  # Two converters stacked: the outer one's mask reaches the root past the
+  # inner one's mask buffer, and the inner one still sends back the values
+  # written into the cells it had masked.
+  def test_stacked_casts_fill_the_masked_cells
+    VIEWS.each do |vname, view|
+      r = root
+      view.call(r).as_type(:int64).as_type(:float64).map! { 7 }
+      want = root
+      view.call(want).map! { 7 }
+      assert_equal want.to_a, r.to_a, "map! over #{vname}"
+      r = root
+      view.call(r).as_type(:int64).as_type(:float64).unmask(99)
+      assert_equal expected(view, 99), r.to_a, "unmask over #{vname}"
+      r = root
+      view.call(r).swap_bytes.fake(:uint32).swap_bytes.unmask(99)
+      assert_equal expected(view, 99), r.to_a, "swap over fake over #{vname}"
+    end
+  end
 end

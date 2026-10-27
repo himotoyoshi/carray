@@ -301,6 +301,7 @@ int ca_shares_root (void *ap, void *aq);
 
 void    ca_view_func_create_mask (void *ap);
 void    ca_view_sync_mask_after_parent (void *ap);
+void    ca_view_pass_mask_to_parent (void *ap);
 
 /* Running count of the present cells of any data type along axis (Qnil:
    the flattened array), read off the mask alone (carray_mask.c).  The

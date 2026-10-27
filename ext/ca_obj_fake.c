@@ -315,6 +315,7 @@ ca_fake_func_sync (void *ap)
   else {
     ca_cast_block(ca->elements, ca, ca->ptr, ca->parent, ca->parent->ptr);
   }
+  ca_view_pass_mask_to_parent(ca);
   ca_sync(ca->parent);
   ca_view_sync_mask_after_parent(ca);
 }

@@ -432,6 +432,26 @@ ca_view_func_create_mask (void *ap)
    buffer, from before the view's mask was written, back over the root,
    so the view's mask is synced once more. */
 
+/* The sync slot of a view that maps its cells one to one onto its parent's
+   (a fake, a cast, a byte swap, a Face) calls this before syncing its
+   parent.  The view's mask may have been written past the parent's mask
+   buffer, straight to the root (by a view over it), so the parent's
+   buffer can still hold the bits from before.  The parent's own sync
+   decides from that buffer which cells it sends back, so the view's bits
+   are copied into it first. */
+
+void
+ca_view_pass_mask_to_parent (void *ap)
+{
+  CAView *ca = (CAView *) ap;
+  if ( ca->mask != NULL && ca->mask->ptr != NULL
+       && ca->parent->mask != NULL && ca->parent->mask->ptr != NULL
+       && ca->mask->ptr != ca->parent->mask->ptr
+       && ca->elements == ca->parent->elements ) {
+    memmove(ca->parent->mask->ptr, ca->mask->ptr, (size_t) ca->elements);
+  }
+}
+
 void
 ca_view_sync_mask_after_parent (void *ap)
 {
