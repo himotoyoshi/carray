@@ -2574,8 +2574,16 @@ module MkKernel
       expr_macro_defs   = "#define #{p1_macro}(__x) #{p1_expr}\n" \
                           "#define #{p2_macro}(__x) #{p2_expr}\n"
       expr_macro_undefs = "#undef #{p1_macro}\n#undef #{p2_macro}\n"
-      p1_reduce_call = "CA_SLAB_REDUCE_SUM8_EX(#{si[:c]}, #{sum_c}, st, p, m, sum, #{sum_init}, #{p1_macro}, masked_cnt);"
-      p2_reduce_call = "CA_SLAB_REDUCE_SUM8_EX(#{si[:c]}, #{m2_c}, st, p, m, M2, #{m2_init}, #{p2_macro}, __unused_mc);"
+      if %i[i8 u8 i16 u16].include?(src)
+        # Per-cell conversion to double does not vectorize for these widths
+        # (see the CA_SLAB_REDUCE_*_NARROW_EX header comments).
+        q_c = %i[i8 u8].include?(src) ? "int32_t" : "int64_t"
+        p1_reduce_call = "CA_SLAB_REDUCE_SUM8_NARROW_EX(#{si[:c]}, #{sum_c}, st, p, m, sum, #{sum_init}, #{p1_macro}, masked_cnt);"
+        p2_reduce_call = "CA_SLAB_REDUCE_M2_NARROW_EX(#{si[:c]}, #{q_c}, st, p, m, M2, #{m2_init}, mean, #{p2_macro}, __unused_mc);"
+      else
+        p1_reduce_call = "CA_SLAB_REDUCE_SUM8_EX(#{si[:c]}, #{sum_c}, st, p, m, sum, #{sum_init}, #{p1_macro}, masked_cnt);"
+        p2_reduce_call = "CA_SLAB_REDUCE_SUM8_EX(#{si[:c]}, #{m2_c}, st, p, m, M2, #{m2_init}, #{p2_macro}, __unused_mc);"
+      end
     end
 
     io.puts

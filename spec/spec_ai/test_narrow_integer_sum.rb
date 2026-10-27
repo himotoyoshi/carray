@@ -1,8 +1,9 @@
 # spec_ai/test_narrow_integer_sum.rb
 #
 # sum and mean of an 8- or 16-bit integer array add the cells in int32
-# blocks before they meet the float64 accumulator.  The answer is the
-# exact integer sum, across block boundaries, at the type's extremes,
+# blocks before they meet the float64 accumulator, and the variance family
+# adds sum (x - c)^2 around the integer c nearest the mean.  The answers
+# match exact arithmetic across block boundaries, at the type's extremes,
 # with a mask, through a strided view and along an axis.
 
 require "test/unit"
@@ -53,6 +54,53 @@ class TestNarrowIntegerSum < Test::Unit::TestCase
       b = a.reshape(4, 10000)
       assert_equal v.each_slice(10000).map { |row| row.sum.to_f }, b.sum(axis: 1).to_a, "axis 1 type #{type}"
       assert_equal (0...10000).map { |j| (0...4).sum { |i| v[i * 10000 + j] }.to_f }, b.sum(axis: 0).to_a, "axis 0 type #{type}"
+    end
+  end
+
+  def exact_variance (v)
+    n = v.size
+    mean = Rational(v.sum, n)
+    m2 = v.sum { |x| (x - mean) ** 2 }
+    [m2 / (n - 1), m2 / n]
+  end
+
+  def assert_close (want, got, message)
+    if want == 0
+      assert_equal 0.0, got, message
+    else
+      assert_operator ((got - want) / want).abs, :<, 1e-14, message
+    end
+  end
+
+  def test_variance_family_matches_exact_arithmetic
+    RANGES.each do |type, range|
+      [2, 31, 32768, 32769, 70001].each do |n|
+        [values(range, n, n), Array.new(n, range.last),
+         Array.new(n) { |i| i.even? ? range.first : range.last }].each_with_index do |v, kind|
+          a = CArray.new(type, [n]) { v }
+          s, p = exact_variance(v)
+          tag = "type #{type} n=#{n} kind=#{kind}"
+          assert_close s, a.variance, "variance #{tag}"
+          assert_close p, a.variancep, "variancep #{tag}"
+          assert_close Math.sqrt(s), a.stddev, "stddev #{tag}"
+          assert_close Math.sqrt(p), a.stddevp, "stddevp #{tag}"
+        end
+      end
+    end
+  end
+
+  def test_variance_with_mask_and_axis
+    RANGES.each do |type, range|
+      v = values(range, 40000, 11)
+      a = CArray.new(type, [40000]) { v }
+      m = a.copy
+      m[[0, 10000, 4]] = UNDEF
+      kept = v.each_with_index.reject { |_, i| i % 4 == 0 && i < 40000 }.map(&:first)
+      assert_close exact_variance(kept)[0], m.variance, "masked type #{type}"
+      rows = v.each_slice(10000).map { |row| exact_variance(row)[0] }
+      a.reshape(4, 10000).variance(axis: 1).to_a.zip(rows).each do |got, want|
+        assert_close want, got, "axis 1 type #{type}"
+      end
     end
   end
 
