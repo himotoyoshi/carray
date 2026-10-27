@@ -729,8 +729,12 @@ end
 
 [CAView, CArrayMask, CAObjectMask].each do |klass|
   # @return [CArray] the plain array a {#_dump} string describes.
-  klass.define_singleton_method(:_load) do |str|
-    CArray.send(:array_from_marshal_payload, Marshal.load(str))
+  # Defined with def, not define_singleton_method: a block's method keeps
+  # the block's self and cannot be called from another Ractor.
+  klass.singleton_class.class_eval do
+    def _load (str)
+      CArray.send(:array_from_marshal_payload, Marshal.load(str))
+    end
   end
 end
 

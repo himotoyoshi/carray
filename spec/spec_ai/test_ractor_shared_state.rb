@@ -40,6 +40,7 @@ class TestRactorSharedState < Test::Unit::TestCase
       require "carray"
       Warning[:experimental] = false
       require "carray/struct"    # loaded on first use, which only the main Ractor can do
+      require "carray/serialize"
       # autoloaded on first use: a Ractor that triggers one can deadlock (Ruby 3.4)
       [CAFrame, CArray::Fusion, CArray::FuseSource, CAStruct::Builder]
       CArray.expression_evaluator = ->(plan, out) { false } if ENV["CARRAY_TEST_EVALUATOR"]
@@ -50,6 +51,17 @@ class TestRactorSharedState < Test::Unit::TestCase
     st = run_child(src, env)
     assert_not_equal :timeout, st, "child did not finish"
     assert_equal 0, st.exitstatus, "child ended with #{st.inspect}"
+  end
+
+  # A view and a mask load back from Marshal in any Ractor.
+  def test_marshal_load_of_a_view_and_a_mask
+    assert_ractors_agree <<~'BODY'
+      a = CArray.float64(4 + id).seq!(id)
+      a[1] = UNDEF
+      v = Marshal.load(Marshal.dump(a[0..2]))
+      m = Marshal.load(Marshal.dump(a.mask[0..2]))
+      (v.to_a == [id.to_f, UNDEF, id + 2.0] && m.to_a == [false, true, false]) ? 0 : 1
+    BODY
   end
 
   # The sort's comparator gets its strings through its own argument.
