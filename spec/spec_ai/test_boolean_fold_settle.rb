@@ -71,4 +71,23 @@ class TestBooleanFoldSettle < Test::Unit::TestCase
     end
   end
 
+def test_unmasked_leading_axes_match_the_reference
+  r = Random.new(11)
+  [[2048, 300], [3, 700, 90], [5, 4, 1200]].each do |shape|
+    t = CArray.boolean(*shape) { false }
+    20.times { t[*shape.map { |n| r.rand(n) }] = true }
+    f = t.not
+    (0...t.ndim - 1).each do |ax|
+      got_any, got_none, got_all = t.any(axis: ax), t.none(axis: ax), f.all(axis: ax)
+      moved = (0...t.ndim).to_a - [ax] + [ax]
+      flat = t.transpose(*moved).copy.reshape(got_any.elements, shape[ax]).to_a
+      flat.each_with_index do |fiber, i|
+        assert_equal fiber.any?,             got_any[i],  "any(axis: #{ax}) on #{shape}, fiber #{i}"
+        assert_equal fiber.none?,            got_none[i], "none(axis: #{ax}) on #{shape}, fiber #{i}"
+        assert_equal fiber.none?,            got_all[i],  "all(axis: #{ax}) of the negation on #{shape}, fiber #{i}"
+      end
+    end
+  end
+end
+
 end
