@@ -110,7 +110,10 @@ class CArray
       return weights
     end
     if weights.scalar?
-      return weights[0]
+      w = weights[0]
+      # A boolean cell reads as true / false; as a weight it is 1 / 0.
+      w = (w ? 1 : 0) if weights.data_type == CA_BOOLEAN && !UNDEF.equal?(w)
+      return w
     end
     if weights.shape == self.shape
       return weights

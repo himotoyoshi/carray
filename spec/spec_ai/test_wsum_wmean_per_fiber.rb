@@ -56,6 +56,21 @@ class TestWsumWmeanPerFiber < Test::Unit::TestCase
     assert_in_delta(30.0, a.wsum(cs), 1e-12)
   end
 
+  # A boolean CScalar weighs 1 when true and 0 when false, as a boolean
+  # array of weights does; a masked one weighs no cell.
+  def test_W_A1_boolean_cscalar
+    t = CScalar.boolean; t[0] = true
+    f = CScalar.boolean; f[0] = false
+    u = CScalar.boolean; u[0] = UNDEF
+    a = CArray.float64(4).seq!
+    assert_equal [6.0, 1.5, 0.0], [a.wsum(t), a.wmean(t), a.wsum(f)]
+    assert_equal UNDEF, a.wmean(f)
+    assert_equal [0.0, UNDEF], [a.wsum(u), a.wmean(u)]
+    o = CArray.object(4).seq!
+    assert_equal [6, 0], [o.wsum(t), o.wsum(f)]
+    assert_equal UNDEF, o.wmean(f)
+  end
+
   # An array with a single element is not a scalar: it is held to the shapes,
   # as an operand of an operator is.
   def test_W_A1_single_element_carray

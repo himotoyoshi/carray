@@ -3676,7 +3676,12 @@ module MkKernel
       io.puts "    CArray *cv_pre_;"
       io.puts "    GetCArray(rweights, cv_pre_);"
       io.puts "    if ( ca_is_scalar(cv_pre_) ) {"
+      io.puts "      int8_t wtype_ = cv_pre_->data_type;"
       io.puts "      rweights = rb_funcall(rweights, rb_intern(\"[]\"), 1, INT2NUM(0));"
+      # A boolean cell reads as true / false; as a weight it is 1 / 0.
+      io.puts "      if ( wtype_ == CA_BOOLEAN && rweights != CA_UNDEF ) {"
+      io.puts "        rweights = INT2FIX(RTEST(rweights) ? 1 : 0);"
+      io.puts "      }"
       io.puts "    }"
       io.puts "  }"
       # The weights are attached from here to the end of the call, so they
