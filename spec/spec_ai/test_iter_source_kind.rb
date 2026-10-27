@@ -159,6 +159,36 @@ class TestIterSourceKindRegistration < Test::Unit::TestCase
     assert_equal 6, view.max
   end
 
+  # carray's own types are classified from their operation tables, so a
+  # registration for one is refused instead of moving every array of that
+  # type onto the transfer walk.
+  def test_carrays_own_types_cannot_be_registered
+    grid = CArray.int32(5).seq![CA_INT64([0, 2, 4])]
+    err = assert_raise(ArgumentError) do
+      CAIterOffset.register(grid.obj_type, CA_ITER_SRC_ATTACH)
+    end
+    assert_match(/carray's own/, err.message)
+    assert_equal 6, grid.sum
+  end
+
+  # The transfer-only walk of a development build (CARRAY_GENERAL_PATH=2)
+  # reaches what the default classifier reaches, a registered view with no
+  # attach slot included.
+  def test_the_transfer_walk_reaches_a_registered_view_without_attach
+    omit "development build only" unless CArray.respond_to?(:__attached_views__)
+    require "rbconfig"
+    require "open3"
+    ext = File.expand_path("../../ext", __dir__)
+    lib = File.expand_path("../../lib", __dir__)
+    fixture = File.expand_path("ext_iter_source_kind", __dir__)
+    code = "require 'carray'; require 'iter_source_kind'; " \
+           "v = CAIterOffsetNoAttach.wrap(CArray.int32(3, 4).seq!, 100); " \
+           "p [v.sum, v.median(axis: 1).to_a]"
+    out, err, = Open3.capture3({ "CARRAY_GENERAL_PATH" => "2" }, RbConfig.ruby,
+                               "-I#{ext}", "-I#{lib}", "-I#{fixture}", "-e", code)
+    assert_equal "[1266.0, [101.5, 105.5, 109.5]]\n", out, err
+  end
+
   # A registered view with no attach slot is reached through its transfer
   # slots.  A CAStack of such views takes no shortcut that attaches its
   # parents: every axis of every stack layout answers as its copy does.

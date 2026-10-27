@@ -29,6 +29,10 @@ const rb_data_type_t *ca_mask_typeddata[CA_OBJ_TYPE_MAX];
 ca_operation_function_t ca_func[CA_OBJ_TYPE_MAX];
 int ca_obj_num = 0;
 
+/* The number of obj_types carray installs for itself, set once
+   Init_carray_ext has installed them all; 0 until then. */
+int ca_obj_num_builtin = 0;
+
 /* 
    definition of validity of each data_type [1 for valid, 0 for invalid]
 

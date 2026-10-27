@@ -14,6 +14,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 #include "carray_build_flags.h"
 #include "version.h"
 
@@ -394,5 +395,7 @@ Init_carray_ext (void)
   Init_carray_slab();
 
   Init_carray_address_basis();
+
+  ca_obj_num_builtin = ca_obj_num;
 }
 

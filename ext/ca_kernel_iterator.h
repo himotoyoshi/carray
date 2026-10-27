@@ -235,14 +235,16 @@ typedef enum {
    one whose contract an external class can meet on its own: the engine
    reads the cells with ca_xfer_all GET and, on a WRITE walk, sends back
    the changed cells with ca_xfer_addrs, so the view's transfer slots
-   are all it needs -- the slots every view already implements.  The view's attach / sync slots
+   are all the iterator needs -- the slots every view already implements.  The view's attach / sync slots
    are not called.  The other kinds are not open to registration: SRC_CASTRIDE
    asserts the struct *is* a CAStride (the engine reads its strides
    directly, and a class that really is one is already classified by its
    inherited operation table), and SRC_DESCRIPTOR requires a
    describe_axes function the engine looks up in its own table, which an
    external type has no way to supply.  Passing anything else raises
-   rather than accepting a routing the iterator cannot honour.
+   rather than accepting a routing the iterator cannot honour.  An
+   obj_type carray installs for itself is refused too: its routing comes
+   from its operation table.
 
    Registering is additive and does not override the two structural
    cases: the classifier still decides entity and CAStride-family sources

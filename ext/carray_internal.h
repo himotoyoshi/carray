@@ -853,6 +853,9 @@ ca_obj_equal (VALUE a, VALUE b)
 
 ---------------------------------------------------------------------------- */
 
+/* The number of obj_types carray installs for itself (carray_core.c). */
+extern int ca_obj_num_builtin;
+
 /* Each fast path has a name, so that a development build can switch it off
    alone: CARRAY_SHORTCUTS_OFF=stack,stack_outer_k in the environment turns
    off the ones named, CARRAY_GENERAL_PATH=1 all of them.  A fast path tests

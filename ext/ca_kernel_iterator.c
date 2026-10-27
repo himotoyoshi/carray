@@ -187,6 +187,14 @@ ca_iter_register_source_kind (int obj_type, uint8_t kind)
              "ca_iter_register_source_kind: obj_type %d out of range",
              obj_type);
   }
+  /* carray's own types are classified from their operation tables; a
+     registration would only move one of them onto the transfer walk, for
+     every array in the process. */
+  if ( obj_type < ca_obj_num_builtin ) {
+    rb_raise(rb_eArgError,
+             "ca_iter_register_source_kind: obj_type %d is one of carray's "
+             "own", obj_type);
+  }
   if ( kind != CA_ITER_SRC_ATTACH ) {
     rb_raise(rb_eArgError,
              "ca_iter_register_source_kind: only CA_ITER_SRC_ATTACH (%d) "
@@ -209,8 +217,10 @@ ca_iter_classify_source (CArray *src)
      transfer walk (see ki_open_by_transfer), the reference the other
      routes are checked against. */
   if ( ca_iter_by_transfer_only() ) {
-    return ca_func[src->obj_type].attach != NULL ? CA_ITER_SRC_ATTACH
-                                                 : CA_ITER_SRC_NONE;
+    return ( ca_func[src->obj_type].attach != NULL
+             || ca_iter_registered_source_kind[src->obj_type]
+                == CA_ITER_SRC_ATTACH ) ? CA_ITER_SRC_ATTACH
+                                        : CA_ITER_SRC_NONE;
   }
 
   if ( ca_is_entity(src) )                return CA_ITER_SRC_CASTRIDE;
