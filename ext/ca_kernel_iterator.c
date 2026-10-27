@@ -466,16 +466,6 @@ ca_iter_should_per_fiber_fused (CArray   *src,
     }
   }
 
-  /* The one caller passes CA_ITER_SRC_ATTACH, so this SRC_DESCRIPTOR
-     branch is not reached: a CAWindow / CAShift is read by the
-     descriptor routes (KI_L2_PER_SLAB / KI_L2_DESC_WHOLE /
-     KI_L2_DESC_STRIDED), not fiber by fiber. */
-  if ( src_kind == CA_ITER_SRC_DESCRIPTOR ) {
-    if ( attach == ca_window_func.attach ) {
-      return 1;
-    }
-  }
-
   /* Not taken by the other views, each measured slower fiber by fiber:
      CASelectAxis / CAGrid / CASelect (1.25-4.7x), whose descriptor
      engine already gathers the whole view in one batched pass and has no
@@ -2019,10 +2009,7 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
     }
 
     /* Build fiber region: fiber_axis spans the full fiber, all other
-       axes pinned to outer_idx position (count=1).  starts[] is also
-       recorded in fiber_region_starts (captured before the outer_idx
-       advance below), which only the PER_FIBER_FUSED block of sync_slab
-       reads. */
+       axes pinned to outer_idx position (count=1). */
     {
       int8_t op = 0;
       for ( int8_t k = 0; k < nd; k++ ) {
@@ -2034,7 +2021,6 @@ ca_iter_state_next_slab_axes_unprotected (ca_iter_state *st,
           counts[k] = 1;
           op++;
         }
-        st->fiber_region_starts[k] = starts[k];
       }
     }
 
@@ -2162,28 +2148,6 @@ ca_iter_state_sync_slab_unprotected (ca_iter_state *st)
    * If lookahead / batching is needed, allocate one scratch per fiber
    * instead of reusing -- separate phase, separate design.
    * ====================================================================== */
-
-  /* PER_FIBER_FUSED: not reached by the current routes, which take
-     PER_FIBER_FUSED for read walks only (ca_iter_should_per_fiber_fused
-     returns 0 under CA_KERNEL_WRITE) and return at the top of this
-     function on a read.  The block puts the fiber in fiber_data_scratch
-     back over the region recorded in fiber_region_starts with
-     ca_xfer_stride PUT.  That would send every cell of the fiber, not
-     only the changed ones, which a conversion view does not round-trip
-     (promise 3). */
-  if ( st->alias_mode == CA_ITER_ALIAS_PER_FIBER_FUSED ) {
-    ca_size_t fiber_n = st->slab_dims[0];
-    int8_t    nd      = st->ndim;
-    ca_size_t counts[CA_RANK_MAX];
-    for ( int8_t k = 0; k < nd; k++ ) {
-      counts[k] = (k == st->fiber_axis) ? fiber_n : 1;
-    }
-    ca_xfer_stride(st->src, st->fiber_region_starts, counts,
-                   st->fiber_native_strides,
-                   st->fiber_data_scratch, CA_XFER_PUT);
-    st->write_dirty = 0;
-    return;
-  }
 
   /* Per-fiber gather path scatter.
      When next_slab_axes gathered the fiber into fiber_data_scratch

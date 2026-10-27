@@ -420,10 +420,8 @@ typedef struct {
      over src->dim used in ca_xfer_stride strides[] argument. */
   int8_t            fiber_axis;
   ca_size_t         fiber_native_strides[CA_RANK_MAX];
-  /* fiber_region_starts[]: the starts of the fiber region fetched last,
-     recorded by next_slab_axes before the outer_idx advance.  Only the
-     PER_FIBER_FUSED block of sync_slab reads it, and PER_FIBER_FUSED is
-     taken by read walks only, so no walk reaches that block. */
+  /* fiber_region_starts[]: not used; kept so the fields after it stay
+     where ext gems built against this header expect them. */
   ca_size_t         fiber_region_starts[CA_RANK_MAX];
 
   /* --- CAStack read from its parents (STACK / STACK_OUTER_K) --- */
