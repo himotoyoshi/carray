@@ -1010,8 +1010,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    The INOUT forms cover input + output.  These cover input + input, which
    is what a routine taking two vectors of the same length wants -- a
    correlation, a dot product, a distance.  Neither state gets
-   CA_KERNEL_WRITE, and `flags` must not carry it: use the INOUT forms to
-   write.
+   CA_KERNEL_WRITE, and `flags` must not carry it (it is refused with
+   CA_ITER_ERR_FLAGS): use the INOUT forms to write.
 
    Both fibers are contig-delivered, so the pair may be handed straight to
    a C routine that walks it itself.  The MASKED form yields BOTH mask
@@ -1027,6 +1027,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
 #define CA_FOR_EACH_FIBER_PAIR(st_a, st_b, ca_a, ca_b, axis,                  \
                                flags, p_a, p_b, n)                            \
   for ( int __cffp_init = (                                                   \
+            ca_iter_check_init(((flags) & CA_KERNEL_WRITE)                    \
+                               ? CA_ITER_ERR_FLAGS : CA_ITER_OK),             \
             ca_iter_check_same_shape((ca_a), (ca_b)),                         \
             ca_iter_check_init(                                               \
               ca_iter_state_init_l2(&(st_a), (ca_a), CA_SLAB_AXES,            \
@@ -1051,6 +1053,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
 #define CA_FOR_EACH_FIBER_PAIR_MASKED(st_a, st_b, ca_a, ca_b, axis,           \
                                       flags, p_a, p_b, n, m_a, m_b)           \
   for ( int __cffpm_init = (                                                  \
+            ca_iter_check_init(((flags) & CA_KERNEL_WRITE)                    \
+                               ? CA_ITER_ERR_FLAGS : CA_ITER_OK),             \
             ca_iter_check_same_shape((ca_a), (ca_b)),                         \
             ca_iter_check_init(                                               \
               ca_iter_state_init_l2(&(st_a), (ca_a), CA_SLAB_AXES,            \

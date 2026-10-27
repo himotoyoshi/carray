@@ -162,6 +162,31 @@ ip_dot_raw (VALUE klass, VALUE va, VALUE vb, VALUE vaxis)
   return vout;
 }
 
+/* Opens a pair with CA_KERNEL_WRITE, which the macro refuses before
+   either walk is opened. */
+static VALUE
+ip_write_pair (VALUE klass, VALUE va, VALUE vb, VALUE vaxis)
+{
+  CArray *ca, *cb;
+  int     axis = NUM2INT(vaxis);
+
+  (void) klass;
+  TypedData_Get_Struct(va, CArray, &carray_data_type, ca);
+  TypedData_Get_Struct(vb, CArray, &carray_data_type, cb);
+  {
+    ca_iter_state sa, sb;
+    char       *pa, *pb;
+    ca_size_t   n;
+
+    CA_FOR_EACH_FIBER_PAIR(sa, sb, ca, cb, (int8_t) axis,
+                           CA_KERNEL_WRITE, pa, pb, n) {
+      ((double *) pa)[0] = (double) n;
+      ((double *) pb)[0] = (double) n;
+    }
+  }
+  return Qnil;
+}
+
 void
 Init_iter_pair (void)
 {
@@ -169,4 +194,5 @@ Init_iter_pair (void)
   rb_define_module_function(mod, "dot",        ip_dot,        3);
   rb_define_module_function(mod, "dot_masked", ip_dot_masked, 3);
   rb_define_module_function(mod, "dot_raw",    ip_dot_raw,    3);
+  rb_define_module_function(mod, "write_pair", ip_write_pair, 3);
 }
