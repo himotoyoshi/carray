@@ -10,6 +10,7 @@
 #include "carray.h"
 #include "carray_internal.h"   /* ca_lazy_arena_enter / _exit */
 #include "ca_iter_substrate.h"
+#include "ca_obj_face.h"
 #include <stdarg.h>
 
 /* definition of ca_endian */
@@ -1077,6 +1078,20 @@ ca_register_cell_moving_view (int8_t obj_type)
   ca_obj_moves_cells[(uint8_t) obj_type] = 1;
 }
 
+/* Whether the transfers of a Face are the forwarders of ca_obj_face.c, which
+   hand the request to the parent unchanged.  A Face with transfer slots of
+   its own (one defined in Ruby on CAObject, or by an extension) may run Ruby
+   and answers no. */
+static int
+ca_face_forwards_transfers (CArray *ca)
+{
+  ca_operation_function_t *f = &ca_func[ca->obj_type];
+  return f->xfer_index  == ca_face_xfer_index  &&
+         f->xfer_addrs  == ca_face_xfer_addrs  &&
+         f->xfer_stride == ca_face_xfer_stride &&
+         f->xfer_all    == ca_face_xfer_all;
+}
+
 /* Whether a transfer of ca reaches entities through cell-moving views only:
    then it calls no Ruby on the way.  An unknown view, one that computes its
    cells (CAObject, a lazy expression) or converts them, answers no. */
@@ -1101,8 +1116,9 @@ ca_transfer_calls_no_ruby (CArray *ca, int depth)
       }
       return 1;
     }
-    if ( ca_is_face(ca) ||
-         ! ( ca_is_stride_family(ca) || ca_obj_moves_cells[(uint8_t) ca->obj_type] ) ) {
+    if ( ca_is_face(ca) ? ! ca_face_forwards_transfers(ca)
+                        : ! ( ca_is_stride_family(ca) ||
+                              ca_obj_moves_cells[(uint8_t) ca->obj_type] ) ) {
       return 0;
     }
     ca = ((CAView *) ca)->parent;

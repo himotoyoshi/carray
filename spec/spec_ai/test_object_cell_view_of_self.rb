@@ -85,6 +85,19 @@ class TestObjectCellViewOfSelf < Test::Unit::TestCase
     end
   end
 
+  # A Face over object cells hands its transfers to its parent unchanged and
+  # is not recorded either; a cell that holds the Face is refused when read.
+  def test_a_string_face_held_in_a_cell_of_its_storage_is_refused_when_read
+    o = CA_OBJECT(%w[a b c])
+    s = CArray.string(o)
+    o[0..0] = [s]
+    %i[to_a upcase str_len].each do |m|
+      e = assert_raise(ArgumentError, m.to_s) { s.send(m) }
+      assert_match(/cyclic/, e.message, m.to_s)
+    end
+    assert_equal %w[b c], s[1..2].to_a
+  end
+
   # Arrays that share cells but hold no view of themselves compute as usual.
   def test_views_of_the_same_array_as_operands
     o = CA_OBJECT([1, 2, 3, 4]).reshape(2, 2).copy
