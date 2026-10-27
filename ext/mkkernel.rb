@@ -1078,11 +1078,14 @@ module MkKernel
   # => ...` form).
   #
   # `bind:` defaults to true (= register CArray#<name> + CArray#<name>!).
+  # `bang: false` leaves CArray#<name>! unregistered too, for a method whose
+  # Ruby surface is defined by hand on top of the generated rb_ca_<name> and
+  # rb_ca_<name>_bang.
   # `op:` defaults to name (= the public method name; some mkmath ops
   # use a different operator name from the kernel suffix, e.g. operator
   # methods).
-  def self.monop(name, source:, expr:, op: nil, bind: true, cmath: true,
-                 widening: nil, output: :preserve)
+  def self.monop(name, source:, expr:, op: nil, bind: true, bang: true,
+                 cmath: true, widening: nil, output: :preserve)
     op ||= name
     # widening = true => emit wrapper that auto-casts integer input to
     # CA_FLOAT64 (= mkmath monfunc behavior).  Default: auto-detect based
@@ -1105,6 +1108,7 @@ module MkKernel
       source:   source,
       expr:     expr,
       bind:     bind,
+      bang:     bang,
       cmath:    cmath,
       widening: widening,
       output:   output,
@@ -1116,8 +1120,10 @@ module MkKernel
   # of integer input to f64 is decided by `monop`'s widening auto-detect
   # based on whether `source:` includes integer data_types — matching mkmath's
   # rule "if no INT_TYPES key, auto-cast; otherwise rely on integer kernel".
-  def self.monfunc(name, source:, expr:, op: nil, bind: true, cmath: true)
-    monop(name, source: source, expr: expr, op: op, bind: bind, cmath: cmath)
+  def self.monfunc(name, source:, expr:, op: nil, bind: true, bang: true,
+                   cmath: true)
+    monop(name, source: source, expr: expr, op: op, bind: bind, bang: bang,
+          cmath: cmath)
   end
 
   # Register an alias of an existing monop method under a different
@@ -6962,7 +6968,7 @@ module MkKernel
       # surface) + optional CAMath module function, NOT as `<name>_ki`.
       if k[:kind] == :monop
         io.puts %Q[  rb_define_method(rb_cCArray, "#{k[:op]}", rb_ca_#{k[:name]}, 0);] if k[:bind]
-        io.puts %Q[  rb_define_method(rb_cCArray, "#{k[:name]}!", rb_ca_#{k[:name]}_bang, 0);]
+        io.puts %Q[  rb_define_method(rb_cCArray, "#{k[:name]}!", rb_ca_#{k[:name]}_bang, 0);] if k[:bang]
         io.puts %Q[  rb_define_module_function(rb_mCAMath, "#{k[:name]}", rb_cmath_#{k[:name]}, 1);] if k[:cmath]
         return
       end
@@ -8870,7 +8876,11 @@ MkKernel.monfunc :floor,
     object: '(#2) = rb_funcall((#1), rb_intern("floor"), 0);',
   }
 
+# round: the Ruby methods `round(ndigits)` / `round!(ndigits)` are defined in
+# carray_round.c on top of this kernel, so none is registered here.
 MkKernel.monfunc :round,
+  bind: false,
+  bang: false,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#2) = (#1);",
