@@ -89,6 +89,40 @@ class TestNarrowIntegerSum < Test::Unit::TestCase
     end
   end
 
+  # A few distinct values at the top or bottom of the range give a mean far
+  # from zero that is not an integer, where its rounding error would show
+  # if it entered the answer to the first order.
+  def test_variance_of_a_small_spread_at_the_edge_of_the_range
+    a = CArray.uint16(7)
+    a[] = [65534, 65534, 65535, 65535, 65535, 65535, 65535]
+    assert_close Rational(5, 21), a.variance, "uint16 7 cells"
+    RANGES.each do |type, range|
+      [range.first, range.last].each do |edge|
+        [7, 1001, 40001].each do |n|
+          r = Random.new(n)
+          v = Array.new(n) { (edge + r.rand(-2..2)).clamp(range) }
+          a = CArray.new(type, [n]) { v }
+          s, p = exact_variance(v)
+          tag = "type #{type} edge=#{edge} n=#{n}"
+          assert_close s, a.variance, "variance #{tag}"
+          assert_close p, a.variancep, "variancep #{tag}"
+        end
+      end
+    end
+  end
+
+  # Contiguous rows of a block reduced together share the block's mean.
+  def test_variance_of_contiguous_rows_reduced_together
+    RANGES.each do |type, range|
+      v = values(range, 3 * 5000, 13).map { |x| (x / 4) + range.last / 2 }
+      v = v.map { |x| x.clamp(range) }
+      a = CArray.new(type, [3, 5001]) { 0 }
+      a[nil, 0...5000] = CArray.new(type, [3, 5000]) { v }
+      s, = exact_variance(v)
+      assert_close s, a[nil, 0...5000].variance, "type #{type}"
+    end
+  end
+
   def test_variance_with_mask_and_axis
     RANGES.each do |type, range|
       v = values(range, 40000, 11)

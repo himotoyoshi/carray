@@ -49,14 +49,15 @@
         v, r, w, acc, idx, first
 
     INTERNAL (free to refactor across 3.x — engine implementation):
-      - the state-machine functions' bodies + init_l1 / next_slab /
-        ca_iter_can_alias
+      - the state-machine functions' bodies + ca_iter_can_alias
       - the macros only the kernel generator (ext/mkkernel.rb) emits:
         CA_SLAB_REDUCE_SUM8_EX / MIN8_EX / MAX8_EX / STAR8_EX (8-way
         accumulator split; they take EXPR(x) rather than exposing v and
         idx), CA_SLAB_REDUCE_T_MIN_EX / _MAX_EX / _STAR_EX (what it emits
         when a :min / :max / :prod kernel does not take the 8-way form),
-        CA_SLAB_SCAN_T_GATED, and CA_SLAB_REDUCE_T_VAR_EX (no caller)
+        CA_SLAB_REDUCE_SUM8_NARROW_EX / M2_NARROW_EX (8- and 16-bit
+        integer sum and centred sum of squares), CA_SLAB_SCAN_T_GATED,
+        and CA_SLAB_REDUCE_T_VAR_EX (no caller)
       - alias_mode / src_kind routing (CA_ITER_ALIAS_* / CA_ITER_SRC_* /
         CA_KERNEL_FIBER_CONTIG / CA_SLAB_FREE)
       - every ca_iter_state field NOT marked frozen (scratch / stack /
@@ -1660,13 +1661,16 @@ ca_slab_is_flat (const ca_iter_state *st, const ca_size_t *strides,
  *   The centred sum of squares, sum (x - MEAN)^2, of an 8- or 16-bit
  *   integer source (the second pass of variance and stddev).  Converting
  *   each cell to double does not vectorize for these widths, so the
- *   contig run is centred on the integer c nearest MEAN and
- *   sum (x - c)^2 is added in Q_T over blocks of 32768 cells; then
- *   sum (x - MEAN)^2 = sum (x - c)^2 - n (MEAN - c)^2, where
- *   |MEAN - c| <= 1/2.  Q_T is int32_t for 8-bit cells (a block is at
- *   most 32768 * 255^2 < 2^31) and int64_t for 16-bit cells.  The block
- *   sums are exact.  The masked and non-contig branches add EXPR(x) per
- *   cell as CA_SLAB_REDUCE_SUM8_EX does, with ACC_T double.
+ *   contig run is centred on the integer c nearest MEAN (held within the
+ *   8- and 16-bit range), and D = sum (x - c) and sum (x - c)^2 are added
+ *   in integers over blocks of 32768 cells; then
+ *   sum (x - MEAN)^2 = sum (x - c)^2 - 2 (MEAN - c) D + n (MEAN - c)^2.
+ *   The identity holds for any MEAN, and when MEAN is the mean of the
+ *   cells its rounding error enters only squared.  Q_T is int32_t for
+ *   8-bit cells (a block is at most 32768 * 255^2 < 2^31) and int64_t for
+ *   16-bit cells.  The block sums are exact.  The masked and non-contig
+ *   branches add EXPR(x) per cell as CA_SLAB_REDUCE_SUM8_EX does; acc is
+ *   double.
  */
 #define CA_SLAB_REDUCE_M2_NARROW_EX(T, Q_T, st, p, m, acc, INIT, MEAN, EXPR, masked_cnt) do { \
     typedef T __ca_u_T CA_UNALIGNED;                                         \
@@ -1698,20 +1702,28 @@ ca_slab_is_flat (const ca_iter_state *st, const ca_size_t *strides,
       if ( (m) == NULL ) {                                                   \
         if ( __srContig ) {                                                  \
           const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                \
-          int32_t __sc  = (int32_t) lrint(MEAN);                             \
-          double  __sdm = (MEAN) - (double) __sc;                            \
+          double  __scm = (MEAN);                                            \
+          int32_t __sc  = ( __scm > 65535.0 ) ? 65535                        \
+                        : ( __scm < -32768.0 ) ? -32768                      \
+                        : (int32_t) lrint(__scm);                            \
+          double  __sdm = __scm - (double) __sc;                             \
+          int64_t __sdt = 0;                                                 \
           for ( ca_size_t __sb = 0; __sb < __srInnerN; __sb += 32768 ) {     \
             ca_size_t __se = ( __srInnerN - __sb < 32768 )                   \
                              ? __srInnerN : __sb + 32768;                    \
-            Q_T __sq = 0;                                                    \
+            Q_T     __sq = 0;                                                \
+            int32_t __sl = 0;                                                \
             for ( ca_size_t __sj = __sb; __sj < __se; __sj++ ) {             \
               int32_t __sd = (int32_t) __srSrc[__sj] - __sc;                 \
+              __sl += __sd;                                                  \
               __sq += (Q_T) __sd * __sd;                                     \
             }                                                                \
+            __sdt += __sl;                                                   \
             (acc) += (double) __sq;                                          \
           }                                                                  \
           if ( __srInnerN > 0 )                                              \
-            (acc) -= (double) __srInnerN * __sdm * __sdm;                    \
+            (acc) += __sdm * ( (double) __srInnerN * __sdm                   \
+                               - 2.0 * (double) __sdt );                     \
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                   \
