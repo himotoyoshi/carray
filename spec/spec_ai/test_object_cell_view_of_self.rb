@@ -60,6 +60,31 @@ class TestObjectCellViewOfSelf < Test::Unit::TestCase
     assert_equal [], bad
   end
 
+  # A read through views that only move cells is not recorded, and a cell
+  # that holds the view read is still refused, for each such view.
+  def test_a_view_held_in_a_cell_of_its_own_array_is_refused_when_read
+    views = {
+      "grid"   => ->(o) { o[CA_INT64([1, 0, 2])] },
+      "select" => ->(o) { o[CA_BOOLEAN([1, 1, 1])] },
+      "window" => ->(o) { o.window(0..2) },
+      "shift"  => ->(o) { o.shift(1, fill_value: 0) },
+      "tile"   => ->(o) { o.tile(2) },
+      "roll"   => ->(o) { o.roll(1) },
+      "stack"  => ->(o) { CArray.stack([o, o]) },
+      "meld"   => ->(o) { CArray.meld(o, o) },
+      "remap"  => ->(o) { o.sort },
+    }
+    views.each do |name, make|
+      o = CA_OBJECT([1, 2, 3])
+      v = make.(o)
+      o[0..0] = [v]
+      %i[to_a sum].each do |m|
+        e = assert_raise(ArgumentError, "#{name} #{m}") { v.send(m) }
+        assert_match(/cyclic/, e.message, "#{name} #{m}")
+      end
+    end
+  end
+
   # Arrays that share cells but hold no view of themselves compute as usual.
   def test_views_of_the_same_array_as_operands
     o = CA_OBJECT([1, 2, 3, 4]).reshape(2, 2).copy

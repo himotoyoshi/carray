@@ -1388,6 +1388,7 @@ Init_ca_obj_meld (void)
                                     &cameld_data_type,
                                     rb_cCAMeldMask,
                                     &cameld_mask_data_type, &ca_meld_func, sizeof(ca_meld_func));
+  ca_register_cell_moving_view(CA_OBJ_MELD);
   rb_define_const(rb_cObject, "CA_OBJ_MELD", INT2NUM(CA_OBJ_MELD));
 
   id_parents = rb_intern("parents");

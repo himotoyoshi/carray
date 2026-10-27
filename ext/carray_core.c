@@ -1069,17 +1069,62 @@ ca_reading_step (VALUE key, VALUE varg, int recursive)
   return r->body(r->arg);
 }
 
+static char ca_obj_moves_cells[CA_OBJ_TYPE_MAX];
+
+void
+ca_register_cell_moving_view (int8_t obj_type)
+{
+  ca_obj_moves_cells[(uint8_t) obj_type] = 1;
+}
+
+/* Whether a transfer of ca reaches entities through cell-moving views only:
+   then it calls no Ruby on the way.  An unknown view, one that computes its
+   cells (CAObject, a lazy expression) or converts them, answers no. */
+static int
+ca_transfer_calls_no_ruby (CArray *ca, int depth)
+{
+  while ( ! ca_is_entity(ca) ) {
+    if ( depth++ > 64 ) {
+      return 0;
+    }
+    if ( ca_test_flag(ca, CA_FLAG_MULTI_PARENTS) ) {
+      CAMultiParent *mp = (CAMultiParent *) ca;
+      int32_t k;
+      if ( ! ca_obj_moves_cells[(uint8_t) ca->obj_type] ) {
+        return 0;
+      }
+      for ( k = 0; k < mp->n_parents; k++ ) {
+        if ( ! mp->parents[k] ||
+             ! ca_transfer_calls_no_ruby(mp->parents[k], depth) ) {
+          return 0;
+        }
+      }
+      return 1;
+    }
+    if ( ca_is_face(ca) ||
+         ! ( ca_is_stride_family(ca) || ca_obj_moves_cells[(uint8_t) ca->obj_type] ) ) {
+      return 0;
+    }
+    ca = ((CAView *) ca)->parent;
+    if ( ! ca ) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 /* Runs body(arg) -- one transfer of an object cell or cells -- with ca
    recorded as being read.  Entering a transfer of ca again from inside it
-   is refused as cyclic.  A transfer of an entity only copies VALUEs and
-   calls no Ruby, so it cannot be entered again; it is not recorded, and
-   a cell holding the entity itself is caught by ca_test_cyclic_check. */
+   is refused as cyclic.  A transfer of an entity, or of views that only move
+   cells down to entities, copies VALUEs and calls no Ruby, so it cannot be
+   entered again; it is not recorded, and a cell holding the array itself is
+   caught by ca_test_cyclic_check. */
 static void
 ca_with_cyclic_check (CArray *ca, int dir, VALUE (*body)(VALUE), VALUE arg)
 {
   ca_reading_t r;
   (void) dir;
-  if ( ca_is_entity(ca) ) {
+  if ( ca_transfer_calls_no_ruby(ca, 0) ) {
     body(arg);
     return;
   }

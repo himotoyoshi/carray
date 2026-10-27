@@ -584,6 +584,7 @@ Init_ca_obj_remap (void)
                                      rb_cCARemapMask,
                                      &caremap_mask_data_type,
                                      &ca_remap_func, sizeof(ca_remap_func));
+  ca_register_cell_moving_view(CA_OBJ_REMAP);
 
   /* Defining semantic state accessor — companion to CABlock#start /
      CAStride#strides / CAWindow#count.  The hierarchy-preserving

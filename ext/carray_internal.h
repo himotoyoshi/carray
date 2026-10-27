@@ -483,6 +483,11 @@ VALUE ca_computing_run_nodes (int n, CArray **ops, VALUE (*body)(VALUE), VALUE a
    lazy node being evaluated: computing it would come back into the node. */
 void  ca_refuse_cells_reaching_evaluation (ca_size_t n, const VALUE *cells);
 
+/* Registers a view type whose transfers only move cells between its parents
+   and the caller (an index view: CAGrid, CASelect, CAWindow, CAStack, ...),
+   calling no Ruby.  A transfer through such views down to entities cannot
+   come back into an array, and is not recorded (ca_with_cyclic_check). */
+void ca_register_cell_moving_view (int8_t obj_type);
 VALUE ca_iter_ensure_computing (CArray *ca, int32_t n, ca_iter_state *states,
                                 VALUE (*body)(VALUE), VALUE arg);
 

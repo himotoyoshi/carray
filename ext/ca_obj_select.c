@@ -670,6 +670,7 @@ rb_cm_initialize_copy (VALUE self, VALUE other)
 void
 Init_ca_obj_select (void)
 {
+  ca_register_cell_moving_view(CA_OBJ_SELECT);
   /* rb_cCASelect and CA_OBJ_SELECT are defined in ruby_carray.c;
      this file only registers the constant + allocator. */
   rb_define_const(rb_cObject, "CA_OBJ_SELECT", INT2NUM(CA_OBJ_SELECT));
