@@ -217,10 +217,8 @@ ca_iter_classify_source (CArray *src)
      transfer walk (see ki_open_by_transfer), the reference the other
      routes are checked against. */
   if ( ca_iter_by_transfer_only() ) {
-    return ( ca_func[src->obj_type].attach != NULL
-             || ca_iter_registered_source_kind[src->obj_type]
-                == CA_ITER_SRC_ATTACH ) ? CA_ITER_SRC_ATTACH
-                                        : CA_ITER_SRC_NONE;
+    return ca_func[src->obj_type].attach != NULL ? CA_ITER_SRC_ATTACH
+                                                 : CA_ITER_SRC_NONE;
   }
 
   if ( ca_is_entity(src) )                return CA_ITER_SRC_CASTRIDE;
@@ -1122,14 +1120,13 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
        Why         measured switched off alone (CARRAY_SHORTCUTS_OFF) on an
                    M2 Max / a Xeon 6369P, 2026-10-26: 1.2x / 1.3x on a mean
                    along the stack axis of 4 parents of 500x2000.
-       Enters      a CAStack whose parents all have an attach slot, no
-                   mask, a read walk, one slab axis that is k_axis.
+       Enters      a CAStack, no mask, a read walk, one slab axis that is
+                   k_axis.
        Promises    1 (the slab is contiguous), 6 (no mask exists to touch).
        Switch      ca_fast_path(): off, the transfer walk.
        Checked by  the slab-axis and fiber rows of the stack parent along
                    axis 0 in the delivery matrix. */
     if ( ca_func[src->obj_type].attach == ca_stack_func.attach
-         && ca_stack_parents_attachable(src)
          && !ca_has_mask(src)
          && !(flags & CA_KERNEL_WRITE)
          && naxes == 1 && axes[0] == ((CAStack *) src)->k_axis
@@ -1147,8 +1144,7 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
                    along axis 1 of 4 parents of 500x2000, which the
                    generated loop interchange answers first (3.5x / 3.8x
                    with that off too); 1.1x / 1.2x on a median along axis 2.
-       Enters      a CAStack whose parents all have an attach slot, a read
-                   walk, the stack axis outside the slab.
+       Enters      a CAStack, a read walk, the stack axis outside the slab.
        Promises    2 (the parents' masks are copied), 6 (masks are read
                    only when a parent has one), 8 (alias_ptr stays NULL,
                    so no slab is lent as a window).
@@ -1156,7 +1152,6 @@ ki_choose_l2_route (CArray *src, int8_t *axes, int8_t naxes, uint32_t flags,
        Checked by  the slab-axis, fiber and two-slab-axes rows of the
                    stack parent along axes 1 and 2 in the delivery matrix. */
     if ( ca_func[src->obj_type].attach == ca_stack_func.attach
-         && ca_stack_parents_attachable(src)
          && !(flags & CA_KERNEL_WRITE)
          && naxes >= 1 && !in_slab[((CAStack *) src)->k_axis]
          && ca_fast_path(CA_SC_STACK_OUTER_K) ) {

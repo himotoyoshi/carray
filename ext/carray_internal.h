@@ -756,7 +756,6 @@ int         ca_stack_mask_parts (CArray *mask, CArray ***parents,
 int         ca_meld_mask_parts (CArray *mask, CArray ***parents,
                                 CArray ***standins, int32_t *n);
 int         ca_stack_data_parts (CArray *ca, CArray ***parents, int32_t *n);
-int         ca_stack_parents_attachable (CArray *ca);
 int         ca_meld_data_parts (CArray *ca, CArray ***parents, int32_t *n);
 CArray     *ca_stack_like (CArray *like, CArray **parents);
 CArray     *ca_meld_like (CArray *like, CArray **parents);

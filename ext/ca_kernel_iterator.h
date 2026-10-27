@@ -235,8 +235,10 @@ typedef enum {
    one whose contract an external class can meet on its own: the engine
    reads the cells with ca_xfer_all GET and, on a WRITE walk, sends back
    the changed cells with ca_xfer_addrs, so the view's transfer slots
-   are all the iterator needs -- the slots every view already implements.  The view's attach / sync slots
-   are not called.  The other kinds are not open to registration: SRC_CASTRIDE
+   are all the iterator needs.  It does not call the view's attach / sync
+   slots, which ca_install_obj_type requires all the same: the paths
+   that take a view's buffer, such as a bang operator, call them.  The
+   other kinds are not open to registration: SRC_CASTRIDE
    asserts the struct *is* a CAStride (the engine reads its strides
    directly, and a class that really is one is already classified by its
    inherited operation table), and SRC_DESCRIPTOR requires a

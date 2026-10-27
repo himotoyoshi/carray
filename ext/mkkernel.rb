@@ -2940,7 +2940,6 @@ module MkKernel
              && slab_axes[0] != (int8_t)(ca->ndim - 1)
              && ! ca_has_mask(ca)
              && ca_func[ca->obj_type].attach == ca_stack_func.attach
-             && ca_stack_parents_attachable(ca)
              && ((CAStack *) ca)->k_axis == 0
              && ca_fast_path(CA_SC_STACK_LOOP_INTERCHANGE) ) {
           CAStack  *__li_st    = (CAStack *) ca;
@@ -3005,7 +3004,6 @@ module MkKernel
              && slab_axes[0] != (int8_t)(ca->ndim - 1)
              && ! ca_has_mask(ca)
              && ca_func[ca->obj_type].attach == ca_stack_func.attach
-             && ca_stack_parents_attachable(ca)
              && ((CAStack *) ca)->k_axis > 0
              && ( slab_axes[0] > ((CAStack *) ca)->k_axis
                   || slab_axes[0] + 1 == ((CAStack *) ca)->k_axis )
@@ -3150,7 +3148,6 @@ module MkKernel
              && slab_axes[0] != (int8_t)(ca->ndim - 1)
              && ! ca_has_mask(ca)
              && ca_func[ca->obj_type].attach == ca_stack_func.attach
-             && ca_stack_parents_attachable(ca)
              && ((CAStack *) ca)->k_axis > 0
              && slab_axes[0] + 1 < ((CAStack *) ca)->k_axis
              && ca_fast_path(CA_SC_STACK_LOOP_INTERCHANGE) ) {

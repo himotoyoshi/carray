@@ -354,6 +354,14 @@ ca_install_obj_type (VALUE klass,
                        sizeof(((ca_operation_function_t *) 0)->xfer_all)));
   }
 
+  /* ca_allocate / ca_attach / ca_sync / ca_detach call these four slots
+     without asking, from any path that takes a view's buffer. */
+  if ( ! func->allocate || ! func->attach || ! func->sync || ! func->detach ) {
+    rb_raise(rb_eArgError,
+             "ca_install_obj_type: operation table has no allocate / attach / "
+             "sync / detach slot");
+  }
+
   /* A refused table takes no number. */
   obj_type = ca_obj_num++;
 

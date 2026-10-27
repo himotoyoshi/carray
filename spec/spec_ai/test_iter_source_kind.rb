@@ -171,39 +171,11 @@ class TestIterSourceKindRegistration < Test::Unit::TestCase
     assert_equal 6, grid.sum
   end
 
-  # The transfer-only walk of a development build (CARRAY_GENERAL_PATH=2)
-  # reaches what the default classifier reaches, a registered view with no
-  # attach slot included.
-  def test_the_transfer_walk_reaches_a_registered_view_without_attach
-    omit "development build only" unless CArray.respond_to?(:__attached_views__)
-    require "rbconfig"
-    require "open3"
-    ext = File.expand_path("../../ext", __dir__)
-    lib = File.expand_path("../../lib", __dir__)
-    fixture = File.expand_path("ext_iter_source_kind", __dir__)
-    code = "require 'carray'; require 'iter_source_kind'; " \
-           "v = CAIterOffsetNoAttach.wrap(CArray.int32(3, 4).seq!, 100); " \
-           "p [v.sum, v.median(axis: 1).to_a]"
-    out, err, = Open3.capture3({ "CARRAY_GENERAL_PATH" => "2" }, RbConfig.ruby,
-                               "-I#{ext}", "-I#{lib}", "-I#{fixture}", "-e", code)
-    assert_equal "[1266.0, [101.5, 105.5, 109.5]]\n", out, err
-  end
-
-  # A registered view with no attach slot is reached through its transfer
-  # slots.  A CAStack of such views takes no shortcut that attaches its
-  # parents: every axis of every stack layout answers as its copy does.
-  def test_stack_of_views_without_an_attach_slot
-    mk = ->(shape) { CAIterOffsetNoAttach.wrap(CArray.int32(*shape).seq!, 100) }
-    [[[4, 3], 0], [[4, 3], 1], [[64, 64], 0], [[64, 64], 1],
-     [[3, 64, 64], 0], [[3, 64, 64], 2]].each do |shape, k|
-      s = CArray.stack([mk.(shape), mk.(shape)], axis: k)
-      s.ndim.times do |ax|
-        assert_equal s.copy.sum(axis: ax).to_a, s.sum(axis: ax).to_a,
-                     "sum shape=#{shape} k=#{k} axis=#{ax}"
-        assert_equal s.copy.median(axis: ax).to_a, s.median(axis: ax).to_a,
-                     "median shape=#{shape} k=#{k} axis=#{ax}"
-      end
-    end
+  # Every path that takes a view's buffer calls its allocate / attach /
+  # sync / detach slots, so a table without them is refused at install.
+  def test_a_table_without_an_attach_slot_is_refused
+    err = assert_raise(ArgumentError) { CAIterOffset.install_without_attach }
+    assert_match(/no allocate \/ attach \/ sync \/ detach slot/, err.message)
   end
 
 end
