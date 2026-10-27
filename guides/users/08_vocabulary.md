@@ -80,10 +80,10 @@ Arithmetic on a masked array carries the mask through automatically — the mask
 a + 10           #  => [ _, 11.0, 12.0 ]    the masked element propagates
 ```
 
-`value` gives a view that ignores the mask and exposes the raw stored values:
+`value` gives a view of the stored values with the mask dropped. It is for looking at what a masked cell holds, not for computing with: what sits in a masked cell is not defined (see [Masks and missing values](05_masks.md)).
 
 ```ruby
-a.value          #  => [ 0.0, 1.0, 2.0 ]   the underlying storage, mask dropped
+a.value          #  => [ 0.0, 1.0, 2.0 ]   the first cell is masked: its 0.0 is not defined
 ```
 
 ## data_type

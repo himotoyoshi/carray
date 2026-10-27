@@ -352,3 +352,7 @@ row = a[0, nil]
 row[0] = UNDEF
 a.count_masked    #  => 2
 ```
+
+## `value`
+
+What a masked cell holds is not defined, and nothing should be built on it. `value` drops the mask and shows those cells anyway, so do not compute from it or build views on it. To take the mask off, use `unmask` or `strip_mask` and say what the gaps hold.
