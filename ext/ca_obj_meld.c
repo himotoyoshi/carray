@@ -706,11 +706,14 @@ ca_meld_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
    buffer the parent's attach handed out, rather than through the parent to
    what is behind it: the sync of an attached meld, which then syncs each
    parent.  Writing past the buffer would leave it stale, and the parent's
-   own sync would push the stale buffer back over the cells just written. */
+   own sync would push the stale buffer back over the cells just written.
+   A parent with no buffer out (the mask the check of a mask write puts in
+   place for a part with no mask yet, which is never attached) has nothing
+   to go stale: the cells go through it. */
 static void
 ca_meld_put_parent (CArray *p, char *src, int into_buffers)
 {
-  if ( into_buffers ) {
+  if ( into_buffers && p->ptr != NULL ) {
     memcpy(p->ptr, src, (size_t) (p->elements * p->bytes));
   }
   else {
@@ -904,7 +907,7 @@ ca_meld_func_sync (void *ap)
   CAMeld *ca = (CAMeld *) ap;
   ca_meld_mask_refuse_sync(ca);
   ca_meld_xfer_parents(ca, ca->ptr, CA_XFER_PUT, 1);
-  ca_sync_all(ca->parents, ca->n_parents);
+  ca_sync_all_attached(ca->parents, ca->n_parents);
   ca_meld_mask_settle(ca);
 }
 

@@ -681,6 +681,22 @@ ca_stack_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   }
 }
 
+/* A parent's cells, delivered (PUT): into the buffer its attach handed
+   out, or through the parent (see ca_stack_xfer_parents).  A parent with no
+   buffer out (the mask the check of a mask write puts in place for a part
+   with no mask yet, which is never attached) has nothing to go stale: the
+   cells go through it. */
+static void
+ca_stack_put_parent (CArray *p, char *src, int into_buffers)
+{
+  if ( into_buffers && p->ptr != NULL ) {
+    memcpy(p->ptr, src, (size_t) (p->elements * p->bytes));
+  }
+  else {
+    ca_xfer_all(p, src, CA_XFER_PUT);
+  }
+}
+
 /* ------------------------------------------------------------------- */
 /* xfer_all: K-fold over all parents                                    */
 /* ------------------------------------------------------------------- */
@@ -713,9 +729,9 @@ ca_stack_xfer_parents (CAStack *ca, char *d, int dir, int into_buffers)
   if ( k_axis == 0 && ca_fast_path(CA_SC_STACK_PARENTS_K0) ) {
     ca_size_t parent_bytes_total = ca->parents[0]->elements * bytes;
     for ( k = 0; k < ca->n_parents; k++ ) {
-      if ( into_buffers ) {
-        memcpy(ca->parents[k]->ptr, d + k * parent_bytes_total,
-               (size_t) parent_bytes_total);
+      if ( dir == CA_XFER_PUT ) {
+        ca_stack_put_parent(ca->parents[k], d + k * parent_bytes_total,
+                            into_buffers);
       }
       else {
         ca_xfer_all(ca->parents[k], d + k * parent_bytes_total, dir);
@@ -809,12 +825,7 @@ ca_stack_xfer_parents (CAStack *ca, char *d, int dir, int into_buffers)
         }
 
         if ( dir == CA_XFER_PUT ) {
-          if ( into_buffers ) {
-            memcpy(ca->parents[k]->ptr, buf, (size_t) (parent_elements * bytes));
-          }
-          else {
-            ca_xfer_all(ca->parents[k], buf, CA_XFER_PUT);
-          }
+          ca_stack_put_parent(ca->parents[k], buf, into_buffers);
         }
       }
     }
@@ -866,7 +877,7 @@ ca_stack_func_sync (void *ap)
   CAStack *ca = (CAStack *) ap;
   ca_stack_mask_refuse_sync(ca);
   ca_stack_xfer_parents(ca, ca->ptr, CA_XFER_PUT, 1);
-  ca_sync_all(ca->parents, ca->n_parents);
+  ca_sync_all_attached(ca->parents, ca->n_parents);
   ca_stack_mask_settle(ca);
 }
 

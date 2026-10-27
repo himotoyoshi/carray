@@ -191,7 +191,8 @@ ca_mask_from_bytes (CArray *ca, const boolean8_t *m)
 
    ca_sync_all syncs every one of list[0..n-1], carrying on past one that
    raises so that the others still receive what was written, and raises
-   the first exception once all have been tried.
+   the first exception once all have been tried.  ca_sync_all_attached
+   does the same for those of them that have a buffer out.
 
    ca_attach_window opens list[0..n-1] ('r' attach, 'w' attach + sync,
    'a' allocate + sync), runs body(arg), and closes every array however body
@@ -200,6 +201,7 @@ ca_mask_from_bytes (CArray *ca, const boolean8_t *m)
 
 void    ca_attach_all (CArray **list, int32_t n);
 void    ca_sync_all   (CArray **list, int32_t n);
+void    ca_sync_all_attached (CArray **list, int32_t n);
 VALUE   ca_attach_window (int32_t n, CArray **list, const char *modes,
                           VALUE (*body)(VALUE), VALUE arg);
 

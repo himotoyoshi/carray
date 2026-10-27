@@ -2249,6 +2249,25 @@ ca_sync_all (CArray **list, int32_t n)
   }
 }
 
+/* ca_sync_all over the arrays of list[0..n-1] that have a buffer out.  For
+   the sync of a stack or meld, which the check of a mask write runs with a
+   part its attach did not open (the mask it puts in place for a part with
+   no mask yet): that part took its cells through its transfer. */
+void
+ca_sync_all_attached (CArray **list, int32_t n)
+{
+  volatile VALUE holder = 0;
+  CArray **out = ALLOCV_N(CArray *, holder, n);
+  int32_t k, m = 0;
+  for ( k = 0; k < n; k++ ) {
+    if ( list[k]->ptr != NULL ) {
+      out[m++] = list[k];
+    }
+  }
+  ca_sync_all(out, m);
+  ALLOCV_END(holder);
+}
+
 /* An attach window over list[0..n-1] that closes however body leaves.
 
    modes holds one letter per array:
