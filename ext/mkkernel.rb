@@ -6167,6 +6167,66 @@ module MkKernel
               { #{expr_body} }
             }
           }
+        } else if ( i3 == 1 && ( ( i1 == 1 && i2 == 0 ) || ( i1 == 0 && i2 == 1 ) ) ) {
+          /* scalar branch: one operand is a scalar (stride 0).  It is read
+             into a local before the loop, so a store to the output cannot
+             change it and the loop vectorizes like the contig branch. */
+          #{c_type} sv = ( i1 == 0 ) ? *q1 : *q2;
+          #{c_type} *qa = ( i1 == 0 ) ? q2 : q1;
+          #{c_type} *p1, *p2, *p3;
+          uintptr_t aa = (uintptr_t) qa, a3 = (uintptr_t) q3;
+          uintptr_t nb = (uintptr_t) n * sizeof(*q3);
+          (void)p1; (void)p2; (void)p3;
+          if ( i1 == 0 ) {
+            p1 = &sv;
+            if ( a3 + nb <= aa || aa + nb <= a3 ) {
+              #{c_type} * __restrict__ ra = qa;
+              #{c_type} * __restrict__ r3 = q3;
+              #pragma omp simd
+              for (k=0; k<n; k++) {
+                p2 = ra + k; p3 = r3 + k;
+                { #{expr_body} }
+              }
+            }
+            else if ( aa == a3 ) {
+              #pragma omp simd
+              for (k=0; k<n; k++) {
+                p2 = qa + k; p3 = q3 + k;
+                { #{expr_body} }
+              }
+            }
+            else {
+              for (k=0; k<n; k++) {
+                p2 = qa + k; p3 = q3 + k;
+                { #{expr_body} }
+              }
+            }
+          }
+          else {
+            p2 = &sv;
+            if ( a3 + nb <= aa || aa + nb <= a3 ) {
+              #{c_type} * __restrict__ ra = qa;
+              #{c_type} * __restrict__ r3 = q3;
+              #pragma omp simd
+              for (k=0; k<n; k++) {
+                p1 = ra + k; p3 = r3 + k;
+                { #{expr_body} }
+              }
+            }
+            else if ( aa == a3 ) {
+              #pragma omp simd
+              for (k=0; k<n; k++) {
+                p1 = qa + k; p3 = q3 + k;
+                { #{expr_body} }
+              }
+            }
+            else {
+              for (k=0; k<n; k++) {
+                p1 = qa + k; p3 = q3 + k;
+                { #{expr_body} }
+              }
+            }
+          }
         } else {
           /* strided branch: numo-shape `p += s` increment form. */
           #{c_type} *p1 = q1, *p2 = q2, *p3 = q3;
@@ -6498,6 +6558,24 @@ module MkKernel
                 p3 = q3 + k*i3;
                 { #{expr_body} }
               }
+            }
+          } else if ( i3 == 1 && i1 == 1 && i2 == 0 ) {
+            /* scalar on the right: read it once, so the boolean store
+               cannot be taken to change it and the loop vectorizes */
+            #{c_type} sv = *q2;
+            p2 = &sv;
+            for (k=0; k<n; k++) {
+              p1 = q1 + k;
+              p3 = q3 + k;
+              { #{expr_body} }
+            }
+          } else if ( i3 == 1 && i1 == 0 && i2 == 1 ) {
+            #{c_type} sv = *q1;
+            p1 = &sv;
+            for (k=0; k<n; k++) {
+              p2 = q2 + k;
+              p3 = q3 + k;
+              { #{expr_body} }
             }
           } else {
             for (k=0; k<n; k++) {
