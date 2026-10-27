@@ -106,6 +106,14 @@ class CAWindowIterator < CAIterator
             "windows: expected #{@source.ndim} ranges (one per axis), " \
             "got #{@ranges.size}"
     end
+    # Each window is read through a view with one axis per anchor and one
+    # per cell in the window, twice the source's rank.
+    if 2 * @source.ndim > CA_RANK_MAX
+      raise ArgumentError,
+            "windows: a rank #{@source.ndim} array would need #{2 * @source.ndim} " \
+            "axes for its windows, beyond the limit of #{CA_RANK_MAX}; " \
+            "windows works up to rank #{CA_RANK_MAX / 2}"
+    end
     @ranges = @ranges.each_with_index.map { |r, k| window_offsets(r, k) }
 
     @sndim  = @source.ndim
