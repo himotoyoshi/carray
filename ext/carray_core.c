@@ -1951,6 +1951,7 @@ static const char *ca_shortcut_names[CA_SC_COUNT] = {
   "loop_interchange",
   "stack_loop_interchange",
   "lazy_streaming_reduce",
+  "short_fiber_reduce",
   "meld_reduce",
   "segment_nunique",
   "segment_scan_kernel",

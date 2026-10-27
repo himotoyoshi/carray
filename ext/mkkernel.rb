@@ -2066,6 +2066,7 @@ module MkKernel
       io.puts "  if ( naxes != 1 || ! ca_too_few_present(ca->dim[slab_axes[0]], min_count, 0) ) {" if li_gate
       emit_reduce_loop_interchange(io, k, si, oi, ruby_wrap, src,
                                    acc_var, acc_init, reduce_stmt, finish_expr)
+      emit_reduce_short_fiber(io, k, si, oi, src, reduce_stmt, finish_expr)
       io.puts "  }" if li_gate
     end
 
@@ -2643,6 +2644,101 @@ module MkKernel
       }
     C
     io.print expr_macro_undefs
+  end
+
+  # Short-fiber fast path (shortcut short_fiber_reduce): a single-axis
+  # reduction over the innermost axis of a row-major buffer whose fibers are
+  # short.  The general walk asks the kernel iterator for each fiber, and for
+  # fibers of a few cells that per-fiber step costs more than the cells
+  # (1M fibers of 4 float64 cells: 12.6 ms against 1.0 ms for a plain loop,
+  # M2 Max).  Here every fiber is folded in place from the buffer, in the
+  # order the general walk folds it, into scalar accumulators.  Eligibility
+  # is the loop interchange's (same reduction kinds, no mask, an alias
+  # attach); a fiber longer than 32 cells (16 for min / max) goes to the
+  # general walk, which is already faster than this loop there.
+  def self.emit_reduce_short_fiber(io, k, si, oi, src, reduce_stmt, finish_expr)
+    buf_kinds = %i[plus star min max]
+    rk = k[:reduction_kind]
+    if buf_kinds.include?(rk)
+      acc_vars = [k[:state].keys.first]
+      induction_var = nil
+    else
+      acc_vars = k[:state].keys.select { |v| buf_kinds.include?(rk[v]) }
+      ind_pair = rk.find { |_, kind| kind == :induction }
+      induction_var = ind_pair && ind_pair[0]
+    end
+
+    info = acc_vars.map do |v|
+      { var: v,
+        c_type: resolve_state_type(k[:state][v], oi, si, src),
+        init: resolve_init_expr(k[:init][v], oi, si, src) }
+    end
+
+    reduce_sf = reduce_stmt.dup
+    finish_sf = finish_expr.dup
+    if induction_var
+      ind_pat = Regexp.escape(induction_var.to_s)
+      reduce_sf = reduce_sf.gsub(/\b#{ind_pat}\+\+/, "0")
+                           .gsub(/\+\+\b#{ind_pat}\b/, "0")
+      finish_sf = finish_sf.gsub(/\b#{ind_pat}\b/, "((int64_t)__sf_M)")
+    end
+
+    decls = info.map { |i| "#{i[:c_type]} #{i[:var]} = (#{i[:c_type]}) (#{i[:init]});" }
+                .join("\n              ")
+
+    # A float min / max whose accumulator is still at the init saw only NaN
+    # or only +/-INFINITY; the fiber is re-read to tell which, as the
+    # general walk's all-NaN rule answers NaN for the first.
+    nan_fixup =
+      if k[:all_nan_result] == :nan && FLOAT_DTYPES.include?(src) && info.size == 1
+        i = info.first
+        <<~C.rstrip
+              if ( #{i[:var]} == (#{i[:c_type]}) (#{i[:init]}) ) {
+                int __sf_seen = 0;
+                for ( ca_size_t __j = 0; __j < __sf_M; __j++ ) __sf_seen |= (__sf_row[__j] == __sf_row[__j]);
+                if ( ! __sf_seen ) #{i[:var]} = (#{i[:c_type]}) NAN;
+              }
+        C
+      else
+        ""
+      end
+
+    # A min / max fold is a compare per cell that the general walk splits
+    # eight ways; past 16 cells that split is faster than this loop.
+    max_m = info.any? { |i| %i[min max].include?(buf_kinds.include?(rk) ? rk : rk[i[:var]]) } ? 16 : 32
+
+    io.puts <<~C
+        if ( naxes == 1
+             && ca->ndim >= 2
+             && slab_axes[0] == (int8_t)(ca->ndim - 1)
+             && ca->dim[ca->ndim - 1] >= 1
+             && ca->dim[ca->ndim - 1] <= #{max_m}
+             && ! ca_has_mask(ca)
+             && ca_attach_is_alias(ca)
+             && ca_fast_path(CA_SC_SHORT_FIBER_REDUCE) ) {
+          ca_size_t __sf_M     = ca->dim[ca->ndim - 1];
+          ca_size_t __sf_OUTER = ca->elements / __sf_M;
+          VALUE   vout = rb_ca_new_reduced(self, slab_axes, naxes, #{oi[:ca]}, keep_axis);
+          CArray *co;
+          GetCArray(vout, co);
+          #{oi[:c]} *op = (#{oi[:c]} *) co->ptr;
+          ca_attach(ca);   /* window: numeric lanes only, nothing raises inside; O(1) alias attach */
+          const #{si[:c]} *p_root = (const #{si[:c]} *) ca->ptr;
+          for ( ca_size_t __sf_o = 0; __sf_o < __sf_OUTER; __sf_o++ ) {
+            const #{si[:c]} *__sf_row = p_root + __sf_o * __sf_M;
+            #{decls}
+            for ( ca_size_t __j = 0; __j < __sf_M; __j++ ) {
+              #{si[:c]} v = __sf_row[__j];
+              #{reduce_sf};
+              (void) v;
+            }
+    #{nan_fixup}
+            op[__sf_o] = (#{oi[:c]}) (#{finish_sf});
+          }
+          ca_detach(ca);
+          return vout;
+        }
+    C
   end
 
   def self.emit_reduce_loop_interchange(io, k, si, oi, ruby_wrap, src,
