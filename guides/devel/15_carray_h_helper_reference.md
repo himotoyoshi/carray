@@ -411,7 +411,7 @@ converts Ruby method arguments to per-cell C values.
 #define CA_FLAG_READ_ONLY      8
 #define CA_FLAG_SHARE_INDEX   16
 #define CA_FLAG_MULTI_PARENTS 32     /* fan-out view (CAStack, ...) */
-#define CA_FLAG_CYCLE_CHECK   64
+/* bit 64 is free */
 #define CA_FLAG_IS_FACE      128     /* CAFace lift */
 
 #define ca_set_flag(ca, flag)    ((ca)->flags |=  (flag))
