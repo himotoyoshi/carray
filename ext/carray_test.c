@@ -847,7 +847,8 @@ without_read_only_ensure (VALUE arg)
  * the bridge owns.
  *
  * Mechanics: clears CA_FLAG_READ_ONLY on self and on its mask for the
- * duration of the block; rb_ensure restores both on normal return AND on
+ * duration of the block, except on a mask that is a wrap: that mask borrows
+ * its bits from a producer (wrap_memory_view's mask:), which set the flag; rb_ensure restores both on normal return AND on
  * raise, setting the flag on whatever mask self has by then.  (A read-only
  * array's mask carries the flag once CArray#mask has handed it out.)  Frozen
  * objects still raise FrozenError.  Does not walk parent chains.
@@ -874,7 +875,9 @@ rb_ca_without_read_only_flag (VALUE self)
   s.was_readonly = ca_test_flag(ca, CA_FLAG_READ_ONLY);
   if (s.was_readonly) {
     ca_unset_flag(ca, CA_FLAG_READ_ONLY);
-    if (ca->mask) {
+    /* A mask that is a wrap borrows its bits (the mask: of
+       wrap_memory_view); its flag is the lender's and stays. */
+    if (ca->mask && ca->mask->obj_type != CA_OBJ_ARRAY_WRAP) {
       ca_unset_flag(ca->mask, CA_FLAG_READ_ONLY);
     }
   }

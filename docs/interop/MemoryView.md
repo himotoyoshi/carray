@@ -360,6 +360,10 @@ end
 
 The lift is not limited to the mask. Inside the block every write is allowed, values included, and a value write lands in the producer's buffer — memory the producer declared immutable. When the producer is a frozen CArray, that array's values change. Keep the block to what the lift is for.
 
+The recipe needs a contiguous producer. A strided producer is wrapped as a view over a read-only byte array, and the lift does not reach that parent, so `v.mask =` still raises; `mask:` is not accepted for strided data either. A read-only strided producer has no zero-copy way to carry a mask: use `.copy`.
+
+A mask borrowed with `wrap_memory_view(data, mask: m)` from a read-only producer stays read-only inside the block: the lift leaves a mask that is itself a wrap alone, so its bits are never written.
+
 Discipline (not enforced by the primitive): use it only on **entities** (CArray / CScalar / CAWrap). On a view of a read-only parent, `mask=` allocates the parent's mask as a side effect (the view chain's `create_mask` recursion) and mutates a buffer the producer declared immutable, breaking the view-inherits-readonly guarantee for sibling views. The author is responsible for knowing that this is safe in their context.
 
 **If you are writing user code, not a library / bridge / class**, `.copy` is the correct answer, not this primitive.
