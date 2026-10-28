@@ -34,7 +34,7 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
      neighbour ("as well", "the producer above") or leave unnamed the
      method, class or keyword it is about. -->
 
-## 3.0.6 (unreleased)
+## 3.0.6
 
 - New: `CAFrame` answers the column reductions itself, as a frame of one
   row (`df.mean`, `df.sum("rain", "temp")`), and the running values down
@@ -154,12 +154,20 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   raises. A view such as `s.refer(s.data_type, [1])` takes the usual
   indexes.
 
+- Change: `CArray.stack` and `CArray.meld` refuse a value array
+  (`a.value`) or a mask array (`a.mask`) as a part. Pass a copy
+  (`a.value.copy`), or `a.is_masked` for the mask's values.
+
 - Change: `CArray#==` finds a NaN equal to a NaN, so an array holding NaN
   equals its copy and the array read back from a file. The cell-by-cell
   IEEE comparison is `eq`; `eql?` still compares bits.
 
 - Change: `CARemap#mapper` returns a read-only array; writing it raises.
   The index array given to `a[idx]` is not affected.
+
+- Change: `Marshal.dump` of a `CAWrap` (from `CArray.wrap_memory_view`)
+  writes its values, and the load gives a plain array owning a copy of
+  them, as for a view of the wrap; it raised `TypeError`.
 
 - Change: `as_type` returns a view also when the data type is the
   receiver's own, and `CATime#to_unit` / `CATimedelta#to_unit` return a
@@ -203,6 +211,9 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   in several at once; it was refused as cyclic. A cell holding a view of
   other cells of the same array is no longer refused.
 
+- Fix: a record array (`CARecord`) exports through MemoryView from a
+  Ractor other than the main one; it raised `Ractor::IsolationError`.
+
 - Fix: `Marshal.dump` of a view no longer writes its whole parent (a
   one-cell view of a 100,000-cell array dumped about 400 KB), and an
   array's mask marshals as a plain boolean array.
@@ -216,6 +227,15 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 
 - Fix: a frozen or read-only `CArray.meld` refuses writes through a meld
   of it (`CArray.meld(m, m)` wrote into the frozen root).
+
+- Fix: a write to a `CArray.stack` or `CArray.meld` whose parts share
+  cells (`CArray.meld(a, a)`) gives those cells the value, or the mask, of
+  the last part; `add!` could leave an earlier part's result, and a mask
+  write masked the cells of every part.
+
+- Fix: a write to a `CArray.stack` or `CArray.meld` that one part refuses
+  (a value outside a part's data type) writes nothing; the parts before
+  it were written.
 
 - Fix: `blocks(...).sort_addr` works when the source holds more than one
   tile; it failed with `IndexError`.
