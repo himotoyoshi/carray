@@ -67,7 +67,7 @@ its own cannot be checked against anything; a script can be run.
 
 ## Sending a fix
 
-Ruby 3.3 or later is required. Build and test:
+Ruby 3.2 or later is required. Build and test:
 
 ```sh
 rake build_ext     # build the C extension in place

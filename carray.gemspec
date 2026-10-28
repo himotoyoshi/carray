@@ -17,7 +17,7 @@ Gem::Specification.new do |s|
   s.homepage    = "https://github.com/himotoyoshi/carray"
   s.license     = "MIT"
   s.platform    = Gem::Platform::RUBY
-  s.required_ruby_version = ">= 3.3"
+  s.required_ruby_version = ">= 3.2"
   s.add_dependency "prism", ">= 1.0"
   s.files       = [
     *Dir.glob("lib/**/*.rb"),

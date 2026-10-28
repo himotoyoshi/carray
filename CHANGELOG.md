@@ -97,7 +97,7 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
   pointers to the parts' own String bytes. An `fsync` character other than
   `0` or `1` is refused.
 
-- Change: CArray requires Ruby 3.3 or later, up from 3.0. On an older
+- Change: CArray requires Ruby 3.2 or later, up from 3.0. On an older
   Ruby, `gem install carray` does not offer this release; install a
   newer Ruby with a version manager such as rbenv or mise, or stay on
   3.0.5.
@@ -199,9 +199,10 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
 - Fix: `require "carray"` works on Ruby 4.0; it raised
   `Ractor::IsolationError` since 3.0.4.
 
-- Fix: `CArray.fuse` works on Ruby 3.3. The gem now depends on prism 1.0
-  or later, which `gem install` and Bundler bring in on Ruby 3.3, whose
-  own prism is too old; Ruby 3.4 and later already ship it.
+- Fix: `CArray.fuse` works on Ruby 3.2 and 3.3. The gem now depends on
+  prism 1.0 or later, which `gem install` and Bundler bring in on Ruby
+  3.2, which ships none, and 3.3, whose own prism is too old; Ruby 3.4
+  and later already ship it.
 
 - Fix: a block of a reshape over a strided view
   (`a[1..2, 1..3].reshape(3, 2)[0..1, nil]`) read and wrote past the end

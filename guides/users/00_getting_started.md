@@ -16,7 +16,7 @@ Or add it to your `Gemfile`:
 gem "carray"
 ```
 
-Requires Ruby 3.3 or later.
+Requires Ruby 3.2 or later.
 
 On a multi-core machine, parallel `make` cuts install time noticeably:
 

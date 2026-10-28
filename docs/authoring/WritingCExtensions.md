@@ -152,7 +152,7 @@ boundary; the header is the authority for everything else.
 
 ### 1.3 Minimum requirements
 
-- **Ruby 3.3 or later**, the floor CArray's gemspec sets. Within it,
+- **Ruby 3.2 or later**, the floor CArray's gemspec sets. Within it,
   `ruby/memory_view.h` (Ruby 3.0+) is a hard build requirement, and
   the code assumes `xmalloc` raises `NoMemoryError` on OOM rather than
   returning `NULL`.
