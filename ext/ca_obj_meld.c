@@ -702,19 +702,23 @@ ca_meld_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 /* xfer_all                                                             */
 /* ------------------------------------------------------------------- */
 
-/* A parent's cells, delivered (PUT).  into_buffers writes them into the
-   buffer the parent's attach handed out, rather than through the parent to
-   what is behind it: the sync of an attached meld, which then syncs each
-   parent.  Writing past the buffer would leave it stale, and the parent's
+/* A parent's cells, delivered (PUT).  A non-NULL sync_error writes them
+   into the buffer the parent's attach handed out, rather than through the
+   parent to what is behind it, and syncs the parent: the sync of an
+   attached meld.  Writing past the buffer would leave it stale, and the parent's
    own sync would push the stale buffer back over the cells just written.
-   A parent with no buffer out (the mask the check of a mask write puts in
-   place for a part with no mask yet, which is never attached) has nothing
-   to go stale: the cells go through it. */
+   A parent with no buffer out (a stand-in the trial of a write puts in
+   place, which is never attached) has nothing to go stale: the cells go
+   through it. */
 static void
-ca_meld_put_parent (CArray *p, char *src, int into_buffers)
+ca_meld_put_parent (CArray *p, char *src, volatile VALUE *sync_error)
 {
-  if ( into_buffers && p->ptr != NULL ) {
+  if ( sync_error != NULL && p->ptr != NULL ) {
+    /* Synced at once, before the next part is written: parts that share
+       cells then take the write of the last of them, as a write through
+       the parts does. */
     memcpy(p->ptr, src, (size_t) (p->elements * p->bytes));
+    ca_sync_carry_on(p, sync_error);
   }
   else {
     ca_xfer_all(p, src, CA_XFER_PUT);
@@ -723,7 +727,7 @@ ca_meld_put_parent (CArray *p, char *src, int into_buffers)
 
 /* meld_axis == 0 best path: K contig xfer_all at prefix-sum offsets. */
 static void
-ca_meld_xfer_all_ma0 (CAMeld *ca, void *data, int dir, int into_buffers)
+ca_meld_xfer_all_ma0 (CAMeld *ca, void *data, int dir, volatile VALUE *sync_error)
 {
   ca_size_t tail_bytes = ca_meld_tail_elements(ca) * ca->bytes;
   char *d = (char *) data;
@@ -731,7 +735,7 @@ ca_meld_xfer_all_ma0 (CAMeld *ca, void *data, int dir, int into_buffers)
   for ( k = 0; k < ca->n_parents; k++ ) {
     char *seg = d + ca->seg_offset[k] * tail_bytes;
     if ( dir == CA_XFER_PUT ) {
-      ca_meld_put_parent(ca->parents[k], seg, into_buffers);
+      ca_meld_put_parent(ca->parents[k], seg, sync_error);
     }
     else {
       ca_xfer_all(ca->parents[k], seg, dir);
@@ -753,7 +757,7 @@ ca_meld_xfer_all_ma0 (CAMeld *ca, void *data, int dir, int into_buffers)
    chunked memcpy approaches memcpy bandwidth (eager parity target). */
 static void
 ca_meld_xfer_all_ma_internal (CAMeld *ca, void *data, int dir,
-                              int into_buffers)
+                              volatile VALUE *sync_error)
 {
   int8_t   ma = ca->meld_axis;
   int8_t   ndim = ca->ndim;
@@ -846,19 +850,19 @@ ca_meld_xfer_all_ma_internal (CAMeld *ca, void *data, int dir,
     }
 
     if ( dir == CA_XFER_PUT ) {
-      ca_meld_put_parent(p, buf, into_buffers);
+      ca_meld_put_parent(p, buf, sync_error);
     }
     ALLOCV_END(holder);
   }
 }
 
 static void
-ca_meld_xfer_parents (CAMeld *ca, void *data, int dir, int into_buffers)
+ca_meld_xfer_parents (CAMeld *ca, void *data, int dir, volatile VALUE *sync_error)
 {
   if ( ca->meld_axis == 0 && ca_fast_path(CA_SC_MELD_PARENTS_AXIS0) ) {
-    ca_meld_xfer_all_ma0(ca, data, dir, into_buffers);
+    ca_meld_xfer_all_ma0(ca, data, dir, sync_error);
   } else {
-    ca_meld_xfer_all_ma_internal(ca, data, dir, into_buffers);
+    ca_meld_xfer_all_ma_internal(ca, data, dir, sync_error);
   }
 }
 
@@ -867,7 +871,7 @@ ca_meld_func_xfer_all (void *ap, void *data, int dir)
 {
   if ( ((CArray *) ap)->elements == 0 ) return;
   ca_meld_mask_refresh((CAMeld *) ap);
-  ca_meld_xfer_parents((CAMeld *) ap, data, dir, 0);
+  ca_meld_xfer_parents((CAMeld *) ap, data, dir, NULL);
 }
 
 /* ------------------------------------------------------------------- */
@@ -904,9 +908,14 @@ ca_meld_func_sync (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
   CA_MULTI_PARENT_VALUE_TRIAL(ca, t,
-    ca_meld_xfer_parents((CAMeld *) t, ca->ptr, CA_XFER_PUT, 0));
-  ca_meld_xfer_parents(ca, ca->ptr, CA_XFER_PUT, 1);
-  ca_sync_all_attached(ca->parents, ca->n_parents);
+    ca_meld_xfer_parents((CAMeld *) t, ca->ptr, CA_XFER_PUT, NULL));
+  {
+    volatile VALUE error = Qnil;
+    ca_meld_xfer_parents(ca, ca->ptr, CA_XFER_PUT, &error);
+    if ( ! NIL_P(error) ) {
+      rb_exc_raise(error);
+    }
+  }
   ca_meld_mask_settle(ca);
 }
 
@@ -984,6 +993,17 @@ ca_meld_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
 /* After a write of n cells of `data` to the mask of a CAMeld: a true
    that went into a stand-in goes on to its parent's mask. */
 static void
+ca_meld_mask_adopt_before (void *ap, const void *data, ca_size_t n)
+{
+  CAMeld *ca = (CAMeld *) ap;
+  CAMeld *o  = (CAMeld *) ca->mask_owner;
+  if ( o != NULL && ca_mask_any_true(data, n) ) {
+    ca_multi_parent_mask_adopt((CArray *) ca, o->parents, o->mask_standins,
+                               o->n_parents);
+  }
+}
+
+static void
 ca_meld_mask_settle_after (CAMeld *ca, const void *data, ca_size_t n)
 {
   if ( ca->mask_owner != NULL && ca_mask_any_true(data, n) ) {
@@ -994,6 +1014,7 @@ ca_meld_mask_settle_after (CAMeld *ca, const void *data, ca_size_t n)
 static void
 ca_meld_put_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
+  if ( dir == CA_XFER_PUT ) ca_meld_mask_adopt_before(ap, data, 1);
   ca_meld_func_xfer_index(ap, idx, data, dir);
   if ( dir == CA_XFER_PUT ) ca_meld_mask_settle_after((CAMeld *) ap, data, 1);
 }
@@ -1005,6 +1026,7 @@ ca_meld_put_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data,
   if ( dir == CA_XFER_PUT ) {
     CA_MULTI_PARENT_VALUE_TRIAL(ap, t,
       ca_meld_func_xfer_addrs(t, n, addrs, data, dir));
+    ca_meld_mask_adopt_before(ap, data, n);
   }
   ca_meld_func_xfer_addrs(ap, n, addrs, data, dir);
   if ( dir == CA_XFER_PUT ) ca_meld_mask_settle_after((CAMeld *) ap, data, n);
@@ -1017,6 +1039,8 @@ ca_meld_put_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   if ( dir == CA_XFER_PUT ) {
     CA_MULTI_PARENT_VALUE_TRIAL(ap, t,
       ca_meld_func_xfer_stride(t, starts, counts, strides, data, dir));
+    ca_meld_mask_adopt_before(ap, data,
+                               ca_shape_elements(((CArray *) ap)->ndim, counts, 1));
   }
   ca_meld_func_xfer_stride(ap, starts, counts, strides, data, dir);
   if ( dir == CA_XFER_PUT ) {
@@ -1030,6 +1054,7 @@ ca_meld_put_xfer_all (void *ap, void *data, int dir)
 {
   if ( dir == CA_XFER_PUT ) {
     CA_MULTI_PARENT_VALUE_TRIAL(ap, t, ca_meld_func_xfer_all(t, data, dir));
+    ca_meld_mask_adopt_before(ap, data, ((CArray *) ap)->elements);
   }
   ca_meld_func_xfer_all(ap, data, dir);
   if ( dir == CA_XFER_PUT ) {
@@ -1041,6 +1066,7 @@ static void
 ca_meld_put_fill_data (void *ap, void *ptr)
 {
   CA_MULTI_PARENT_VALUE_TRIAL(ap, t, ca_meld_func_fill_data(t, ptr));
+  ca_meld_mask_adopt_before(ap, ptr, 1);
   ca_meld_func_fill_data(ap, ptr);
   ca_meld_mask_settle_after((CAMeld *) ap, ptr, 1);
 }
@@ -1049,6 +1075,7 @@ static void
 ca_meld_put_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
 {
   CA_MULTI_PARENT_VALUE_TRIAL(ap, t, ca_fill_addrs_default(t, n, addrs, ptr));
+  ca_meld_mask_adopt_before(ap, ptr, 1);
   ca_fill_addrs_default(ap, n, addrs, ptr);
   ca_meld_mask_settle_after((CAMeld *) ap, ptr, 1);
 }
@@ -1059,6 +1086,7 @@ ca_meld_put_fill_stride (void *ap, ca_size_t base, int8_t ndim,
 {
   CA_MULTI_PARENT_VALUE_TRIAL(ap, t,
     ca_fill_stride_default(t, base, ndim, counts, steps, ptr));
+  ca_meld_mask_adopt_before(ap, ptr, 1);
   ca_fill_stride_default(ap, base, ndim, counts, steps, ptr);
   ca_meld_mask_settle_after((CAMeld *) ap, ptr, 1);
 }

@@ -2351,50 +2351,41 @@ ca_sync_all_step (VALUE arg)
   return Qnil;
 }
 
+/* Syncs `ca`, carrying on past a raise: the first exception is kept in
+   *error (left as it is when one is already there), to be raised once
+   the others have been synced.  A throw or break cannot wait, and goes at
+   once. */
+void
+ca_sync_carry_on (CArray *ca, volatile VALUE *error)
+{
+  int tag = 0;
+  rb_protect(ca_sync_all_step, (VALUE) ca, &tag);
+  if ( tag ) {
+    VALUE err = rb_errinfo();
+    if ( ! RTEST(rb_obj_is_kind_of(err, rb_eException)) ) {
+      rb_jump_tag(tag);
+    }
+    if ( NIL_P(*error) ) {
+      *error = err;
+    }
+    rb_set_errinfo(Qnil);
+  }
+}
+
 /* Syncs every one of list[0..n-1] in turn, carrying on past one that
    raises so that the others still receive what was written, then raises
-   the first exception.  A throw or break cannot wait, and goes at once. */
+   the first exception. */
 void
 ca_sync_all (CArray **list, int32_t n)
 {
   volatile VALUE error = Qnil;
   int32_t k;
   for ( k = 0; k < n; k++ ) {
-    int tag = 0;
-    rb_protect(ca_sync_all_step, (VALUE) list[k], &tag);
-    if ( tag ) {
-      VALUE err = rb_errinfo();
-      if ( ! RTEST(rb_obj_is_kind_of(err, rb_eException)) ) {
-        rb_jump_tag(tag);
-      }
-      if ( NIL_P(error) ) {
-        error = err;
-      }
-      rb_set_errinfo(Qnil);
-    }
+    ca_sync_carry_on(list[k], &error);
   }
   if ( ! NIL_P(error) ) {
     rb_exc_raise(error);
   }
-}
-
-/* ca_sync_all over the arrays of list[0..n-1] that have a buffer out.  For
-   the sync of a stack or meld, which the check of a mask write runs with a
-   part its attach did not open (the mask it puts in place for a part with
-   no mask yet): that part took its cells through its transfer. */
-void
-ca_sync_all_attached (CArray **list, int32_t n)
-{
-  volatile VALUE holder = 0;
-  CArray **out = ALLOCV_N(CArray *, holder, n);
-  int32_t k, m = 0;
-  for ( k = 0; k < n; k++ ) {
-    if ( list[k]->ptr != NULL ) {
-      out[m++] = list[k];
-    }
-  }
-  ca_sync_all(out, m);
-  ALLOCV_END(holder);
 }
 
 /* An attach window over list[0..n-1] that closes however body leaves.

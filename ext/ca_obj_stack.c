@@ -684,14 +684,17 @@ ca_stack_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 
 /* A parent's cells, delivered (PUT): into the buffer its attach handed
    out, or through the parent (see ca_stack_xfer_parents).  A parent with no
-   buffer out (the mask the check of a mask write puts in place for a part
-   with no mask yet, which is never attached) has nothing to go stale: the
-   cells go through it. */
+   buffer out (a stand-in the trial of a write puts in place, which is never
+   attached) has nothing to go stale: the cells go through it. */
 static void
-ca_stack_put_parent (CArray *p, char *src, int into_buffers)
+ca_stack_put_parent (CArray *p, char *src, volatile VALUE *sync_error)
 {
-  if ( into_buffers && p->ptr != NULL ) {
+  if ( sync_error != NULL && p->ptr != NULL ) {
+    /* Synced at once, before the next part is written: parts that share
+       cells then take the write of the last of them, as a write through
+       the parts does. */
     memcpy(p->ptr, src, (size_t) (p->elements * p->bytes));
+    ca_sync_carry_on(p, sync_error);
   }
   else {
     ca_xfer_all(p, src, CA_XFER_PUT);
@@ -711,13 +714,14 @@ ca_stack_put_parent (CArray *p, char *src, int into_buffers)
      correctness path (per-parent contig-read / scattered-write), not a
      perf-optimised one.
 
-   into_buffers (PUT only) writes each parent's cells into the buffer its
-   attach handed out, rather than through the parent to what is behind it:
-   the sync of an attached stack, which then syncs each parent.  Writing
+   A non-NULL sync_error (PUT only) writes each parent's cells into the
+   buffer its attach handed out, rather than through the parent to what is
+   behind it, and syncs the parent: the sync of an attached stack.  Writing
    past the buffer would leave it stale, and the parent's own sync would
-   push the stale buffer back over the cells just written. */
+   push the stale buffer back over the cells just written.  An exception
+   from one parent's sync is kept in *sync_error while the others go on. */
 static void
-ca_stack_xfer_parents (CAStack *ca, char *d, int dir, int into_buffers)
+ca_stack_xfer_parents (CAStack *ca, char *d, int dir, volatile VALUE *sync_error)
 {
   int8_t  k_axis = ca->k_axis;
   ca_size_t bytes = ca->bytes;
@@ -732,7 +736,7 @@ ca_stack_xfer_parents (CAStack *ca, char *d, int dir, int into_buffers)
     for ( k = 0; k < ca->n_parents; k++ ) {
       if ( dir == CA_XFER_PUT ) {
         ca_stack_put_parent(ca->parents[k], d + k * parent_bytes_total,
-                            into_buffers);
+                            sync_error);
       }
       else {
         ca_xfer_all(ca->parents[k], d + k * parent_bytes_total, dir);
@@ -826,7 +830,7 @@ ca_stack_xfer_parents (CAStack *ca, char *d, int dir, int into_buffers)
         }
 
         if ( dir == CA_XFER_PUT ) {
-          ca_stack_put_parent(ca->parents[k], buf, into_buffers);
+          ca_stack_put_parent(ca->parents[k], buf, sync_error);
         }
       }
     }
@@ -838,7 +842,7 @@ static void
 ca_stack_func_xfer_all (void *ap, void *data, int dir)
 {
   ca_stack_mask_refresh((CAStack *) ap);
-  ca_stack_xfer_parents((CAStack *) ap, (char *) data, dir, 0);
+  ca_stack_xfer_parents((CAStack *) ap, (char *) data, dir, NULL);
 }
 
 /* ------------------------------------------------------------------- */
@@ -875,9 +879,14 @@ ca_stack_func_sync (void *ap)
 {
   CAStack *ca = (CAStack *) ap;
   CA_MULTI_PARENT_VALUE_TRIAL(ca, t,
-    ca_stack_xfer_parents((CAStack *) t, ca->ptr, CA_XFER_PUT, 0));
-  ca_stack_xfer_parents(ca, ca->ptr, CA_XFER_PUT, 1);
-  ca_sync_all_attached(ca->parents, ca->n_parents);
+    ca_stack_xfer_parents((CAStack *) t, ca->ptr, CA_XFER_PUT, NULL));
+  {
+    volatile VALUE error = Qnil;
+    ca_stack_xfer_parents(ca, ca->ptr, CA_XFER_PUT, &error);
+    if ( ! NIL_P(error) ) {
+      rb_exc_raise(error);
+    }
+  }
   ca_stack_mask_settle(ca);
 }
 
@@ -1248,6 +1257,17 @@ ca_multi_parent_value_trial_through (CArray *m, VALUE (*body)(VALUE), VALUE arg)
 /* After a write of n cells of `data` to the mask of a CAStack: a true
    that went into a stand-in goes on to its parent's mask. */
 static void
+ca_stack_mask_adopt_before (void *ap, const void *data, ca_size_t n)
+{
+  CAStack *ca = (CAStack *) ap;
+  CAStack *o  = (CAStack *) ca->mask_owner;
+  if ( o != NULL && ca_mask_any_true(data, n) ) {
+    ca_multi_parent_mask_adopt((CArray *) ca, o->parents, o->mask_standins,
+                               o->n_parents);
+  }
+}
+
+static void
 ca_stack_mask_settle_after (CAStack *ca, const void *data, ca_size_t n)
 {
   if ( ca->mask_owner != NULL && ca_mask_any_true(data, n) ) {
@@ -1258,6 +1278,7 @@ ca_stack_mask_settle_after (CAStack *ca, const void *data, ca_size_t n)
 static void
 ca_stack_put_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
+  if ( dir == CA_XFER_PUT ) ca_stack_mask_adopt_before(ap, data, 1);
   ca_stack_func_xfer_index(ap, idx, data, dir);
   if ( dir == CA_XFER_PUT ) ca_stack_mask_settle_after((CAStack *) ap, data, 1);
 }
@@ -1269,6 +1290,7 @@ ca_stack_put_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data,
   if ( dir == CA_XFER_PUT ) {
     CA_MULTI_PARENT_VALUE_TRIAL(ap, t,
       ca_stack_func_xfer_addrs(t, n, addrs, data, dir));
+    ca_stack_mask_adopt_before(ap, data, n);
   }
   ca_stack_func_xfer_addrs(ap, n, addrs, data, dir);
   if ( dir == CA_XFER_PUT ) ca_stack_mask_settle_after((CAStack *) ap, data, n);
@@ -1281,6 +1303,8 @@ ca_stack_put_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   if ( dir == CA_XFER_PUT ) {
     CA_MULTI_PARENT_VALUE_TRIAL(ap, t,
       ca_stack_func_xfer_stride(t, starts, counts, strides, data, dir));
+    ca_stack_mask_adopt_before(ap, data,
+                               ca_shape_elements(((CArray *) ap)->ndim, counts, 1));
   }
   ca_stack_func_xfer_stride(ap, starts, counts, strides, data, dir);
   if ( dir == CA_XFER_PUT ) {
@@ -1294,6 +1318,7 @@ ca_stack_put_xfer_all (void *ap, void *data, int dir)
 {
   if ( dir == CA_XFER_PUT ) {
     CA_MULTI_PARENT_VALUE_TRIAL(ap, t, ca_stack_func_xfer_all(t, data, dir));
+    ca_stack_mask_adopt_before(ap, data, ((CArray *) ap)->elements);
   }
   ca_stack_func_xfer_all(ap, data, dir);
   if ( dir == CA_XFER_PUT ) {
@@ -1305,6 +1330,7 @@ static void
 ca_stack_put_fill_data (void *ap, void *ptr)
 {
   CA_MULTI_PARENT_VALUE_TRIAL(ap, t, ca_stack_func_fill_data(t, ptr));
+  ca_stack_mask_adopt_before(ap, ptr, 1);
   ca_stack_func_fill_data(ap, ptr);
   ca_stack_mask_settle_after((CAStack *) ap, ptr, 1);
 }
@@ -1313,6 +1339,7 @@ static void
 ca_stack_put_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
 {
   CA_MULTI_PARENT_VALUE_TRIAL(ap, t, ca_fill_addrs_default(t, n, addrs, ptr));
+  ca_stack_mask_adopt_before(ap, ptr, 1);
   ca_fill_addrs_default(ap, n, addrs, ptr);
   ca_stack_mask_settle_after((CAStack *) ap, ptr, 1);
 }
@@ -1323,6 +1350,7 @@ ca_stack_put_fill_stride (void *ap, ca_size_t base, int8_t ndim,
 {
   CA_MULTI_PARENT_VALUE_TRIAL(ap, t,
     ca_fill_stride_default(t, base, ndim, counts, steps, ptr));
+  ca_stack_mask_adopt_before(ap, ptr, 1);
   ca_fill_stride_default(ap, base, ndim, counts, steps, ptr);
   ca_stack_mask_settle_after((CAStack *) ap, ptr, 1);
 }

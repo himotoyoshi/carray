@@ -595,6 +595,39 @@ ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
   CAVIEW(mask)->parent = mp->parents[0];
 }
 
+/* Before a write that puts a true into the mask of a stack or meld (not one
+   with its buffer out): each part still reading its stand-in that shares
+   its root with another part is given its own mask, and the write goes to
+   those parts' masks in their order.  Parts that share cells then take the
+   write of the last of them, as they do for values; through stand-ins,
+   settled afterwards, the trues would be added together.  A part that
+   shares nothing keeps its stand-in, and gets no mask from falses. */
+void
+ca_multi_parent_mask_adopt (CArray *mask, CArray **parents,
+                            CArray **standins, int32_t n)
+{
+  CAMultiParent *mp = (CAMultiParent *) mask;
+  int32_t k, j;
+  if ( standins == NULL || mask->ptr != NULL ) {
+    return;
+  }
+  for ( k = 0; k < n; k++ ) {
+    if ( standins[k] == NULL || mp->parents[k] != standins[k]
+         || ca_test_flag(standins[k], CA_FLAG_READ_ONLY) ) {
+      continue;
+    }
+    for ( j = 0; j < n && ( j == k || ! ca_shares_root(parents[j], parents[k]) ); j++ ) ;
+    if ( j == n ) {
+      continue;
+    }
+    ca_create_mask(parents[k]);
+    if ( parents[k]->mask != NULL ) {
+      mp->parents[k] = parents[k]->mask;
+    }
+  }
+  CAVIEW(mask)->parent = mp->parents[0];
+}
+
 void
 ca_multi_parent_mask_settle (CArray *mask, CArray **parents,
                              CArray **standins, int32_t n)
