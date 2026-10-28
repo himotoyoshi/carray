@@ -687,8 +687,8 @@ end
 
 # Marshal of a view, a mask and a scalar: the {CArray#marshal_dump} payload,
 # loaded back by the class method rather than into an empty instance.  A
-# view and a mask come back as a plain array (a copy owns its memory, as
-# #copy gives); a scalar comes back a scalar.  A wrap is refused below.
+# view, a wrap and a mask come back as a plain array (a copy owns its
+# memory, as #copy gives); a scalar comes back a scalar.
 [CAView, CAWrap, CScalar, CArrayMask, CAObjectMask].each do |klass|
   klass.class_eval do
     # A Face other than a record is refused: the payload would carry its
@@ -739,15 +739,9 @@ end
 end
 
 class CAWrap
-  # A wrap borrows memory, which Marshal cannot carry to another process;
-  # Ruby would also try to write the objects that keep the borrowed memory
-  # alive.  Its copy owns its memory and marshals.
-  def _dump (_level)
-    raise TypeError,
-          "Marshal cannot carry a #{self.class}: it borrows its memory; " \
-          "dump .copy instead"
-  end
-
+  # A wrap borrows its memory, which Marshal cannot carry to another
+  # process: {#_dump} above writes its values, and the load gives a plain
+  # array that owns a copy of them, as it does for a view of the wrap.
   def self._load (str)
     CArray.send(:array_from_marshal_payload, Marshal.load(str))
   end

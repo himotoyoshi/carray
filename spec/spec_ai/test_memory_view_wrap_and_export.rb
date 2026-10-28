@@ -5,7 +5,8 @@ require "carray"
 # What the MemoryView export and a wrap of a borrowed buffer promise
 # beyond the import itself:
 # - a record array exports from any Ractor;
-# - the private read-only lift leaves a borrowed mask read-only.
+# - the private read-only lift leaves a borrowed mask read-only;
+# - Marshal carries a wrap as a copy, as it does a view of one.
 
 borrower_dir = File.expand_path("ext_memory_view_test", __dir__)
 $LOAD_PATH.unshift(borrower_dir)
@@ -64,6 +65,26 @@ class TestMemoryViewWrapAndExport < Test::Unit::TestCase
     w, _d, m = wrap_with_mask(readonly_mask: false)
     w.mask = 0
     assert_equal [0] * 12, m.bytes.unpack("C*")
+  end
+
+  # ---------- Marshal ----------
+
+  def test_marshal_carries_a_wrap_as_a_copy
+    src = CArray.int32(3, 4).seq
+    w = CArray.wrap_memory_view(src)
+    x = Marshal.load(Marshal.dump(w))
+    assert_equal CArray, x.class
+    assert_equal src.to_a, x.to_a
+    x[0, 0] = 99
+    assert_equal 0, src[0, 0]
+    assert_equal src[nil, 1].to_a, Marshal.load(Marshal.dump(w[nil, 1])).to_a
+  end
+
+  def test_marshal_carries_a_masked_wrap
+    w, = wrap_with_mask(readonly_mask: false)
+    x = Marshal.load(Marshal.dump(w))
+    assert_equal w.to_a, x.to_a
+    assert_equal w.is_masked.to_a, x.is_masked.to_a
   end
 
 end

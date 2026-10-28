@@ -102,8 +102,7 @@ class TestSerializeByteOrderAndMarshal < Test::Unit::TestCase
   def test_marshal_refuses_what_it_cannot_carry
     assert_raise(TypeError) { Marshal.dump(CArray.time(%w[2024-01-01], unit: :D)) }
     w = CArray.wrap_memory_view(CArray.int32(2).seq!)
-    assert_raise(TypeError) { Marshal.dump(w) }
-    assert_equal [0, 1], round_trip(w.copy).to_a
+    assert_equal [0, 1], round_trip(w).to_a
   end
 
 end
