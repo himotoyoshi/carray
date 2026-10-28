@@ -171,7 +171,7 @@ update its row. Statuses:
 | 16a | 16a_iterator_family.md | draft | verified vs lib/carray/iterator.rb + *_iterator.rb + ca_categorical_iterator.c / ca_group_iter.c / ca_axis_group.c |
 | 16b | 16b_fz_hash_discovery.md | draft | verified vs ext/carray_factorize.c (fz_hash / fz_levels + lane switches) + Ruby wrappers |
 | 17 | 17_lazy.md | draft | verified vs ca_obj_*op.c + carray_lazy.c arena |
-| 18 | 18_memory_view_protocol.md | draft | verified vs carray_memory_view.c strategy table |
+| 18 | 18_memory_view_protocol.md | draft | producer side rewritten to the alias-only export (2026-10-28) |
 | 18a | 18a_serialization.md | draft | verified vs lib/carray/serialize.rb (header layout, save/load, marshal_dump) |
 | 19 | 19_build_generators_testing.md | draft | verified vs the build/test discipline in the source tree |
 | 20 | 20_memory_efficiency_and_streaming.md | draft | cross-cutting; refs verified vs ext/ sources (compose-fold, streaming reduce, scatter kernels, tile cache, streaming I/O) |

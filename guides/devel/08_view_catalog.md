@@ -592,33 +592,31 @@ tail, never the foreign buffer — and the foreign owner needs a GC anchor (an i
 on the wrapper object, or a `dmark` over a `VALUE` in your tail).
 
 Two things a source does not get. MemoryView export is unavailable to any
-extension-defined obj_type: the strategy table is keyed by class name with no
-registration hook, so `CArray.memory_view_available?` answers `false` and export
-is declined — hand out `src.copy` instead. And compose-fold never folds through
+extension-defined obj_type: the export hands out only the bytes of a core
+entity, so `CArray.memory_view_available?` answers `false` and export is
+declined — hand out `src.copy` instead. And compose-fold never folds through
 a source, which is exactly right: it is the root of every chain built on it.
 
-## The exact MV strategy table
+## Which views export through MemoryView
 
-For the canonical strategies (the ones declared in
-`carray_memory_view.c`'s `ca_mv_runtime_types[]`):
+The export is zero-copy only, so a view exports when it composes by strides onto a
+core entity:
 
-| Strategy | Meaning | View kinds |
-|---|---|---|
-| **direct** | contiguous, zero-copy | CArray, CAWrap, CScalar |
-| **strided** | strided, zero-copy | every CAStride descendant — CARefer (with `is_deformed ∈ {0,1}`), CABlock, CAFarray, CATranspose, CARepeat, CAStride, CAField |
-| **attach** | materialise into contig buffer first | CASelect, CAGrid, CAWindow, CAShift, CAFake, CAByteSwap, CABitfield, CAReduce, CARecord, CARemap, CARoll, CATile, CAStack (alias state allowing) |
-| **reject** | not expressible as bytes | CABitarray, CAObject, CAConstString (per-parent buffer) |
+| Exports | View kinds |
+|---|---|
+| **as is** | CArray, CAWrap, CScalar |
+| **with strides** | every CAStride descendant — CARefer (a reshape that composes linearly), CABlock, CAFarray, CATranspose, CARepeat (read-only), CAStride, CAField |
+| **as its storage** | CARecord (`T{...}`), CAFixlenString (`Ns`) |
+| **refused** (export `.copy`) | CASelect, CASelectAxis, CAGrid, CARemap, CAWindow, CAShift, CATile, CARoll, CAStack, CAMeld, CAFake, CAByteSwap, CABitarray, CABitfield, CAReduce, CAObject, lazy expressions, the other Faces, a reshape across a non-contiguous step |
 
-The full `ca_mv_runtime_types[]` decision is in
-`ext/carray_memory_view.c`; [ch. 18](18_memory_view_protocol.md) walks
-the protocol-level surface.
+[ch. 18](18_memory_view_protocol.md) walks the protocol-level surface.
 
 ## Where to go next
 
 - The strided family in depth → [ch. 6](06_view_algebra_and_castride.md).
 - The descriptor engine the gather / shift views share →
   [ch. 7](07_axis_descriptor_framework.md).
-- The MemoryView strategy table and what each export does →
+- What the MemoryView export hands out →
   [ch. 18](18_memory_view_protocol.md).
 - Faces → [ch. 9](09_faces.md).
 - The lazy operation tree → [ch. 17](17_lazy.md).

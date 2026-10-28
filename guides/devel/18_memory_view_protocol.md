@@ -6,8 +6,7 @@
 CArray implements Ruby 3.0+'s `rb_memory_view_t` protocol, so it can exchange raw
 buffers with Numo::NArray, Apache Arrow, PyCall, and fiddle without copying. This
 chapter explains the C machinery on both sides — importing (consumer) and exporting
-(producer) — the per-obj_type strategy table, the mask policy, and the format
-string. The implementation is `ext/carray_memory_view.c`.
+(producer) — which arrays export, the mask policy, and the format string. The implementation is `ext/carray_memory_view.c`.
 
 Why the protocol matters structurally: it is CArray's **escape hatch** to other
 libraries. Because CArray's view-everywhere model makes concurrent
@@ -70,42 +69,43 @@ class to survive view algebra — for semantic identity that does survive it, th
 mechanism is a Face (chapter on `CAFace`), which describes what the *elements*
 mean rather than where the array came from.
 
-## Producer side: the strategy table
+## Producer side: alias only
 
-When CArray *is* the producer, the export path must answer "how do I expose this
-obj_type's bytes?" That is a per-obj_type decision, encoded as a strategy:
+When CArray *is* the producer it hands out its own bytes and nothing else: the
+export never materialises a copy. An array is exported when its parent chain
+composes, by stride arithmetic, down to a core entity (`CA_OBJ_ARRAY` /
+`ARRAY_WRAP` / `SCALAR`). That is the entity itself, or a CAStride-family view
+(`REFER` / `BLOCK` / `STRIDE` / `FARRAY` / `TRANSPOSE` / `REPEAT` / `FIELD`, and
+reshapes of them that compose linearly). Everything else is refused, and the
+refusal tells the consumer to export `.copy`: CASelect, CAGrid, CAShift, CAWindow,
+CAFake, CAReduce, CAStack, CAMeld, lazy expressions, CABitarray / CABitfield,
+CAObject, a reshape across a non-contiguous step, and any view whose root was
+installed from outside the core.
 
-| Strategy | Meaning |
-|----------|---------|
-| **direct** | contiguous own buffer — expose `ptr` directly |
-| **strided** (`REFER`/`BLOCK`/`FARRAY`/`TRANS`/`REPEAT`) | zero-copy via strides + offset over `parent->ptr` |
-| **attach** | not expressible as strides — `ca_attach` materialises a contiguous buffer first |
-| **reject** | cannot be represented at all |
+One resolver, `ca_mv_compose_to_entity`, decides. `memory_view_available?`,
+`memory_view_reject_reason` and the export itself all go through it, so they
+cannot disagree. `ca_mv_runtime_types[]` still labels each class (direct /
+strided / attach / reject), but only to name the class in a refusal; the resolver
+refuses every class labelled attach.
 
-The mapping is resolved in `ca_mv_strategy_for` for the fixed obj_types and in the
-`ca_mv_runtime_types[]` table for the runtime-installed ones. Representative
-assignments ([ch. 8](08_view_catalog.md) has the full catalog):
+A Face is exported as its storage only when it registered that its storage bytes
+carry its values (`ca_face_register_memory_view`, internal): CARecord as `T{...}`
+and CAFixlenString as `Ns`. The other Faces (a time with its unit, categorical
+codes with their labels) are refused; export `.ticks` or `.codes` instead.
 
-- `CA_OBJ_ARRAY` / `ARRAY_WRAP` / `SCALAR` → **direct**;
-- `CA_OBJ_REFER` / `BLOCK` / `STRIDE` / `FARRAY` / `TRANSPOSE` / `REPEAT` /
-  `FIELD` → **strided** (zero-copy);
-- `CA_OBJ_SELECT` / `GRID` / `SHIFT` / `WINDOW` / `FAKE` / `REDUCE` / `RECORD` →
-  **attach** (the access pattern isn't strides, so materialise);
-- `CA_OBJ_BITARRAY` / `BITFIELD` / `OBJECT` → **reject**
-  (sub-byte packing and Ruby `VALUE`s have no byte-addressable
-  layout).
-
-The strided strategies are why a transposed or sliced CArray exports **zero-copy**:
-the strides and base offset that drive the view internally
+The strided views are why a transposed or sliced CArray exports **zero-copy**: the
+strides and base offset that drive the view internally
 ([ch. 6](06_view_algebra_and_castride.md)) are exactly what the MemoryView protocol
-wants. CAField became strided (zero-copy) when it moved onto CAStride.
+wants.
 
-### SIMPLE-flag consumers force contiguity
+### Layout requests
 
-A consumer that sets the SIMPLE flag (NetCDF, HDF5, …) cannot accept strides. When
-such a consumer requests a strided virtual array, the producer side automatically
-`ca_attach`es → fills → syncs to hand over a contiguous buffer, converting a
-strided strategy into a materialised one on the fly.
+A consumer that asks for no strides (SIMPLE, or ROW_MAJOR) gets the export only
+when the composed layout is row-major contiguous; COLUMN_MAJOR only when it is
+column-major contiguous (a transposed array). Otherwise the request is refused:
+no contiguous copy is made behind the consumer's back. A writable request is
+refused for any read-only source (`ca_is_readonly`): CARepeat and `value` views
+are read-only.
 
 ## The mask policy
 
@@ -115,7 +115,7 @@ cannot, so the caller must say explicitly what to export:
 
 - `ca.value` — a CARefer that drops the mask ([ch. 5](05_mask_and_undef.md));
 - `ca.mask` — the boolean mask array itself;
-- `ca.unmask_copy(fill)` — a filled copy.
+- `ca.strip_mask(fill)` — a filled copy.
 
 This is the deliberate "no silent data loss" choice: rather than guess, the
 protocol makes the caller name the projection.
@@ -129,20 +129,19 @@ NumPy, Numo, and Arrow each describe e.g. `int32` differently. The normative
 spec is PEP 3118 (with a struct-format section on top); keep the Numo side in
 sync when extending the table.
 
-## Extending the strategy table
+## Making a new obj_type exportable
 
-To add MemoryView support for a new obj_type, register its strategy in
-`ca_mv_runtime_types` (direct / strided / attach / reject) per the rules above, and
-add any new format mapping to `ca_mv_format_for` / `_data_type_from_format`.
+An obj_type exports only by composing onto a core entity, so a new view exports
+zero-copy when it is a CAStride subclass whose strides fold into its parent's
+([ch. 6](06_view_algebra_and_castride.md)); a new element type also needs its
+format in `ca_mv_format_for` / `ca_mv_data_type_from_format`.
 
-The table is a fixed-size static array resolved by class name at init, so **an
-obj_type installed from outside the core cannot register a strategy** — a source
-class defined by a C extension ([ch. 8](08_view_catalog.md)) is unexportable, and
-`memory_view_available?` says so rather than letting the export fail later. Such
-a class hands out `src.copy` when a consumer needs a MemoryView. Opening the
-table to extensions would need a registration API; nobody has needed one yet.
-A writable request must be rejected for any read-only source via
-`ca_is_readonly` — CARepeat and `value` views are read-only.
+**An obj_type installed from outside the core is not exported**, nor is a view
+onto one: a source class defined by a C extension ([ch. 8](08_view_catalog.md))
+hands out `src.copy` when a consumer needs a MemoryView, and
+`memory_view_available?` says so rather than letting the export fail later.
+Opening the export to extensions would need a registration API; nobody has needed
+one yet.
 
 ## Author-only escape: attaching a mask to a read-only wrap
 
