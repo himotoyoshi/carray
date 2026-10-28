@@ -764,6 +764,34 @@ void        ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
 
 void        ca_multi_parent_check_part (CArray *part, const char *name);
 
+/* A write to a stack or meld goes to its parts one after another, and a
+   part that converts the value on its way (a writable cast) can refuse it
+   after the parts before it were written.  ca_multi_parent_value_trial
+   gives a stack or meld laid out as `ca` over scratch arrays standing for
+   its parts (held by `keep`), to run the write against first, when
+   ca_multi_parent_value_needs_trial says such a part is there. */
+int         ca_multi_parent_value_needs_trial (CArray *ca);
+CArray     *ca_multi_parent_value_trial (CArray *ca, VALUE keep);
+
+/* A write through the view `ca` that reaches a stack or meld needing the
+   trial, in pieces: ca_multi_parent_value_trial_below gives the stack or
+   meld, and ca_multi_parent_value_trial_through runs the write against its
+   stand-ins first. */
+CArray     *ca_multi_parent_value_trial_below (CArray *ca);
+void        ca_multi_parent_value_trial_through (CArray *m, VALUE (*body)(VALUE),
+                                                 VALUE arg);
+
+#define CA_MULTI_PARENT_VALUE_TRIAL(ap, t, call) \
+  do { \
+    if ( ca_multi_parent_value_needs_trial((CArray *) (ap)) ) { \
+      volatile VALUE keep_ = rb_ary_new(); \
+      CArray *t = ca_multi_parent_value_trial((CArray *) (ap), keep_); \
+      call; \
+      RB_GC_GUARD(keep_); \
+    } \
+  } while (0)
+int         ca_monop_writable_cast_target (CArray *ca, int8_t *target);
+
 /* ca_mask_standin_settle for each part of a multi-parent view's mask
    still reading its stand-in. */
 void        ca_multi_parent_mask_settle (CArray *mask, CArray **parents,

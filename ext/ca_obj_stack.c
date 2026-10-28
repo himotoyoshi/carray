@@ -19,6 +19,7 @@
 
 #include "carray.h"
 #include "carray_internal.h"   /* ca_attach_all / ca_sync_all */
+#include <ruby/ractor.h>
 #include "ca_composite_dispatch.h"
 #include "ca_obj_face.h"
 
@@ -873,6 +874,8 @@ static void
 ca_stack_func_sync (void *ap)
 {
   CAStack *ca = (CAStack *) ap;
+  CA_MULTI_PARENT_VALUE_TRIAL(ca, t,
+    ca_stack_xfer_parents((CAStack *) t, ca->ptr, CA_XFER_PUT, 0));
   ca_stack_xfer_parents(ca, ca->ptr, CA_XFER_PUT, 1);
   ca_sync_all_attached(ca->parents, ca->n_parents);
   ca_stack_mask_settle(ca);
@@ -1012,6 +1015,233 @@ ca_stack_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
 /* operation table                                                      */
 /* ------------------------------------------------------------------- */
 
+extern int8_t CA_OBJ_MELD;
+CAMeld *ca_meld_new (int32_t n_parents, CArray **parents, int8_t meld_axis);
+
+/* For a stack or meld holding data (not the mask of one): its parts. */
+static int
+ca_value_trial_parts (CArray *ca, CArray ***parts, int32_t *n)
+{
+  if ( ca->obj_type == CA_OBJ_STACK && ((CAStack *) ca)->mask_owner == NULL ) {
+    *parts = ((CAStack *) ca)->parents;
+    *n     = ((CAStack *) ca)->n_parents;
+    return 1;
+  }
+  if ( ca->obj_type == CA_OBJ_MELD && ((CAMeld *) ca)->mask_owner == NULL ) {
+    *parts = ((CAMeld *) ca)->parents;
+    *n     = ((CAMeld *) ca)->n_parents;
+    return 1;
+  }
+  return 0;
+}
+
+/* The data type a write through `q` is converted to and can be refused by:
+   the parent type of the first writable cast that changes the type, down
+   the chain of single-parent views.  -1 if there is none. */
+static int
+ca_value_trial_target (CArray *q)
+{
+  int8_t t;
+  while ( q != NULL ) {
+    if ( ca_monop_writable_cast_target(q, &t) && t != q->data_type ) {
+      return t;
+    }
+    if ( ! ca_is_view(q) || ca_test_flag(q, CA_FLAG_MULTI_PARENTS) ) {
+      break;
+    }
+    q = CAVIEW(q)->parent;
+  }
+  return -1;
+}
+
+static int
+ca_value_trial_needed (CArray *ca, int depth)
+{
+  CArray **parts;
+  int32_t  n, k;
+  if ( depth > 64 || ! ca_value_trial_parts(ca, &parts, &n) ) {
+    return 0;
+  }
+  for ( k = 0; k < n; k++ ) {
+    if ( ca_value_trial_target(parts[k]) >= 0
+         || ca_value_trial_needed(parts[k], depth + 1) ) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static CArray *
+ca_value_trial_hold (VALUE keep, CArray *ca)
+{
+  rb_ary_push(keep, ca_wrap_struct(ca));
+  return ca;
+}
+
+static CArray *ca_value_trial_like (CArray *ca, VALUE keep, int depth);
+
+/* A scratch array standing for the part `q`: converting as `q` does when
+   `q` can refuse a value, plain otherwise. */
+static CArray *
+ca_value_trial_standin (CArray *q, VALUE keep, int depth)
+{
+  CArray **parts;
+  int32_t  n;
+  int      t = ca_value_trial_target(q);
+  if ( t >= 0 ) {
+    VALUE z = rb_carray_new((int8_t) t, q->ndim, q->dim, 0, NULL);
+    VALUE w = rb_ca_wrap_writable(z, INT2NUM(q->data_type));
+    rb_ary_push(keep, z);
+    rb_ary_push(keep, w);
+    return (CArray *) DATA_PTR(w);
+  }
+  if ( ca_value_trial_parts(q, &parts, &n) && ca_value_trial_needed(q, depth) ) {
+    return ca_value_trial_like(q, keep, depth);
+  }
+  {
+    VALUE z = rb_carray_new(q->data_type, q->ndim, q->dim, q->bytes, NULL);
+    rb_ary_push(keep, z);
+    return (CArray *) DATA_PTR(z);
+  }
+}
+
+static CArray *
+ca_value_trial_like (CArray *ca, VALUE keep, int depth)
+{
+  volatile VALUE holder = 0;
+  CArray **parts = NULL, **standins, *like;
+  int32_t  n = 0, k;
+  ca_value_trial_parts(ca, &parts, &n);
+  standins = ALLOCV_N(CArray *, holder, n);
+  for ( k = 0; k < n; k++ ) {
+    standins[k] = ca_value_trial_standin(parts[k], keep, depth + 1);
+  }
+  if ( ca->obj_type == CA_OBJ_STACK ) {
+    like = (CArray *) ca_stack_new_with_axis(n, standins, ((CAStack *) ca)->k_axis);
+  }
+  else {
+    like = (CArray *) ca_meld_new(n, standins, ((CAMeld *) ca)->meld_axis);
+  }
+  ALLOCV_END(holder);
+  return ca_value_trial_hold(keep, like);
+}
+
+/* Set while a write runs against stand-ins; a write nested in it is not
+   tried again. */
+static rb_ractor_local_key_t ca_value_trial_depth_key;
+
+static long
+ca_value_trial_depth (void)
+{
+  VALUE v;
+  if ( ca_value_trial_depth_key
+       && rb_ractor_local_storage_value_lookup(ca_value_trial_depth_key, &v) ) {
+    return FIX2LONG(v);
+  }
+  return 0;
+}
+
+static void
+ca_value_trial_depth_add (long d)
+{
+  rb_ractor_local_storage_value_set(ca_value_trial_depth_key,
+                                    LONG2FIX(ca_value_trial_depth() + d));
+}
+
+int
+ca_multi_parent_value_needs_trial (CArray *ca)
+{
+  return ca_value_trial_depth() == 0 && ca_value_trial_needed(ca, 0);
+}
+
+CArray *
+ca_multi_parent_value_trial (CArray *ca, VALUE keep)
+{
+  return ca_value_trial_like(ca, keep, 0);
+}
+
+/* A view over a stack or meld can hand a write on to it in several pieces
+   (a CAGrid picking along the stack axis), each a write of its own.  The
+   stack or meld below `ca`, reached through views that have no buffer out
+   (a view with one gets its write checked when it is synced), when a write
+   through `ca` needs to be tried first; NULL otherwise. */
+CArray *
+ca_multi_parent_value_trial_below (CArray *ca)
+{
+  CArray *q;
+  if ( ! ca_is_view(ca) || ca_test_flag(ca, CA_FLAG_MULTI_PARENTS)
+       || ca_value_trial_depth() > 0 ) {
+    return NULL;
+  }
+  q = CAVIEW(ca)->parent;
+  while ( q != NULL && ca_is_view(q) && ! ca_test_flag(q, CA_FLAG_MULTI_PARENTS) ) {
+    if ( q->ptr != NULL ) {
+      return NULL;
+    }
+    q = CAVIEW(q)->parent;
+  }
+  if ( q == NULL || q->ptr != NULL || ! ca_value_trial_needed(q, 0) ) {
+    return NULL;
+  }
+  return q;
+}
+
+typedef struct {
+  CAMultiParent *mp;
+  CArray       **saved;
+  CArray        *saved_parent;
+  VALUE        (*body)(VALUE);
+  VALUE          arg;
+} ca_value_trial_swap_t;
+
+static VALUE
+ca_value_trial_swap_body (VALUE p)
+{
+  ca_value_trial_swap_t *t = (ca_value_trial_swap_t *) p;
+  return t->body(t->arg);
+}
+
+static VALUE
+ca_value_trial_swap_restore (VALUE p)
+{
+  ca_value_trial_swap_t *t = (ca_value_trial_swap_t *) p;
+  int32_t k;
+  for ( k = 0; k < t->mp->n_parents; k++ ) {
+    t->mp->parents[k] = t->saved[k];
+  }
+  CAVIEW(t->mp)->parent = t->saved_parent;
+  ca_value_trial_depth_add(-1);
+  return Qnil;
+}
+
+/* Run `body(arg)` once with the parts of the stack or meld `m` replaced by
+   stand-ins (ca_multi_parent_value_trial), then put the parts back. */
+void
+ca_multi_parent_value_trial_through (CArray *m, VALUE (*body)(VALUE), VALUE arg)
+{
+  volatile VALUE keep = rb_ary_new();
+  volatile VALUE holder = 0;
+  CAMultiParent *mp = (CAMultiParent *) m;
+  CAMultiParent *like = (CAMultiParent *) ca_multi_parent_value_trial(m, keep);
+  ca_value_trial_swap_t t;
+  int32_t k;
+  t.mp           = mp;
+  t.saved        = ALLOCV_N(CArray *, holder, mp->n_parents);
+  t.saved_parent = CAVIEW(m)->parent;
+  t.body         = body;
+  t.arg          = arg;
+  for ( k = 0; k < mp->n_parents; k++ ) {
+    t.saved[k]     = mp->parents[k];
+    mp->parents[k] = like->parents[k];
+  }
+  CAVIEW(m)->parent = mp->parents[0];
+  ca_value_trial_depth_add(1);
+  rb_ensure(ca_value_trial_swap_body, (VALUE) &t,
+            ca_value_trial_swap_restore, (VALUE) &t);
+  ALLOCV_END(holder);
+  RB_GC_GUARD(keep);
+}
+
 /* The table's write slots: after a write that may have put a true into a
    stand-in, the true goes on to the parent's mask (ca_mask_standin_settle).
    Only the mask of a CAStack has stand-ins. */
@@ -1036,6 +1266,10 @@ static void
 ca_stack_put_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data,
                          int dir)
 {
+  if ( dir == CA_XFER_PUT ) {
+    CA_MULTI_PARENT_VALUE_TRIAL(ap, t,
+      ca_stack_func_xfer_addrs(t, n, addrs, data, dir));
+  }
   ca_stack_func_xfer_addrs(ap, n, addrs, data, dir);
   if ( dir == CA_XFER_PUT ) ca_stack_mask_settle_after((CAStack *) ap, data, n);
 }
@@ -1044,6 +1278,10 @@ static void
 ca_stack_put_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir)
 {
+  if ( dir == CA_XFER_PUT ) {
+    CA_MULTI_PARENT_VALUE_TRIAL(ap, t,
+      ca_stack_func_xfer_stride(t, starts, counts, strides, data, dir));
+  }
   ca_stack_func_xfer_stride(ap, starts, counts, strides, data, dir);
   if ( dir == CA_XFER_PUT ) {
     ca_stack_mask_settle_after((CAStack *) ap, data,
@@ -1054,6 +1292,9 @@ ca_stack_put_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 static void
 ca_stack_put_xfer_all (void *ap, void *data, int dir)
 {
+  if ( dir == CA_XFER_PUT ) {
+    CA_MULTI_PARENT_VALUE_TRIAL(ap, t, ca_stack_func_xfer_all(t, data, dir));
+  }
   ca_stack_func_xfer_all(ap, data, dir);
   if ( dir == CA_XFER_PUT ) {
     ca_stack_mask_settle_after((CAStack *) ap, data, ((CArray *) ap)->elements);
@@ -1063,16 +1304,15 @@ ca_stack_put_xfer_all (void *ap, void *data, int dir)
 static void
 ca_stack_put_fill_data (void *ap, void *ptr)
 {
+  CA_MULTI_PARENT_VALUE_TRIAL(ap, t, ca_stack_func_fill_data(t, ptr));
   ca_stack_func_fill_data(ap, ptr);
   ca_stack_mask_settle_after((CAStack *) ap, ptr, 1);
 }
 
-/* A fill of part of the mask goes cell by cell through xfer_index; run
-   the whole of it against blank masks first, so that a cell refused late
-   does not leave the cells before it written. */
 static void
 ca_stack_put_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
 {
+  CA_MULTI_PARENT_VALUE_TRIAL(ap, t, ca_fill_addrs_default(t, n, addrs, ptr));
   ca_fill_addrs_default(ap, n, addrs, ptr);
   ca_stack_mask_settle_after((CAStack *) ap, ptr, 1);
 }
@@ -1081,6 +1321,8 @@ static void
 ca_stack_put_fill_stride (void *ap, ca_size_t base, int8_t ndim,
                          ca_size_t *counts, ca_size_t *steps, void *ptr)
 {
+  CA_MULTI_PARENT_VALUE_TRIAL(ap, t,
+    ca_fill_stride_default(t, base, ndim, counts, steps, ptr));
   ca_fill_stride_default(ap, base, ndim, counts, steps, ptr);
   ca_stack_mask_settle_after((CAStack *) ap, ptr, 1);
 }
@@ -1305,6 +1547,7 @@ rb_ca_stack_k_axis (VALUE self)
 void
 Init_ca_obj_stack (void)
 {
+  ca_value_trial_depth_key = rb_ractor_local_storage_value_newkey();
   /* CAStack must match the CAMultiParent layout convention so generic code
      can fold over parents[] via the CA_FLAG_MULTI_PARENTS path. */
   if ( offsetof(CAStack, n_parents) != offsetof(CAMultiParent, n_parents) ||

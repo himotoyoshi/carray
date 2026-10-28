@@ -903,6 +903,8 @@ static void
 ca_meld_func_sync (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
+  CA_MULTI_PARENT_VALUE_TRIAL(ca, t,
+    ca_meld_xfer_parents((CAMeld *) t, ca->ptr, CA_XFER_PUT, 0));
   ca_meld_xfer_parents(ca, ca->ptr, CA_XFER_PUT, 1);
   ca_sync_all_attached(ca->parents, ca->n_parents);
   ca_meld_mask_settle(ca);
@@ -1000,6 +1002,10 @@ static void
 ca_meld_put_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data,
                          int dir)
 {
+  if ( dir == CA_XFER_PUT ) {
+    CA_MULTI_PARENT_VALUE_TRIAL(ap, t,
+      ca_meld_func_xfer_addrs(t, n, addrs, data, dir));
+  }
   ca_meld_func_xfer_addrs(ap, n, addrs, data, dir);
   if ( dir == CA_XFER_PUT ) ca_meld_mask_settle_after((CAMeld *) ap, data, n);
 }
@@ -1008,6 +1014,10 @@ static void
 ca_meld_put_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir)
 {
+  if ( dir == CA_XFER_PUT ) {
+    CA_MULTI_PARENT_VALUE_TRIAL(ap, t,
+      ca_meld_func_xfer_stride(t, starts, counts, strides, data, dir));
+  }
   ca_meld_func_xfer_stride(ap, starts, counts, strides, data, dir);
   if ( dir == CA_XFER_PUT ) {
     ca_meld_mask_settle_after((CAMeld *) ap, data,
@@ -1018,6 +1028,9 @@ ca_meld_put_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 static void
 ca_meld_put_xfer_all (void *ap, void *data, int dir)
 {
+  if ( dir == CA_XFER_PUT ) {
+    CA_MULTI_PARENT_VALUE_TRIAL(ap, t, ca_meld_func_xfer_all(t, data, dir));
+  }
   ca_meld_func_xfer_all(ap, data, dir);
   if ( dir == CA_XFER_PUT ) {
     ca_meld_mask_settle_after((CAMeld *) ap, data, ((CArray *) ap)->elements);
@@ -1027,16 +1040,15 @@ ca_meld_put_xfer_all (void *ap, void *data, int dir)
 static void
 ca_meld_put_fill_data (void *ap, void *ptr)
 {
+  CA_MULTI_PARENT_VALUE_TRIAL(ap, t, ca_meld_func_fill_data(t, ptr));
   ca_meld_func_fill_data(ap, ptr);
   ca_meld_mask_settle_after((CAMeld *) ap, ptr, 1);
 }
 
-/* A fill of part of the mask goes cell by cell through xfer_index; run
-   the whole of it against blank masks first, so that a cell refused late
-   does not leave the cells before it written. */
 static void
 ca_meld_put_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
 {
+  CA_MULTI_PARENT_VALUE_TRIAL(ap, t, ca_fill_addrs_default(t, n, addrs, ptr));
   ca_fill_addrs_default(ap, n, addrs, ptr);
   ca_meld_mask_settle_after((CAMeld *) ap, ptr, 1);
 }
@@ -1045,6 +1057,8 @@ static void
 ca_meld_put_fill_stride (void *ap, ca_size_t base, int8_t ndim,
                          ca_size_t *counts, ca_size_t *steps, void *ptr)
 {
+  CA_MULTI_PARENT_VALUE_TRIAL(ap, t,
+    ca_fill_stride_default(t, base, ndim, counts, steps, ptr));
   ca_fill_stride_default(ap, base, ndim, counts, steps, ptr);
   ca_meld_mask_settle_after((CAMeld *) ap, ptr, 1);
 }

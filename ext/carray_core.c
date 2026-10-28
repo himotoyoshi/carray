@@ -1180,6 +1180,58 @@ ca_store_addr (void *ap, ca_size_t addr, void *pval)
    public C-API for external ext gems).  Every view supplies an
    xfer_index slot. */
 
+/* ---- A write through a view, tried first against a stack's stand-ins ----
+   (ca_multi_parent_value_trial_below) */
+
+typedef struct {
+  int        kind;
+  CArray    *ca;
+  ca_size_t  n;
+  ca_size_t *addrs;
+  ca_size_t *starts;
+  ca_size_t *counts;
+  ca_size_t *strides;
+  void      *data;
+  ca_size_t  base;
+  int8_t     ndim;
+  ca_size_t *steps;
+} ca_value_trial_put_t;
+
+enum { CA_TRIAL_ADDRS, CA_TRIAL_STRIDE, CA_TRIAL_ALL, CA_TRIAL_FILL,
+       CA_TRIAL_FILL_STRIDE, CA_TRIAL_FILL_ADDRS, CA_TRIAL_SYNC };
+
+static VALUE
+ca_value_trial_put_body (VALUE arg)
+{
+  ca_value_trial_put_t *a = (ca_value_trial_put_t *) arg;
+  switch ( a->kind ) {
+  case CA_TRIAL_ADDRS:
+    ca_xfer_addrs(a->ca, a->n, a->addrs, a->data, CA_XFER_PUT); break;
+  case CA_TRIAL_STRIDE:
+    ca_xfer_stride(a->ca, a->starts, a->counts, a->strides, a->data, CA_XFER_PUT); break;
+  case CA_TRIAL_ALL:
+    ca_xfer_all(a->ca, a->data, CA_XFER_PUT); break;
+  case CA_TRIAL_FILL:
+    ca_fill_data(a->ca, a->data); break;
+  case CA_TRIAL_FILL_STRIDE:
+    ca_fill_stride(a->ca, a->base, a->ndim, a->counts, a->steps, a->data); break;
+  case CA_TRIAL_FILL_ADDRS:
+    ca_fill_addrs(a->ca, a->n, a->addrs, a->data); break;
+  case CA_TRIAL_SYNC:
+    ca_func[a->ca->obj_type].sync(a->ca); break;
+  }
+  return Qnil;
+}
+
+#define CA_VALUE_TRIAL_PUT(...) \
+  do { \
+    ca_value_trial_put_t a_ = { __VA_ARGS__ }; \
+    CArray *m_ = ca_multi_parent_value_trial_below(a_.ca); \
+    if ( m_ != NULL ) { \
+      ca_multi_parent_value_trial_through(m_, ca_value_trial_put_body, (VALUE) &a_); \
+    } \
+  } while (0)
+
 static inline void
 ca_xfer_index_dispatch (CArray *ca, ca_size_t *idx, void *data, int dir)
 {
@@ -1368,6 +1420,10 @@ ca_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data, int dir)
 
   if ( dir == CA_XFER_PUT && ca_is_readonly(ca) ) {
     ca_refuse_read_only();
+  }
+
+  if ( dir == CA_XFER_PUT && ca->ptr == NULL ) {
+    CA_VALUE_TRIAL_PUT(CA_TRIAL_ADDRS, ca, n, addrs, NULL, NULL, NULL, data);
   }
 
 
@@ -1827,6 +1883,10 @@ ca_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 
   if ( ca_region_is_empty(ca->ndim, counts) ) return;
 
+  if ( dir == CA_XFER_PUT && ca->ptr == NULL ) {
+    CA_VALUE_TRIAL_PUT(CA_TRIAL_STRIDE, ca, 0, NULL, starts, counts, strides, data);
+  }
+
 
   if ( ca->data_type != CA_OBJECT ) {
     ca_xfer_stride_dispatch(ca, starts, counts, strides, data, dir);
@@ -1898,6 +1958,9 @@ ca_xfer_all (void *ap, void *data, int dir)
   /* An empty view moves nothing; see ca_xfer_stride. */
   if ( ca->elements == 0 ) {
     return;
+  }
+  if ( dir == CA_XFER_PUT && ca->ptr == NULL ) {
+    CA_VALUE_TRIAL_PUT(CA_TRIAL_ALL, ca, 0, NULL, NULL, NULL, NULL, data);
   }
   /* Universal arena lifetime hook.  ca_xfer_all is the single universal
      entry for materialise (to_ca -> ca_copy -> ca_copy_data ->
@@ -2794,6 +2857,11 @@ ca_sync (void *ap)
     ca_refuse_read_only();
   }
 
+  /* Before the mask is synced: a refused write leaves the mask as well. */
+  if ( ca_is_view(ca) && ! CAVIEW(ca)->nosync ) {
+    CA_VALUE_TRIAL_PUT(CA_TRIAL_SYNC, ca, 0, NULL, NULL, NULL, NULL, NULL);
+  }
+
 
   /* Only a mask that exists can hold writes: one made inside the window
      is attached with the view (ca_create_mask).  Making one here would
@@ -3026,6 +3094,10 @@ ca_fill_data (void *ap, void *aptr)
     ca_refuse_read_only();
   }
 
+  if ( ca->ptr == NULL ) {
+    CA_VALUE_TRIAL_PUT(CA_TRIAL_FILL, ca, 0, NULL, NULL, NULL, NULL, ptr);
+  }
+
 
   if ( ca_is_view(ca) ) {   /* view array */
     if ( ca_is_attached(ca) ) { /* ca is to be attached */
@@ -3082,6 +3154,11 @@ ca_fill_stride (void *ap, ca_size_t base, int8_t ndim,
   }
 
   if ( ca_region_is_empty(ndim, counts) ) return;
+
+  if ( ca->ptr == NULL ) {
+    CA_VALUE_TRIAL_PUT(CA_TRIAL_FILL_STRIDE, ca, 0, NULL, NULL, counts, NULL, ptr,
+                       base, ndim, steps);
+  }
 
 
   if ( ca_func[ca->obj_type].fill_stride ) {
@@ -3200,6 +3277,10 @@ ca_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
 
   if ( ca_is_readonly(ca) ) {
     ca_refuse_read_only();
+  }
+
+  if ( ca->ptr == NULL ) {
+    CA_VALUE_TRIAL_PUT(CA_TRIAL_FILL_ADDRS, ca, n, addrs, NULL, NULL, NULL, ptr);
   }
 
 

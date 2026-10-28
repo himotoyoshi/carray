@@ -870,6 +870,21 @@ ca_monop_func_create_mask (void *ap)
   }
 }
 
+/* For a writable cast: 1 and the data type it writes its parent in.  0 for
+   any other array. */
+int
+ca_monop_writable_cast_target (CArray *ca, int8_t *target)
+{
+  CAMonOp *mo = (CAMonOp *) ca;
+  if ( ca->obj_type != CA_OBJ_MONOP
+       || ! ca_monop_is_writable_view(mo->op_id)
+       || ! ca_monop_is_cast(mo->op_id) ) {
+    return 0;
+  }
+  *target = mo->parent->data_type;
+  return 1;
+}
+
 ca_operation_function_t ca_monop_func = {
   -1, /* CA_OBJ_MONOP, set at install time */
   CA_VIEW_ARRAY,
