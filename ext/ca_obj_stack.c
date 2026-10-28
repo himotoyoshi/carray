@@ -1099,6 +1099,7 @@ ca_value_trial_standin (CArray *q, VALUE keep, int depth)
   int      t = ca_value_trial_target(q);
   if ( t >= 0 ) {
     VALUE z = rb_carray_new((int8_t) t, q->ndim, q->dim, 0, NULL);
+    /* coerce: the stand-in converts as the part's own cast does */
     VALUE w = rb_ca_wrap_writable(z, INT2NUM(q->data_type));
     rb_ary_push(keep, z);
     rb_ary_push(keep, w);
