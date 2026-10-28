@@ -899,13 +899,10 @@ ca_meld_func_attach (void *ap)
   ca_fill_or_detach(ca->n_parents, ca->parents, ca_meld_attach_owned, (VALUE) ca);
 }
 
-static void ca_meld_mask_refuse_sync (CAMeld *ca);
-
 static void
 ca_meld_func_sync (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
-  ca_meld_mask_refuse_sync(ca);
   ca_meld_xfer_parents(ca, ca->ptr, CA_XFER_PUT, 1);
   ca_sync_all_attached(ca->parents, ca->n_parents);
   ca_meld_mask_settle(ca);
@@ -980,117 +977,8 @@ ca_meld_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
 /* ------------------------------------------------------------------- */
 
 /* The table's write slots: after a write that may have put a true into a
-   stand-in, the true goes on to the parent's mask, or is refused for a
-   value array or a mask array (ca_mask_standin_settle).  Only the mask of
-   a CAMeld has stand-ins. */
-/* A write to the mask of a CAMeld, run once against blank masks first
-   (ca_multi_parent_mask_refuse_first), so that a write refused for a value
-   array or mask array part changes no other part. */
-enum { CA_MELD_PUT_INDEX, CA_MELD_PUT_ADDRS, CA_MELD_PUT_STRIDE, CA_MELD_PUT_ALL,
-       CA_MELD_PUT_FILL, CA_MELD_PUT_SYNC, CA_MELD_PUT_FILL_ADDRS,
-       CA_MELD_PUT_FILL_STRIDE };
-
-typedef struct {
-  int        slot;
-  void      *ap;
-  ca_size_t *idx;
-  ca_size_t  n;
-  ca_size_t *addrs;
-  ca_size_t *starts;
-  ca_size_t *counts;
-  ca_size_t *strides;
-  void      *data;
-  ca_size_t  base;
-  int8_t     ndim;
-  ca_size_t *steps;
-} ca_meld_put_t;
-
-static VALUE
-ca_meld_put_body (VALUE arg)
-{
-  ca_meld_put_t *a = (ca_meld_put_t *) arg;
-  switch ( a->slot ) {
-  case CA_MELD_PUT_INDEX:
-    ca_meld_func_xfer_index(a->ap, a->idx, a->data, CA_XFER_PUT); break;
-  case CA_MELD_PUT_ADDRS:
-    ca_meld_func_xfer_addrs(a->ap, a->n, a->addrs, a->data, CA_XFER_PUT); break;
-  case CA_MELD_PUT_STRIDE:
-    ca_meld_func_xfer_stride(a->ap, a->starts, a->counts, a->strides, a->data,
-                             CA_XFER_PUT); break;
-  case CA_MELD_PUT_ALL:
-    ca_meld_func_xfer_all(a->ap, a->data, CA_XFER_PUT); break;
-  case CA_MELD_PUT_FILL:
-    ca_meld_func_fill_data(a->ap, a->data); break;
-  case CA_MELD_PUT_FILL_ADDRS:
-    ca_fill_addrs_default(a->ap, a->n, a->addrs, a->data); break;
-  case CA_MELD_PUT_FILL_STRIDE:
-    ca_fill_stride_default(a->ap, a->base, a->ndim, a->counts, a->steps,
-                           a->data); break;
-  case CA_MELD_PUT_SYNC:
-    ca_meld_xfer_parents((CAMeld *) a->ap, ((CArray *) a->ap)->ptr, CA_XFER_PUT, 1);
-    break;
-  }
-  return Qnil;
-}
-
-/* For a CAMeld holding data (not the mask of one): its parents and their
-   number.  0 for any other array. */
-int
-ca_meld_data_parts (CArray *ca, CArray ***parents, int32_t *n)
-{
-  if ( ca->obj_type != CA_OBJ_MELD || ((CAMeld *) ca)->mask_owner != NULL ) {
-    return 0;
-  }
-  *parents = ((CAMeld *) ca)->parents;
-  *n       = ((CAMeld *) ca)->n_parents;
-  return 1;
-}
-
-/* A CAMeld over `parents`, laid out as the CAMeld `like`. */
-CArray *
-ca_meld_like (CArray *like, CArray **parents)
-{
-  CAMeld *l = (CAMeld *) like;
-  return (CArray *) ca_meld_new(l->n_parents, parents, l->meld_axis);
-}
-
-/* For the mask of a CAMeld: the CAMeld it belongs to, as its data parents,
-   their stand-ins and their number.  0 for any other array. */
-int
-ca_meld_mask_parts (CArray *mask, CArray ***parents, CArray ***standins, int32_t *n)
-{
-  CAMeld *o;
-  if ( mask->obj_type != CA_OBJ_MELD ) {
-    return 0;
-  }
-  o = (CAMeld *) ((CAMeld *) mask)->mask_owner;
-  if ( o == NULL ) {
-    return 0;
-  }
-  *parents  = o->parents;
-  *standins = o->mask_standins;
-  *n        = o->n_parents;
-  return 1;
-}
-
-static void
-ca_meld_mask_refuse_first (ca_meld_put_t *a)
-{
-  CAMeld *o = (CAMeld *) ((CAMeld *) a->ap)->mask_owner;
-  if ( o != NULL ) {
-    ca_multi_parent_mask_refuse_first((CArray *) a->ap, o->parents,
-                                      o->mask_standins, o->n_parents,
-                                      ca_meld_put_body, (VALUE) a);
-  }
-}
-
-static void
-ca_meld_mask_refuse_sync (CAMeld *ca)
-{
-  ca_meld_put_t a = { CA_MELD_PUT_SYNC, ca, NULL, 0, NULL, NULL, NULL, NULL, NULL };
-  ca_meld_mask_refuse_first(&a);
-}
-
+   stand-in, the true goes on to the parent's mask (ca_mask_standin_settle).
+   Only the mask of a CAMeld has stand-ins. */
 /* After a write of n cells of `data` to the mask of a CAMeld: a true
    that went into a stand-in goes on to its parent's mask. */
 static void
@@ -1104,10 +992,6 @@ ca_meld_mask_settle_after (CAMeld *ca, const void *data, ca_size_t n)
 static void
 ca_meld_put_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
-  if ( dir == CA_XFER_PUT ) {
-    ca_meld_put_t a = { CA_MELD_PUT_INDEX, ap, idx, 0, NULL, NULL, NULL, NULL, data };
-    ca_meld_mask_refuse_first(&a);
-  }
   ca_meld_func_xfer_index(ap, idx, data, dir);
   if ( dir == CA_XFER_PUT ) ca_meld_mask_settle_after((CAMeld *) ap, data, 1);
 }
@@ -1116,10 +1000,6 @@ static void
 ca_meld_put_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data,
                          int dir)
 {
-  if ( dir == CA_XFER_PUT ) {
-    ca_meld_put_t a = { CA_MELD_PUT_ADDRS, ap, NULL, n, addrs, NULL, NULL, NULL, data };
-    ca_meld_mask_refuse_first(&a);
-  }
   ca_meld_func_xfer_addrs(ap, n, addrs, data, dir);
   if ( dir == CA_XFER_PUT ) ca_meld_mask_settle_after((CAMeld *) ap, data, n);
 }
@@ -1128,10 +1008,6 @@ static void
 ca_meld_put_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir)
 {
-  if ( dir == CA_XFER_PUT ) {
-    ca_meld_put_t a = { CA_MELD_PUT_STRIDE, ap, NULL, 0, NULL, starts, counts, strides, data };
-    ca_meld_mask_refuse_first(&a);
-  }
   ca_meld_func_xfer_stride(ap, starts, counts, strides, data, dir);
   if ( dir == CA_XFER_PUT ) {
     ca_meld_mask_settle_after((CAMeld *) ap, data,
@@ -1142,10 +1018,6 @@ ca_meld_put_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 static void
 ca_meld_put_xfer_all (void *ap, void *data, int dir)
 {
-  if ( dir == CA_XFER_PUT ) {
-    ca_meld_put_t a = { CA_MELD_PUT_ALL, ap, NULL, 0, NULL, NULL, NULL, NULL, data };
-    ca_meld_mask_refuse_first(&a);
-  }
   ca_meld_func_xfer_all(ap, data, dir);
   if ( dir == CA_XFER_PUT ) {
     ca_meld_mask_settle_after((CAMeld *) ap, data, ((CArray *) ap)->elements);
@@ -1155,10 +1027,6 @@ ca_meld_put_xfer_all (void *ap, void *data, int dir)
 static void
 ca_meld_put_fill_data (void *ap, void *ptr)
 {
-  {
-    ca_meld_put_t a = { CA_MELD_PUT_FILL, ap, NULL, 0, NULL, NULL, NULL, NULL, ptr };
-    ca_meld_mask_refuse_first(&a);
-  }
   ca_meld_func_fill_data(ap, ptr);
   ca_meld_mask_settle_after((CAMeld *) ap, ptr, 1);
 }
@@ -1169,9 +1037,6 @@ ca_meld_put_fill_data (void *ap, void *ptr)
 static void
 ca_meld_put_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
 {
-  ca_meld_put_t a = { CA_MELD_PUT_FILL_ADDRS, ap, NULL, n, addrs, NULL, NULL,
-                     NULL, ptr };
-  ca_meld_mask_refuse_first(&a);
   ca_fill_addrs_default(ap, n, addrs, ptr);
   ca_meld_mask_settle_after((CAMeld *) ap, ptr, 1);
 }
@@ -1180,9 +1045,6 @@ static void
 ca_meld_put_fill_stride (void *ap, ca_size_t base, int8_t ndim,
                          ca_size_t *counts, ca_size_t *steps, void *ptr)
 {
-  ca_meld_put_t a = { CA_MELD_PUT_FILL_STRIDE, ap, NULL, 0, NULL, NULL, counts,
-                     NULL, ptr, base, ndim, steps };
-  ca_meld_mask_refuse_first(&a);
   ca_fill_stride_default(ap, base, ndim, counts, steps, ptr);
   ca_meld_mask_settle_after((CAMeld *) ap, ptr, 1);
 }

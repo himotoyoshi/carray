@@ -869,13 +869,10 @@ ca_stack_func_attach (void *ap)
   ca_fill_or_detach(ca->n_parents, ca->parents, ca_stack_attach_owned, (VALUE) ca);
 }
 
-static void ca_stack_mask_refuse_sync (CAStack *ca);
-
 static void
 ca_stack_func_sync (void *ap)
 {
   CAStack *ca = (CAStack *) ap;
-  ca_stack_mask_refuse_sync(ca);
   ca_stack_xfer_parents(ca, ca->ptr, CA_XFER_PUT, 1);
   ca_sync_all_attached(ca->parents, ca->n_parents);
   ca_stack_mask_settle(ca);
@@ -1016,117 +1013,8 @@ ca_stack_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
 /* ------------------------------------------------------------------- */
 
 /* The table's write slots: after a write that may have put a true into a
-   stand-in, the true goes on to the parent's mask, or is refused for a
-   value array or a mask array (ca_mask_standin_settle).  Only the mask of
-   a CAStack has stand-ins. */
-/* A write to the mask of a CAStack, run once against blank masks first
-   (ca_multi_parent_mask_refuse_first), so that a write refused for a value
-   array or mask array part changes no other part. */
-enum { CA_STACK_PUT_INDEX, CA_STACK_PUT_ADDRS, CA_STACK_PUT_STRIDE, CA_STACK_PUT_ALL,
-       CA_STACK_PUT_FILL, CA_STACK_PUT_SYNC, CA_STACK_PUT_FILL_ADDRS,
-       CA_STACK_PUT_FILL_STRIDE };
-
-typedef struct {
-  int        slot;
-  void      *ap;
-  ca_size_t *idx;
-  ca_size_t  n;
-  ca_size_t *addrs;
-  ca_size_t *starts;
-  ca_size_t *counts;
-  ca_size_t *strides;
-  void      *data;
-  ca_size_t  base;
-  int8_t     ndim;
-  ca_size_t *steps;
-} ca_stack_put_t;
-
-static VALUE
-ca_stack_put_body (VALUE arg)
-{
-  ca_stack_put_t *a = (ca_stack_put_t *) arg;
-  switch ( a->slot ) {
-  case CA_STACK_PUT_INDEX:
-    ca_stack_func_xfer_index(a->ap, a->idx, a->data, CA_XFER_PUT); break;
-  case CA_STACK_PUT_ADDRS:
-    ca_stack_func_xfer_addrs(a->ap, a->n, a->addrs, a->data, CA_XFER_PUT); break;
-  case CA_STACK_PUT_STRIDE:
-    ca_stack_func_xfer_stride(a->ap, a->starts, a->counts, a->strides, a->data,
-                             CA_XFER_PUT); break;
-  case CA_STACK_PUT_ALL:
-    ca_stack_func_xfer_all(a->ap, a->data, CA_XFER_PUT); break;
-  case CA_STACK_PUT_FILL:
-    ca_stack_func_fill_data(a->ap, a->data); break;
-  case CA_STACK_PUT_FILL_ADDRS:
-    ca_fill_addrs_default(a->ap, a->n, a->addrs, a->data); break;
-  case CA_STACK_PUT_FILL_STRIDE:
-    ca_fill_stride_default(a->ap, a->base, a->ndim, a->counts, a->steps,
-                           a->data); break;
-  case CA_STACK_PUT_SYNC:
-    ca_stack_xfer_parents((CAStack *) a->ap, ((CArray *) a->ap)->ptr, CA_XFER_PUT, 1);
-    break;
-  }
-  return Qnil;
-}
-
-/* For a CAStack holding data (not the mask of one): its parents and their
-   number.  0 for any other array. */
-int
-ca_stack_data_parts (CArray *ca, CArray ***parents, int32_t *n)
-{
-  if ( ca->obj_type != CA_OBJ_STACK || ((CAStack *) ca)->mask_owner != NULL ) {
-    return 0;
-  }
-  *parents = ((CAStack *) ca)->parents;
-  *n       = ((CAStack *) ca)->n_parents;
-  return 1;
-}
-
-/* A CAStack over `parents`, laid out as the CAStack `like`. */
-CArray *
-ca_stack_like (CArray *like, CArray **parents)
-{
-  CAStack *l = (CAStack *) like;
-  return (CArray *) ca_stack_new_with_axis(l->n_parents, parents, l->k_axis);
-}
-
-/* For the mask of a CAStack: the CAStack it belongs to, as its data parents,
-   their stand-ins and their number.  0 for any other array. */
-int
-ca_stack_mask_parts (CArray *mask, CArray ***parents, CArray ***standins, int32_t *n)
-{
-  CAStack *o;
-  if ( mask->obj_type != CA_OBJ_STACK ) {
-    return 0;
-  }
-  o = (CAStack *) ((CAStack *) mask)->mask_owner;
-  if ( o == NULL ) {
-    return 0;
-  }
-  *parents  = o->parents;
-  *standins = o->mask_standins;
-  *n        = o->n_parents;
-  return 1;
-}
-
-static void
-ca_stack_mask_refuse_first (ca_stack_put_t *a)
-{
-  CAStack *o = (CAStack *) ((CAStack *) a->ap)->mask_owner;
-  if ( o != NULL ) {
-    ca_multi_parent_mask_refuse_first((CArray *) a->ap, o->parents,
-                                      o->mask_standins, o->n_parents,
-                                      ca_stack_put_body, (VALUE) a);
-  }
-}
-
-static void
-ca_stack_mask_refuse_sync (CAStack *ca)
-{
-  ca_stack_put_t a = { CA_STACK_PUT_SYNC, ca, NULL, 0, NULL, NULL, NULL, NULL, NULL };
-  ca_stack_mask_refuse_first(&a);
-}
-
+   stand-in, the true goes on to the parent's mask (ca_mask_standin_settle).
+   Only the mask of a CAStack has stand-ins. */
 /* After a write of n cells of `data` to the mask of a CAStack: a true
    that went into a stand-in goes on to its parent's mask. */
 static void
@@ -1140,10 +1028,6 @@ ca_stack_mask_settle_after (CAStack *ca, const void *data, ca_size_t n)
 static void
 ca_stack_put_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
-  if ( dir == CA_XFER_PUT ) {
-    ca_stack_put_t a = { CA_STACK_PUT_INDEX, ap, idx, 0, NULL, NULL, NULL, NULL, data };
-    ca_stack_mask_refuse_first(&a);
-  }
   ca_stack_func_xfer_index(ap, idx, data, dir);
   if ( dir == CA_XFER_PUT ) ca_stack_mask_settle_after((CAStack *) ap, data, 1);
 }
@@ -1152,10 +1036,6 @@ static void
 ca_stack_put_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data,
                          int dir)
 {
-  if ( dir == CA_XFER_PUT ) {
-    ca_stack_put_t a = { CA_STACK_PUT_ADDRS, ap, NULL, n, addrs, NULL, NULL, NULL, data };
-    ca_stack_mask_refuse_first(&a);
-  }
   ca_stack_func_xfer_addrs(ap, n, addrs, data, dir);
   if ( dir == CA_XFER_PUT ) ca_stack_mask_settle_after((CAStack *) ap, data, n);
 }
@@ -1164,10 +1044,6 @@ static void
 ca_stack_put_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                           ca_size_t *strides, void *data, int dir)
 {
-  if ( dir == CA_XFER_PUT ) {
-    ca_stack_put_t a = { CA_STACK_PUT_STRIDE, ap, NULL, 0, NULL, starts, counts, strides, data };
-    ca_stack_mask_refuse_first(&a);
-  }
   ca_stack_func_xfer_stride(ap, starts, counts, strides, data, dir);
   if ( dir == CA_XFER_PUT ) {
     ca_stack_mask_settle_after((CAStack *) ap, data,
@@ -1178,10 +1054,6 @@ ca_stack_put_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 static void
 ca_stack_put_xfer_all (void *ap, void *data, int dir)
 {
-  if ( dir == CA_XFER_PUT ) {
-    ca_stack_put_t a = { CA_STACK_PUT_ALL, ap, NULL, 0, NULL, NULL, NULL, NULL, data };
-    ca_stack_mask_refuse_first(&a);
-  }
   ca_stack_func_xfer_all(ap, data, dir);
   if ( dir == CA_XFER_PUT ) {
     ca_stack_mask_settle_after((CAStack *) ap, data, ((CArray *) ap)->elements);
@@ -1191,10 +1063,6 @@ ca_stack_put_xfer_all (void *ap, void *data, int dir)
 static void
 ca_stack_put_fill_data (void *ap, void *ptr)
 {
-  {
-    ca_stack_put_t a = { CA_STACK_PUT_FILL, ap, NULL, 0, NULL, NULL, NULL, NULL, ptr };
-    ca_stack_mask_refuse_first(&a);
-  }
   ca_stack_func_fill_data(ap, ptr);
   ca_stack_mask_settle_after((CAStack *) ap, ptr, 1);
 }
@@ -1205,9 +1073,6 @@ ca_stack_put_fill_data (void *ap, void *ptr)
 static void
 ca_stack_put_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
 {
-  ca_stack_put_t a = { CA_STACK_PUT_FILL_ADDRS, ap, NULL, n, addrs, NULL, NULL,
-                     NULL, ptr };
-  ca_stack_mask_refuse_first(&a);
   ca_fill_addrs_default(ap, n, addrs, ptr);
   ca_stack_mask_settle_after((CAStack *) ap, ptr, 1);
 }
@@ -1216,9 +1081,6 @@ static void
 ca_stack_put_fill_stride (void *ap, ca_size_t base, int8_t ndim,
                          ca_size_t *counts, ca_size_t *steps, void *ptr)
 {
-  ca_stack_put_t a = { CA_STACK_PUT_FILL_STRIDE, ap, NULL, 0, NULL, NULL, counts,
-                     NULL, ptr, base, ndim, steps };
-  ca_stack_mask_refuse_first(&a);
   ca_fill_stride_default(ap, base, ndim, counts, steps, ptr);
   ca_stack_mask_settle_after((CAStack *) ap, ptr, 1);
 }

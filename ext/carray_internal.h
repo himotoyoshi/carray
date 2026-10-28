@@ -762,38 +762,10 @@ CArray     *ca_multi_parent_mask (CArray *p, CArray **standin);
 void        ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
                                           CArray **standins, int32_t n);
 
-/* Before a write to a multi-parent view's mask: when a parent that can
-   never carry a mask (a value array, a mask array) is among the parents,
-   run the write `body(arg)` once against blank all-false masks in place of
-   every parent's mask and refuse it with that TypeError if it put a true
-   into such a parent's part.  A refused write then changes no parent.
-   Does nothing when no such parent is there. */
-/* A write entering at the mask view `mask` that can reach the part of a
-   stack or meld mask whose parent can have no mask: run `body(arg)` once
-   against blank masks in place of every real mask it can reach, refuse it
-   with TypeError if it put a true into such a part, and run it for real
-   otherwise.  ca_mask_write_needs_check says whether a write needs this.
-   Writes nested inside are not checked again. */
-int         ca_mask_write_needs_check (CArray *ca);
-void        ca_mask_write_checked (CArray *mask, VALUE (*body)(VALUE),
-                                   VALUE arg);
-int         ca_stack_mask_parts (CArray *mask, CArray ***parents,
-                                 CArray ***standins, int32_t *n);
-int         ca_meld_mask_parts (CArray *mask, CArray ***parents,
-                                CArray ***standins, int32_t *n);
-int         ca_stack_data_parts (CArray *ca, CArray ***parents, int32_t *n);
-int         ca_meld_data_parts (CArray *ca, CArray ***parents, int32_t *n);
-CArray     *ca_stack_like (CArray *like, CArray **parents);
-CArray     *ca_meld_like (CArray *like, CArray **parents);
-
 void        ca_multi_parent_check_part (CArray *part, const char *name);
-void        ca_multi_parent_mask_refuse_first (CArray *mask, CArray **parents,
-                                               CArray **standins, int32_t n,
-                                               VALUE (*body)(VALUE),
-                                               VALUE arg);
 
 /* ca_mask_standin_settle for each part of a multi-parent view's mask
-   still reading its stand-in, the parts that can have no mask first. */
+   still reading its stand-in. */
 void        ca_multi_parent_mask_settle (CArray *mask, CArray **parents,
                                          CArray **standins, int32_t n);
 
