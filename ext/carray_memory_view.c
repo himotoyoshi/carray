@@ -1623,9 +1623,13 @@ rb_ca_s_memory_view_reject_reason (VALUE klass, VALUE obj)
                              "producer cannot express yet (nested struct, "
                              "CArray template, :fixlen, or :object)");
     }
-    return rb_sprintf("element data_type (%d) is not exportable via memory_view "
-                      "(CA_FIXLEN without data_class / CA_OBJECT)",
-                      ca->data_type);
+    if (ca->data_type == CA_OBJECT) {
+      return rb_str_new_cstr("an object array holds Ruby objects, not bytes "
+                             "a consumer can read; convert it with to_type "
+                             "first");
+    }
+    return rb_sprintf("data_type %s has no MemoryView format",
+                      ca_type_name[ca->data_type]);
   }
   if (ca_has_mask(ca)) {
     return rb_str_new_cstr("array has a mask; use arr.value (mask-ignoring CARefer) "

@@ -6,7 +6,8 @@ require "carray"
 # beyond the import itself:
 # - a record array exports from any Ractor;
 # - the private read-only lift leaves a borrowed mask read-only;
-# - Marshal carries a wrap as a copy, as it does a view of one.
+# - Marshal carries a wrap as a copy, as it does a view of one;
+# - the reason given for an object array names its type.
 
 borrower_dir = File.expand_path("ext_memory_view_test", __dir__)
 $LOAD_PATH.unshift(borrower_dir)
@@ -85,6 +86,14 @@ class TestMemoryViewWrapAndExport < Test::Unit::TestCase
     x = Marshal.load(Marshal.dump(w))
     assert_equal w.to_a, x.to_a
     assert_equal w.is_masked.to_a, x.is_masked.to_a
+  end
+
+  # ---------- the reason given for an object array ----------
+
+  def test_the_reason_for_an_object_array_names_the_type
+    r = CArray.memory_view_reject_reason(CArray.object(3))
+    assert_match(/object/, r)
+    refute_match(/\(16\)|CA_FIXLEN|CA_OBJECT/, r)
   end
 
 end
