@@ -202,7 +202,9 @@ ca_mv_record_member_spec (VALUE info, char *out, size_t outlen,
    a member it has no item for (see above), or members that overlap or come
    out of offset order (a union).
 
-   The result is frozen and cached on the data_class.  It is an ordinary
+   The result is frozen and cached on the data_class.  Only the main Ractor
+   may set an instance variable on a class, so another Ractor builds the
+   format each time until the main one has cached it.  It is an ordinary
    String that compaction can move, so a view takes a copy of its bytes
    rather than its pointer (ca_mv_get). */
 static VALUE
@@ -245,11 +247,11 @@ ca_mv_struct_format_for_data_class (VALUE data_class)
   }
 
   rb_obj_freeze(buf);
-  rb_ivar_set(data_class, iv, buf);
+  if (ca_in_main_ractor()) rb_ivar_set(data_class, iv, buf);
   return buf;
 
 unsupported:
-  rb_ivar_set(data_class, iv, Qfalse);
+  if (ca_in_main_ractor()) rb_ivar_set(data_class, iv, Qfalse);
   return Qnil;
 }
 
