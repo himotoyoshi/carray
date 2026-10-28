@@ -100,7 +100,7 @@ class CArray
     end
     if not complex?
       zero = template { 0 }
-      zero[is_masked] = UNDEF if has_mask?
+      zero.inherit_mask(self) if has_mask?
       return zero
     end
     return @__imag__ if part_of_self?(@__imag__)

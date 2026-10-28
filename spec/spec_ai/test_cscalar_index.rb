@@ -58,6 +58,8 @@ class TestCScalarIndex < Test::Unit::TestCase
     s = scalar
     assert_same s, s.drop_axis
     assert_same s, s.real
+    u = scalar; u[] = UNDEF
+    assert_equal [UNDEF], u.imag.to_a
     assert_equal true, s.mask_eq(2.5).is_masked[0]
     assert_equal true, s.mask_where(s.gt(0)).is_masked[0]
     n = scalar; n[0] = Float::NAN
