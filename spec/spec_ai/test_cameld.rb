@@ -736,17 +736,14 @@ class TestCAMeld < Test::Unit::TestCase
     assert_equal 1, CArray.meld(CA_OBJECT([3, 4]), CA_OBJECT([1, 2])).min
   end
 
-  def test_mask_over_parents_that_cannot_carry_one
+  def test_mask_over_a_frozen_parent
     masked = CA_FLOAT64([1, 2, 3]); masked[1] = UNDEF
-    value  = CA_FLOAT64([4, 5]).value
     frozen = CA_FLOAT64([6, 7]).freeze
-    m = CArray.meld([masked, value, frozen])
-    assert_equal [false, true, false, false, false, false, false], m.mask.to_a
-    assert_equal 1 + 3 + 4 + 5 + 6 + 7, m.sum
+    m = CArray.meld([masked, frozen])
+    assert_equal [false, true, false, false, false], m.mask.to_a
+    assert_equal 1 + 3 + 6 + 7, m.sum
     refute frozen.has_mask?
     assert_raise(RuntimeError) { m[3] = UNDEF }
-    stacked = CArray.stack([masked, CA_FLOAT64([1, 2, 3]).value])
-    assert_equal 1 + 3 + 1 + 2 + 3, stacked.sum
   end
 
   def test_undef_written_through_the_view_reaches_a_writable_parent

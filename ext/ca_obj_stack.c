@@ -1278,6 +1278,7 @@ rb_ca_stack_new_with_axis (VALUE parents_ary, int8_t k_axis)
     VALUE p = rb_ary_entry(parents_ary, i);
     rb_check_carray_object(p);
     TypedData_Get_Struct(p, CArray, &carray_data_type, parents[i]);
+    ca_multi_parent_check_part(parents[i], "stack");
   }
   ca  = ca_stack_new_with_axis((int32_t) n, parents, k_axis);
   obj = ca_wrap_struct(ca);
@@ -1364,6 +1365,7 @@ rb_ca_stack_initialize (int argc, VALUE *argv, VALUE self)
     VALUE p = rb_ary_entry(list, i);
     rb_check_carray_object(p);
     TypedData_Get_Struct(p, CArray, &carray_data_type, parents[i]);
+    ca_multi_parent_check_part(parents[i], "stack");
   }
   ca_stack_setup_with_axis(ca, (int32_t) n, parents, k_axis);
   rb_ivar_set(self, id_parents, rb_ary_dup(list));  /* GC anchor */

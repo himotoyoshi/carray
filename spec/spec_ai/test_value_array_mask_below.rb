@@ -93,19 +93,6 @@ class TestValueArrayMaskBelow < Test::Unit::TestCase
     assert_equal true, w.has_mask?
   end
 
-  # A multi-parent view gets its mask from the parent that has one only.
-  def test_stack_and_meld_with_a_value_array
-    x = masked_x
-    s = CArray.stack([x.value, x])
-    assert_equal true, s.has_mask?
-    assert_equal [false] * 6 + [false, true, false, false, false, false],
-                 s.is_masked.to_a.flatten
-    m = CArray.meld(x.value, x)
-    assert_equal [0, 1, 2, 3, 4, 5, 0, UNDEF, 2, 3, 4, 5], m.to_a
-    assert_equal false, CArray.stack([x.value, x.value]).has_mask?
-    assert_equal false, CArray.meld(x.value, x.value)[2..5].has_mask?
-  end
-
   def test_face_value_views
     t = CArray.time(["2024-01-01", "2024-01-02", "2024-01-03"])
     t[1] = UNDEF

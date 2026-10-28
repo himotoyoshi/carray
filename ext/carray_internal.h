@@ -786,6 +786,7 @@ int         ca_meld_data_parts (CArray *ca, CArray ***parents, int32_t *n);
 CArray     *ca_stack_like (CArray *like, CArray **parents);
 CArray     *ca_meld_like (CArray *like, CArray **parents);
 
+void        ca_multi_parent_check_part (CArray *part, const char *name);
 void        ca_multi_parent_mask_refuse_first (CArray *mask, CArray **parents,
                                                CArray **standins, int32_t n,
                                                VALUE (*body)(VALUE),

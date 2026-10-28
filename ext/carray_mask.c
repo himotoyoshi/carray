@@ -492,6 +492,22 @@ ca_mask_standin_new (CArray *parent)
   return z;
 }
 
+/* A stack or meld refuses a value array or a mask array as a part: such an
+   array can have no mask, and a part of a stack or meld is an array like
+   any other, which can. */
+void
+ca_multi_parent_check_part (CArray *part, const char *name)
+{
+  if ( ca_is_value_array(part) ) {
+    rb_raise(rb_eArgError,
+             "%s: a value array can have no mask and can not be a part", name);
+  }
+  if ( ca_is_mask_array(part) ) {
+    rb_raise(rb_eArgError,
+             "%s: a mask array can have no mask and can not be a part", name);
+  }
+}
+
 /* A value array or a mask array: a parent that can never be given a mask,
    whose stand-in therefore stays in place for good. */
 static int

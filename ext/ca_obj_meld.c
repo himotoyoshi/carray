@@ -1228,6 +1228,7 @@ rb_ca_meld_new (VALUE parents_ary, int8_t meld_axis)
     VALUE p = rb_ary_entry(parents_ary, i);
     rb_check_carray_object(p);
     TypedData_Get_Struct(p, CArray, &carray_data_type, parents[i]);
+    ca_multi_parent_check_part(parents[i], "meld");
   }
   ca  = ca_meld_new((int32_t) n, parents, meld_axis);
   obj = ca_wrap_struct(ca);
@@ -1293,6 +1294,7 @@ rb_ca_meld_initialize (int argc, VALUE *argv, VALUE self)
     VALUE p = rb_ary_entry(list, i);
     rb_check_carray_object(p);
     TypedData_Get_Struct(p, CArray, &carray_data_type, parents[i]);
+    ca_multi_parent_check_part(parents[i], "meld");
   }
   ca_meld_setup(ca, (int32_t) n, parents, meld_axis);
   rb_ivar_set(self, id_parents, rb_ary_dup(list));

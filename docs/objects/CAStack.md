@@ -278,8 +278,9 @@ puts s.inspect
 #     [ 10.0, 11.0, 12.0 ] ]>
 ```
 
-A parent that cannot carry a mask (a value array, a read-only array) is
-read as all-unmasked too; writing UNDEF into its part raises.
+A read-only parent is read as all-unmasked too; writing UNDEF into its
+part raises.  A value array or a mask array can have no mask at all, and
+is not taken as a parent: building the stack raises.
 
 ---
 

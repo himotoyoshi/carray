@@ -108,8 +108,10 @@ class CArray
     # intermediate CAMeld).  A CAMeld with a different meld_axis is left
     # intact — its segment structure is orthogonal.  So is a read-only one
     # (frozen or flagged): writes through it are refused, and absorbing it
-    # would drop that.
-    absorbed = ->(a) { a.is_a?(CAMeld) && a.meld_axis == axis_norm && !a.read_only? }
+    # would drop that.  The mask of a meld is a CAMeld with no parents of
+    # its own; it is passed on, to be refused as a part.
+    absorbed = ->(a) { a.is_a?(CAMeld) && a.meld_axis == axis_norm &&
+                       !a.read_only? && !a.mask_array? }
     if arrays.any?(&absorbed)
       arrays = arrays.flat_map { |a| absorbed.(a) ? a.parents : [a] }
     end
@@ -298,6 +300,9 @@ class CAStack
   #   @raise [ArgumentError] when no `others` are given.
   def append (*others)
     raise ArgumentError, "append: at least one parent required" if others.empty?
+    if mask_array?
+      raise ArgumentError, "append: a mask array can have no mask and can not be a part"
+    end
     mine = self.parents
     if read_only?
       mine = mine.map { |p| p[].tap(&:set_read_only_flag) }
