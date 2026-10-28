@@ -107,6 +107,23 @@ no contiguous copy is made behind the consumer's back. A writable request is
 refused for any read-only source (`ca_is_readonly`): CARepeat and `value` views
 are read-only.
 
+### A buffer lent for a call
+
+Two kinds of array hold a pointer that lasts only for one call, and both export:
+
+- the `data` a CAObject bulk hook (`copy_data`, `sync_data`, `copy_block`, ...)
+  receives is the caller's buffer, lent for the hook;
+- a slab that `each_slab` yields along a non-contiguous axis is a view over the
+  walk's scratch, which every iteration refills and the walk frees at its end.
+
+Exporting them is the intended use: a hook hands `data` to a NetCDF or HDF5
+binding to fill, a block hands a slab to a writer. The export, and a wrap made
+from it, is valid until the hook returns or the block's iteration ends. CArray
+cannot extend it: a view the hook took keeps its cells because the array can
+point it at a copy, but an export has already given out the address. An export
+kept past the call reads or writes memory that is no longer the array's. Code
+that needs the bytes afterwards exports `.copy`.
+
 ## The mask policy
 
 A masked CArray passed directly to `from_memory_view` / `wrap_memory_view` is

@@ -170,6 +170,8 @@ Use `row.copy` or `row.to_a` when you need to remember a slab. `row.dup` is not 
 
 Derived values made inside the block (`row.sum`, `row - 1`, `row[1..-1]`, `row.median`) read the current iteration's data correctly. The trap is only about keeping the slab object itself across iterations.
 
+The same holds for handing a slab to another library through MemoryView (`CArray.wrap_memory_view(row)`, `Fiddle::MemoryView.new(row)`, a C extension that reads it): inside the block it sees the current slab, but kept past the iteration it can see the next slab, or memory the walk has already freed. Give the library `row.copy` if it keeps the data.
+
 ## Masks
 
 A masked source array is passed straight through: the slab the block receives carries the mask, so masked cells show up as `UNDEF`. Any mask-aware method you call on the slab (`sum`, `mean`, `count_not_masked`, …) skips them just as it would on a whole array (see [Masks and missing values](05_masks.md)). A masked cell of the array the `map_slab` block returns is masked in the result. If the missing cells should take a value instead, give them one first with `strip_mask`:

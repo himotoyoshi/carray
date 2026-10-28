@@ -131,6 +131,14 @@ A view the hook took of it (a slice, a reshape, `data.mask`, a stack or a
 lazy expression with it as an operand) is the exception: the array then
 keeps the cells it held as the hook returned, for the view to read.
 
+A MemoryView export of `data`, or of a view of it, is different: it hands out
+the buffer's address, which the array cannot later point at a copy. Exporting
+is the intended way to let another library fill the buffer (a NetCDF or HDF5
+binding reading into `data`), and the export is valid until the hook returns.
+An export, or a `CArray.wrap_memory_view(data)`, kept past the hook reads and
+writes memory that is no longer the array's. To keep the bytes, keep
+`data.copy`.
+
 ### Optional: partial-region fast paths (`copy_block` / `copy_addrs`)
 
 Between per-cell `fetch_addr` and whole-view `copy_data` there is a

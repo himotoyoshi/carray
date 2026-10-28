@@ -376,6 +376,10 @@ Discipline (not enforced by the primitive): use it only on **entities** (CArray 
 
 The view is acquired and released inside the call. The result is fully independent; the source object may be freed immediately.
 
+### An export of a buffer lent for a call
+
+Two arrays hold memory only for the length of one call: the `data` a CAObject hook such as `copy_data` receives, and a slab `each_slab` yields along a non-contiguous axis. Both export, so you can hand them to another library inside the hook or the block. The export is valid until the hook returns or the iteration ends; kept longer, it points at memory the array no longer owns. Export `.copy` to keep the bytes.
+
 ### `wrap_memory_view`
 
 The view is held alive by a small TypedData "holder" attached to the returned wrap via an internal ivar. When the wrap is garbage-collected, the holder's `dfree` calls `rb_memory_view_release`. The source object is anchored by a second ivar so it cannot be GC'd while the wrap is alive.
