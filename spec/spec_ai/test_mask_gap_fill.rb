@@ -393,4 +393,15 @@ class TestMaskGapFillHold < Test::Unit::TestCase
     q = CA_FLOAT64([1, inf, 3, 4]); q[2] = UNDEF
     assert_equal [1.0, inf, inf, 4.0], q.strip_mask(method: :linear).to_a
   end
+
+  # A view that reaches one cell twice keeps the value the fill gave that
+  # cell: the unfilled copy is not sent back to mask it again.
+  def test_fill_through_a_view_with_repeated_cells
+    a = CA_FLOAT64([0, 200]); a[0] = UNDEF
+    a[CA_INT64([0, 1, 0])].unmask(method: :backward)
+    assert_equal [200.0, 200.0], a.to_a
+    a = CA_FLOAT64([0, 200]); a[0] = UNDEF
+    a[CA_INT64([0, 1, 0])].unmask(method: :forward)
+    assert_equal [200.0, 200.0], a.to_a
+  end
 end

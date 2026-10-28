@@ -850,9 +850,8 @@ rb_ca_reduceat_quantile (VALUE self, VALUE roffsets, VALUE rp0, VALUE rp25,
    group order (float64, weight mask propagated). A cell contributes iff its
    value AND its weight are present. wsum_out = Sum(v*w) (0.0 for a segment with
    no present pair, the additive identity). wmean_out = Sum(v*w)/Sum(w), masked
-   when the segment has no present pair (matching CArray#wmean UNDEF); a present
-   segment whose weights sum to zero yields NaN/Inf from the division (core's
-   0/0 contract). */
+   when the segment has no present pair or its weights sum to zero, as
+   CArray#wmean leaves both undefined. */
 #define REDUCEAT_WSUM_BODY(T)                                                   \
   do {                                                                          \
     const T *gp = (const T *) grouped->ptr;                                     \
@@ -866,7 +865,7 @@ rb_ca_reduceat_quantile (VALUE self, VALUE roffsets, VALUE rp0, VALUE rp25,
         { double wv = wp[j]; svw += (double) gp[j] * wv; sw += wv; cnt++; }     \
       }                                                                         \
       wsp[c] = svw;                                                             \
-      if ( cnt == 0 ) { wmp[c] = 0.0; wmm[c] = 1; }     /* no present pair */    \
+      if ( cnt == 0 || sw == 0.0 ) { wmp[c] = 0.0; wmm[c] = 1; }  /* undefined */ \
       else wmp[c] = svw / sw;                                                   \
     }                                                                           \
   } while (0)
@@ -1452,15 +1451,16 @@ rb_ca_fiber_scatter_wsum_wmean (VALUE self, VALUE rcodes, VALUE rweights,
              h->data_type);
   }
 
-  /* Compute wmean = wsum / sum-of-weights; mask cells with no present pair. */
+  /* Compute wmean = wsum / sum-of-weights; mask cells with no present pair
+     and cells whose weights sum to zero, as CArray#wmean does. */
   ca_create_mask(wmean);
   wmm = (boolean8_t *) wmean->mask->ptr;
   for ( cell = 0; cell < total; cell++ ) {
-    if ( cntp[cell] == 0 ) {
+    if ( cntp[cell] == 0 || wsw[cell] == 0.0 ) {
       wmp[cell] = 0.0;
       wmm[cell] = 1;
     } else {
-      wmp[cell] = wsp[cell] / wsw[cell];    /* 0/0 -> NaN naturally (core contract) */
+      wmp[cell] = wsp[cell] / wsw[cell];
     }
   }
 

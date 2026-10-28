@@ -1,9 +1,11 @@
 # CAFrame column verbs (memo §11.4, §12-A, §13.2).
 #
-# Each verb touches this frame's own columns Hash (per-frame, §12-B) and
-# returns self so calls chain. Column data is still shared with any parent
-# (view-frame), but membership — which columns this frame names — is local:
-# append/drop/rename here never change a parent's column set.
+# A verb that changes which columns the frame has, their names or their
+# types returns a new frame and leaves this one as it is; a verb that edits
+# cells (fill, mask_eq) edits them in place and returns self. The new frame
+# shares the columns it did not replace, so a write to a cell through it
+# reaches this frame too: only the table (names, index, column types) is its
+# own.
 
 class CAFrame
   # Add (or replace) a column, returning a new frame — the column set changes,
@@ -49,11 +51,12 @@ class CAFrame
   end
 
   # Remove one or more columns, returning a new frame (column set changes,
-  # memo §3.8). Column data is untouched and shared with the original.
+  # memo §3.8). Column data is untouched and shared with the original. Each
+  # argument is a name, a Range of names or a Regexp, as +select+ takes them.
   def drop(*names)
     cols = @columns.dup
-    column_keys(names, "drop").each do |key|
-      raise KeyError, "no column #{key.inspect}" unless cols.key?(key)
+    names_selected(names, "drop").each do |key|
+      refuse_missing_column(key) unless cols.key?(key)
       cols.delete(key)
     end
     rebuild(cols)
@@ -61,21 +64,87 @@ class CAFrame
 
   # Rename columns, returning a new frame (column names change, memo §3.8).
   # Column order is preserved (memo §13.2 "column order = insertion order");
-  # columns are shared by reference.
-  def rename(mapping)
+  # columns are shared by reference. The new names are given as a Hash of
+  # old name => new name, or by a block that receives each column's name and
+  # returns its new one. The index has a name too, and is renamed the same
+  # way. Names may be exchanged; two columns, or a column and the index, may
+  # not end up with one name.
+  #
+  #   df.rename("temp" => "T")
+  #   df.rename { |name| name.upcase }
+  #   df.group_by("shop").sum.rename("shop" => "store")   # the index
+  def rename(mapping = nil)
+    index_name = @index ? @axis_name : nil
+    if block_given?
+      raise ArgumentError, "rename: give a Hash or a block, not both" unless mapping.nil?
+      mapping = (@columns.keys + [index_name].compact).to_h { |name| [name, yield(name)] }
+    end
+    raise ArgumentError, "rename: give a Hash of old name => new name, or a block" if mapping.nil?
     norm = {}
     mapping.each do |old, new|
       o = column_key(old, "rename")
       n = column_name_arg(new, "rename")
-      raise KeyError, "no column #{o.inspect}" unless @columns.key?(o)
-      if n != o && @columns.key?(n)
-        raise ArgumentError, "rename target #{n.inspect} already exists"
-      end
+      refuse_missing_column(o, "rename") unless @columns.key?(o) || o == index_name
       norm[o] = n
     end
+    names = @columns.keys.map { |k| norm[k] || k }
+    names << (norm[index_name] || index_name) if index_name
+    CAFrame.__send__(:refuse_repeated_names, names, "rename", "the columns and index would be named")
     rebuilt = {}
     @columns.each { |k, v| rebuilt[norm[k] || k] = v }
-    rebuild(rebuilt)
+    return rebuild(rebuilt) unless index_name && norm.key?(index_name)
+    CAFrame.new(rebuilt, axis_name: norm[index_name], index: @index, attrs: @attrs)
+  end
+
+  # A new frame with each column replaced by what the block computes from it,
+  # the names, the index and the attributes kept; this frame is left as it
+  # is. Without names every column is given to the block; names pick the
+  # columns as +select+ does (a name, a Range of names, a Regexp), and the
+  # others are kept as they are. The block receives the column and its name
+  # and returns a CArray (or an Array) of one value per row. A single value,
+  # such as a reduction's, is refused: to give every row its column's mean,
+  # use +mean(name, keep_rows: true)+.
+  #
+  #   df.transform { |col| col.round(1) }
+  #   df.transform("tmax".."tmin") { |col| (col - col.mean) / col.stddev }
+  #   df.transform(/^t/) { |col, name| ... }
+  #
+  # What the block returns becomes the column as it is: a view stays a view
+  # of what it was made from, so a write to a cell reaches it (+copy+ cuts
+  # that).
+  #
+  # @param names [Array<String, Range, Regexp>] the columns; default all.
+  # @yieldparam col [CArray] a column.
+  # @yieldparam name [String] its name.
+  # @yieldreturn [CArray, Array] one value per row.
+  # @return [CAFrame]
+  # @raise [ArgumentError] without a block, or when the block gives a single
+  #   value or a column of another length.
+  def transform (*names)
+    raise ArgumentError, "transform needs a block that computes each column" unless block_given?
+    keys = names.empty? ? @columns.keys : names_selected(names, "transform")
+    keys.each { |key| refuse_missing_column(key) unless @columns.key?(key) }
+    cols = @columns.dup
+    computed = keys.map do |key|
+      out = yield(@columns[key], key)
+      unless out.is_a?(CArray) || out.is_a?(Array)
+        raise ArgumentError,
+              "transform: the block gave #{out.class} for column #{key.inspect}, not a column; " \
+              "return one value per row (to give every row a summary, use " \
+              "a reduction with keep_rows: true)"
+      end
+      # An empty Array on a frame with no rows has no value to type it by,
+      # so the column keeps the type it was given as.
+      out = out.is_a?(Array) && out.empty? && @nrow == 0 ? @columns[key].copy : coerce_column(out)
+      unless out.ndim >= 1 && out.shape[0] == @nrow
+        raise ArgumentError,
+              "transform: the block gave #{out.ndim >= 1 ? out.shape[0] : "no"} rows for " \
+              "column #{key.inspect}; the frame has #{@nrow}"
+      end
+      [key, out]
+    end
+    computed.each { |key, out| cols[key] = out }
+    return rebuild(cols)
   end
 
   # Split a text column at +sep+ into the columns named by +into:+,
@@ -98,7 +167,7 @@ class CAFrame
   #   fewer than two columns or one twice, or names a column already there.
   def split_column(name, sep, into:)
     key = column_key(name, "split_column")
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     unless string_column?(col) && col.ndim == 1
       raise ArgumentError, "split_column: #{key.inspect} is not a one-dimensional text column"
     end
@@ -159,7 +228,7 @@ class CAFrame
   #   already a column; and as CACategorical#contrast raises.
   def contrast_columns(name, scheme = :dummy, base: nil, full: false, into: nil)
     key = column_key(name, "contrast_columns")
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     unless col.ndim == 1
       raise ArgumentError, "contrast_columns: #{key.inspect} is not a one-dimensional column"
     end
@@ -290,7 +359,7 @@ class CAFrame
   # @return [CAFrame] a new frame; the other columns are shared.
   def unstack_column(name, into: nil)
     key = column_key(name, "unstack_column")
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     if col.ndim < 2
       raise ArgumentError, "unstack_column: #{key.inspect} is one-dimensional; there is nothing to unstack"
     end
@@ -350,15 +419,15 @@ class CAFrame
               unless from.is_a?(String) && to.is_a?(String)
                 raise ArgumentError, "#{verb}: a Range of column names takes two names (got #{selection.inspect})"
               end
-              i = keys.index(from) or raise KeyError, "#{verb}: no column #{from.inspect}"
-              j = keys.index(to)   or raise KeyError, "#{verb}: no column #{to.inspect}"
+              i = keys.index(from) or refuse_missing_column(from, verb)
+              j = keys.index(to)   or refuse_missing_column(to, verb)
               if j < i
                 raise ArgumentError, "#{verb}: #{to.inspect} comes before #{from.inspect} in the frame"
               end
               keys[i..(selection.exclude_end? ? j - 1 : j)]
             when Array
               selection.map { |n| column_key(n, verb) }.each do |n|
-                raise KeyError, "#{verb}: no column #{n.inspect}" unless @columns.key?(n)
+                refuse_missing_column(n, verb) unless @columns.key?(n)
               end
             when Regexp
               keys.grep(selection)
@@ -389,9 +458,11 @@ class CAFrame
   # column cast to :time is parsed into a CATime column, in the finest unit
   # its text shows (:D for dates alone, :s with a time of day, :ms / :us /
   # :ns for fractions of a second); parse_to_time takes a format and a
-  # unit. A column cast to :categorical becomes a CACategorical of its
+  # unit. A text column cast to :timedelta reads the text to_csv writes for
+  # a duration ("194400s", "3M", "3 @ 10 m") into a CATimedelta column, in
+  # the finest unit its cells show. A column cast to :categorical becomes a CACategorical of its
   # values, the labels in the order they first appear (categorize); a text
-  # column read by from_csv with types: gets there without a String made per
+  # column read by read_csv with types: gets there without a String made per
   # cell. Other targets use to_type.
   # The call shapes are told apart by the fact that column names are always
   # Strings and types always Symbols (§3.7):
@@ -416,8 +487,9 @@ class CAFrame
   #
   # A name that is not a column raises KeyError, and a Symbol key other than
   # +:default+ raises TypeError; both before any column is read. Every
-  # column is read before any is rebound, so a raise leaves the frame as it
-  # was. Returns self so calls chain.
+  # column is read before any is converted. Returns a new frame holding the
+  # converted columns; this frame keeps its own, and the columns not named are
+  # shared by the two.
   #
   # +on_error:+ says what to do with a text cell that holds something but
   # does not read as the number type ("x", "1.5" for an integer, "300" for
@@ -431,12 +503,16 @@ class CAFrame
   #           cell; no column is rebound
   #
   # +option_name:+ is for a method that takes the map as one of its own
-  # options and hands it to cast, as from_csv does with +types:+. An error
+  # options and hands it to cast, as read_csv does with +types:+. An error
   # about the map then names that option instead of cast, and the map must
   # be a Hash or :infer:
   #
   #   frame.cast(types, on_error: on_error, option_name: :types)
-  def cast(name_or_map = nil, type = nil, on_error: :mask, option_name: nil, **map)
+  def cast(...)
+    return dup.__send__(:cast_in_place, ...)
+  end
+
+  private def cast_in_place(name_or_map = nil, type = nil, on_error: :mask, option_name: nil, **map)
     refuse_if_frozen
     label = option_name ? "#{option_name}:" : "cast"
     # A brace-less map (cast("temp" => :float64, on_error: :warn)) arrives as
@@ -460,8 +536,9 @@ class CAFrame
             "on_error: must be :mask, :warn or :raise (got #{on_error.inspect})"
     end
     name_or_map = { default: :infer } if name_or_map == :infer && type.nil?
+    name_or_map = { default: :string } if name_or_map == :string && type.nil?
     if option_name && !name_or_map.is_a?(Hash)
-      raise ArgumentError, "#{label} takes a map of column types or :infer " \
+      raise ArgumentError, "#{label} takes a map of column types, :infer or :string " \
                            "(got #{name_or_map.inspect})"
     end
     types =
@@ -500,7 +577,7 @@ class CAFrame
       end
     end
     named.each_key do |name|
-      raise KeyError, "#{label} names no column #{name.inspect}" unless @columns.key?(name)
+      refuse_missing_column(name, label.chomp(":")) unless @columns.key?(name)
     end
     rest = @columns.keys - named.keys
     types =
@@ -554,9 +631,8 @@ class CAFrame
   # Bring every column to one common data type and rebind them (memo §11.4).
   # The frame-level counterpart of +CArray.promote_list+: where +cast+ forces
   # named columns to a type, +promote+ widens the whole table until it has a
-  # single type. Returns self so calls chain (§3.8 -- a type-interpretation
-  # change), and like +cast+ it allocates fresh columns, so a parent frame
-  # sharing the old ones is untouched. The index is not a column and is left
+  # single type. Returns a new frame; like +cast+ it allocates fresh columns,
+  # so this frame keeps its own. The index is not a column and is left
   # alone.
   #
   #   df.promote             # the common type CArray.result_type would pick
@@ -574,14 +650,19 @@ class CAFrame
   # and therefore always accepted -- it is the way a frame mixing text,
   # Face-typed and numeric columns becomes a single-type table (and so the
   # way +to_ca+ can hand back a matrix for it).
-  def promote(type = nil)
+  def promote(...)
+    return dup.__send__(:promote_in_place, ...)
+  end
+
+  private def promote_in_place(type = nil)
     refuse_if_frozen
     return self if @columns.empty?
     type.nil? ? promote_to_common : promote_to_type(type)
     self
   end
 
-  # Parse a string column into a time column and rebind it (memo §11.2).
+  # A new frame with a string column parsed into a time column (memo §11.2);
+  # this frame keeps the text column.
   # The column must be string-bearing (an object CArray of Strings, or a
   # CAString / CAConstString / CAFixlenString) — this is the "text -> time"
   # mode, distinct from the integer-serial mode of +to_time+.
@@ -603,14 +684,18 @@ class CAFrame
   #   df.parse_to_time("time").set_index("time")
   #   df.parse_to_time("date", "%d/%m/%Y")
   #   df.parse_to_time("date", :infer)
-  def parse_to_time(name, format = nil, unit: nil, on_error: :mask)
+  def parse_to_time(...)
+    return dup.__send__(:parse_to_time_in_place, ...)
+  end
+
+  private def parse_to_time_in_place(name, format = nil, unit: nil, on_error: :mask)
     refuse_if_frozen
     unless CAST_ON_ERROR.include?(on_error)
       raise ArgumentError,
             "on_error: must be :mask, :warn or :raise (got #{on_error.inspect})"
     end
     key = column_key(name, "parse_to_time")
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     unless string_column?(col)
       raise ArgumentError,
             "parse_to_time needs a string column (object / CAString / " \
@@ -632,15 +717,15 @@ class CAFrame
   #   df.infer_time_format("date")   # => "%d/%m/%Y"
   def infer_time_format(name)
     key = column_key(name, "infer_time_format")
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     unless string_column?(col)
       raise ArgumentError, "column #{key.inspect} is #{col.data_type}, not text"
     end
     inferred_time_format(key, col)&.first&.format
   end
 
-  # Reinterpret an integer column as time serial counts and rebind it (memo
-  # §11.2). This is the "serial -> time" mode: each value is a count of
+  # A new frame with an integer column read as time serial counts (memo
+  # §11.2); this frame keeps the integer column. This is the "serial -> time" mode: each value is a count of
   # +unit+ resolution since +epoch+ (default the Unix epoch, 1970-01-01 UTC).
   # +epoch+ takes any time literal (String / Time / Integer), so a column
   # measured from another origin — a netCDF "hours since 1990-01-01" axis, an
@@ -660,10 +745,14 @@ class CAFrame
   #   df.to_time("time", unit: :h, epoch: "1990-01-01").set_index("time")
   #   df.to_time("time", CATime::Grid.parse("hours since 1990-01-01"))
   #   df.to_time("time", CATime::Grid.parse("days since 1980-01-01 12:00"))
-  def to_time(name, grid = nil, unit: :s, epoch: nil)
+  def to_time(...)
+    return dup.__send__(:to_time_in_place, ...)
+  end
+
+  private def to_time_in_place(name, grid = nil, unit: :s, epoch: nil)
     refuse_if_frozen
     key = column_key(name, "to_time")
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     raw = integer_serial_column(col, key)
     grid = unit if unit.is_a?(CATime::Grid)
     if grid.is_a?(CATime::Grid)
@@ -698,10 +787,27 @@ class CAFrame
   # CATimedelta) column.  A categorical column's codes are read-only
   # (memo §13.4), so any fill on it raises — rebind a filled copy instead:
   # `df.append(name, df[name].strip_mask(method: :forward))`.
-  def fill(name, method_or_value)
+  #
+  # Several columns, or every one, are filled the same way: the method or
+  # value comes last, after the columns as +select+ takes them; alone, it
+  # fills every column that has a masked cell, as +strip_mask+ does. A Hash
+  # fills several columns, each its own way. Every column is checked before
+  # any is filled:
+  #
+  #   fill("temp", "wind", :ffill)
+  #   fill(:numeric, 0)
+  #   fill(:ffill)                          # every column with a masked cell
+  #   fill("temp" => :linear, "wind" => 0.0)
+  def fill(*args)
+    plan = fill_arguments(args)
+    return self if plan.nil?
+    if plan.is_a?(Hash)
+      return fill_by_map(plan, "fill") { |frame, key, how| frame.fill(key, how) }
+    end
+    name, method_or_value = plan
     refuse_if_frozen
     key = column_key(name, "fill")
-    raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
+    refuse_missing_column(key) unless @columns.key?(key)
     col = @columns[key]
     # An N-D column is filled down the rows: each position on its trailing
     # axes is a series of its own.
@@ -715,17 +821,183 @@ class CAFrame
             "fill: unknown method #{method_or_value.inspect} " \
             "(:ffill | :bfill | :linear, or a constant fill value)"
     else
-      col.unmask(method_or_value)   # constant fill, in place
+      fill_constant(key, col, method_or_value)
     end
     self
   end
 
-  private def fill_linear_column(key, col)
+  # A constant fill, in place, naming the column when the value does not go
+  # into it, as strip_mask names it.
+  private def fill_constant (key, col, value)
+    col.unmask(value)
+  rescue ArgumentError, TypeError, RangeError, FloatDomainError => e
+    raise e.exception("fill: column #{key.inspect} (#{CArray::Inspector.type_label(col)}) " \
+                      "cannot take #{value.inspect}: #{e.message}")
+  end
+
+  # A frame with the masked cells filled, this frame left as it is: the
+  # sibling of +fill+ that returns a new frame, as CArray#strip_mask is of
+  # CArray#unmask. The value or the method is given as CArray#strip_mask
+  # takes it, for every column or, with a Hash, column by column:
+  #
+  #   df.strip_mask(0.0)                                 # every column, one value
+  #   df.strip_mask("temp" => Float::NAN, "n" => -1)
+  #   df.strip_mask(method: :forward)                    # every column, one method
+  #   df.strip_mask(method: { "temp" => :linear, "station" => :forward })
+  #
+  # A positional Symbol is a value, as in CArray#strip_mask. The methods are
+  # :forward and :backward (carry the last or the next present value down the
+  # rows; :ffill and :bfill are the same) and :linear, which interpolates
+  # against this frame's index when it has one, as +fill+ does, and against
+  # the row position when it has none. An N-D column is filled down the rows.
+  # A cell a method cannot reach (before the first present value, say) stays
+  # masked.
+  #
+  # The forms for every column fill the columns that have a masked cell and
+  # leave the others alone, so one value serves a frame whose complete
+  # columns could not hold it (NaN beside a complete integer column). A
+  # column named in a Hash is filled whatever it holds. A column that cannot
+  # take its value is refused, by name, and no frame is returned.
+  #
+  # The filled columns are new arrays; the others are this frame's own, shared
+  # as +select+ shares them. The index is not filled.
+  #
+  # @return [CAFrame]
+  # @raise [KeyError] for a name that is no column.
+  # @raise [ArgumentError] for neither or both of a value and method:, or an
+  #   unknown method.
+  def strip_mask (fill = STRIP_MASK_UNSET, method: nil, **named)
+    # df.strip_mask("x" => 0.0) arrives as keywords: the String keys are
+    # column names, never an option.
+    unless named.empty?
+      unless fill.equal?(STRIP_MASK_UNSET)
+        raise ArgumentError, "strip_mask: give a fill value or a Hash of them, not both"
+      end
+      fill = named
+    end
+    given = !fill.equal?(STRIP_MASK_UNSET)
+    if given && method
+      raise ArgumentError, "strip_mask: pass either a fill value or method:, not both"
+    end
+    unless given || method
+      raise ArgumentError, "strip_mask: a fill value is required (or method:)"
+    end
+    how = given ? fill : method
+    plan = if how.is_a?(Hash)
+             raise ArgumentError, "strip_mask: the Hash names no column" if how.empty?
+             keys = column_keys(how.keys, "strip_mask")
+             keys.each { |key| refuse_missing_column(key) unless @columns.key?(key) }
+             keys.zip(how.values)
+           else
+             @columns.select { |_, col| col.any_masked? }.keys.map { |key| [key, how] }
+           end
+    unless given
+      plan.each do |_, m|
+        next if STRIP_MASK_METHODS.include?(m)
+        raise ArgumentError,
+              "strip_mask: unknown method #{m.inspect} (:forward | :backward | :linear)"
+      end
+    end
+    cols = @columns.dup
+    plan.each do |key, h|
+      cols[key] = given ? strip_mask_by_value(key, @columns[key], h)
+                        : strip_mask_by_method(key, @columns[key], h)
+    end
+    return rebuild(cols)
+  end
+
+  STRIP_MASK_UNSET = ::Object.new
+  Ractor.make_shareable(STRIP_MASK_UNSET)
+  private_constant :STRIP_MASK_UNSET
+
+  STRIP_MASK_METHODS = %i[forward backward ffill bfill linear].freeze
+  private_constant :STRIP_MASK_METHODS
+
+  private def strip_mask_by_value (key, col, value)
+    return col.strip_mask(value)
+  rescue ArgumentError, TypeError, RangeError, FloatDomainError => e
+    raise e.exception("strip_mask: column #{key.inspect} (#{CArray::Inspector.type_label(col)}) " \
+                      "cannot take #{value.inspect}: #{e.message}")
+  end
+
+  private def strip_mask_by_method (key, col, method)
+    if method == :linear && @index
+      out = col.copy
+      fill_linear_column(key, out, "strip_mask")
+      return out
+    end
+    begin
+      return col.strip_mask(method: method, **(col.ndim > 1 ? { axis: 0 } : {}))
+    rescue ArgumentError, TypeError => e
+      raise e.exception("strip_mask: column #{key.inspect}: #{e.message}")
+    end
+  end
+
+  private def linear_call (verb, key)
+    return "fill(#{key.inspect}, :linear)" if verb == "fill"
+    return "strip_mask(method: :linear) of column #{key.inspect}"
+  end
+
+  # A fill Hash, name => method or value. Each column is filled first on a
+  # copy, in a frame holding the copy, by the block (frame, name, how) -- so
+  # every check a single fill makes applies -- and the stored columns are
+  # written only when every one has passed: a refusal leaves them all as
+  # they were. A read-only column is given to the block as it is, to refuse
+  # as a single fill does before anything is written.
+  # What fill's arguments ask for: [name, how] for one column, or a Hash of
+  # name => how for several (the columns named before the method or value,
+  # or, with none named, every column with a masked cell, +key_names+ left
+  # out; nil when there is none).
+  private def fill_arguments (args, key_names = [])
+    return args.first if args.size == 1 && args.first.is_a?(Hash)
+    if args.empty? || args.first.is_a?(Hash)
+      raise ArgumentError,
+            "fill: give the columns and a method or value, a method or value alone, " \
+            "or one Hash of them"
+    end
+    *names, how = args
+    if names.empty?
+      if how.is_a?(String)
+        raise ArgumentError,
+              "fill: give a method or value after the column #{how.inspect}; " \
+              "a String alone is a column name"
+      end
+      map = @columns.select { |key, col| !key_names.include?(key) && col.any_masked? }
+                    .keys.to_h { |key| [key, how] }
+      return map.empty? ? nil : map
+    end
+    return [names.first, how] if names.size == 1 && names.first.is_a?(String)
+    return names_selected(names, "fill").to_h { |key| [key, how] }
+  end
+
+  private def fill_by_map (map, verb)
+    raise ArgumentError, "#{verb}: the Hash names no column" if map.empty?
+    refuse_if_frozen
+    keys = column_keys(map.keys, verb)
+    keys.each { |key| refuse_missing_column(key) unless @columns.key?(key) }
+    map.each_value do |how|
+      next unless how.is_a?(Symbol) && !%i[ffill bfill linear].include?(how)
+      raise ArgumentError,
+            "#{verb}: unknown method #{how.inspect} (:ffill | :bfill | :linear, or a constant fill value)"
+    end
+    pairs = keys.zip(map.values)
+    pairs.each { |key, how| yield self, key, how if @columns[key].read_only? }
+    filled = pairs.map do |key, how|
+      next if @columns[key].read_only?
+      probe = rebuild(@columns.merge(key => @columns[key].copy))
+      yield probe, key, how
+      [key, probe[key]]
+    end
+    filled.compact.each { |key, col| @columns[key][] = col }
+    return self
+  end
+
+  private def fill_linear_column(key, col, verb = "fill")
     # A Face column interpolates through its own linear_fetch (a time
     # column's keeps the Face and its unit), as the core gap fill does.
     unless col.__send__(:interpolable?)
       raise ArgumentError,
-            "fill(#{key.inspect}, :linear): numeric or time column required " \
+            "#{linear_call(verb, key)}: numeric or time column required " \
             "(got #{col.data_type_name})"
     end
     # Without an index coordinate x is the cell position, which is exactly what
@@ -736,16 +1008,16 @@ class CAFrame
     unless @index.numeric? || @index.is_a?(CATime) || @index.is_a?(CATimedelta)
       along = col.ndim > 1 ? ", axis: 0" : ""
       raise ArgumentError,
-            "fill(#{key.inspect}, :linear): the index #{@axis_name.inspect} is " \
+            "#{linear_call(verb, key)}: the index #{@axis_name.inspect} is " \
             "#{@index.data_type_name}, not numeric or time, so it cannot be the x of " \
             "the interpolation; to interpolate by row position, use " \
-            "df[#{key.inspect}].unmask(method: :linear#{along})"
+            "df[#{key.inspect}].#{verb == "fill" ? "unmask" : "strip_mask"}(method: :linear#{along})"
     end
     # With the index as x, an N-D column is filled one trailing position at a
     # time; each position is a 1-D view, so the fill writes through to it.
     if col.ndim > 1
       col.shape[1..].map { |d| (0...d).to_a }.inject { |a, b| a.product(b).map { |e| Array(e).flatten } }
-         .each { |pos| fill_linear_column(key, col[nil, *Array(pos)]) }
+         .each { |pos| fill_linear_column(key, col[nil, *Array(pos)], verb) }
       return
     end
     # The same fill as the core, with the index as x.
@@ -757,8 +1029,20 @@ class CAFrame
   # are not numbers). Other targets go through to_type.
   private def cast_column(name, type, on_error)
     key = name.to_s
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     return cast_time_column(key, col, on_error) if type == :time
+    return cast_timedelta_column(key, col, on_error) if type == :timedelta
+    # Text stays text, an object column of Strings becomes a CAString, and
+    # anything else is refused as CArray.string refuses it (a number is
+    # written as text with #format).
+    if type == :string
+      return col if col.is_a?(CArray::StringOperationMixin)
+      begin
+        return CArray.string(col)
+      rescue CArray::DataTypeError, TypeError => e
+        raise e.class, "column #{key.inspect} cannot be cast to :string: #{e.message}"
+      end
+    end
     if type == :categorical
       return col.is_a?(CACategorical) ? col : col.categorize
     end
@@ -848,6 +1132,57 @@ class CAFrame
     end
     parse_time_column(key, col, nil, nil, on_error)
   end
+
+  # cast(name => :timedelta): the text #to_csv writes for a duration -- a
+  # signed integer and its unit ("194400s", "3M"), or "<n> @ <count> <unit>"
+  # for a unit of several base ticks ("3 @ 10 m") -- to CATimedelta. Cells in
+  # different units are brought to the finest of them; a column that mixes
+  # calendar units (Y, M) with fixed-length ones has no common unit.
+  private def cast_timedelta_column(key, col, on_error)
+    return col if col.is_a?(CATimedelta)
+    unless string_column?(col)
+      raise ArgumentError,
+            "cast: column #{key.inspect} is #{col.data_type}, not text; " \
+            "#timedelta(unit:) reads a column of counts as durations"
+    end
+    cells = time_text_of(col).flatten
+    present = cells.is_not_masked
+    values = Array.new(cells.elements)
+    units = Array.new(cells.elements)
+    bad = []
+    cells.elements.times do |addr|
+      next unless present[addr]
+      text = cells[addr]
+      m = text.is_a?(String) && TIMEDELTA_TEXT.match(text)
+      if m
+        values[addr] = Integer(m[1], 10)
+        units[addr] = CATime::Resolution.new(m[2] ? Integer(m[2], 10) : 1, m[3].to_sym)
+      elsif !text.nil? && !(text.is_a?(String) && text.strip.empty?)
+        bad << addr
+      end
+    end
+    report_unreadable(key, col, :timedelta, bad, on_error) unless bad.empty? || on_error == :mask
+    distinct = units.compact.uniq
+    calendar = distinct.partition { |u| %i[Y M].include?(u.base) }
+    unless calendar.all?(&:empty?) || calendar.any?(&:empty?)
+      raise ArgumentError,
+            "cast: column #{key.inspect} mixes calendar units (Y, M) with " \
+            "fixed-length ones (#{distinct.map(&:to_s).join(', ')}); " \
+            "they have no common unit"
+    end
+    unit = distinct.reduce { |a, b| CATimeUnitAlgebra.finer(a, b) } || CATime::Resolution.new(1, :s)
+    ticks = CArray.int64(cells.elements)
+    ticks[nil] = UNDEF
+    distinct.each do |u|
+      addrs = units.each_index.select { |i| units[i] == u }
+      scaled = CATimeUnitAlgebra.convert_scale!(CA_INT64(addrs.map { |i| values[i] }), u, unit)
+      ticks[CA_INT64(addrs)] = scaled
+    end
+    ticks.reshape(*col.shape).timedelta(unit: unit)
+  end
+
+  TIMEDELTA_TEXT = /\A\s*([-+]?\d+)\s*(?:@\s*(\d+)\s+)?(Y|M|W|D|h|ms|us|ns|ps|fs|as|m|s)\s*\z/
+  private_constant :TIMEDELTA_TEXT
 
   # Text to CATime. Without a format only year-first text is read; a
   # strptime format, or :mixed for a guess at each cell, goes through

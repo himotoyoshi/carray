@@ -463,4 +463,40 @@ class TestIterWriteBack < Test::Unit::TestCase
     assert_equal 0, a.count_masked
   end
 
+  # A CAObject whose mask lives in a backend: its mask is an entity that
+  # hands out a copy when attached and keeps a write only through its sync
+  # slot.
+  class BackedMask < CAObject
+    def initialize (back)
+      @back = back
+      super(back.data_type, back.shape)
+    end
+    def create_mask; end
+    private
+    def fetch_addr (a);         @back.value[a]; end
+    def store_addr (a, v);      @back.value[a] = v; end
+    def copy_data (d);          d[] = @back.value; end
+    def sync_data (d);          @back.value[] = d.value; end
+    def mask_fetch_addr (a);    @back.mask[a] ? 1 : 0; end
+    def mask_store_addr (a, v); @back.mask[a] = v; end
+    def mask_copy_data (d);     d[] = @back.mask; end
+    def mask_sync_data (d);     @back.mask[] = d; end
+    def mask_fill_data (v);     @back.mask[] = v; end
+    def mask_copy_addrs (a, d); d[] = @back.mask[a]; end
+    def mask_sync_addrs (a, d); @back.mask[a] = d; end
+  end
+
+  def test_a_write_reaches_an_entity_that_attaches_a_copy
+    { "mask"            => ->(o) { o.mask },
+      "reshaped mask"   => ->(o) { o.reshape(6).mask },
+      "transposed mask" => ->(o) { o.mask.transpose } }.each do |name, view|
+      back = CArray.int16(2, 3).seq!
+      back[0, 1] = UNDEF
+      o = BackedMask.new(back)
+      o[0, 1] = UNDEF
+      CArray.iw_write_byte(view.(o), 0, 0, 1)
+      assert_equal [true] * 6, back.mask.to_a.flatten, name
+    end
+  end
+
 end

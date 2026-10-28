@@ -395,7 +395,7 @@ extern const int      ca_cast_table2[CA_NTYPE][CA_NTYPE];
 #define CA_FLAG_READ_ONLY      8     /* WRITE-path operations reject */
 #define CA_FLAG_SHARE_INDEX   16     /* index / axis buffer is aliased, not owned */
 #define CA_FLAG_MULTI_PARENTS 32     /* fan-out view (CAStack and friends) */
-#define CA_FLAG_CYCLE_CHECK   64     /* re-entrancy guard for CA_OBJECT fetch/store */
+/* bit 64 is free (it was the cycle check on object arrays) */
 #define CA_FLAG_IS_FACE      128     /* CAFace lift ([ch. 9](09_faces.md)) */
 ```
 
@@ -424,7 +424,7 @@ typedef struct {
 So `(CAMultiParent *) ca` is valid for any view with `CA_FLAG_MULTI_PARENTS`
 set.
 
-Three of the bits carry no behaviour in their name and are easy to misread:
+Two of the bits carry no behaviour in their name and are easy to misread:
 
 - **`CA_FLAG_SCALAR` (1)** — marks an array that acts as a *scalar / broadcast
   operand* rather than a rank-N array. `ca_is_scalar(ca)` is exactly
@@ -440,14 +440,14 @@ Three of the bits carry no behaviour in their name and are easy to misread:
   the flag and aliases `ca->axes = protos`; `free_ca_grid` then skips the
   per-axis `xfree` when the flag is present. `initialize_copy` and `create_mask`
   are the call sites that share a source's `axes` buffer this way.
-- **`CA_FLAG_CYCLE_CHECK` (64)** — a *re-entrancy guard*, meaningful only for
-  `CA_OBJECT` arrays (an object array can contain a reference to itself). During
-  a fetch/store of an object array, `ca_set_cyclic_check` raises if the flag is
-  already set on this array (a cycle) and otherwise sets it; `ca_clear_cyclic_check`
-  clears it afterward; `ca_test_cyclic_check` raises if a nested CArray element
-  already has the flag set (`carray_core.c`). It exists to turn what would be a
-  system-stack overflow on a self-referential object array into a clean
-  `ArgumentError` ([ch. 5](05_mask_and_undef.md)).
+An object array can hold itself, or a view of itself, in a cell. Reading such
+a cell, or computing over the array, would come back into the same cells
+without end. No flag marks this: `ca_test_cyclic_check` and
+`ca_computing_run` (`carray_core.c`) record the arrays being read or computed
+over with `rb_exec_recursive`, per thread and fiber and per method, as
+`Array#flatten` does, and raise `ArgumentError` when the same method enters
+one of them again. Nothing is written to the array, so a frozen array shared
+between Ractors is read like any other.
 
 ## The view struct catalog (extended)
 

@@ -2,7 +2,7 @@ require "test/unit"
 require "carray"
 require "stringio"
 
-# CAFrame#infer_types / from_csv(types: :infer): a text column becomes
+# CAFrame#infer_types / read_csv(types: :infer): a text column becomes
 # int64 or float64 when every cell that is not missing reads as a number of
 # that kind; anything else stays text.
 class TestCAFrameInferTypes < Test::Unit::TestCase
@@ -14,7 +14,7 @@ class TestCAFrameInferTypes < Test::Unit::TestCase
   CSV
 
   def frame(text = CSV_TEXT, **opts)
-    CAFrame.from_csv(StringIO.new(text), **opts)
+    CAFrame.from_csv(text, types: :string, **opts)
   end
 
   def infer(cells)
@@ -99,7 +99,7 @@ class TestCAFrameCastTime < Test::Unit::TestCase
   CSV
 
   def frame
-    CAFrame.from_csv(StringIO.new(CSV_TEXT))
+    CAFrame.from_csv(CSV_TEXT, types: :string)
   end
 
   def strings(col)
@@ -120,14 +120,14 @@ class TestCAFrameCastTime < Test::Unit::TestCase
   end
 
   def test_types_infer_casts_time
-    df = CAFrame.from_csv(StringIO.new(CSV_TEXT), types: :infer)
+    df = CAFrame.from_csv(CSV_TEXT, types: :infer)
     assert_kind_of CATime, df["stamp"]
     assert_equal :object, df["dmy"].data_type
     assert_equal :object, df["bad"].data_type
   end
 
   def test_a_blank_first_cell_does_not_stop_a_time_column
-    df = CAFrame.from_csv(StringIO.new("t,u\n,x\n2024-01-02,2024-01-02\n2024-01-03,2024-01-03\n"),
+    df = CAFrame.from_csv("t,u\n,x\n2024-01-02,2024-01-02\n2024-01-03,2024-01-03\n",
                           types: :infer)
     assert_kind_of CATime, df["t"]
     assert_equal :object, df["u"].data_type
@@ -136,8 +136,8 @@ class TestCAFrameCastTime < Test::Unit::TestCase
   def test_on_error
     e = assert_raise(CAFrame::UnreadableColumn) { frame.cast("bad" => :time, on_error: :raise) }
     assert_match(/column "bad", row 1 "2024-13-01" cannot be read as time/, e.message)
-    df = frame
-    _out, err = capture_output { df.cast("bad" => :time, on_error: :warn) }
+    df = nil
+    _out, err = capture_output { df = frame.cast("bad" => :time, on_error: :warn) }
     assert_match(/2 cells cannot be read as time/, err)
     assert_equal ["2024-01-01", "UNDEF", "UNDEF"], strings(df["bad"])
   end
@@ -154,7 +154,7 @@ class TestCAFrameCastTime < Test::Unit::TestCase
 
   def times(cells, *args, **opts)
     df = CAFrame.new("t" => CA_OBJECT(cells))
-    df.parse_to_time("t", *args, **opts)
+    df = df.parse_to_time("t", *args, **opts)
     strings(df["t"])
   end
 
@@ -220,7 +220,7 @@ class TestCAFrameInferTimeFormat < Test::Unit::TestCase
 
   def times(cells, **opts)
     df = frame(cells)
-    df.parse_to_time("t", :infer, **opts)
+    df = df.parse_to_time("t", :infer, **opts)
     df["t"].to_a.map(&:to_s)
   end
 

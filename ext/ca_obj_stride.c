@@ -183,6 +183,9 @@ free_ca_stride (void *ap)
 {
   CAStride *ca = (CAStride *) ap;
   if (ca == NULL) return;
+  if ( ca_test_flag(ca, CA_FLAG_FOLDED) ) {
+    ca_fold_forget((CArray *) ca);
+  }
   ca_free(ca->mask);
   if (ca->_pool) {
     /* Pool path: one xfree covers dim/strides via the pool buffer,
@@ -278,11 +281,15 @@ ca_stride_compose_through (CAStride *leaf, CAStride *parent,
 
   /* Compose each leaf dim's stride.
      Validity rule: leaf dim k must advance exactly one parent dim
-     (not cross multiple parent dims) AND stay within that parent
-     dim's bounds across leaf's full extent *given the base position*.
-     Otherwise the leaf's traversal would wrap across parent dim
-     boundaries, which is a non-strided access pattern that cannot
-     be folded. */
+     (not cross multiple parent dims), and every parent dim must stay
+     within its bounds across the leaf's full extent *given the base
+     position*.  Several leaf dims can advance the same parent dim (a block
+     of a reshape: rows step 4 parent columns, columns step 1), so the
+     bound is on the sum of their extents, kept in lo[] / hi[].  Otherwise
+     the leaf's traversal would wrap across parent dim boundaries, which
+     is a non-strided access pattern that cannot be folded. */
+  ca_size_t lo[CA_RANK_MAX], hi[CA_RANK_MAX];
+  for (m = 0; m < parent->ndim; m++) lo[m] = hi[m] = base_idx[m];
   for (k = 0; k < leaf->ndim; k++) {
     if (leaf->strides[k] % parent->bytes != 0) return 0;
     ca_size_t advance = leaf->strides[k] / parent->bytes;
@@ -302,20 +309,15 @@ ca_stride_compose_through (CAStride *leaf, CAStride *parent,
     }
     if (advance != 0) return 0;
     if (nonzero_count > 1) return 0;   /* crosses parent dims */
-    if (nonzero_count == 1) {
-      /* Final position in parent dim after the full leaf extent.
-         For a forward step it must stay strictly below dim; for a
-         backward step it must stay at or above 0. */
-      ca_size_t final_pos =
-        base_idx[nonzero_dim] + (leaf->dim[k] - 1) * nonzero_step;
-      if (nonzero_step > 0) {
-        if (final_pos >= parent->dim[nonzero_dim]) return 0;
-      } else {
-        if (final_pos < 0) return 0;
-      }
+    if (nonzero_count == 1 && leaf->dim[k] > 1) {
+      ca_size_t extent = (leaf->dim[k] - 1) * nonzero_step;
+      if (extent > 0) hi[nonzero_dim] += extent;
+      else            lo[nonzero_dim] += extent;
     }
     out_strides[k] = composed;
   }
+  for (m = 0; m < parent->ndim; m++)
+    if (lo[m] < 0 || hi[m] >= parent->dim[m]) return 0;
 
   /* A leaf cell wider than the remainder of its first parent element
      (CARefer reinterpreting two float64 as one complex128) covers several
@@ -679,14 +681,20 @@ ca_stride_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
       }
     }
     else {
+      /* Peel the axes from the innermost: a % dim[k] is the index on
+         axis k and a / dim[k] carries the rest outward.  The outermost
+         axis takes whatever is left, so ndim-1 divisions per address. */
+      ca_size_t *dim = ca->dim;
+      int8_t     ndim = ca->ndim;
       for ( i = 0; i < n; i++ ) {
-        ca_size_t idx[CA_RANK_MAX];
+        ca_size_t a = addrs[i];
         ca_size_t off = ebase;
-        ca_addr2index((CArray *) ca, addrs[i], idx);
-        for ( k = 0; k < ca->ndim; k++ ) {
-          off += idx[k] * esteps[k];
+        for ( k = ndim - 1; k > 0; k-- ) {
+          ca_size_t q = a / dim[k];
+          off += ( a - q * dim[k] ) * esteps[k];
+          a = q;
         }
-        paddrs[i] = off;
+        paddrs[i] = off + a * esteps[0];
       }
     }
     ca_xfer_addrs(root, n, paddrs, data, dir);
@@ -821,9 +829,12 @@ ca_stride_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 
   /* A reshape over a 1-D cold root (ndim != root->ndim): the request has no
      box in the root's single axis, but the root cells it touches lie in one
-     flat span.  Ask the root for that span once and walk the request over
-     it, as xfer_all does for the whole view.  A PUT reads the span first so
-     the cells between the requested ones go back unchanged. */
+     flat span.  A GET asks the root for that span once and walks the
+     request over it, as xfer_all does for the whole view.  A PUT hands the
+     root the list of the requested cells' addresses instead: sending the
+     span back would write the cells between them too, and a root that
+     repeats its cells (CATile) would have a stale copy land after the
+     written one. */
   if (aligned && !root->ptr && ca_func[root->obj_type].xfer_stride
        && ca->bytes == root->bytes && root->ndim == 1
        && root_base % root->bytes == 0) {
@@ -836,15 +847,33 @@ ca_stride_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
     }
     if ( span_lo >= 0 && span_hi <= root->elements * root->bytes ) {
       volatile VALUE holder;
-      ca_size_t rlo    = span_lo / root->bytes;
-      ca_size_t rcount = (span_hi - span_lo) / root->bytes;
-      ca_size_t rstep  = root->bytes;
-      char     *scratch = ALLOCV_N(char, holder, rcount * root->bytes);
-      ca_xfer_stride(root, &rlo, &rcount, &rstep, scratch, CA_XFER_GET);
-      ca_xfer_strided_walk(scratch + (root_base - span_lo), ca->bytes, ndim,
-                           counts, root_stride, d, dir);
       if ( dir == CA_XFER_PUT ) {
-        ca_xfer_stride(root, &rlo, &rcount, &rstep, scratch, CA_XFER_PUT);
+        ca_size_t  n = 1, m = 0, idx[CA_RANK_MAX];
+        ca_size_t *addrs;
+        for (k = 0; k < ndim; k++) {
+          n *= counts[k];
+          idx[k] = 0;
+        }
+        addrs = ALLOCV_N(ca_size_t, holder, n);
+        /* empty: the slot returns on an empty region at its entry */
+        while (1) {
+          ca_size_t off = root_base;
+          for (k = 0; k < ndim; k++) off += idx[k] * root_stride[k];
+          addrs[m++] = off / root->bytes;
+          k = ndim - 1;
+          while (k >= 0) { if (++idx[k] < counts[k]) break; idx[k] = 0; k--; }
+          if (k < 0) break;
+        }
+        ca_xfer_addrs(root, n, addrs, d, CA_XFER_PUT);
+      }
+      else {
+        ca_size_t rlo    = span_lo / root->bytes;
+        ca_size_t rcount = (span_hi - span_lo) / root->bytes;
+        ca_size_t rstep  = root->bytes;
+        char     *scratch = ALLOCV_N(char, holder, rcount * root->bytes);
+        ca_xfer_stride(root, &rlo, &rcount, &rstep, scratch, CA_XFER_GET);
+        ca_xfer_strided_walk(scratch + (root_base - span_lo), ca->bytes, ndim,
+                             counts, root_stride, d, dir);
       }
       ALLOCV_END(holder);
       return;
@@ -1118,10 +1147,12 @@ static int ca_layout_is_contiguous (int8_t ndim, const ca_size_t *dim,
    folds onward from itself, so the answer is the one for the root it folds
    to.  What is left is the
    boundary views that compute or fetch their contents -- CAObject, the lazy
-   per-element transforms, whatever a companion gem installed -- and of those,
-   only the ones with an xfer_stride slot can answer a region request at all.
-   The rest have nothing better than materialising, so they keep doing it once
-   under attach rather than once per transfer. */
+   per-element transforms, whatever a companion gem installed.  All of them
+   answer a region request: through their xfer_stride slot, or, when a type
+   leaves it out, through the dispatcher's default, which hands the cells'
+   addresses to xfer_addrs.  Attaching one instead would produce all of it
+   and write all of it back, so a cell nobody touched would go through the
+   view's conversion both ways. */
 int
 ca_root_lends_no_memory (void *ap)
 {
@@ -1139,7 +1170,7 @@ ca_root_lends_no_memory (void *ap)
     ca_stride_compose_to_root((CAStride *) root, &below, cs, &base);
     return ca_root_lends_no_memory(below);
   }
-  return ca_func[root->obj_type].xfer_stride != NULL;
+  return 1;
 }
 
 /* The same question for the parent of a view that is not itself in the
@@ -1435,8 +1466,10 @@ ca_stride_func_xfer_all (void *ap, void *data, int dir)
          the request is exact) and ca->bytes == root->bytes (no byte
          reinterpret, so the span endpoints are whole root elements).  A wider
          lazy root has no single strided box to ask for, so it takes the
-         whole-root fallback below -- correct, just not partial. */
-      if ( root->ndim == 1 && ca->bytes == root->bytes ) {
+         whole-root fallback below -- correct, just not partial.  Reads only:
+         a write goes to the root as the list of its cells below, since
+         sending the span back would write the cells between them too. */
+      if ( dir == CA_XFER_GET && root->ndim == 1 && ca->bytes == root->bytes ) {
         ca_size_t span_lo = composed_base;
         ca_size_t span_hi = composed_base + ca->bytes;
         int8_t k;
@@ -1453,13 +1486,10 @@ ca_stride_func_xfer_all (void *ap, void *data, int dir)
           char     *scratch = ALLOCV_N(char, holder, rcount * root->bytes);
           ca_xfer_stride(root, &rlo, &rcount, &rstep, scratch, CA_XFER_GET);
           ca->ptr = ptr;
-          ca_stride_xfer_with_layout(ca, (dir == CA_XFER_PUT) ? 1 : 0,
+          ca_stride_xfer_with_layout(ca, 0,
                                      scratch + (composed_base - span_lo),
                                      composed_strides);
           ca->ptr = ptr0;
-          if ( dir == CA_XFER_PUT ) {
-            ca_xfer_stride(root, &rlo, &rcount, &rstep, scratch, CA_XFER_PUT);
-          }
           ALLOCV_END(holder);
         }
         return;
@@ -1585,6 +1615,51 @@ ca_stride_func_xfer_all (void *ap, void *data, int dir)
   }
 }
 
+/* Whether a layout of `ndim` axes (dims, byte strides, byte base) addresses
+   each cell of a packed array of the same number of cells exactly once:
+   ordered by the size of their strides, the axes longer than one must be
+   packed (the smallest stride is `bytes`, each next one the previous times
+   its axis length), and the lowest address must be 0.  Equal counts alone
+   do not say this: a zero or repeated stride covers fewer cells. */
+static int
+ca_stride_layout_is_permutation (int8_t ndim, const ca_size_t *dim,
+                                 const ca_size_t *strides, ca_size_t base,
+                                 ca_size_t bytes)
+{
+  int8_t    order[CA_RANK_MAX];
+  int8_t    n = 0, i, j;
+  ca_size_t lowest = base, expect = bytes;
+
+  for (i=0; i<ndim; i++) {
+    if ( dim[i] <= 1 ) {
+      continue;
+    }
+    if ( strides[i] < 0 ) {
+      lowest += (dim[i] - 1) * strides[i];
+    }
+    for (j=n; j>0; j--) {
+      ca_size_t a = strides[order[j-1]], b = strides[i];
+      if ( (a < 0 ? -a : a) <= (b < 0 ? -b : b) ) {
+        break;
+      }
+      order[j] = order[j-1];
+    }
+    order[j] = i;
+    n++;
+  }
+  if ( lowest != 0 ) {
+    return 0;
+  }
+  for (i=0; i<n; i++) {
+    ca_size_t s = strides[order[i]];
+    if ( (s < 0 ? -s : s) != expect ) {
+      return 0;
+    }
+    expect *= dim[order[i]];
+  }
+  return 1;
+}
+
 static void
 ca_stride_func_fill_data (void *ap, void *ptr)
 {
@@ -1620,7 +1695,9 @@ ca_stride_func_fill_data (void *ap, void *ptr)
      into scratch only to overwrite every byte with *ptr -- wasted
      work.  Delegate to root.fill_data instead.
      Safety gates:
-       (1) elements match -- our view covers every root cell;
+       (1) elements match and the composed layout addresses each root cell
+           exactly once -- our view covers every root cell (a zero or
+           repeated stride has as many cells but covers fewer);
        (2) bytes match -- our cell width equals root's cell width.
      Without (2), a type-reinterpreting CAStride (CAField over a
      complex entity for `.real`/`.imag`) would corrupt root: root
@@ -1632,7 +1709,9 @@ ca_stride_func_fill_data (void *ap, void *ptr)
   if ( ca_func[root->obj_type].attach != ca_stride_func.attach &&
        ca_func[root->obj_type].attach != ca_window_func.attach &&
        ca->elements == root->elements &&
-       ca->bytes    == root->bytes ) {
+       ca->bytes    == root->bytes &&
+       ca_stride_layout_is_permutation(ca->ndim, ca->dim, composed_strides,
+                                       composed_base, bytes) ) {
     ca_func[root->obj_type].fill_data(root, ptr);
     return;
   }
@@ -2094,6 +2173,13 @@ rb_cs_initialize_copy (VALUE self, VALUE other)
   ca_stride_setup(ca, cs->obj_type, cs->parent, cs->data_type, cs->bytes,
                   cs->ndim, cs->dim, cs->strides, cs->base_offset);
   rb_ca_set_parent(self, rb_ca_parent(other));
+  if ( ca_test_flag(cs, CA_FLAG_FOLDED) ) {
+    /* the copy has the same @parent, so it answers to the same source */
+    CArray *src = ca_fold_source((CArray *) cs);
+    if ( src ) {
+      ca_fold_note_source((CArray *) ca, src);
+    }
+  }
   return self;
 }
 

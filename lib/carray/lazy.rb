@@ -384,12 +384,6 @@ class CArray
     alias_method word, op
   end
 
-  # `pow` is the canonical C method (defined by rb_define_method in
-  # ext/ca_op_ipower.c) that `**` is rb_define_alias'd to.  The `**`
-  # dispatch in this file does not reach `pow` through the C alias, so
-  # `a.lazy.pow(2)` would fall to eager; `pow` is aliased again here.
-  alias_method :pow, :**
-
   # `fmax` / `fmin` are rb_define_alias'd to `pmax` / `pmin` at Init
   # time (the same C alias); they are aliased again beside them, in
   # LazyDispatch.
@@ -474,6 +468,14 @@ class CArray
     end
   end
 
+  # `pow` is the canonical C method (defined by rb_define_method in
+  # ext/ca_op_ipower.c) that `**` is rb_define_alias'd to.  The `**`
+  # dispatch in this file does not reach `pow` through the C alias, so
+  # `a.lazy.pow(2)` would fall to eager; `pow` is aliased again here.
+  # An alias copies the method as it is at that moment, so this follows
+  # the integer-exponent `**` above, not the template one.
+  alias_method :pow, :**
+
   # coerce: when self is a lazy view and the scalar appears on the LEFT
   # (e.g. `2 * a.lazy`), Ruby's Numeric#* calls a.lazy.coerce(2).  The
   # default coerce would unwrap the lazy-ness via eager scalar promotion;
@@ -494,6 +496,9 @@ class CArray
   # comparison ops — eager `CArray#==` (rb_ca_equal) is array-level
   # equality returning bool, not element-wise.  Element-wise equality is
   # `eq` / `feq`.
+  #
+  # A comparison with UNDEF goes to the eager method, which answers `eq` /
+  # `ne` from the mask and refuses the others.
   #
   # `feq` is arity 1 in eager (compile-time FLT_EPSILON / DBL_EPSILON);
   # we mirror that here.  Runtime eps is a future extension (struct field
@@ -518,7 +523,9 @@ class CArray
 
   CArray.send(:define_named_methods, LazyDispatch, LAZY_BINCMP_OP_IDS, template: <<~'RUBY')
     def __NAME__(other)
-      if lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
+      if UNDEF.equal?(other)
+        super(other)
+      elsif lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
         if face_among_operands?(self, other)
           return computed_operand(self).__send__(__method__, computed_operand(other))
         end
@@ -540,7 +547,9 @@ class CArray
 
   CArray.send(:define_named_methods, LazyDispatch, LAZY_BINCMP_TOL_OP_IDS, template: <<~'RUBY')
     def __NAME__(other, tol)
-      if lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
+      if UNDEF.equal?(other)
+        super(other, tol)
+      elsif lazy_view? || (other.is_a?(CArray) && other.lazy_view?)
         if face_among_operands?(self, other)
           return computed_operand(self).__send__(__method__, computed_operand(other), tol)
         end

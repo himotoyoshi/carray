@@ -491,7 +491,9 @@ ca_byte_swap_func_sync (void *ap)
   ca_byte_swap_apply(ca, tmp);
   memcpy(ca->parent->ptr, tmp, ca_length(ca));
   ALLOCV_END(holder);
+  ca_view_pass_mask_to_parent(ca);
   ca_sync(ca->parent);
+  ca_view_sync_mask_after_parent(ca);
 }
 
 static void

@@ -79,14 +79,50 @@ class WindowedFrame
 
   # The windowed reductions.  Without names, a frame of every column whose
   # type has the reduction (the on: and by: columns left out), on the
-  # frame's rows and index; given names, the CArray (one) or the Array of
-  # them (several), as +df[...]+ returns columns.
+  # frame's rows and index; given names, the CArray (one), as +df[name]+
+  # returns a column, or a frame of those columns (several) on the frame's
+  # rows and index.  With +at:+ the answers
+  # are one per point, not per row, so names or none, the result is a frame
+  # with the points as its index, as a group reduction's result is labelled
+  # by the groups.
   CArray.send(:define_named_methods, self,
               [:sum, :mean, :min, :max, :prod, :accumulate, :median,
                :variance, :stddev, :variancep, :stddevp], :window_reduction)
 
   CArray.send(:define_named_methods, self,
               [:first, :last, :nunique, :count, :all, :any], :window_value)
+
+  # Each window's +p+-th percentile (0 to 100), as +median+ gives the 50th.
+  # The percentage comes first, then the names.
+  #
+  #   w.percentile(90, "rain")
+  #
+  # @param p [Numeric] the percentage.
+  # @param names [Array<String>] the columns; default every column that has
+  #   a percentile.
+  # @return [CAFrame, CArray] as the other windowed reductions return.
+  def percentile (p, *names, min_count: nil, fill_value: nil)
+    CAFrame.__send__(:check_percentage, p)
+    window_reduce(:percentile, names, [p], min_count: min_count, fill_value: fill_value)
+  end
+
+  # Each window's five quartile percentiles, as +CAFrame#quantile+ gives
+  # them: a column "x" gives "x_p0", "x_p25", "x_p50", "x_p75" and "x_p100",
+  # a frame on the frame's rows and index, or with +at:+ on the points.
+  #
+  # @param names [Array<String>] the columns; default every column that has
+  #   a quantile.
+  # @return [CAFrame]
+  def quantile (*names)
+    named = {}
+    over_named_columns(:quantile, names, @key_names) do |col, name|
+      named[name] = @plan.for_value(col).quantile
+    end
+    cols = CAFrame.__send__(:quantile_columns, named)
+    return CAFrame.new(cols, axis_name: @frame.axis_name, index: @frame.index) unless @at
+    key = @frame.__send__(:key_column, @key_names.first, "windows")
+    CAFrame.new(cols, axis_name: @key_names.first, index: CAFrame.__send__(:key_labels, key, @at.copy))
+  end
 
   private
 
@@ -100,12 +136,14 @@ class WindowedFrame
 
   # An N-D column (each row a profile) is reduced along the rows, each
   # window keeping the trailing shape, as a group reduces it.
-  def window_reduce (reduction, names, **keywords)
+  def window_reduce (reduction, names, args = [], **keywords)
     keywords = keywords.compact
-    out = over_named_columns(reduction, names, @key_names) do |col|
-      @plan.for_value(col).public_send(reduction, **keywords)
+    named = {}
+    out = over_named_columns(reduction, names, @key_names, args) do |col, name|
+      named[name] = @plan.for_value(col).public_send(reduction, *args, **keywords)
     end
-    return out unless names.empty?
+    out = named if @at && !names.empty?
+    return out if out.is_a?(CArray) && !@at
     if @at
       # Each result has an index of its own, as a group's result has.
       key = @frame.__send__(:key_column, @key_names.first, "windows")

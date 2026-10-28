@@ -158,11 +158,16 @@ still passes, so nothing else would report it:
 A fast path answers what a general path also answers, by a different
 algorithm: the CAStack tile cache, the loop-interchange reduction, the
 streaming reduction of a lazy expression, the per-parent decomposition of a
-meld's reductions. Each one tests `ca_fast_paths_enabled()` (declared in
-`ext/carray_internal.h`) alongside its own condition; a Ruby one tests
-`CArray.__fast_paths_enabled__`. In a development build both are false when
-the process starts with `CARRAY_GENERAL_PATH=1`, so the general paths run
-everywhere. In a release build the C test is the constant 1.
+meld's reductions. Each one has a name and tests `ca_fast_path(CA_SC_name)`
+(declared in `ext/carray_internal.h`, the names listed in
+`ca_shortcut_names` in `ext/carray_core.c`) alongside its own condition; a
+Ruby one tests `CArray.__fast_paths_enabled__(:name)`. In a development build
+a process started with `CARRAY_GENERAL_PATH=1` has all of them off, so the
+general paths run everywhere, and one started with
+`CARRAY_SHORTCUTS_OFF=name1,name2` has only the named ones off (a name that
+is not in the list is warned about). This is how a single fast path is
+measured or checked against its general path. In a release build the C test
+is the constant 1 and neither variable has an effect.
 
 `rake spec_ai_general` runs spec_ai that way. The two runs together compare
 every fast path with its general path on the whole suite. A test that fails
@@ -183,7 +188,9 @@ per-fiber paths). `rake spec_ai_transfer` runs spec_ai that way, and
 five ways (one of them with two slab axes), read and write, and is the test the three runs are meant to
 compare.
 
-When you write a fast path, add the test to its condition. Leave it off a
+When you write a fast path, give it a name (an entry in the `CA_SC_*` list
+and in `ca_shortcut_names`) and add `ca_fast_path(CA_SC_name)` to its
+condition. Leave it off a
 branch that only lends a pointer or drops to `memcpy` (the same code runs
 either way), and off a branch that is the only way to keep a promise, such
 as reading only the cells a view selects from a root that cannot lend its

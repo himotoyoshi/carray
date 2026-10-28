@@ -733,6 +733,7 @@ Init_ca_obj_roll (void)
                                     &caroll_data_type,
                                     rb_cCARollMask,
                                     &caroll_mask_data_type, &ca_roll_func, sizeof(ca_roll_func));
+  ca_register_cell_moving_view(CA_OBJ_ROLL);
   rb_define_const(rb_cObject, "CA_OBJ_ROLL", INT2NUM(CA_OBJ_ROLL));
 
   rb_define_method(rb_cCArray, "roll", rb_ca_roll, -1);

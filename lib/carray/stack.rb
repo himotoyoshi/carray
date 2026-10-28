@@ -106,11 +106,14 @@ class CArray
     # describe a segment sequence, so absorbing their parents keeps chain
     # depth at 1 (avoids 2-level xfer_all / reduce chains through the
     # intermediate CAMeld).  A CAMeld with a different meld_axis is left
-    # intact — its segment structure is orthogonal.
-    if arrays.any? { |a| a.is_a?(CAMeld) && a.meld_axis == axis_norm }
-      arrays = arrays.flat_map { |a|
-        a.is_a?(CAMeld) && a.meld_axis == axis_norm ? a.parents : [a]
-      }
+    # intact — its segment structure is orthogonal.  So is a read-only one
+    # (frozen or flagged): writes through it are refused, and absorbing it
+    # would drop that.  The mask of a meld is a CAMeld with no parents of
+    # its own; it is passed on, to be refused as a part.
+    absorbed = ->(a) { a.is_a?(CAMeld) && a.meld_axis == axis_norm &&
+                       !a.read_only? && !a.mask_array? }
+    if arrays.any?(&absorbed)
+      arrays = arrays.flat_map { |a| absorbed.(a) ? a.parents : [a] }
     end
     CAMeld.new(arrays, axis: axis_norm)
   end
@@ -291,10 +294,19 @@ class CAStack
   #   preserving `self.k_axis`. Distinct from `CArray#stack`, which
   #   always treats `self` as a single parent of a new K-stack.
   #   @param others [Array<CArray>] extra parents to append.
+  #   A read-only stack hands on read-only views of its parents, so
+  #   writes into its cells stay refused.
   #   @return [CAStack]
   #   @raise [ArgumentError] when no `others` are given.
   def append (*others)
     raise ArgumentError, "append: at least one parent required" if others.empty?
-    CArray.stack(self.parents + others, axis: self.k_axis)
+    if mask_array?
+      raise ArgumentError, "append: a mask array can have no mask and can not be a part"
+    end
+    mine = self.parents
+    if read_only?
+      mine = mine.map { |p| p[].tap(&:set_read_only_flag) }
+    end
+    CArray.stack(mine + others, axis: self.k_axis)
   end
 end

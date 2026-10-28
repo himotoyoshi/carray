@@ -304,8 +304,9 @@ ca_remap_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
 
   paddrs = ALLOCV_N(ca_size_t, holder, n);
   ca_xfer_addrs(ca->idx, n, addrs, paddrs, CA_XFER_GET);
-  /* idx is read live, so its values are checked here, not at
-     construction: negative counts from the end, out of range raises
+  /* idx is read-only once the view holds it, but its values are still
+     checked on every transfer (the private without_read_only_flag can
+     lift the flag): negative counts from the end, out of range raises
      before the parent is touched. */
   for ( i = 0; i < n; i++ ) {
     CA_CHECK_INDEX(paddrs[i], ca->parent->elements);
@@ -366,9 +367,19 @@ ca_remap_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   ALLOCV_END(holder);
 }
 
-/* xfer_all: whole-view delivery.  Sequential view-flat addresses
-   [0..elements) routed through xfer_addrs -- one ALLOCV for the addr
-   list, then two batched ca_xfer_addrs calls inside xfer_addrs.
+/* xfer_all: whole-view delivery.  The whole view reads every cell of idx
+   in order, so when idx holds its cells in memory those cells are the
+   parent addresses: they are checked in one pass, a negative one counting
+   from the end of the parent.
+
+   idx itself is handed to the parent only when the parent holds its cells
+   in memory and shares no root with idx: that transfer is a plain copy, so
+   no Ruby runs while the parent reads the list and a scatter cannot
+   rewrite it.  Any other parent (a view, a CAObject whose hooks run Ruby)
+   gets a copy of the addresses taken in the checking pass, so nothing it
+   does can change an address after it was checked, or change idx.
+   Without idx in memory, the sequential view-flat addresses [0..elements)
+   go through xfer_addrs.
 
    No ca_attach(parent) / ca_attach(idx). */
 static void
@@ -381,6 +392,46 @@ ca_remap_func_xfer_all (void *ap, void *data, int dir)
   volatile VALUE holder;
 
   if ( n == 0 ) return;
+
+  if ( ca->idx->ptr ) {
+    ca_size_t *iaddrs = (ca_size_t *) ca->idx->ptr;
+    ca_size_t  pn = ca->parent->elements;
+    ca_size_t *paddrs;
+
+    if ( ca->parent->ptr && ! ca_shares_root(ca->parent, ca->idx) ) {
+      int lendable = 1;
+      for ( i = 0; i < n; i++ ) {
+        ca_size_t a = iaddrs[i];
+        if ( a < 0 ) {
+          lendable = 0;
+          a += pn;
+        }
+        if ( a < 0 || a >= pn ) {
+          ca_index_out_of_range(iaddrs[i], pn, "index");
+        }
+      }
+      if ( lendable ) {
+        ca_xfer_addrs(ca->parent, n, iaddrs, data, dir);
+        return;
+      }
+    }
+
+    paddrs = ALLOCV_N(ca_size_t, holder, n);
+    for ( i = 0; i < n; i++ ) {
+      ca_size_t a = iaddrs[i];
+      if ( a < 0 ) {
+        a += pn;
+      }
+      if ( a < 0 || a >= pn ) {
+        ALLOCV_END(holder);
+        ca_index_out_of_range(iaddrs[i], pn, "index");
+      }
+      paddrs[i] = a;
+    }
+    ca_xfer_addrs(ca->parent, n, paddrs, data, dir);
+    ALLOCV_END(holder);
+    return;
+  }
 
   vaddrs = ALLOCV_N(ca_size_t, holder, n);
   for ( i = 0; i < n; i++ ) vaddrs[i] = i;
@@ -417,7 +468,13 @@ ca_operation_function_t ca_remap_func = {
    carray_partition.c).  Callers are expected to have already checked the
    routing preconditions (same shape, idx data_type == CA_SIZE);
    ca_remap_setup raises ArgumentError on mismatch as a defensive
-   fallback. */
+   fallback.
+
+   The view takes rmapper over: every caller hands a fresh array no one
+   else holds, and it is marked read-only here, so the mapping a view was
+   made with cannot be rewritten through #mapper.  CAGrid and CASelect
+   keep their indices where Ruby cannot reach them; this is the same
+   promise for an index array that stays visible. */
 VALUE
 rb_ca_remap_new (VALUE cary, VALUE rmapper)
 {
@@ -437,13 +494,14 @@ rb_ca_remap_new (VALUE cary, VALUE rmapper)
      covers the view's.  ca->idx is a raw pointer into idx's struct;
      keeping rmapper reachable through the view keeps it alive. */
   rb_ivar_set(obj, rb_intern("remap_idx"), rmapper);
+  rb_ca_set_read_only_flag(rmapper);
   return obj;
 }
 
-/* Read-only accessor for the per-cell index CArray that defines this
-   CARemap's mapping: the array the view reads.  For ca[mapper] it is a
-   copy of mapper taken at the call, so a later change to mapper does
-   not reach the view.  Companion to
+/* Accessor for the per-cell index CArray that defines this CARemap's
+   mapping: the array the view reads, itself read-only.  For ca[mapper]
+   it is a copy of mapper taken at the call, so a later change to mapper
+   does not reach the view.  Companion to
    CABlock#start / CAStride#strides / CAWindow#count etc. — the view
    hierarchy is preserved so each named view class exposes its own
    defining semantic state. */
@@ -526,6 +584,7 @@ Init_ca_obj_remap (void)
                                      rb_cCARemapMask,
                                      &caremap_mask_data_type,
                                      &ca_remap_func, sizeof(ca_remap_func));
+  ca_register_cell_moving_view(CA_OBJ_REMAP);
 
   /* Defining semantic state accessor — companion to CABlock#start /
      CAStride#strides / CAWindow#count.  The hierarchy-preserving

@@ -1982,6 +1982,7 @@ Init_ca_obj_window (void)
   		                      &cawindow_data_type, 
 				      rb_cCAWindowMask,
 				      &cawindow_mask_data_type, &ca_window_func, sizeof(ca_window_func));
+  ca_register_cell_moving_view(CA_OBJ_WINDOW);
   rb_define_const(rb_cObject, "CA_OBJ_WINDOW", INT2NUM(CA_OBJ_WINDOW));
 
   rb_define_method(rb_cCArray, "window", rb_ca_window, -1);

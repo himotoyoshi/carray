@@ -453,8 +453,9 @@ pull_leaf_with_optional_cast (CArray *leaf, uint16_t innermost_op,
 /* Evaluate (GET) or write (PUT, writable views only) the cells a request
    names; `data` holds them packed. */
 static void
-ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
+ca_monop_eval_cells (void *node, const ca_lazy_req_t *req, void *data, int dir)
 {
+  CAMonOp *mo = (CAMonOp *) node;
   uint16_t op_chain[CA_MAX_LAZY_DEPTH];
   int chain_len = 0;
   CArray  *leaf;
@@ -641,6 +642,26 @@ ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
   }
 }
 
+/* A chain is evaluated from its leaf without evaluating the nodes under
+   the top one, so those nodes are recorded with it: a cell that holds an
+   expression over one of them is caught when it comes back, before a
+   longer chain over the same cells is built. */
+static void
+ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
+{
+  CArray *chain[CA_MAX_LAZY_DEPTH];
+  CArray *leaf = mo->parent;
+  int     nchain = 0;
+  while ( nchain < CA_MAX_LAZY_DEPTH &&
+          ( leaf->obj_type == CA_OBJ_MONOP ||
+            leaf->obj_type == CA_OBJ_LAZY_MARKER ) ) {
+    chain[nchain++] = leaf;
+    leaf = ((CAView *) leaf)->parent;
+  }
+  ca_lazy_eval_recorded(mo, 1, &leaf, nchain, chain, ca_monop_eval_cells,
+                        req, data, dir);
+}
+
 static void
 ca_monop_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
                            ca_size_t *strides, void *data, int dir)
@@ -776,7 +797,7 @@ ca_monop_func_sync (void *ap)
     if ( ca->mask ) {
       ca_cast_block_with_mask(ca->elements, ca, ca->ptr,
                               ca->parent, ca->parent->ptr,
-                              (boolean8_t *) ca->parent->mask->ptr);
+                              (boolean8_t *) ca->mask->ptr);
     }
     else {
       ca_cast_block(ca->elements, ca, ca->ptr, ca->parent, ca->parent->ptr);
@@ -790,7 +811,9 @@ ca_monop_func_sync (void *ap)
     ca_byte_swap_buffer(ca->data_type, ca->bytes, ca->elements,
                         ca->parent->ptr);
   }
+  ca_view_pass_mask_to_parent(ca);
   ca_sync(ca->parent);
+  ca_view_sync_mask_after_parent(ca);
 }
 
 static void
@@ -845,6 +868,21 @@ ca_monop_func_create_mask (void *ap)
   if ( ca_test_flag(ca, CA_FLAG_READ_ONLY) ) {
     ca_set_flag(ca->mask, CA_FLAG_READ_ONLY);
   }
+}
+
+/* For a writable cast: 1 and the data type it writes its parent in.  0 for
+   any other array. */
+int
+ca_monop_writable_cast_target (CArray *ca, int8_t *target)
+{
+  CAMonOp *mo = (CAMonOp *) ca;
+  if ( ca->obj_type != CA_OBJ_MONOP
+       || ! ca_monop_is_writable_view(mo->op_id)
+       || ! ca_monop_is_cast(mo->op_id) ) {
+    return 0;
+  }
+  *target = mo->parent->data_type;
+  return 1;
 }
 
 ca_operation_function_t ca_monop_func = {

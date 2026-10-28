@@ -1554,75 +1554,37 @@ rb_ca_fetch_slab_sigil (int argc, VALUE *argv, VALUE self)
   return rb_funcall(klass, rb_intern("new"), 2, base, slab_axes);
 }
 
+/* A CScalar is one cell and takes no index: s[] and s[0] name that cell,
+   anything else is refused. */
+
+static void
+rb_cs_check_index (int argc, VALUE *argv, const char *op)
+{
+  if ( argc == 0 ) {
+    return;
+  }
+  if ( argc == 1 && FIXNUM_P(argv[0]) && FIX2LONG(argv[0]) == 0 ) {
+    return;
+  }
+  rb_raise(rb_eArgError,
+           "CScalar%s takes no index other than [] or [0]", op);
+}
+
 static VALUE
 rb_cs_fetch_method (int argc, VALUE *argv, VALUE self)
 {
-  volatile VALUE obj = Qnil;
-  CArray *ca;
-  CAIndexInfo info;
+  rb_cs_check_index(argc, argv, "#[]");
+  return rb_ca_fetch_addr(self, 0);
+}
 
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+static VALUE rb_ca_store_method (int argc, VALUE *argv, VALUE self);
 
-  info.range_check = 0;
-  rb_ca_scan_index(ca->ndim, ca->dim, ca->elements, argc, argv, &info);
-
-  switch ( info.type ) {
-  case CA_REG_ADDRESS_COMPLEX:
-    obj = rb_ca_fetch_addr(self, 0);
-    break;
-  case CA_REG_ADDRESS:
-    obj = rb_ca_fetch_addr(self, 0);
-    break;
-  case CA_REG_FLATTEN:
-    obj = self; /* rb_funcall(self, rb_intern("refer"), 0); */
-    break;
-  case CA_REG_POINT:
-    obj = rb_ca_fetch_addr(self, 0);
-    break;
-  case CA_REG_ALL:
-    obj = self; /* rb_funcall(self, rb_intern("refer"), 0); */
-    break;
-  case CA_REG_BLOCK:
-    obj = self; /* rb_funcall(self, rb_intern("refer"), 0); */
-    break;
-  case CA_REG_SELECT:
-    obj = rb_ca_select_new(self, argv[0]);
-    break;
-  case CA_REG_ITERATOR:
-    obj = rb_ca_slab_iter_new(self, &info);
-    break;
-  case CA_REG_REPEAT:
-    obj = rb_ca_repeat(argc, argv, self);
-    break;
-  case CA_REG_MAPPING:
-    obj = rb_ca_fancy_index_chain(self, argv[0]);
-    break;
-  case CA_REG_GRID:
-    obj = rb_ca_grid(argc, argv, self);
-    break;
-  case CA_REG_METHOD_CALL: {
-    volatile VALUE idx;
-    idx = rb_funcallv_public(self, SYM2ID(info.symbol), argc-1, argv+1);
-    obj = rb_ca_fetch(self, idx);
-    break;
-  }
-  case CA_REG_MEMBER: {
-    volatile VALUE data_class = rb_ca_data_class(self);
-    if ( ! NIL_P(data_class) ) {
-      obj = rb_ca_face_field(self, info.symbol);
-      break;
-    }
-    else {
-      rb_raise(rb_eIndexError, 
-               "can't refer member of carray doesn't have data_class");
-    }
-    break;
-  }
-  default:
-    rb_raise(rb_eIndexError, "invalid index specified");
-  }
-
-  return obj;
+static VALUE
+rb_cs_store_method (int argc, VALUE *argv, VALUE self)
+{
+  rb_check_arity(argc, 1, UNLIMITED_ARGUMENTS);
+  rb_cs_check_index(argc - 1, argv, "#[]=");
+  return rb_ca_store_method(argc, argv, self);
 }
 
 /* Recursively convert a store rvalue's surface value objects into
@@ -2443,6 +2405,7 @@ Init_carray_access (void)
   rb_define_method(rb_cCArray, "[]=", rb_ca_store_method, -1);
 
   rb_define_method(rb_cCScalar, "[]", rb_cs_fetch_method, -1);
+  rb_define_method(rb_cCScalar, "[]=", rb_cs_store_method, -1);
 
   rb_define_method(rb_cCArray, "fill", rb_ca_fill, 1);
   rb_define_method(rb_cCArray, "fill_copy", rb_ca_fill_copy, 1);

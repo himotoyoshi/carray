@@ -510,6 +510,36 @@ iw_write_cells (VALUE klass, VALUE vdst, VALUE vmode, VALUE vaxis)
   return Qnil;
 }
 
+/* As iw_write_cells for any data type: sets every byte of every cell to
+   `byte`. */
+static VALUE
+iw_write_byte (VALUE klass, VALUE vdst, VALUE vmode, VALUE vaxis, VALUE vbyte)
+{
+  CArray       *dst;
+  int           mode = NUM2INT(vmode);
+  int8_t        axis = (int8_t) NUM2INT(vaxis);
+  int           byte = NUM2INT(vbyte);
+  ca_iter_state st;
+  char         *p;
+  boolean8_t   *m;
+  ca_size_t     n, s, ms;
+
+  (void) klass;
+  TypedData_Get_Struct(vdst, CArray, &carray_data_type, dst);
+
+  ca_iter_check_init(iw_open(&st, dst, mode, axis, CA_KERNEL_WRITE));
+  while ( iw_next(&st, mode, &p, &m, &n, &s, &ms) ) {
+    for ( ca_size_t i = 0; i < n; i++ ) {
+      ca_size_t doff, moff;
+      iw_cell(&st, mode, i, s, ms, &doff, &moff);
+      memset(p + doff, byte, st.bytes);
+    }
+    ca_iter_state_sync_slab(&st);
+  }
+  ca_iter_state_close(&st);
+  return Qnil;
+}
+
 /* As iw_write_cells, but writes only the cells `which` marks: `which` is
    an Array of booleans, one per cell in the order the walk yields them.
    The cells it leaves alone must come back as the kernel received them. */
@@ -811,6 +841,7 @@ Init_iter_write (void)
   rb_define_singleton_method(rb_cCArray, "iw_slab_fill_poisoned", iw_slab_fill_poisoned, 3);
   rb_define_singleton_method(rb_cCArray, "iw_read_cells", iw_read_cells, 3);
   rb_define_singleton_method(rb_cCArray, "iw_write_cells", iw_write_cells, 3);
+  rb_define_singleton_method(rb_cCArray, "iw_write_byte", iw_write_byte, 4);
   rb_define_singleton_method(rb_cCArray, "iw_write_some_cells", iw_write_some_cells, 4);
   rb_define_singleton_method(rb_cCArray, "iw_route", iw_route, 4);
   rb_define_singleton_method(rb_cCArray, "iw_state", iw_state, 4);

@@ -14,6 +14,7 @@
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
+#include "carray_internal.h"
 #include "carray_build_flags.h"
 #include "version.h"
 
@@ -313,7 +314,7 @@ Init_carray_ext (void)
   Init_carray_sort();               /* sort / sort_copy / sort_addr / axis2addr */
   Init_carray_count();
   Init_carray_kernels();            /* mkkernel-generated: reductions + maps */
-  Init_carray_round();              /* round(ndigits); after the generated round */
+  Init_carray_round();              /* round(ndigits) / round!(ndigits) */
 
   Init_carray_utils();
 
@@ -394,5 +395,7 @@ Init_carray_ext (void)
   Init_carray_slab();
 
   Init_carray_address_basis();
+
+  ca_obj_num_builtin = ca_obj_num;
 }
 

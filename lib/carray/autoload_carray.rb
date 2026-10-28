@@ -32,12 +32,12 @@ class CArray
   autoload_method "marshal_load",        serialize_rb
 end
 
-# A view, a wrap and a scalar are marshalled through _dump / self._load,
+# A view, a mask, a wrap and a scalar are marshalled through _dump / self._load,
 # which return a new array: with marshal_dump Marshal records the class and
 # loads into an empty instance of it, which the plain array the payload
 # holds cannot become.  A record array keeps marshal_dump, under which it
 # already round-trips with its class.
-[CAView, CAWrap, CScalar].each do |klass|
+[CAView, CAWrap, CScalar, CArrayMask, CAObjectMask].each do |klass|
   klass.class_eval do
     undef_method :marshal_dump
     autoload_method "_dump",               "carray/serialize"
@@ -137,7 +137,7 @@ autoload :CAUnion,  "carray/struct"
 # ---- CAFrame (DataFrame over CArray columns) -------------------------------
 #
 # The frame is only reached through the CAFrame constant (CAFrame.new /
-# .from_csv / subclassing) or GroupedFrame (obtained from CAFrame#group_by,
+# .read_csv / subclassing) or GroupedFrame (obtained from CAFrame#group_by,
 # by which point CAFrame is already loaded). Both constants live in the same
 # require bundle (carray/frame.rb), so autoloading either loads the whole
 # frame. Nothing in the eager core references them, so it loads on first use.

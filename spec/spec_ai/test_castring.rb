@@ -276,6 +276,20 @@ class TestCAString < Test::Unit::TestCase
     assert_equal ["a", "b"], s.to_a
   end
 
+  # The same holds when the wrapped array is a view, and the cell stays masked
+  # until it is unmasked.
+  def test_a_masked_cell_of_a_wrapped_view_is_a_string_once_unmasked
+    [->(o) { o[0..3] }, ->(o) { o.reshape(2, 2) },
+     ->(o) { o.reshape(2, 2).transpose }].each do |view|
+      o = CA_OBJECT(["a", nil, 5, "d"]); o[1] = UNDEF; o[2] = UNDEF
+      s = CAString.wrap(view.(o))
+      assert_equal [false, true, true, false], o.is_masked.to_a
+      s.unmask
+      assert_equal %w[a d], [s.to_a.flatten.first, s.to_a.flatten.last]
+      assert_equal [String] * 4, s.to_a.flatten.map(&:class)
+    end
+  end
+
   # The builder says what it takes, rather than failing inside on to_a.
   def test_the_builder_refuses_what_it_does_not_take
     assert_raise(ArgumentError) { CArray.string(2) }

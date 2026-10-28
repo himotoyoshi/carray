@@ -4,7 +4,7 @@ Real tables have gaps: a counter that failed, a field left empty, a value that c
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## What a missing value is
@@ -118,10 +118,10 @@ Both work on group summaries as well, which is where they are most useful.
 
 ### A code that means "no value" — `mask_eq`
 
-If a column uses a code such as `-1` and you did not tell `from_csv` about it, `mask_eq` makes those cells missing:
+If a column uses a code such as `-1` and you did not tell `read_csv` about it, `mask_eq` makes those cells missing:
 
 ```ruby
-raw = CAFrame.from_csv("sales.csv", types: :infer)
+raw = CAFrame.read_csv("sales.csv")
 raw["visitors"].min           # => -1
 raw.mask_eq("visitors", -1)
 raw["visitors"].min           # => 95
@@ -199,6 +199,8 @@ df.group_by("shop").fill("visitors", :ffill)
 df["visitors"][7]   # => 102
 ```
 
+Several columns are filled the same way by naming them before the method — `fill("visitors", "rating", :ffill)` — and a method alone fills every column that has a missing cell: `df.group_by("shop").fill(:ffill)`.
+
 The south shop's missing count for 6 March took the south shop's 5 March figure, not the value in the row above it. Linear interpolation in time is shown in chapter 11.
 
 ### A filled copy of a column
@@ -213,30 +215,41 @@ s["v_filled"].to_a   # => [1.0, 2.0, 3.0, 4.0, UNDEF]
 
 `strip_mask(value)` fills with a value, and `method: :forward` / `:backward` carry values as `:ffill` / `:bfill` do.
 
+The frame has a `strip_mask` too, which returns a new frame with the gaps filled and leaves the original as it is. A Hash gives each column its own value, and `method:` takes a method or a Hash of them:
+
+```ruby
+s2 = CAFrame.new("v" => [1.0, nil, 3.0], "n" => [1, 2, 3])
+s2.strip_mask(Float::NAN)["v"].to_a              # => [1.0, NaN, 3.0]
+s2.strip_mask("v" => 0.0)["v"].to_a              # => [1.0, 0.0, 3.0]
+s2.strip_mask(method: { "v" => :linear })["v"].to_a   # => [1.0, 2.0, 3.0]
+s2["v"].to_a                                     # => [1.0, UNDEF, 3.0]
+```
+
+One value for the whole frame fills only the columns that have gaps, so `NaN` can fill the float column `v` while the complete integer column `n` is left alone.
+
 ### Filling the result of a summary
 
 `fill_value:` on a summary fills its `UNDEF` results only, leaving the data alone (above).
 
 ## Removing rows with missing values
 
-Choose the rows that have the values you need:
+`drop_masked` keeps the rows that have a value in every column you name, or in every column when you name none:
 
 ```ruby
-complete = sales.filter { |f| f["visitors"].is_not_masked & f["revenue"].is_not_masked }
-complete.nrow   # => 22
-
-any_missing = sales.columns.map(&:is_masked).inject(:|)
-sales[any_missing.not].nrow   # => 21
+sales.drop_masked("visitors", "revenue").nrow   # => 22
+sales.drop_masked.nrow                          # => 21
 ```
+
+The result shares the frame's columns, as `filter` does. A `NaN` is a value, not a missing one, so its row stays; mark it as missing first (above) to drop it as well.
 
 Before removing rows, consider whether you need to. Summaries already leave missing values out, and removing a row because one column is missing also removes the values its other columns had.
 
 ## Missing values on the way out
 
-- **CSV**: a missing cell is written as an empty field, which `from_csv` reads back as missing. `missing: "NA"` writes a code instead (chapter 17).
+- **CSV**: a missing cell is written as an empty field, which `read_csv` reads back as missing. `missing: "NA"` writes a code instead (chapter 17).
 - **Ruby values** (`to_records`, for JSON): a missing cell becomes `nil`, and `from_records` reads `nil` back as missing.
 - **One row** (`df[i]`, `each_row`): a missing cell is `UNDEF`.
-- **Arrays** (`to_a`): a missing cell is `UNDEF`.
+- **Arrays** (`to_a`, of a column or of the frame): a missing cell is `UNDEF`. Before handing rows to another library, fill the gaps with `strip_mask` or leave the rows out with `drop_masked`.
 
 ## In the CArray User's Guide
 

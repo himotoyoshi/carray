@@ -209,6 +209,8 @@ c
 
 `strip_mask` has no such form. It insists on being told what to put in the gaps and raises if you give it nothing; when you want the stored values as a new array, copy first and unmask the copy, as above.
 
+`unmask` on a view writes through to the cells the view shows. A view taken with an index array that has masked cells (chapter 2) has places with no cell behind them; they take no write, so after `unmask` they are still masked. `strip_mask` makes a new array and fills them too.
+
 ### Filling from the neighbours
 
 Instead of one value everywhere, `method:` derives each gap from the cells around it. `:forward` carries the last present value forward, `:backward` carries the next one back, and `:linear` interpolates between the two.
@@ -350,3 +352,7 @@ row = a[0, nil]
 row[0] = UNDEF
 a.count_masked    #  => 2
 ```
+
+## `value`
+
+What a masked cell holds is not defined, and nothing should be built on it. `value` drops the mask and shows those cells anyway: it is there to peek at the internal state of an array, and nothing more. Use it on the spot — `a.value.copy`, or a write such as `a.value[nil, 1] = 2` — and do not keep the view to carry around (`b = a.value`). Do not compute from it, or mix it with other arrays. To take the mask off, use `unmask` or `strip_mask` and say what the gaps hold.

@@ -12,8 +12,8 @@ Data you need often sits in more than one table: daily figures in one, the shops
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
-shops = CAFrame.from_csv("shops.csv", types: :infer)
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
+shops = CAFrame.read_csv("shops.csv")
 ```
 
 ## Matching rows by a key — `join`
@@ -61,6 +61,36 @@ extra.join(shops.select("shop", "size"), on: "shop", how: :right).nrow   # => 4
 
 When a key appears more than once on both sides, every pairing gives a row: a key on 2 rows of this table and 3 of the other gives 6 rows. When the other table's key is unique — one row per shop, as here — `:left` gives exactly one row per row of this table, in the same order.
 
+The result shares cells with the tables it came from wherever every row has a row of that table: this table's columns for `:left` and `:inner`, the other table's for `:inner` and `:right`. Writing such a cell writes the original, and reading it looks the rows up each time. When you will write to the result, or read it many times — group it, summarize it repeatedly — take a copy first:
+
+```ruby
+both = extra.join(shops.select("shop", "size"), on: "shop", how: :inner).copy
+```
+
+### Cleaning data through a join
+
+The sharing is what data cleaning needs. A table read from a file or a database is a working copy: the source stays as it is, and the cleaning happens on the copy, just before the analysis. A check often needs both tables — here, a day with more than 2.5 visitors per square metre of floor is suspect — and the cells it finds belong to one of them. Build the condition on the joined table and write to it; with the default `:left`, this table's columns are shared, so the write lands in the original. Work on a copy to keep `sales` as it is:
+
+```ruby
+checked = sales.copy
+detail  = checked.join(shops.select("shop", "floor_m2"), on: "shop")
+crowded = detail["visitors"] > detail["floor_m2"] * 2.5
+detail["visitors"][crowded] = UNDEF
+checked["visitors"].count_masked   # => 3, one of them missing already
+```
+
+The other table's columns — the side with missing values for rows without a match — are new columns of the joined table, so a write to them stays there. To write back to that table too, pass `view: :full`: its columns become views as well, with the places without a match left as holes that read as missing and ignore writes. Here the floor area is the one to doubt:
+
+```ruby
+area    = shops.select("shop", "floor_m2").copy
+detail  = sales.join(area, on: "shop", view: :full)
+crowded = detail["visitors"] > detail["floor_m2"] * 2.5
+detail["floor_m2"][crowded] = UNDEF
+area["floor_m2"].to_a   # => [UNDEF, 85, 240, 200]
+```
+
+`view: :full` is experimental, and a column with holes is slower to read — about three times for a summary. That is fine for cleaning; for the analysis afterwards, use the cleaned tables themselves, or a copy of the joined one.
+
 ### Keeping rows by whether the other table has their key — `:semi`, `:anti`
 
 Sometimes you want no columns from the other table, only to know whether it has the key. `:semi` keeps the rows whose key the other table has; `:anti` keeps the rows whose key it does not have:
@@ -79,6 +109,16 @@ Give an Array of names to match on several columns at once; a row matches when e
 
 ```ruby norun
 orders.join(targets, on: ["shop", "date"])
+```
+
+### Keys with different names
+
+When the key has another name in the other table, give a Hash of this table's name to the other's. The key keeps this table's name, and the other table's key column is not added:
+
+```ruby
+codes = shops.rename("shop" => "code")
+sales.join(codes.select("code", "size"), on: { "shop" => "code" }).column_names
+# => ["date", "shop", "visitors", "revenue", "rating", "size"]
 ```
 
 ### How keys are compared

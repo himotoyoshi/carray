@@ -108,35 +108,6 @@ class TestStackMeldMultiParent < Test::Unit::TestCase
     assert_equal [UNDEF, 11], b.to_a
   end
 
-  def test_value_array_parent_takes_writes
-    a = CArray.int32(2, 3).seq!; a[1] = UNDEF
-    b = CArray.int32(2, 3).seq!(10); b[5] = UNDEF
-    s = CArray.stack([a.value, b])
-    s[1, 0, 0] = 8
-    s[0, 0, 0] = 7
-    assert_equal 8, b[0, 0]
-    assert_equal 7, a.value[0, 0]
-    s[1, 0, 1] = UNDEF
-    assert_equal UNDEF, b[0, 1]
-    assert_equal [[false, true, false], [false, false, false]],
-                 a.is_masked.to_a
-    s[] = 1
-    assert_equal [[1] * 3] * 2, b.to_a
-    m = CArray.meld(a.value, CArray.int32(2, 3).tap { |x| x[0] = UNDEF })
-    m[3, 0] = 8
-    assert_equal 8, m[3, 0]
-  end
-
-  def test_undef_into_value_array_parent_is_refused
-    a = CArray.int32(2, 3).seq!; a[1] = UNDEF
-    b = CArray.int32(2, 3).seq!(10); b[5] = UNDEF
-    s = CArray.stack([a.value, b])
-    assert_raise(TypeError) { s[0, 0, 2] = UNDEF }
-    assert_equal false, s.is_masked[0, 0, 2]
-    assert_equal [[false, true, false], [false, false, false]],
-                 a.is_masked.to_a
-  end
-
   # ---------- meld reduction fast path ----------
 
   def test_one_dimensional_meld_along_its_axis

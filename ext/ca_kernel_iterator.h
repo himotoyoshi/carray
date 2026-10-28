@@ -49,14 +49,16 @@
         v, r, w, acc, idx, first
 
     INTERNAL (free to refactor across 3.x — engine implementation):
-      - the state-machine functions' bodies + init_l1 / next_slab /
-        ca_iter_can_alias
+      - the state-machine functions' bodies + ca_iter_can_alias
       - the macros only the kernel generator (ext/mkkernel.rb) emits:
         CA_SLAB_REDUCE_SUM8_EX / MIN8_EX / MAX8_EX / STAR8_EX (8-way
         accumulator split; they take EXPR(x) rather than exposing v and
         idx), CA_SLAB_REDUCE_T_MIN_EX / _MAX_EX / _STAR_EX (what it emits
         when a :min / :max / :prod kernel does not take the 8-way form),
-        CA_SLAB_SCAN_T_GATED, and CA_SLAB_REDUCE_T_VAR_EX (no caller)
+        CA_SLAB_REDUCE_SUM8_NARROW_EX / M2_NARROW_EX (8- and 16-bit
+        integer sum and centred sum of squares), CA_SLAB_REDUCE_T_SETTLE
+        with CA_SLAB_SETTLE_BLOCK (all / any / none), CA_SLAB_SCAN_T_GATED,
+        and CA_SLAB_REDUCE_T_VAR_EX (no caller)
       - alias_mode / src_kind routing (CA_ITER_ALIAS_* / CA_ITER_SRC_* /
         CA_KERNEL_FIBER_CONTIG / CA_SLAB_FREE)
       - every ca_iter_state field NOT marked frozen (scratch / stack /
@@ -97,7 +99,9 @@ typedef enum {
                                         there, even for a kernel that
                                         writes every cell                */
 #define CA_KERNEL_NO_MASK     0x2    /* the kernel cannot take a mask:
-                                        a masked source is refused     */
+                                        a source that has a mask is
+                                        refused, even with no cell
+                                        masked (no cell is scanned)    */
 #define CA_KERNEL_CHUNK_HINT  0x4    /* reserved: init refuses it
                                         with CA_ITER_ERR_FLAGS          */
 #define CA_KERNEL_FIBER_CONTIG 0x8   /* with policy=CA_SLAB_AXES and
@@ -136,13 +140,12 @@ typedef enum {
                                           non-innermost slab offsets are
                                           computed once per slab row and
                                           the inner run is a memcpy. */
-#define CA_ITER_ALIAS_PER_FIBER_FUSED 6 /* each fiber is fetched (and on a
-                                          write put back) with the view's
-                                          ca_xfer_stride, without
+#define CA_ITER_ALIAS_PER_FIBER_FUSED 6 /* each fiber is fetched with the
+                                          view's ca_xfer_stride, without
                                           gathering the whole view: a
-                                          CAWindow / CAShift fiber, or a
                                           read of the innermost fiber of
-                                          a conversion view.  Chosen by
+                                          a conversion view (a write takes
+                                          the transfer walk).  Chosen by
                                           ca_iter_should_per_fiber_fused.
                                           The fiber is handed out from
                                           fiber_data_scratch, its mask
@@ -208,7 +211,8 @@ typedef enum {
 #define CA_ITER_SRC_ATTACH     3     /* every other view the classifier
                                         knows (conversion views, CATile,
                                         CARoll, CAStack, CAMeld, CARemap,
-                                        CAObject, the lazy views) and any
+                                        CAReduce, CAObject, the lazy
+                                        views) and any
                                         registered external obj_type: the
                                         view's own transfer gathers it */
 #define CA_ITER_SRC_DESCRIPTOR_L2_ALIASABLE 4
@@ -233,16 +237,19 @@ typedef enum {
    CA_ITER_SRC_ATTACH is the only kind that may be registered.  It is the
    one whose contract an external class can meet on its own: the engine
    reads the cells with ca_xfer_all GET and, on a WRITE walk, sends back
-   the changed cells with ca_xfer_addrs (or ca_xfer_all PUT when every
-   cell changed), so the view's transfer slots are all it needs -- the
-   slots every view already implements.  The view's attach / sync slots
-   are not called.  The other kinds are not open to registration: SRC_CASTRIDE
+   the changed cells with ca_xfer_addrs, so the view's transfer slots
+   are all the iterator needs.  It does not call the view's attach / sync
+   slots, which ca_install_obj_type requires all the same: the paths
+   that take a view's buffer, such as a bang operator, call them.  The
+   other kinds are not open to registration: SRC_CASTRIDE
    asserts the struct *is* a CAStride (the engine reads its strides
    directly, and a class that really is one is already classified by its
    inherited operation table), and SRC_DESCRIPTOR requires a
    describe_axes function the engine looks up in its own table, which an
    external type has no way to supply.  Passing anything else raises
-   rather than accepting a routing the iterator cannot honour.
+   rather than accepting a routing the iterator cannot honour.  An
+   obj_type carray installs for itself is refused too: its routing comes
+   from its operation table.
 
    Registering is additive and does not override the two structural
    cases: the classifier still decides entity and CAStride-family sources
@@ -272,14 +279,24 @@ typedef struct {
   /* --- CAStride compose-fold cache (L2 alias path) ---
      For CAStride-family sources at L2, init_l2 runs
      ca_stride_compose_to_root once to get the root + per-axis
-     byte strides + base offset, kept here for the author to read.  The
-     walk itself steps from composed_base by outer_strides (below), which
-     init builds from the composed strides.  Inline CA_RANK_MAX array (no
-     heap alloc).  root is the array attached at
-     init whose memory the walk reads: the compose-fold root of an L2
-     CAStride walk (an entity, or a view that lends memory) or the parent
-     of a descriptor view.  NULL when the walk reads src itself or a
-     scratch of its own. */
+     byte strides + base offset, recorded here.  These are engine
+     bookkeeping, not part of the author contract (a kernel reads the
+     slab_* / outer_* fields).  The walk itself steps from composed_base
+     by outer_strides (below), which init builds from the composed
+     strides.  Inline CA_RANK_MAX array (no heap alloc).
+
+     root is the array init attaches and finish detaches:
+       - the compose-fold root of an L2 CAStride walk (an entity, or a
+         view that lends memory), whose memory the slabs are cut from
+       - the parent of a descriptor view, on every descriptor route.  On
+         the strided route (DESC_STRIDED) the slabs are cut from its
+         memory; on the L1 descriptor walk, PER_SLAB / PER_SLAB_HOIST
+         and DESC_WHOLE (SHIFT_WHOLE_VIEW included) the descriptor
+         engine gathers from it into a scratch of the walk's own (once,
+         or per slab for PER_SLAB) and the kernel reads the scratch, but
+         root stays attached until finish.
+     NULL when the walk reads src itself, a scratch filled through the
+     view's own transfer, or a CAStack's parents. */
   struct _CArray   *root;              /* attached at init, detached (or
                                           synced and detached, on WRITE)
                                           by finish                        */
@@ -289,7 +306,7 @@ typedef struct {
   /* --- descriptor framework cache (descriptor sources) ---
      For CASelectAxis / CAGrid / CASelect / CAWindow / CAShift, init runs
      the view's *_describe_axes once then
-     reuses the P3 substrate (ca_axis_dispatch_prepare / _layout /
+     reuses the descriptor engine's substrate (ca_axis_dispatch_prepare / _layout /
      _classify_prefix) to derive the slab layout.  Cached inline so
      next_slab walks the prefix axes without re-doing the analysis. */
   ca_axis_desc_t      descs[CA_RANK_MAX];          /* post-merge axes */
@@ -406,9 +423,8 @@ typedef struct {
      over src->dim used in ca_xfer_stride strides[] argument. */
   int8_t            fiber_axis;
   ca_size_t         fiber_native_strides[CA_RANK_MAX];
-  /* fiber_region_starts[] cached by next_slab_axes BEFORE outer_idx
-     advance so sync_slab can reconstruct the same ca_xfer_stride
-     region for WRITE PUT.  The same hazard as last_data_off. */
+  /* fiber_region_starts[]: not used; kept so the fields after it stay
+     where ext gems built against this header expect them. */
   ca_size_t         fiber_region_starts[CA_RANK_MAX];
 
   /* --- CAStack read from its parents (STACK / STACK_OUTER_K) --- */
@@ -526,15 +542,18 @@ int  ca_iter_state_init_l1 (ca_iter_state    *st,
      - entity / CAStride contig: alias_mode = CONTIG, the slab reads
        the source's own memory
      - CAStride non-contig: alias_mode = STRIDED, the slab reads the
-       root through the composed strides. No scratch.
+       root through the composed strides, without a scratch, when the
+       root lends memory; over a root that does not (a conversion view,
+       a CAObject, a CAStack, ...) the view is gathered into scratch
      - descriptor views: aliased when the innermost axis is a STRIDE
        axis, otherwise gathered into scratch (per slab when a slab axis
        is an INDEX or SHIFT axis)
      - SRC_ATTACH views: iterator-owned scratch filled through
        ca_xfer_all, written back with ki_scratch_push_changed (only the
        changed cells).  A CAStack may instead be walked through its
-       parents, and a single FIBER_CONTIG fiber of a cast / byte-swap
-       view through ca_xfer_stride (PER_FIBER_FUSED)
+       parents, and on a READ walk a single FIBER_CONTIG fiber along the
+       innermost axis of a cast / byte-swap / single-cast lazy view
+       through ca_xfer_stride (PER_FIBER_FUSED)
      - a source with no attach slot: CA_ITER_ERR_NOT_CHEAP
 
    policy: CA_SLAB_AXES only.  CA_SLAB_WHOLE and CA_SLAB_FREE return
@@ -632,14 +651,14 @@ int  ca_iter_state_next_slab_axes (ca_iter_state *st,
      - per-fiber gather (CA_KERNEL_FIBER_CONTIG on a strided fiber):
        the fiber is scattered back from its scratch first
      - CAStack walked through its parents: READ only, no-op
-     - per-fiber fused (CA_ITER_ALIAS_PER_FIBER_FUSED): the fiber is put
-       back through the view with ca_xfer_stride
+     - per-fiber fused (CA_ITER_ALIAS_PER_FIBER_FUSED): READ only, so a
+       WRITE walk never has it
      - alias path (scratch_ptr == NULL): no-op — kernel wrote through
        alias_ptr.  When the alias is into a view root's own buffer, that
        buffer is written back once, by finish (ca_sync_detach)
      - scratch path, at L1 or L2: the cells the kernel changed are sent
-       back through the source (ki_scratch_push_changed: ca_xfer_addrs,
-       or ca_xfer_all PUT when every cell changed); a write over a
+       back through the source (ki_scratch_push_changed: ca_xfer_addrs);
+       a write over a
        descriptor view takes this path, opened as a transfer walk
 
    A view that shows one root cell more than once (a repeated index, a
@@ -700,7 +719,8 @@ void ca_iter_state_close (ca_iter_state *st);
 int ca_iter_check_init (int rc);
 
 /* Raise ArgumentError unless the two arrays have the same shape.  The
-   INOUT and PAIR fiber macros call this before opening either walk. */
+   INOUT, SLAB_INOUT and PAIR macros call this before opening either
+   walk. */
 int ca_iter_check_same_shape (struct _CArray *a, struct _CArray *b);
 
 /* Run body(arg) so that the walks in states[0..n) are finished however the
@@ -991,8 +1011,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
    The INOUT forms cover input + output.  These cover input + input, which
    is what a routine taking two vectors of the same length wants -- a
    correlation, a dot product, a distance.  Neither state gets
-   CA_KERNEL_WRITE, and `flags` must not carry it: use the INOUT forms to
-   write.
+   CA_KERNEL_WRITE, and `flags` must not carry it (it is refused with
+   CA_ITER_ERR_FLAGS): use the INOUT forms to write.
 
    Both fibers are contig-delivered, so the pair may be handed straight to
    a C routine that walks it itself.  The MASKED form yields BOTH mask
@@ -1008,6 +1028,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
 #define CA_FOR_EACH_FIBER_PAIR(st_a, st_b, ca_a, ca_b, axis,                  \
                                flags, p_a, p_b, n)                            \
   for ( int __cffp_init = (                                                   \
+            ca_iter_check_init(((flags) & CA_KERNEL_WRITE)                    \
+                               ? CA_ITER_ERR_FLAGS : CA_ITER_OK),             \
             ca_iter_check_same_shape((ca_a), (ca_b)),                         \
             ca_iter_check_init(                                               \
               ca_iter_state_init_l2(&(st_a), (ca_a), CA_SLAB_AXES,            \
@@ -1032,6 +1054,8 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
 #define CA_FOR_EACH_FIBER_PAIR_MASKED(st_a, st_b, ca_a, ca_b, axis,           \
                                       flags, p_a, p_b, n, m_a, m_b)           \
   for ( int __cffpm_init = (                                                  \
+            ca_iter_check_init(((flags) & CA_KERNEL_WRITE)                    \
+                               ? CA_ITER_ERR_FLAGS : CA_ITER_OK),             \
             ca_iter_check_same_shape((ca_a), (ca_b)),                         \
             ca_iter_check_init(                                               \
               ca_iter_state_init_l2(&(st_a), (ca_a), CA_SLAB_AXES,            \
@@ -1115,6 +1139,38 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
 
 /* ---- per-data_type reduction macro suite ------------------------------- */
 
+/* Whether the stride table `strides` walks the current slab of `st` in
+   row-major order with no gap: the innermost axis steps `elem_bytes`, and
+   each outer axis steps the whole of the axis inside it.  A slab that does
+   can be read as one flat run of slab_elements cells.  A length-1 axis whose
+   stride does not fit is answered "no", which only costs the flat loop. */
+static inline int
+ca_slab_strides_are_flat (const ca_iter_state *st, const ca_size_t *strides,
+                          ca_size_t elem_bytes)
+{
+  int8_t k = (int8_t) (st->slab_ndim - 1);
+  if ( strides[k] != elem_bytes ) {
+    return 0;
+  }
+  for ( k = (int8_t) (k - 1); k >= 0; k-- ) {
+    if ( strides[k] != st->slab_dims[k + 1] * strides[k + 1] ) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+/* Whether the slab reductions may fold all slab axes of `st` into one flat
+   loop: the data strides and, when the slab has a mask, the mask strides
+   (one byte per cell) are row-major with no gap. */
+static inline int
+ca_slab_is_flat (const ca_iter_state *st, const ca_size_t *strides,
+                 ca_size_t elem_bytes, int has_mask)
+{
+  return ca_slab_strides_are_flat(st, strides, elem_bytes)
+         && ( ! has_mask || ca_slab_strides_are_flat(st, st->slab_mask_strides, 1) );
+}
+
 /* CA_SLAB_REDUCE_T(T, ...): generic per-data_type slab reduction.  T is the
    element load type (`double`, `float`, `int32_t`, `int64_t`, ...).
    The accumulator `acc` is supplied by the caller and may be a wider
@@ -1170,27 +1226,11 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     ca_size_t __srOC      = 1;                                               \
     for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ )                       \
       __srOC *= (st).slab_dims[__sk];                                        \
-    /* Slab-collapse: when the whole K-D slab is row-major contiguous       \
-       (data, and mask if present), fold all slab axes into one flat        \
-       inner loop.  Removes the per-outer multi-index offset recompute +    \
-       carry that otherwise dominates when the innermost slab axis is       \
-       small (full reduction of [N,1] / [N,small] entity, or trailing-      \
-       contig multi-axis reduce).  Platform-general: structural, not SIMD.  \
-       No-op for 1-D slabs (__srOuterK == 0 leaves __srOC == 1). */         \
-    {                                                                        \
-      int __srFlat = __srContig;                                            \
-      for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-        if ( (st).slab_strides[__sk] !=                                      \
-             (st).slab_dims[__sk + 1] * (st).slab_strides[__sk + 1] )        \
-          __srFlat = 0;                                                      \
-      if ( __srFlat && (m) != NULL ) {                                       \
-        if ( ! __srMaskU ) __srFlat = 0;                                     \
-        for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-          if ( (st).slab_mask_strides[__sk] !=                              \
-               (st).slab_dims[__sk + 1] * (st).slab_mask_strides[__sk + 1] ) \
-            __srFlat = 0;                                                    \
-      }                                                                      \
-      if ( __srFlat ) { __srInnerN = (st).slab_elements; __srOC = 1; }       \
+    /* fold all slab axes into one flat loop when the slab is row-major      \
+       contiguous (ca_slab_is_flat) */                                       \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL) ) { \
+      __srInnerN = (st).slab_elements;                                       \
+      __srOC     = 1;                                                        \
     }                                                                        \
     ca_size_t __srIdx[CA_RANK_MAX] = { 0 };                                  \
     ca_size_t idx         = 0;                                               \
@@ -1259,6 +1299,84 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     (void) __sr_throwaway_mc;                                                \
   } while (0)
 
+/* CA_SLAB_REDUCE_T_SETTLE: a reduction that may stop before the end of
+   the slab.  SETTLED is an expression over `acc` that is true once no
+   further cell can change the result (`acc` for any, `!acc` for all).
+   The slab is walked in blocks of CA_SLAB_SETTLE_BLOCK cells; each block
+   is the same branch-free loop as CA_SLAB_REDUCE_T_EX, and SETTLED is
+   tested between blocks, so a slab that never settles costs one extra
+   test per block.  Masked cells are skipped as in CA_SLAB_REDUCE_T.
+   `idx` and the masked count are not provided. */
+#define CA_SLAB_SETTLE_BLOCK 16384
+#define CA_SLAB_REDUCE_T_SETTLE(T, st, p, m, acc, INIT, REDUCE, SETTLED) do { \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
+    (acc) = (INIT);                                                          \
+    int8_t    __srK       = (st).slab_ndim;                                  \
+    int8_t    __srOuterK  = __srK - 1;                                       \
+    ca_size_t __srInnerN  = (st).slab_dims[__srK - 1];                       \
+    ca_size_t __srInnerS  = (st).slab_strides[__srK - 1];                    \
+    ca_size_t __srInnerMS = (st).slab_mask_strides[__srK - 1];               \
+    int       __srContig  = (__srInnerS == (ca_size_t) sizeof(T));           \
+    int       __srMaskU   = (__srInnerMS == 1);                              \
+    ca_size_t __srOC      = 1;                                               \
+    for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ )                       \
+      __srOC *= (st).slab_dims[__sk];                                        \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL) ) { \
+      __srInnerN = (st).slab_elements;                                       \
+      __srOC     = 1;                                                        \
+    }                                                                        \
+    ca_size_t __srIdx[CA_RANK_MAX] = { 0 };                                  \
+    int       __srDone = 0;                                                  \
+    for ( ca_size_t __so = 0; __so < __srOC && ! __srDone; __so++ ) {        \
+      ca_size_t __srDoff = 0, __srMoff = 0;                                  \
+      for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ ) {                   \
+        __srDoff += __srIdx[__sk] * (st).slab_strides[__sk];                 \
+        __srMoff += __srIdx[__sk] * (st).slab_mask_strides[__sk];            \
+      }                                                                      \
+      const char *__srQ = (const char *)(p) + __srDoff;                      \
+      const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                    \
+      const boolean8_t *__srMM =                                             \
+        ( (m) == NULL ) ? NULL : (const boolean8_t *)(m) + __srMoff;         \
+      for ( ca_size_t __sb = 0; __sb < __srInnerN;                           \
+            __sb += CA_SLAB_SETTLE_BLOCK ) {                                 \
+        ca_size_t __se = ( __srInnerN - __sb > CA_SLAB_SETTLE_BLOCK )        \
+                         ? __sb + CA_SLAB_SETTLE_BLOCK : __srInnerN;         \
+        if ( __srMM == NULL ) {                                              \
+          if ( __srContig ) {                                                \
+            for ( ca_size_t __sj = __sb; __sj < __se; __sj++ ) {             \
+              T v = __srSrc[__sj];                                           \
+              REDUCE;                                                        \
+            }                                                                \
+          } else {                                                           \
+            for ( ca_size_t __sj = __sb; __sj < __se; __sj++ ) {             \
+              T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);          \
+              REDUCE;                                                        \
+            }                                                                \
+          }                                                                  \
+        } else if ( __srContig && __srMaskU ) {                              \
+          for ( ca_size_t __sj = __sb; __sj < __se; __sj++ ) {               \
+            if ( ! __srMM[__sj] ) {                                          \
+              T v = __srSrc[__sj];                                           \
+              REDUCE;                                                        \
+            }                                                                \
+          }                                                                  \
+        } else {                                                             \
+          for ( ca_size_t __sj = __sb; __sj < __se; __sj++ ) {               \
+            if ( ! __srMM[__sj * __srInnerMS] ) {                            \
+              T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);          \
+              REDUCE;                                                        \
+            }                                                                \
+          }                                                                  \
+        }                                                                    \
+        if ( SETTLED ) { __srDone = 1; break; }                              \
+      }                                                                      \
+      for ( int8_t __sk = __srOuterK - 1; __sk >= 0; __sk-- ) {               \
+        if ( ++__srIdx[__sk] < (st).slab_dims[__sk] ) break;                  \
+        __srIdx[__sk] = 0;                                                    \
+      }                                                                      \
+    }                                                                        \
+  } while (0)
+
 /* ----------------------------------------------------------------------
  * SIMD-licensed reduction variants
  *
@@ -1310,27 +1428,11 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     ca_size_t __srOC      = 1;                                               \
     for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ )                       \
       __srOC *= (st).slab_dims[__sk];                                        \
-    /* Slab-collapse: when the whole K-D slab is row-major contiguous       \
-       (data, and mask if present), fold all slab axes into one flat        \
-       inner loop.  Removes the per-outer multi-index offset recompute +    \
-       carry that otherwise dominates when the innermost slab axis is       \
-       small (full reduction of [N,1] / [N,small] entity, or trailing-      \
-       contig multi-axis reduce).  Platform-general: structural, not SIMD.  \
-       No-op for 1-D slabs (__srOuterK == 0 leaves __srOC == 1). */         \
-    {                                                                        \
-      int __srFlat = __srContig;                                            \
-      for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-        if ( (st).slab_strides[__sk] !=                                      \
-             (st).slab_dims[__sk + 1] * (st).slab_strides[__sk + 1] )        \
-          __srFlat = 0;                                                      \
-      if ( __srFlat && (m) != NULL ) {                                       \
-        if ( ! __srMaskU ) __srFlat = 0;                                     \
-        for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-          if ( (st).slab_mask_strides[__sk] !=                              \
-               (st).slab_dims[__sk + 1] * (st).slab_mask_strides[__sk + 1] ) \
-            __srFlat = 0;                                                    \
-      }                                                                      \
-      if ( __srFlat ) { __srInnerN = (st).slab_elements; __srOC = 1; }       \
+    /* fold all slab axes into one flat loop when the slab is row-major      \
+       contiguous (ca_slab_is_flat) */                                       \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL) ) { \
+      __srInnerN = (st).slab_elements;                                       \
+      __srOC     = 1;                                                        \
     }                                                                        \
     ca_size_t __srIdx[CA_RANK_MAX] = { 0 };                                  \
     ca_size_t idx         = 0;                                               \
@@ -1431,20 +1533,11 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     ca_size_t __srOC      = 1;                                               \
     for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ )                       \
       __srOC *= (st).slab_dims[__sk];                                        \
-    {                                                                        \
-      int __srFlat = __srContig;                                            \
-      for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-        if ( (st).slab_strides[__sk] !=                                      \
-             (st).slab_dims[__sk + 1] * (st).slab_strides[__sk + 1] )        \
-          __srFlat = 0;                                                      \
-      if ( __srFlat && (m) != NULL ) {                                       \
-        if ( ! __srMaskU ) __srFlat = 0;                                     \
-        for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-          if ( (st).slab_mask_strides[__sk] !=                              \
-               (st).slab_dims[__sk + 1] * (st).slab_mask_strides[__sk + 1] ) \
-            __srFlat = 0;                                                    \
-      }                                                                      \
-      if ( __srFlat ) { __srInnerN = (st).slab_elements; __srOC = 1; }       \
+    /* fold all slab axes into one flat loop when the slab is row-major      \
+       contiguous (ca_slab_is_flat) */                                       \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL) ) { \
+      __srInnerN = (st).slab_elements;                                       \
+      __srOC     = 1;                                                        \
     }                                                                        \
     ca_size_t __srIdx[CA_RANK_MAX] = { 0 };                                  \
     for ( ca_size_t __so = 0; __so < __srOC; __so++ ) {                      \
@@ -1473,6 +1566,185 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
           for ( ; __sj < __sN; __sj++ ) __a0 += EXPR(__srSrc[__sj]);         \
           (acc) += ((__a0 + __a1) + (__a2 + __a3))                           \
                  + ((__a4 + __a5) + (__a6 + __a7));                          \
+        } else {                                                             \
+          for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
+            T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                   \
+            (acc) += EXPR(v);                                                \
+          }                                                                  \
+        }                                                                    \
+      } else {                                                               \
+        const boolean8_t *__srMM = (const boolean8_t *)(m) + __srMoff;       \
+        if ( __srContig && __srMaskU ) {                                     \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
+          for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
+            if ( ! __srMM[__sj] ) { T v = __srSrc[__sj]; (acc) += EXPR(v); } \
+            else { (masked_cnt)++; }                                         \
+          }                                                                  \
+        } else {                                                             \
+          for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
+            if ( ! __srMM[__sj * __srInnerMS] ) {                            \
+              T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                 \
+              (acc) += EXPR(v);                                              \
+            } else { (masked_cnt)++; }                                       \
+          }                                                                  \
+        }                                                                    \
+      }                                                                      \
+      for ( int8_t __sk = __srOuterK - 1; __sk >= 0; __sk-- ) {               \
+        if ( ++__srIdx[__sk] < (st).slab_dims[__sk] ) break;                  \
+        __srIdx[__sk] = 0;                                                    \
+      }                                                                      \
+    }                                                                        \
+  } while (0)
+
+/* CA_SLAB_REDUCE_SUM8_NARROW_EX:
+ *   CA_SLAB_REDUCE_SUM8_EX for an 8- or 16-bit integer source summed into
+ *   a floating accumulator (sum and mean).  Converting each cell to double
+ *   does not vectorize for these widths, so the contig run is summed in
+ *   int32 over blocks of 32768 cells (|cell| < 2^16, so a block sum stays
+ *   below 2^31) and only the block sums meet the accumulator.  The block
+ *   sums are exact, so the answer is at least as close as the per-cell
+ *   form.  EXPR(x) converts a block sum to ACC_T.  The masked and
+ *   non-contig branches are the same as CA_SLAB_REDUCE_SUM8_EX.
+ *
+ *   The block loop has no omp simd pragma: an integer sum vectorizes on
+ *   its own, and with the pragma GCC left a scalar copy of the loop in
+ *   the large generated kernels.
+ */
+#define CA_SLAB_REDUCE_SUM8_NARROW_EX(T, ACC_T, st, p, m, acc, INIT, EXPR, masked_cnt) do { \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
+    (acc) = (INIT);                                                          \
+    int8_t    __srK       = (st).slab_ndim;                                  \
+    int8_t    __srOuterK  = __srK - 1;                                       \
+    ca_size_t __srInnerN  = (st).slab_dims[__srK - 1];                       \
+    ca_size_t __srInnerS  = (st).slab_strides[__srK - 1];                    \
+    ca_size_t __srInnerMS = (st).slab_mask_strides[__srK - 1];               \
+    int       __srContig  = (__srInnerS == (ca_size_t) sizeof(T));           \
+    int       __srMaskU   = (__srInnerMS == 1);                              \
+    ca_size_t __srOC      = 1;                                               \
+    for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ )                       \
+      __srOC *= (st).slab_dims[__sk];                                        \
+    /* fold all slab axes into one flat loop when the slab is row-major      \
+       contiguous (ca_slab_is_flat) */                                       \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL) ) { \
+      __srInnerN = (st).slab_elements;                                       \
+      __srOC     = 1;                                                        \
+    }                                                                        \
+    ca_size_t __srIdx[CA_RANK_MAX] = { 0 };                                  \
+    for ( ca_size_t __so = 0; __so < __srOC; __so++ ) {                      \
+      ca_size_t __srDoff = 0, __srMoff = 0;                                  \
+      for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ ) {                   \
+        __srDoff += __srIdx[__sk] * (st).slab_strides[__sk];                 \
+        __srMoff += __srIdx[__sk] * (st).slab_mask_strides[__sk];            \
+      }                                                                      \
+      const char *__srQ = (const char *)(p) + __srDoff;                      \
+      if ( (m) == NULL ) {                                                   \
+        if ( __srContig ) {                                                  \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                \
+          for ( ca_size_t __sb = 0; __sb < __srInnerN; __sb += 32768 ) {     \
+            ca_size_t __se = ( __srInnerN - __sb < 32768 )                   \
+                             ? __srInnerN : __sb + 32768;                    \
+            int32_t __sp = 0;                                                \
+            for ( ca_size_t __sj = __sb; __sj < __se; __sj++ )               \
+              __sp += __srSrc[__sj];                                         \
+            (acc) += EXPR(__sp);                                             \
+          }                                                                  \
+        } else {                                                             \
+          for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
+            T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                   \
+            (acc) += EXPR(v);                                                \
+          }                                                                  \
+        }                                                                    \
+      } else {                                                               \
+        const boolean8_t *__srMM = (const boolean8_t *)(m) + __srMoff;       \
+        if ( __srContig && __srMaskU ) {                                     \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                              \
+          for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
+            if ( ! __srMM[__sj] ) { T v = __srSrc[__sj]; (acc) += EXPR(v); } \
+            else { (masked_cnt)++; }                                         \
+          }                                                                  \
+        } else {                                                             \
+          for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
+            if ( ! __srMM[__sj * __srInnerMS] ) {                            \
+              T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                 \
+              (acc) += EXPR(v);                                              \
+            } else { (masked_cnt)++; }                                       \
+          }                                                                  \
+        }                                                                    \
+      }                                                                      \
+      for ( int8_t __sk = __srOuterK - 1; __sk >= 0; __sk-- ) {               \
+        if ( ++__srIdx[__sk] < (st).slab_dims[__sk] ) break;                  \
+        __srIdx[__sk] = 0;                                                    \
+      }                                                                      \
+    }                                                                        \
+  } while (0)
+
+/* CA_SLAB_REDUCE_M2_NARROW_EX:
+ *   The centred sum of squares, sum (x - MEAN)^2, of an 8- or 16-bit
+ *   integer source (the second pass of variance and stddev).  Converting
+ *   each cell to double does not vectorize for these widths, so the
+ *   contig run is centred on the integer c nearest MEAN (held within the
+ *   8- and 16-bit range), and D = sum (x - c) and sum (x - c)^2 are added
+ *   in integers over blocks of 32768 cells; then
+ *   sum (x - MEAN)^2 = sum (x - c)^2 - 2 (MEAN - c) D + n (MEAN - c)^2.
+ *   The identity holds for any MEAN, and when MEAN is the mean of the
+ *   cells its rounding error enters only squared.  Q_T is int32_t for
+ *   8-bit cells (a block is at most 32768 * 255^2 < 2^31) and int64_t for
+ *   16-bit cells.  The block sums are exact.  The masked and non-contig
+ *   branches add EXPR(x) per cell as CA_SLAB_REDUCE_SUM8_EX does; acc is
+ *   double.
+ */
+#define CA_SLAB_REDUCE_M2_NARROW_EX(T, Q_T, st, p, m, acc, INIT, MEAN, EXPR, masked_cnt) do { \
+    typedef T __ca_u_T CA_UNALIGNED;                                         \
+    (acc) = (INIT);                                                          \
+    int8_t    __srK       = (st).slab_ndim;                                  \
+    int8_t    __srOuterK  = __srK - 1;                                       \
+    ca_size_t __srInnerN  = (st).slab_dims[__srK - 1];                       \
+    ca_size_t __srInnerS  = (st).slab_strides[__srK - 1];                    \
+    ca_size_t __srInnerMS = (st).slab_mask_strides[__srK - 1];               \
+    int       __srContig  = (__srInnerS == (ca_size_t) sizeof(T));           \
+    int       __srMaskU   = (__srInnerMS == 1);                              \
+    ca_size_t __srOC      = 1;                                               \
+    for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ )                       \
+      __srOC *= (st).slab_dims[__sk];                                        \
+    /* fold all slab axes into one flat loop when the slab is row-major      \
+       contiguous (ca_slab_is_flat) */                                       \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL) ) { \
+      __srInnerN = (st).slab_elements;                                       \
+      __srOC     = 1;                                                        \
+    }                                                                        \
+    ca_size_t __srIdx[CA_RANK_MAX] = { 0 };                                  \
+    for ( ca_size_t __so = 0; __so < __srOC; __so++ ) {                      \
+      ca_size_t __srDoff = 0, __srMoff = 0;                                  \
+      for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ ) {                   \
+        __srDoff += __srIdx[__sk] * (st).slab_strides[__sk];                 \
+        __srMoff += __srIdx[__sk] * (st).slab_mask_strides[__sk];            \
+      }                                                                      \
+      const char *__srQ = (const char *)(p) + __srDoff;                      \
+      if ( (m) == NULL ) {                                                   \
+        if ( __srContig ) {                                                  \
+          const __ca_u_T *__srSrc = (const __ca_u_T *) __srQ;                \
+          double  __scm = (MEAN);                                            \
+          int32_t __sc  = ( __scm > 65535.0 ) ? 65535                        \
+                        : ( __scm < -32768.0 ) ? -32768                      \
+                        : (int32_t) lrint(__scm);                            \
+          double  __sdm = __scm - (double) __sc;                             \
+          int64_t __sdt = 0;                                                 \
+          for ( ca_size_t __sb = 0; __sb < __srInnerN; __sb += 32768 ) {     \
+            ca_size_t __se = ( __srInnerN - __sb < 32768 )                   \
+                             ? __srInnerN : __sb + 32768;                    \
+            Q_T     __sq = 0;                                                \
+            int32_t __sl = 0;                                                \
+            for ( ca_size_t __sj = __sb; __sj < __se; __sj++ ) {             \
+              int32_t __sd = (int32_t) __srSrc[__sj] - __sc;                 \
+              __sl += __sd;                                                  \
+              __sq += (Q_T) __sd * __sd;                                     \
+            }                                                                \
+            __sdt += __sl;                                                   \
+            (acc) += (double) __sq;                                          \
+          }                                                                  \
+          if ( __srInnerN > 0 )                                              \
+            (acc) += __sdm * ( (double) __srInnerN * __sdm                   \
+                               - 2.0 * (double) __sdt );                     \
         } else {                                                             \
           for ( ca_size_t __sj = 0; __sj < __srInnerN; __sj++ ) {            \
             T v = *(const __ca_u_T *)(__srQ + __sj * __srInnerS);                   \
@@ -1538,20 +1810,11 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     ca_size_t __srOC      = 1;                                               \
     for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ )                       \
       __srOC *= (st).slab_dims[__sk];                                        \
-    {                                                                        \
-      int __srFlat = __srContig;                                            \
-      for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-        if ( (st).slab_strides[__sk] !=                                      \
-             (st).slab_dims[__sk + 1] * (st).slab_strides[__sk + 1] )        \
-          __srFlat = 0;                                                      \
-      if ( __srFlat && (m) != NULL ) {                                       \
-        if ( ! __srMaskU ) __srFlat = 0;                                     \
-        for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-          if ( (st).slab_mask_strides[__sk] !=                              \
-               (st).slab_dims[__sk + 1] * (st).slab_mask_strides[__sk + 1] ) \
-            __srFlat = 0;                                                    \
-      }                                                                      \
-      if ( __srFlat ) { __srInnerN = (st).slab_elements; __srOC = 1; }       \
+    /* fold all slab axes into one flat loop when the slab is row-major      \
+       contiguous (ca_slab_is_flat) */                                       \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL) ) { \
+      __srInnerN = (st).slab_elements;                                       \
+      __srOC     = 1;                                                        \
     }                                                                        \
     ca_size_t __srIdx[CA_RANK_MAX] = { 0 };                                  \
     for ( ca_size_t __so = 0; __so < __srOC; __so++ ) {                      \
@@ -1632,20 +1895,11 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     ca_size_t __srOC      = 1;                                               \
     for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ )                       \
       __srOC *= (st).slab_dims[__sk];                                        \
-    {                                                                        \
-      int __srFlat = __srContig;                                            \
-      for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-        if ( (st).slab_strides[__sk] !=                                      \
-             (st).slab_dims[__sk + 1] * (st).slab_strides[__sk + 1] )        \
-          __srFlat = 0;                                                      \
-      if ( __srFlat && (m) != NULL ) {                                       \
-        if ( ! __srMaskU ) __srFlat = 0;                                     \
-        for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-          if ( (st).slab_mask_strides[__sk] !=                              \
-               (st).slab_dims[__sk + 1] * (st).slab_mask_strides[__sk + 1] ) \
-            __srFlat = 0;                                                    \
-      }                                                                      \
-      if ( __srFlat ) { __srInnerN = (st).slab_elements; __srOC = 1; }       \
+    /* fold all slab axes into one flat loop when the slab is row-major      \
+       contiguous (ca_slab_is_flat) */                                       \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL) ) { \
+      __srInnerN = (st).slab_elements;                                       \
+      __srOC     = 1;                                                        \
     }                                                                        \
     ca_size_t __srIdx[CA_RANK_MAX] = { 0 };                                  \
     for ( ca_size_t __so = 0; __so < __srOC; __so++ ) {                      \
@@ -1726,20 +1980,11 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     ca_size_t __srOC      = 1;                                               \
     for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ )                       \
       __srOC *= (st).slab_dims[__sk];                                        \
-    {                                                                        \
-      int __srFlat = __srContig;                                            \
-      for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-        if ( (st).slab_strides[__sk] !=                                      \
-             (st).slab_dims[__sk + 1] * (st).slab_strides[__sk + 1] )        \
-          __srFlat = 0;                                                      \
-      if ( __srFlat && (m) != NULL ) {                                       \
-        if ( ! __srMaskU ) __srFlat = 0;                                     \
-        for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-          if ( (st).slab_mask_strides[__sk] !=                              \
-               (st).slab_dims[__sk + 1] * (st).slab_mask_strides[__sk + 1] ) \
-            __srFlat = 0;                                                    \
-      }                                                                      \
-      if ( __srFlat ) { __srInnerN = (st).slab_elements; __srOC = 1; }       \
+    /* fold all slab axes into one flat loop when the slab is row-major      \
+       contiguous (ca_slab_is_flat) */                                       \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL) ) { \
+      __srInnerN = (st).slab_elements;                                       \
+      __srOC     = 1;                                                        \
     }                                                                        \
     ca_size_t __srIdx[CA_RANK_MAX] = { 0 };                                  \
     for ( ca_size_t __so = 0; __so < __srOC; __so++ ) {                      \
@@ -1823,27 +2068,11 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     ca_size_t __srOC      = 1;                                               \
     for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ )                       \
       __srOC *= (st).slab_dims[__sk];                                        \
-    /* Slab-collapse: when the whole K-D slab is row-major contiguous       \
-       (data, and mask if present), fold all slab axes into one flat        \
-       inner loop.  Removes the per-outer multi-index offset recompute +    \
-       carry that otherwise dominates when the innermost slab axis is       \
-       small (full reduction of [N,1] / [N,small] entity, or trailing-      \
-       contig multi-axis reduce).  Platform-general: structural, not SIMD.  \
-       No-op for 1-D slabs (__srOuterK == 0 leaves __srOC == 1). */         \
-    {                                                                        \
-      int __srFlat = __srContig;                                            \
-      for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-        if ( (st).slab_strides[__sk] !=                                      \
-             (st).slab_dims[__sk + 1] * (st).slab_strides[__sk + 1] )        \
-          __srFlat = 0;                                                      \
-      if ( __srFlat && (m) != NULL ) {                                       \
-        if ( ! __srMaskU ) __srFlat = 0;                                     \
-        for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-          if ( (st).slab_mask_strides[__sk] !=                              \
-               (st).slab_dims[__sk + 1] * (st).slab_mask_strides[__sk + 1] ) \
-            __srFlat = 0;                                                    \
-      }                                                                      \
-      if ( __srFlat ) { __srInnerN = (st).slab_elements; __srOC = 1; }       \
+    /* fold all slab axes into one flat loop when the slab is row-major      \
+       contiguous (ca_slab_is_flat) */                                       \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL) ) { \
+      __srInnerN = (st).slab_elements;                                       \
+      __srOC     = 1;                                                        \
     }                                                                        \
     ca_size_t __srIdx[CA_RANK_MAX] = { 0 };                                  \
     ca_size_t idx         = 0;                                               \
@@ -1917,27 +2146,11 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     ca_size_t __srOC      = 1;                                               \
     for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ )                       \
       __srOC *= (st).slab_dims[__sk];                                        \
-    /* Slab-collapse: when the whole K-D slab is row-major contiguous       \
-       (data, and mask if present), fold all slab axes into one flat        \
-       inner loop.  Removes the per-outer multi-index offset recompute +    \
-       carry that otherwise dominates when the innermost slab axis is       \
-       small (full reduction of [N,1] / [N,small] entity, or trailing-      \
-       contig multi-axis reduce).  Platform-general: structural, not SIMD.  \
-       No-op for 1-D slabs (__srOuterK == 0 leaves __srOC == 1). */         \
-    {                                                                        \
-      int __srFlat = __srContig;                                            \
-      for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-        if ( (st).slab_strides[__sk] !=                                      \
-             (st).slab_dims[__sk + 1] * (st).slab_strides[__sk + 1] )        \
-          __srFlat = 0;                                                      \
-      if ( __srFlat && (m) != NULL ) {                                       \
-        if ( ! __srMaskU ) __srFlat = 0;                                     \
-        for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-          if ( (st).slab_mask_strides[__sk] !=                              \
-               (st).slab_dims[__sk + 1] * (st).slab_mask_strides[__sk + 1] ) \
-            __srFlat = 0;                                                    \
-      }                                                                      \
-      if ( __srFlat ) { __srInnerN = (st).slab_elements; __srOC = 1; }       \
+    /* fold all slab axes into one flat loop when the slab is row-major      \
+       contiguous (ca_slab_is_flat) */                                       \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL) ) { \
+      __srInnerN = (st).slab_elements;                                       \
+      __srOC     = 1;                                                        \
     }                                                                        \
     ca_size_t __srIdx[CA_RANK_MAX] = { 0 };                                  \
     ca_size_t idx         = 0;                                               \
@@ -2018,27 +2231,11 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     ca_size_t __srOC      = 1;                                               \
     for ( int8_t __sk = 0; __sk < __srOuterK; __sk++ )                       \
       __srOC *= (st).slab_dims[__sk];                                        \
-    /* Slab-collapse: when the whole K-D slab is row-major contiguous       \
-       (data, and mask if present), fold all slab axes into one flat        \
-       inner loop.  Removes the per-outer multi-index offset recompute +    \
-       carry that otherwise dominates when the innermost slab axis is       \
-       small (full reduction of [N,1] / [N,small] entity, or trailing-      \
-       contig multi-axis reduce).  Platform-general: structural, not SIMD.  \
-       No-op for 1-D slabs (__srOuterK == 0 leaves __srOC == 1). */         \
-    {                                                                        \
-      int __srFlat = __srContig;                                            \
-      for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-        if ( (st).slab_strides[__sk] !=                                      \
-             (st).slab_dims[__sk + 1] * (st).slab_strides[__sk + 1] )        \
-          __srFlat = 0;                                                      \
-      if ( __srFlat && (m) != NULL ) {                                       \
-        if ( ! __srMaskU ) __srFlat = 0;                                     \
-        for ( int8_t __sk = (int8_t)(__srK - 2); __sk >= 0 && __srFlat; __sk-- ) \
-          if ( (st).slab_mask_strides[__sk] !=                              \
-               (st).slab_dims[__sk + 1] * (st).slab_mask_strides[__sk + 1] ) \
-            __srFlat = 0;                                                    \
-      }                                                                      \
-      if ( __srFlat ) { __srInnerN = (st).slab_elements; __srOC = 1; }       \
+    /* fold all slab axes into one flat loop when the slab is row-major      \
+       contiguous (ca_slab_is_flat) */                                       \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL) ) { \
+      __srInnerN = (st).slab_elements;                                       \
+      __srOC     = 1;                                                        \
     }                                                                        \
     ca_size_t __srIdx[CA_RANK_MAX] = { 0 };                                  \
     ca_size_t idx         = 0;                                               \
@@ -2161,32 +2358,12 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     ca_size_t __sraOC      = 1;                                              \
     for ( int8_t __sak = 0; __sak < __sraOuterK; __sak++ )                   \
       __sraOC *= (st).slab_dims[__sak];                                      \
-    /* Slab-collapse: fold all slab axes into one flat inner loop when the  \
-       whole K-D slab is row-major contiguous for BOTH source and weights   \
-       (and mask if present).  Same structural win as the unweighted        \
-       CA_SLAB_REDUCE_T_*_EX macros: kills the per-outer multi-index offset  \
-       recompute + carry that dominates when the innermost slab axis is     \
-       small.  No-op for 1-D slabs (__sraOuterK == 0 leaves __sraOC == 1).  \
-       Weights share slab_dims with source (shape invariant), so the dim    \
-       cascade uses (st).slab_dims for both stride tables. */               \
-    {                                                                        \
-      int __sraFlat = __sraContig && __sraContigW;                          \
-      for ( int8_t __sak = (int8_t)(__sraK - 2); __sak >= 0 && __sraFlat; __sak-- ) { \
-        if ( (st).slab_strides[__sak] !=                                     \
-             (st).slab_dims[__sak + 1] * (st).slab_strides[__sak + 1] )      \
-          __sraFlat = 0;                                                     \
-        if ( (st_w).slab_strides[__sak] !=                                   \
-             (st).slab_dims[__sak + 1] * (st_w).slab_strides[__sak + 1] )    \
-          __sraFlat = 0;                                                     \
-      }                                                                      \
-      if ( __sraFlat && (m) != NULL ) {                                      \
-        if ( ! __sraMaskU ) __sraFlat = 0;                                   \
-        for ( int8_t __sak = (int8_t)(__sraK - 2); __sak >= 0 && __sraFlat; __sak-- ) \
-          if ( (st).slab_mask_strides[__sak] !=                             \
-               (st).slab_dims[__sak + 1] * (st).slab_mask_strides[__sak + 1] ) \
-            __sraFlat = 0;                                                   \
-      }                                                                      \
-      if ( __sraFlat ) { __sraInnerN = (st).slab_elements; __sraOC = 1; }    \
+    /* fold all slab axes into one flat loop when the slab is row-major      \
+       contiguous (ca_slab_is_flat) */                                       \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL)   \
+         && ca_slab_strides_are_flat(&(st), (st_w).slab_strides, sizeof(T_W)) ) { \
+      __sraInnerN = (st).slab_elements;                                      \
+      __sraOC     = 1;                                                       \
     }                                                                        \
     ca_size_t __sraIdx[CA_RANK_MAX] = { 0 };                                 \
     ca_size_t idx          = 0;                                              \
@@ -2283,32 +2460,12 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
     ca_size_t __sraOC      = 1;                                              \
     for ( int8_t __sak = 0; __sak < __sraOuterK; __sak++ )                   \
       __sraOC *= (st).slab_dims[__sak];                                      \
-    /* Slab-collapse: fold all slab axes into one flat inner loop when the  \
-       whole K-D slab is row-major contiguous for BOTH source and weights   \
-       (and mask if present).  Same structural win as the unweighted        \
-       CA_SLAB_REDUCE_T_*_EX macros: kills the per-outer multi-index offset  \
-       recompute + carry that dominates when the innermost slab axis is     \
-       small.  No-op for 1-D slabs (__sraOuterK == 0 leaves __sraOC == 1).  \
-       Weights share slab_dims with source (shape invariant), so the dim    \
-       cascade uses (st).slab_dims for both stride tables. */               \
-    {                                                                        \
-      int __sraFlat = __sraContig && __sraContigW;                          \
-      for ( int8_t __sak = (int8_t)(__sraK - 2); __sak >= 0 && __sraFlat; __sak-- ) { \
-        if ( (st).slab_strides[__sak] !=                                     \
-             (st).slab_dims[__sak + 1] * (st).slab_strides[__sak + 1] )      \
-          __sraFlat = 0;                                                     \
-        if ( (st_w).slab_strides[__sak] !=                                   \
-             (st).slab_dims[__sak + 1] * (st_w).slab_strides[__sak + 1] )    \
-          __sraFlat = 0;                                                     \
-      }                                                                      \
-      if ( __sraFlat && (m) != NULL ) {                                      \
-        if ( ! __sraMaskU ) __sraFlat = 0;                                   \
-        for ( int8_t __sak = (int8_t)(__sraK - 2); __sak >= 0 && __sraFlat; __sak-- ) \
-          if ( (st).slab_mask_strides[__sak] !=                             \
-               (st).slab_dims[__sak + 1] * (st).slab_mask_strides[__sak + 1] ) \
-            __sraFlat = 0;                                                   \
-      }                                                                      \
-      if ( __sraFlat ) { __sraInnerN = (st).slab_elements; __sraOC = 1; }    \
+    /* fold all slab axes into one flat loop when the slab is row-major      \
+       contiguous (ca_slab_is_flat) */                                       \
+    if ( ca_slab_is_flat(&(st), (st).slab_strides, sizeof(T), (m) != NULL)   \
+         && ca_slab_strides_are_flat(&(st), (st_w).slab_strides, sizeof(T_W)) ) { \
+      __sraInnerN = (st).slab_elements;                                      \
+      __sraOC     = 1;                                                       \
     }                                                                        \
     ca_size_t __sraIdx[CA_RANK_MAX] = { 0 };                                 \
     ca_size_t idx          = 0;                                              \
@@ -2741,10 +2898,9 @@ VALUE ca_iter_ensure (int32_t n, ca_iter_state *states,
   } while (0)
 
 /* ---- Ruby surface ---------------------------------------------------- */
-/* Called from Init_carray_ext (ruby_carray.c).  Creates the
-   Ractor-local key for the kept scratch buffer, and in a development
-   build (CARRAY_DEV_BUILD) registers the CArray.t1_* smoke entry points
-   the spec_ai kernel iterator tests use. */
+/* Called from Init_carray_ext (ruby_carray.c).  In a development build
+   (CARRAY_DEV_BUILD) it registers the CArray.t1_* smoke entry points the
+   spec_ai kernel iterator tests use; in a release build it does nothing. */
 void Init_ca_kernel_iterator (void);
 
 #endif /* CA_KERNEL_ITERATOR_H */

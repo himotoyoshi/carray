@@ -30,10 +30,14 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
   CARRIES = {
     :[]               => ->(df, _) { df[0..1] },
     :filter           => ->(df, _) { df.filter { |f| f["v"] > 2 } },
+    :drop_masked      => ->(df, _) { df.drop_masked },
+    :strip_mask       => ->(df, _) { df.strip_mask(0.0) },
     :head             => ->(df, _) { df.head(2) },
     :tail             => ->(df, _) { df.tail(2) },
     :sort_by          => ->(df, _) { df.sort_by { |f| f["v"] } },
     :sort_by_key      => ->(df, _) { df.sort_by_key("k") },
+    :nlargest         => ->(df, _) { df.nlargest(2, "k") },
+    :nsmallest        => ->(df, _) { df.nsmallest(2, "k") },
     :select           => ->(df, _) { df.select("k", "v") },
     :append           => ->(df, _) { df.append("x", CA_INT32([1, 2, 3, 4])) },
     :drop             => ->(df, _) { df.drop("v") },
@@ -43,19 +47,21 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     :stack_columns    => ->(df, _) { df.stack_columns(["k", "v"], into: "kv") },
     :unstack_column   => ->(df, _) { df.unstack_column("w") },
     :copy             => ->(df, _) { df.copy },
+    :transform        => ->(df, _) { df.transform("v") { |c| c * 2 } },
+    :cast             => ->(df, _) { df.cast("k" => :float64) },
+    :promote          => ->(df, _) { df.promote(:object) },
+    :set_index        => ->(df, _) { df.set_index("k") },
+    :reset_index      => ->(df, _) { df.set_index("k").reset_index },
+    :parse_to_time    => ->(df, _) { df.parse_to_time("t") },
+    :to_time          => ->(df, _) { df.cast("k" => :int64).to_time("k") },
   }.freeze
 
   # Verbs that change the frame itself and return it.
   RETURNS_SELF = {
-    :cast          => ->(df) { df.cast("k" => :float64) },
-    :promote       => ->(df) { df.promote(:float64) rescue df.promote(:object) },
     :mask_eq       => ->(df) { df.mask_eq("k", 2) },
     :fill          => ->(df) { df.fill("v", 0.0) },
-    :set_index     => ->(df) { df.set_index("k") },
-    :reset_index   => ->(df) { df.set_index("k").reset_index },
-    :parse_to_time => ->(df) { df.parse_to_time("t") },
-    :to_time       => ->(df) { df.cast("k" => :int64).to_time("k") },
     :protect       => ->(df) { df.protect },
+    :set_column_attrs => ->(df) { df.set_column_attrs(df.attrs) },
   }.freeze
 
   # Frames computed from this one: they do not take the attributes.
@@ -65,6 +71,7 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     :paste         => ->(df, _) { df.paste(CAFrame.new("q" => CA_INT32([1, 2, 3, 4]))) },
     :align         => ->(df, _) { df.align("k", CA_INT64([1, 2])) },
     :describe      => ->(df, _) { df.describe },
+    :value_counts  => ->(df, _) { df.value_counts("g") },
     :verify        => ->(df, _) { df.verify("positive" => ->(f) { f["v"] > 0 }) },
     :group_by      => ->(df, _) { df.group_by("g").aggregate("n" => ["v", :count]) },
     :melt          => ->(df, _) { df.select("k", "v").melt(id: ["k"]) },
@@ -74,14 +81,40 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     :unstack       => ->(df, _) { df.select("w").unstack(axis: 1).first },
     :resample      => ->(df, _) { df.parse_to_time("t").resample("t", "2 days").mean },
     :windows       => ->(df, _) { df.windows(on: "k", before: 1).mean },
+    :lag           => ->(df, _) { df.lag(n: 1) },
+    :order         => ->(df, _) { df.order },
+    :cumsum        => ->(df, _) { df.cumsum },
+    :cumprod       => ->(df, _) { df.cumprod },
+    :cummax        => ->(df, _) { df.cummax },
+    :cummin        => ->(df, _) { df.cummin },
+    :cumcount      => ->(df, _) { df.cumcount },
+    :sum           => ->(df, _) { df.sum },
+    :mean          => ->(df, _) { df.mean },
+    :min           => ->(df, _) { df.min },
+    :max           => ->(df, _) { df.max },
+    :prod          => ->(df, _) { df.prod },
+    :accumulate    => ->(df, _) { df.accumulate },
+    :median        => ->(df, _) { df.median },
+    :percentile    => ->(df, _) { df.percentile(50) },
+    :quantile      => ->(df, _) { df.quantile },
+    :variance      => ->(df, _) { df.variance },
+    :stddev        => ->(df, _) { df.stddev },
+    :variancep     => ->(df, _) { df.variancep },
+    :stddevp       => ->(df, _) { df.stddevp },
+    :first         => ->(df, _) { df.first },
+    :last          => ->(df, _) { df.last },
+    :nunique       => ->(df, _) { df.nunique },
+    :count         => ->(df, _) { df.count },
+    :all           => ->(df, _) { df.all },
+    :any           => ->(df, _) { df.any },
   }.freeze
 
   # Public methods that return no frame made from this one.
   NOT_A_FRAME = %i[
-    []= at axis_name column_names columns data_types each_row index
-    infer_time_format infer_types inspect is_duplicate ncol nrow pivot_grid protected?
-    to_ca to_csv to_records to_s to_table
-    attr set_attr set_attrs delete_attr attrs has_attr?
+    == []= at axis_name column_names columns data_types each_row index
+    infer_time_format infer_types inspect is_duplicate ncol nrow shape empty? pivot_grid protected?
+    to_a to_ca to_csv to_records to_s to_table write_csv
+    attr set_attr set_attrs delete_attr attrs attrs_symkey has_attr?
   ].freeze
 
   CLASS_DROPS = {
@@ -91,7 +124,7 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     :stack       => ->(df) { CAFrame.stack(df.select("v"), df.select("v")) },
   }.freeze
 
-  CLASS_NOT_A_FRAME = %i[from_csv from_records].freeze
+  CLASS_NOT_A_FRAME = %i[read_csv from_csv from_records].freeze
 
   def test_every_method_is_classified
     listed = CARRIES.keys + RETURNS_SELF.keys + DROPS.keys + NOT_A_FRAME
@@ -162,6 +195,16 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     assert !df.has_attr?
   end
 
+  def test_attrs_symkey
+    h = frame.attrs_symkey
+    assert_equal({ title: "hourly observations", source: "station network" }, h)
+    assert h.frozen?
+    assert_equal({}, other.attrs_symkey)
+    df = other
+    df.set_attr(:info, { "k" => [{ "x" => 1 }] })
+    assert_equal({ info: { k: [{ x: 1 }] } }, df.attrs_symkey)
+  end
+
   def test_rejected_value_leaves_the_frame_unchanged
     df = frame
     assert_raise(TypeError) { df.set_attrs(a: 1, b: Object.new) }
@@ -174,6 +217,127 @@ class TestCAFrameFrameAttrs < Test::Unit::TestCase
     assert_match(/\Acan't modify frozen CAFrame \(\d+ rows?, \d+ columns?\)\z/, err.message)
     assert_raise(FrozenError) { df.delete_attr(:title) }
     assert_equal ATTRS, df.attrs
+  end
+
+  # set_column_attrs with no attributes: each column takes its own name as
+  # "name"; the frame's own attributes are not touched.
+  def test_set_column_attrs_names
+    df = frame
+    df["v"].set_attr(:units, "m")
+    assert_same df, df.set_column_attrs
+    df.column_names.each { |name| assert_equal name, df[name].attr("name") }
+    assert_equal({ "units" => "m", "name" => "v" }, df["v"].attrs)
+    assert_equal ATTRS, df.attrs
+    # a column taken out of a selection of rows still shows it
+    assert_equal "v", df[0..1]["v"].attr("name")
+  end
+
+  # With attributes, they are set and "name" is not.
+  def test_set_column_attrs_on_every_column
+    df = frame
+    df.set_column_attrs(station: "A", "origin" => df.attr("source"))
+    df.column_names.each do |name|
+      assert_equal({ "station" => "A", "origin" => "station network" }, df[name].attrs)
+    end
+  end
+
+  def test_set_column_attrs_from_a_hash
+    df = frame
+    df.set_column_attrs(df.attrs)
+    assert_equal ATTRS, df["k"].attrs
+    df.set_column_attrs(df.attrs, title: "t")
+    assert_equal "t", df["k"].attr("title")
+    # an empty Hash sets nothing, not "name"
+    df2 = other.set_column_attrs(other.attrs)
+    assert_equal({}, df2["k"].attrs)
+  end
+
+  def test_set_column_attrs_on_named_columns
+    df = frame
+    df.set_column_attrs("v", long_name: "value")
+    df.set_column_attrs("k", "g", station: "A")
+    assert_equal({ "long_name" => "value" }, df["v"].attrs)
+    assert_equal({ "station" => "A" }, df["k"].attrs)
+    assert_equal({ "station" => "A" }, df["g"].attrs)
+    assert_equal({}, df["s"].attrs)
+    # named columns with no attributes take their names
+    df.set_column_attrs("s")
+    assert_equal({ "name" => "s" }, df["s"].attrs)
+    assert_equal({}, df["t"].attrs)
+    # "name" given explicitly is an attribute like any other
+    df.set_column_attrs("t", name: "time")
+    assert_equal "time", df["t"].attr("name")
+  end
+
+  def test_set_column_attrs_leaves_the_index_alone
+    df = CAFrame.new({ "k" => CA_INT32([1, 2]), "v" => CA_FLOAT64([1, 2]) }).set_index("k")
+    df.set_column_attrs
+    assert_equal({}, df.index.attrs)
+    assert_equal "v", df["v"].attr("name")
+    e = assert_raise(KeyError) { df.set_column_attrs("k", a: 1) }
+    assert_match(/\Aset_column_attrs: no column "k": it is the index/, e.message)
+  end
+
+  def test_set_column_attrs_refuses_before_writing
+    df = frame
+    assert_raise(KeyError) { df.set_column_attrs("v", "zz", a: 1) }
+    assert_raise(TypeError) { df.set_column_attrs(:v, a: 1) }
+    assert_raise(ArgumentError) { df.set_column_attrs("k", "k", a: 1) }
+    assert_raise(TypeError) { df.set_column_attrs([1]) }
+    assert_raise(TypeError) { df.set_column_attrs(a: 1, b: Object.new) }
+    assert_raise(TypeError) { df.set_column_attrs(1 => "x") }
+    df.column_names.each { |name| assert_equal({}, df[name].attrs) }
+  end
+
+  def test_set_column_attrs_with_a_frozen_column_writes_nothing
+    df = CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_INT32([3, 4]).freeze)
+    assert_raise(FrozenError) { df.set_column_attrs }
+    assert_equal({}, df["a"].attrs)
+  end
+
+  # A name goes on a view that replaces the column, which a frozen frame
+  # does not allow; attributes given still go on the columns, and a frame
+  # named before it was frozen can name its own views again.
+  def test_set_column_attrs_on_a_frozen_frame
+    df = frame.freeze
+    assert_raise(FrozenError) { df.set_column_attrs }
+    df.set_column_attrs(units: "K")
+    assert_equal "K", df["k"].attr("units")
+    named = frame
+    named.set_column_attrs
+    named.freeze
+    named.set_column_attrs
+    assert_equal "k", named["k"].attr("name")
+  end
+
+  # A name is this frame's: frames sharing a column (rename, select, dup)
+  # each show their own name, whichever names first, and a frame that names
+  # nothing shows none. Attributes given reach every frame sharing the data.
+  def test_a_name_stays_with_its_frame
+    df = CAFrame.new("temp" => CA_FLOAT64([1, 2]))
+    data = df["temp"]
+    r = df.rename("temp" => "t2")
+    r.set_column_attrs
+    assert_nil df["temp"].attr("name")
+    df.set_column_attrs
+    assert_equal "temp", df["temp"].attr("name")
+    assert_equal "t2", r["t2"].attr("name")
+    assert_nil data.attr("name")
+    df.select("temp").set_column_attrs(units: "K")
+    assert_equal ["K", "K", "K"], [df["temp"], r["t2"], data].map { |c| c.attr("units") }
+    df["temp"][0] = 9.0
+    assert_equal [9.0, 2.0], data.to_a
+  end
+
+  # The same array under two names gets two names.
+  def test_one_array_under_two_names
+    df = CAFrame.new("x" => CA_FLOAT64([1, 2]))
+    df["z"] = df["x"]
+    df.set_column_attrs
+    assert_equal ["x", "z"], [df["x"].attr("name"), df["z"].attr("name")]
+    view = df["x"]
+    df.set_column_attrs
+    assert_same view, df["x"]                  # its own view is named again, not wrapped
   end
 
   def test_marshal_round_trip

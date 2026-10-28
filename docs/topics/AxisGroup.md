@@ -316,9 +316,18 @@ gi.percentile(90, axis: :group)  # per-group 90th percentile
 gi.quantile(axis: :group)        # => [min, Q1, median, Q3, max], each [4, 4]
 ```
 
-They currently cover a flat grouping and a band-preserving grouping with a
-single rank-1 group axis; a rank-N categorical or a multi-group-slot
-composite is a follow-up.
+They cover every grouping shape: a flat grouping, a group axis with band
+axes, several group slots at once, and a rank-N categorical:
+
+```ruby
+t[g].median(axis: :group)          # g = axis_group(mon, lon, nil) -> [3, 2, 5]
+field[nil, region].median(axis: :group)  # rank-2 region (§1), field [4, 2, 3] -> [4, 3]
+```
+
+What they do not take is a band axis folded into the statistic
+(`axis: [:group, k]`), which raises `NotImplementedError`. To pool a band
+axis into an order statistic, build a categorical that covers that axis too,
+so the grouping becomes rank-N.
 
 `first` / `last` (the first and last present member of a group, in
 row-major position order along the grouped axes) and `nunique` (its distinct

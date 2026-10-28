@@ -205,7 +205,9 @@ ca_select_setup (CASelect *ca, CArray *parent, CArray *snapshot)
   ca->dim       = &(ca->_dim);
   ca->dim[0]    = ca->elements;
 
-  if ( ca_is_scalar(snapshot) ) {
+  /* A selection of a scalar is one only while it picks the cell: a scalar
+     is one cell along one axis. */
+  if ( ca_is_scalar(snapshot) && ca->elements == 1 ) {
     ca_set_flag(ca, CA_FLAG_SCALAR);
   }
 
@@ -668,6 +670,7 @@ rb_cm_initialize_copy (VALUE self, VALUE other)
 void
 Init_ca_obj_select (void)
 {
+  ca_register_cell_moving_view(CA_OBJ_SELECT);
   /* rb_cCASelect and CA_OBJ_SELECT are defined in ruby_carray.c;
      this file only registers the constant + allocator. */
   rb_define_const(rb_cObject, "CA_OBJ_SELECT", INT2NUM(CA_OBJ_SELECT));

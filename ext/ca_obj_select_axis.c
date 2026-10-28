@@ -1238,6 +1238,7 @@ Init_ca_obj_select_axis (void)
                                            rb_cCASelectAxisMask,
                                            &caselectaxis_mask_data_type,
                                            &ca_select_axis_func, sizeof(ca_select_axis_func));
+  ca_register_cell_moving_view(CA_OBJ_SELECT_AXIS);
   rb_define_const(rb_cObject, "CA_OBJ_SELECT_AXIS", INT2NUM(CA_OBJ_SELECT_AXIS));
 
   rb_define_alloc_func(rb_cCASelectAxis, rb_ca_select_axis_s_allocate);

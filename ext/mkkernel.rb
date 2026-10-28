@@ -328,8 +328,8 @@ module MkKernel
   #                                 # :match_source (legacy) reads the weight at
   #                                 # the source type -- wrong for fractional
   #                                 # weights, kept only for DSL forward-compat.
-  #     shape: :rev5_strict,        # W-A1 scalar / W-A2 1-D axis-broadcast / W-A3
-  #                                 # same-shape (:match_source = W-A3 only)
+  #     shape: :rev5_strict,        # W-A1 scalar / W-A4 shape of the reduced axes /
+  #                                 # W-A3 self.shape (:match_source = W-A3 only)
   #     mask:  :overlay,            # weights.mask OR'd into self.mask before
   #                                 # kernel call (= legacy parity, Q3 (A))
   #   }
@@ -362,6 +362,13 @@ module MkKernel
                   object_escape: nil,
                   identity_on_empty: false,
                   all_nan_result: nil,
+                  undefined_if: nil,
+                  # settled: a C expression over `acc` that is true once no
+                  # further cell can change the result (any: "acc", all:
+                  # "!acc").  The slab walk then stops at the first block
+                  # where it holds (CA_SLAB_REDUCE_T_SETTLE).  Only for a
+                  # single-accumulator reduction without mask_policy.
+                  settled: nil,
                   outputs: 1,
                   # Two-pass centred algorithm (variance / stddev family).
                   # When algorithm: :two_pass_centred is set, `state / init /
@@ -448,6 +455,10 @@ module MkKernel
       raise "#{name}: identity_on_empty requires a single-accumulator reduction (sum/prod/count/accumulate/wsum); mean/variance/wmean/minmax are excluded" \
         unless single_acc && outputs == 1
     end
+    if settled
+      raise "#{name}: settled requires a single-accumulator reduction without mask_policy, value_arg or array_arg" \
+        unless state.nil? && mask_policy.nil? && value_arg.nil? && array_arg.nil? && outputs == 1
+    end
     # SL.1.0: reduction_kind: licenses a SIMD-friendly contig-branch macro
     # variant (CA_SLAB_REDUCE_T_{PLUS,MIN,MAX,STAR,VAR}_EX).  default
     # :none keeps the existing CA_SLAB_REDUCE_T_EX path (= unchanged
@@ -489,6 +500,14 @@ module MkKernel
     end
     if all_nan_result == :undef && mask_policy.nil?
       raise "#{name}: all_nan_result: :undef needs a mask_policy " \
+            "(UNDEF is written through the mask_policy trigger)"
+    end
+    # undefined_if: a C expression over the state that, when true for a
+    # slab, leaves the answer undefined though cells contributed -- wmean's
+    # weights summing to 0, whose quotient has no value.  It is folded into
+    # the mask_policy trigger, so the cell is UNDEF (or fill_value).
+    if undefined_if && mask_policy.nil?
+      raise "#{name}: undefined_if needs a mask_policy " \
             "(UNDEF is written through the mask_policy trigger)"
     end
     if value_arg
@@ -570,9 +589,9 @@ module MkKernel
       raise "#{name}: array_arg: data_type must be :promote or :match_source" \
         unless [:promote, :match_source].include?(array_arg[:data_type])
       # PROPOSAL_REDUCTION_PER_FIBER_AUX_OPERAND rev1: shape acceptance expanded
-      # to W-A1 (scalar) / W-A2 (1-D axis-broadcast) / W-A3 (same shape).
+      # to W-A1 (scalar) / W-A4 (shape of the reduced axes) / W-A3 (self.shape).
       # :match_source = legacy W-A3 only (kept for forward-compat in DSL).
-      # :rev5_strict = W-A1 + W-A2 + W-A3 acceptance (= new default for wsum/wmean).
+      # :rev5_strict = W-A1 + W-A4 + W-A3 acceptance (= new default for wsum/wmean).
       raise "#{name}: array_arg: shape must be :match_source or :rev5_strict" \
         unless [:match_source, :rev5_strict].include?(array_arg[:shape])
       raise "#{name}: array_arg: mask must be :overlay (W.1 MVP)" \
@@ -652,6 +671,8 @@ module MkKernel
       object_escape:   object_escape,
       identity_on_empty: identity_on_empty,
       all_nan_result:  all_nan_result,
+      undefined_if:    undefined_if,
+      settled:         settled,
       outputs:         outputs,
       algorithm:       algorithm,
       divisor:         divisor,
@@ -1057,11 +1078,14 @@ module MkKernel
   # => ...` form).
   #
   # `bind:` defaults to true (= register CArray#<name> + CArray#<name>!).
+  # `bang: false` leaves CArray#<name>! unregistered too, for a method whose
+  # Ruby surface is defined by hand on top of the generated rb_ca_<name> and
+  # rb_ca_<name>_bang.
   # `op:` defaults to name (= the public method name; some mkmath ops
   # use a different operator name from the kernel suffix, e.g. operator
   # methods).
-  def self.monop(name, source:, expr:, op: nil, bind: true, cmath: true,
-                 widening: nil, output: :preserve)
+  def self.monop(name, source:, expr:, op: nil, bind: true, bang: true,
+                 cmath: true, widening: nil, output: :preserve)
     op ||= name
     # widening = true => emit wrapper that auto-casts integer input to
     # CA_FLOAT64 (= mkmath monfunc behavior).  Default: auto-detect based
@@ -1084,6 +1108,7 @@ module MkKernel
       source:   source,
       expr:     expr,
       bind:     bind,
+      bang:     bang,
       cmath:    cmath,
       widening: widening,
       output:   output,
@@ -1095,8 +1120,10 @@ module MkKernel
   # of integer input to f64 is decided by `monop`'s widening auto-detect
   # based on whether `source:` includes integer data_types — matching mkmath's
   # rule "if no INT_TYPES key, auto-cast; otherwise rely on integer kernel".
-  def self.monfunc(name, source:, expr:, op: nil, bind: true, cmath: true)
-    monop(name, source: source, expr: expr, op: op, bind: bind, cmath: cmath)
+  def self.monfunc(name, source:, expr:, op: nil, bind: true, bang: true,
+                   cmath: true)
+    monop(name, source: source, expr: expr, op: op, bind: bind, bang: bang,
+          cmath: cmath)
   end
 
   # Register an alias of an existing monop method under a different
@@ -1358,6 +1385,12 @@ module MkKernel
              when "_STAR" then "CA_SLAB_REDUCE_STAR8_EX"
              end
     acc_c = resolve_state_type(k[:state][acc_var], oi, si, src)
+    # An 8- or 16-bit integer cell converted to double does not vectorize;
+    # the narrow form sums blocks in int32 first.
+    if macro8 == "CA_SLAB_REDUCE_SUM8_EX" && %i[i8 u8 i16 u16].include?(src) &&
+       acc_c == DTYPES[:f64][:c]
+      macro8 = "CA_SLAB_REDUCE_SUM8_NARROW_EX"
+    end
     expr_macro = "__#{k[:name]}_#{src}_EXPR"
     io.puts "#define #{expr_macro}(__x) ((#{acc_c})(__x))"
     io.puts "#{indent}#{macro8}(#{si[:c]}, #{acc_c}, st, p, m, #{acc_var}, #{acc_init}, #{expr_macro}, #{masked_cnt_var});"
@@ -1877,7 +1910,11 @@ module MkKernel
     out.puts "{"
     out.puts "  #{frame} fr;"
     params.each { |_, name| out.puts "  fr.#{name} = #{name};" }
-    out.puts "  return ca_iter_ensure(#{states.size}, fr.states, #{fn}_body, (VALUE) &fr);"
+    if params.any? { |type, name| name == "ca" && type.include?("CArray") } && fn.end_with?("_object")
+      out.puts "  return ca_iter_ensure_computing(ca, #{states.size}, fr.states, #{fn}_body, (VALUE) &fr);"
+    else
+      out.puts "  return ca_iter_ensure(#{states.size}, fr.states, #{fn}_body, (VALUE) &fr);"
+    end
     out.puts "}"
     out.print rest
     out.string
@@ -2035,6 +2072,7 @@ module MkKernel
       io.puts "  if ( naxes != 1 || ! ca_too_few_present(ca->dim[slab_axes[0]], min_count, 0) ) {" if li_gate
       emit_reduce_loop_interchange(io, k, si, oi, ruby_wrap, src,
                                    acc_var, acc_init, reduce_stmt, finish_expr)
+      emit_reduce_short_fiber(io, k, si, oi, src, reduce_stmt, finish_expr)
       io.puts "  }" if li_gate
     end
 
@@ -2168,6 +2206,7 @@ module MkKernel
                     "#{k[:identity_on_empty] ? 0 : 1})"
                 end
       trigger = "(#{trigger}) || #{all_nan_flag}" if all_nan_flag
+      trigger = "(#{trigger}) || (#{k[:undefined_if]})" if k[:undefined_if]
       finish_emit = view_flat \
         ? "(transform_active ? (outer_off + ((ca_size_t)(#{finish_expr})) * axis_vstride) : ((ca_size_t)(#{finish_expr})))" \
         : "(#{finish_expr})"
@@ -2192,7 +2231,9 @@ module MkKernel
         # Non-mask_policy path: the slab macros always take a masked_cnt,
         # so hand them a throwaway.  The generic form (suffix "", the
         # :object lane) has a wrapper that hides it.
-        if suffix == ""
+        if k[:settled]
+          io.puts "      CA_SLAB_REDUCE_T_SETTLE(#{si[:c]}, st, p, m, #{acc_var}, #{acc_init}, #{reduce_stmt}, #{k[:settled]});"
+        elsif suffix == ""
           io.puts "      CA_SLAB_REDUCE_T(#{si[:c]}, st, p, m, #{acc_var}, #{acc_init}, #{reduce_stmt});"
         else
           io.puts "      ca_size_t __sr_throwaway_mc = 0;"
@@ -2540,8 +2581,16 @@ module MkKernel
       expr_macro_defs   = "#define #{p1_macro}(__x) #{p1_expr}\n" \
                           "#define #{p2_macro}(__x) #{p2_expr}\n"
       expr_macro_undefs = "#undef #{p1_macro}\n#undef #{p2_macro}\n"
-      p1_reduce_call = "CA_SLAB_REDUCE_SUM8_EX(#{si[:c]}, #{sum_c}, st, p, m, sum, #{sum_init}, #{p1_macro}, masked_cnt);"
-      p2_reduce_call = "CA_SLAB_REDUCE_SUM8_EX(#{si[:c]}, #{m2_c}, st, p, m, M2, #{m2_init}, #{p2_macro}, __unused_mc);"
+      if %i[i8 u8 i16 u16].include?(src)
+        # Per-cell conversion to double does not vectorize for these widths
+        # (see the CA_SLAB_REDUCE_*_NARROW_EX header comments).
+        q_c = %i[i8 u8].include?(src) ? "int32_t" : "int64_t"
+        p1_reduce_call = "CA_SLAB_REDUCE_SUM8_NARROW_EX(#{si[:c]}, #{sum_c}, st, p, m, sum, #{sum_init}, #{p1_macro}, masked_cnt);"
+        p2_reduce_call = "CA_SLAB_REDUCE_M2_NARROW_EX(#{si[:c]}, #{q_c}, st, p, m, M2, #{m2_init}, mean, #{p2_macro}, __unused_mc);"
+      else
+        p1_reduce_call = "CA_SLAB_REDUCE_SUM8_EX(#{si[:c]}, #{sum_c}, st, p, m, sum, #{sum_init}, #{p1_macro}, masked_cnt);"
+        p2_reduce_call = "CA_SLAB_REDUCE_SUM8_EX(#{si[:c]}, #{m2_c}, st, p, m, M2, #{m2_init}, #{p2_macro}, __unused_mc);"
+      end
     end
 
     io.puts
@@ -2601,6 +2650,101 @@ module MkKernel
       }
     C
     io.print expr_macro_undefs
+  end
+
+  # Short-fiber fast path (shortcut short_fiber_reduce): a single-axis
+  # reduction over the innermost axis of a row-major buffer whose fibers are
+  # short.  The general walk asks the kernel iterator for each fiber, and for
+  # fibers of a few cells that per-fiber step costs more than the cells
+  # (1M fibers of 4 float64 cells: 12.6 ms against 1.0 ms for a plain loop,
+  # M2 Max).  Here every fiber is folded in place from the buffer, in the
+  # order the general walk folds it, into scalar accumulators.  Eligibility
+  # is the loop interchange's (same reduction kinds, no mask, an alias
+  # attach); a fiber longer than 32 cells (16 for min / max) goes to the
+  # general walk, which is already faster than this loop there.
+  def self.emit_reduce_short_fiber(io, k, si, oi, src, reduce_stmt, finish_expr)
+    buf_kinds = %i[plus star min max]
+    rk = k[:reduction_kind]
+    if buf_kinds.include?(rk)
+      acc_vars = [k[:state].keys.first]
+      induction_var = nil
+    else
+      acc_vars = k[:state].keys.select { |v| buf_kinds.include?(rk[v]) }
+      ind_pair = rk.find { |_, kind| kind == :induction }
+      induction_var = ind_pair && ind_pair[0]
+    end
+
+    info = acc_vars.map do |v|
+      { var: v,
+        c_type: resolve_state_type(k[:state][v], oi, si, src),
+        init: resolve_init_expr(k[:init][v], oi, si, src) }
+    end
+
+    reduce_sf = reduce_stmt.dup
+    finish_sf = finish_expr.dup
+    if induction_var
+      ind_pat = Regexp.escape(induction_var.to_s)
+      reduce_sf = reduce_sf.gsub(/\b#{ind_pat}\+\+/, "0")
+                           .gsub(/\+\+\b#{ind_pat}\b/, "0")
+      finish_sf = finish_sf.gsub(/\b#{ind_pat}\b/, "((int64_t)__sf_M)")
+    end
+
+    decls = info.map { |i| "#{i[:c_type]} #{i[:var]} = (#{i[:c_type]}) (#{i[:init]});" }
+                .join("\n              ")
+
+    # A float min / max whose accumulator is still at the init saw only NaN
+    # or only +/-INFINITY; the fiber is re-read to tell which, as the
+    # general walk's all-NaN rule answers NaN for the first.
+    nan_fixup =
+      if k[:all_nan_result] == :nan && FLOAT_DTYPES.include?(src) && info.size == 1
+        i = info.first
+        <<~C.rstrip
+              if ( #{i[:var]} == (#{i[:c_type]}) (#{i[:init]}) ) {
+                int __sf_seen = 0;
+                for ( ca_size_t __j = 0; __j < __sf_M; __j++ ) __sf_seen |= (__sf_row[__j] == __sf_row[__j]);
+                if ( ! __sf_seen ) #{i[:var]} = (#{i[:c_type]}) NAN;
+              }
+        C
+      else
+        ""
+      end
+
+    # A min / max fold is a compare per cell that the general walk splits
+    # eight ways; past 16 cells that split is faster than this loop.
+    max_m = info.any? { |i| %i[min max].include?(buf_kinds.include?(rk) ? rk : rk[i[:var]]) } ? 16 : 32
+
+    io.puts <<~C
+        if ( naxes == 1
+             && ca->ndim >= 2
+             && slab_axes[0] == (int8_t)(ca->ndim - 1)
+             && ca->dim[ca->ndim - 1] >= 1
+             && ca->dim[ca->ndim - 1] <= #{max_m}
+             && ! ca_has_mask(ca)
+             && ca_attach_is_alias(ca)
+             && ca_fast_path(CA_SC_SHORT_FIBER_REDUCE) ) {
+          ca_size_t __sf_M     = ca->dim[ca->ndim - 1];
+          ca_size_t __sf_OUTER = ca->elements / __sf_M;
+          VALUE   vout = rb_ca_new_reduced(self, slab_axes, naxes, #{oi[:ca]}, keep_axis);
+          CArray *co;
+          GetCArray(vout, co);
+          #{oi[:c]} *op = (#{oi[:c]} *) co->ptr;
+          ca_attach(ca);   /* window: numeric lanes only, nothing raises inside; O(1) alias attach */
+          const #{si[:c]} *p_root = (const #{si[:c]} *) ca->ptr;
+          for ( ca_size_t __sf_o = 0; __sf_o < __sf_OUTER; __sf_o++ ) {
+            const #{si[:c]} *__sf_row = p_root + __sf_o * __sf_M;
+            #{decls}
+            for ( ca_size_t __j = 0; __j < __sf_M; __j++ ) {
+              #{si[:c]} v = __sf_row[__j];
+              #{reduce_sf};
+              (void) v;
+            }
+    #{nan_fixup}
+            op[__sf_o] = (#{oi[:c]}) (#{finish_sf});
+          }
+          ca_detach(ca);
+          return vout;
+        }
+    C
   end
 
   def self.emit_reduce_loop_interchange(io, k, si, oi, ruby_wrap, src,
@@ -2752,7 +2896,7 @@ module MkKernel
              && slab_axes[0] != (int8_t)(ca->ndim - 1)
              && ! ca_has_mask(ca)
              && ca_attach_is_alias(ca)
-             && ca_fast_paths_enabled() ) {
+             && ca_fast_path(CA_SC_LOOP_INTERCHANGE) ) {
           int8_t    __li_ax    = slab_axes[0];
           ca_size_t __li_M     = ca->dim[__li_ax];
           ca_size_t __li_INNER = 1;
@@ -2803,7 +2947,7 @@ module MkKernel
              && ! ca_has_mask(ca)
              && ca_func[ca->obj_type].attach == ca_stack_func.attach
              && ((CAStack *) ca)->k_axis == 0
-             && ca_fast_paths_enabled() ) {
+             && ca_fast_path(CA_SC_STACK_LOOP_INTERCHANGE) ) {
           CAStack  *__li_st    = (CAStack *) ca;
           int8_t    __li_ax    = slab_axes[0];
           ca_size_t __li_M     = ca->dim[__li_ax];
@@ -2831,7 +2975,7 @@ module MkKernel
             ca_size_t __li_parent_out  = __li_OUTER * __li_INNER;
             const ca_size_t __li_TILE = 512;
             for ( int32_t __kk = 0; __kk < __li_st->n_parents; __kk++ ) {
-              ca_attach(__li_st->parents[__kk]);   /* window: numeric lanes only, nothing raises inside */
+              ca_attach(__li_st->parents[__kk]);   /* window: a parent may run Ruby to fill itself (a CAObject's copy_data); a raising attach holds nothing and the earlier parents are already detached, and the numeric loop after it does not raise */
               const #{si[:c]} *p_root = (const #{si[:c]} *) __li_st->parents[__kk]->ptr;
               #{oi[:c]} *__li_op_k = op + (ca_size_t) __kk * __li_parent_out;
     #{core.call("p_root", "__li_op_k", "__li_OUTER")}
@@ -2869,7 +3013,7 @@ module MkKernel
              && ((CAStack *) ca)->k_axis > 0
              && ( slab_axes[0] > ((CAStack *) ca)->k_axis
                   || slab_axes[0] + 1 == ((CAStack *) ca)->k_axis )
-             && ca_fast_paths_enabled() ) {
+             && ca_fast_path(CA_SC_STACK_LOOP_INTERCHANGE) ) {
           CAStack  *__li_st    = (CAStack *) ca;
           int8_t    __li_ax    = slab_axes[0];
           int8_t    __li_kax   = (int8_t) __li_st->k_axis;
@@ -2926,7 +3070,7 @@ module MkKernel
             ca_size_t __li_plane_elems = __li_M * __li_INNER;
             const ca_size_t __li_TILE = 512;
             for ( int32_t __kk = 0; __kk < __li_st->n_parents; __kk++ ) {
-              ca_attach(__li_st->parents[__kk]);   /* window: numeric lanes only, nothing raises inside */
+              ca_attach(__li_st->parents[__kk]);   /* window: a parent may run Ruby to fill itself (a CAObject's copy_data); a raising attach holds nothing and the earlier parents are already detached, and the numeric loop after it does not raise */
               const #{si[:c]} *p_root = (const #{si[:c]} *) __li_st->parents[__kk]->ptr;
               ca_size_t __li_k_base = (ca_size_t) __kk * __li_k_stride;
 
@@ -3012,7 +3156,7 @@ module MkKernel
              && ca_func[ca->obj_type].attach == ca_stack_func.attach
              && ((CAStack *) ca)->k_axis > 0
              && slab_axes[0] + 1 < ((CAStack *) ca)->k_axis
-             && ca_fast_paths_enabled() ) {
+             && ca_fast_path(CA_SC_STACK_LOOP_INTERCHANGE) ) {
           CAStack  *__li_st    = (CAStack *) ca;
           int8_t    __li_ax    = slab_axes[0];
           int8_t    __li_kax   = (int8_t) __li_st->k_axis;
@@ -3084,7 +3228,7 @@ module MkKernel
 
             const ca_size_t __li_TILE = 512;
             for ( int32_t __kk = 0; __kk < __li_st->n_parents; __kk++ ) {
-              ca_attach(__li_st->parents[__kk]);   /* window: numeric lanes only, nothing raises inside */
+              ca_attach(__li_st->parents[__kk]);   /* window: a parent may run Ruby to fill itself (a CAObject's copy_data); a raising attach holds nothing and the earlier parents are already detached, and the numeric loop after it does not raise */
               const #{si[:c]} *p_root = (const #{si[:c]} *) __li_st->parents[__kk]->ptr;
               ca_size_t __li_k_base = (ca_size_t) __kk * __li_k_stride;
 
@@ -3394,7 +3538,7 @@ module MkKernel
     io.puts "         ca->elements > 0 &&"
     io.puts "         ! ca_too_few_present(ca->elements, min_count, 0) &&" if k[:mask_policy] == :min_count
     io.puts "         ca_is_lazy_view(ca) && ! ca_has_mask(ca) &&"
-    io.puts "         ca_fast_paths_enabled() ) {"
+    io.puts "         ca_fast_path(CA_SC_LAZY_STREAMING_REDUCE) ) {"
     io.puts "      #{fn}_t __ctx;"
     io.puts "      __ctx.chunk = NULL;"
     io.puts "      __ctx.ca    = ca;"
@@ -3513,12 +3657,12 @@ module MkKernel
       # computation type (so a float weight against an int source is not
       # truncated -- the body reads it as `double`); :match_source keeps the
       # legacy source-type storage.  waca is the CA_* constant the three
-      # materialization sites (W-A1 / W-A2 / W-A3) allocate/wrap against, and
+      # materialization sites (W-A1 / W-A4 / W-A3) allocate/wrap against, and
       # must agree with the T_W the reduce macro reads (double for :promote).
       waca = (k[:array_arg][:data_type] == :promote) ? "CA_FLOAT64" : "src->data_type"
       # PROPOSAL_REDUCTION_PER_FIBER_AUX_OPERAND rev1: weights acceptance
-      # expanded to 3 forms (W-A1 scalar / W-A2 1-D axis-broadcast / W-A3
-      # full per-element).  W-A1 / W-A2 are materialized to W-A3 form
+      # expanded to 3 forms (W-A1 scalar / W-A4 shape of the reduced axes / W-A3
+      # full per-element).  W-A1 / W-A4 are materialized to W-A3 form
       # at dispatch (= simple, uniform kernel path).  rev5 strict acceptance
       # mirrors PROPOSAL_LINEAR_INTERP_PER_FIBER_MATCHED rev5 in spirit.
       io.puts "  if ( argc < 1 ) {"
@@ -3526,13 +3670,18 @@ module MkKernel
       io.puts "  }"
       io.puts "  volatile VALUE rweights = argv[0];"
       io.puts "  argc--; argv++;"
-      # rev5 A1: convert a single-element CArray (CScalar / [1] 1-D / all
-      # dim==1) to a Ruby Numeric and route it through the scalar path.
+      # A CScalar is a scalar weight.  Any other array, one with a single
+      # element included, is held to the shape rules below.
       io.puts "  if ( rb_obj_is_carray(rweights) ) {"
       io.puts "    CArray *cv_pre_;"
       io.puts "    GetCArray(rweights, cv_pre_);"
-      io.puts "    if ( cv_pre_->elements == 1 ) {"
+      io.puts "    if ( ca_is_scalar(cv_pre_) ) {"
+      io.puts "      int8_t wtype_ = cv_pre_->data_type;"
       io.puts "      rweights = rb_funcall(rweights, rb_intern(\"[]\"), 1, INT2NUM(0));"
+      # A boolean cell reads as true / false; as a weight it is 1 / 0.
+      io.puts "      if ( wtype_ == CA_BOOLEAN && rweights != CA_UNDEF ) {"
+      io.puts "        rweights = INT2FIX(RTEST(rweights) ? 1 : 0);"
+      io.puts "      }"
       io.puts "    }"
       io.puts "  }"
       # The weights are attached from here to the end of the call, so they
@@ -3545,7 +3694,16 @@ module MkKernel
       wio.puts "    /* W-A1: Ruby Numeric scalar -> full-shape constant weight CArray */"
       wio.puts "    vcw = rb_carray_new(#{waca}, src->ndim, src->dim, 0, NULL);"
       wio.puts "    GetCArray(vcw, cw);   /* a new entity: its ptr needs no attach */"
-      wio.puts "    rb_ca_obj2ptr(vcw, rweights, cw->ptr);  /* fill first cell */"
+      wio.puts "    if ( rweights == CA_UNDEF ) {"
+      wio.puts "      /* A masked weight (UNDEF, or a one-element array masked): every"
+      wio.puts "         cell's weight is masked, so no cell contributes. */"
+      wio.puts "      memset(cw->ptr, 0, (size_t) cw->elements * cw->bytes);"
+      wio.puts "      ca_create_mask(cw);"
+      wio.puts "      memset(cw->mask->ptr, 1, (size_t) cw->elements);"
+      wio.puts "    }"
+      wio.puts "    else {"
+      wio.puts "      rb_ca_obj2ptr(vcw, rweights, cw->ptr);  /* fill first cell */"
+      wio.puts "    }"
       wio.puts "    /* broadcast first cell to all elements (= constant fill) */"
       wio.puts "    {"
       wio.puts "      char *p0 = cw->ptr;"
@@ -3557,72 +3715,75 @@ module MkKernel
       wio.puts "  else {"
       wio.puts "    /* CArray val: coerce to the weight storage type (f64 for :promote, so a"
       wio.puts "       float weight against an int source is not truncated) */"
-      wio.puts "    /* vcv holds the view while cv is read: W-A2 below moves vcw on to"
+      wio.puts "    /* vcv holds the view while cv is read: W-A4 below moves vcw on to"
       wio.puts "       the materialised copy before it is done with cv. */"
       wio.puts "    volatile VALUE vcv = rb_ca_wrap_readonly(rweights, INT2NUM(#{waca}));"
       wio.puts "    CArray *cv;"
       wio.puts "    GetCArray(vcv, cv);"
       wio.puts "    vcw = vcv;"
       wio.puts ""
-      wio.puts "    /* rev5 form detection: A3 (same ndim) -> A2 (1-D axis-broadcast) -> raise */"
-      wio.puts "    if ( cv->ndim == src->ndim ) {"
-      wio.puts "      /* W-A3 commit-or-raise: shape strict match */"
-      wio.puts "      for ( int8_t i = 0; i < src->ndim; i++ ) {"
-      wio.puts "        if ( cv->dim[i] != src->dim[i] ) {"
-      wio.puts %Q[          rb_raise(rb_eArgError, "%s: weights shape mismatch (dim[%d]=%ld != self.dim[%d]=%ld; expected a scalar, a 1-D array along the reduced axis, or self.shape)", ca_calling_method_name(), (int)i, (long)cv->dim[i], (int)i, (long)src->dim[i]);]
-      wio.puts "        }"
-      wio.puts "      }"
-      wio.puts "      /* W-A3 path: use cv directly (= existing) */"
+      wio.puts "    /* form detection: W-A3 (self.shape) -> W-A4 (shape of the reduced axes,"
+      wio.puts "       taken in ascending axis order whatever order axis: lists them) -> raise */"
+      wio.puts "    int8_t wax[CA_RANK_MAX];"
+      wio.puts "    for ( int8_t i = 0; i < naxes; i++ ) {"
+      wio.puts "      int8_t a = slab_axes[i], j = i;"
+      wio.puts "      while ( j > 0 && wax[j-1] > a ) { wax[j] = wax[j-1]; j--; }"
+      wio.puts "      wax[j] = a;"
+      wio.puts "    }"
+      wio.puts "    int is_full_shape = ( cv->ndim == src->ndim );"
+      wio.puts "    for ( int8_t i = 0; is_full_shape && i < src->ndim; i++ ) {"
+      wio.puts "      if ( cv->dim[i] != src->dim[i] ) is_full_shape = 0;"
+      wio.puts "    }"
+      wio.puts "    int is_reduced_shape = ( ! is_full_shape && naxes >= 1 && cv->ndim == naxes );"
+      wio.puts "    for ( int8_t i = 0; is_reduced_shape && i < naxes; i++ ) {"
+      wio.puts "      if ( cv->dim[i] != src->dim[wax[i]] ) is_reduced_shape = 0;"
+      wio.puts "    }"
+      wio.puts "    if ( is_full_shape ) {"
+      wio.puts "      /* W-A3: per-element weights, used as they are */"
       wio.puts "      cw = cv;"
       wio.puts "    }"
-      wio.puts "    else if ( naxes == 1 && cv->ndim == 1 && cv->dim[0] == src->dim[slab_axes[0]] ) {"
-      wio.puts "      /* W-A2: 1-D axis-broadcast -> materialize to full shape.  cw and"
-      wio.puts "         its mask are made before cv is attached: making them allocates. */"
+      wio.puts "    else if ( is_reduced_shape ) {"
+      wio.puts "      /* W-A4: one weight per cell of the reduced axes, repeated along the"
+      wio.puts "         kept axes; materialized to self.shape.  cw and its mask are made"
+      wio.puts "         before cv is attached: making them allocates. */"
       wio.puts "      vcw = rb_carray_new(#{waca}, src->ndim, src->dim, 0, NULL);"
       wio.puts "      GetCArray(vcw, cw);"
       wio.puts "      if ( ca_has_mask(cv) ) {"
       wio.puts "        ca_create_mask(cw);"
       wio.puts "      }"
       wio.puts "      ca_attach(cv);   /* window: nothing raises inside */"
-      wio.puts "      /* broadcast cv (1-D, length src->dim[slab_axes[0]]) along reduce axis */"
       wio.puts "      {"
-      wio.puts "        int8_t baxis = slab_axes[0];"
-      wio.puts "        ca_size_t inner_stride = 1;"
-      wio.puts "        for ( int8_t ii = baxis + 1; ii < src->ndim; ii++ ) inner_stride *= src->dim[ii];"
-      wio.puts "        ca_size_t axis_n = src->dim[baxis];"
-      wio.puts "        ca_size_t outer  = ( axis_n && inner_stride ) ? src->elements / (axis_n * inner_stride) : 0;   /* a zero-length axis leaves nothing to fill */"
-      wio.puts "        for ( ca_size_t o = 0; o < outer; o++ ) {"
-      wio.puts "          for ( ca_size_t a = 0; a < axis_n; a++ ) {"
-      wio.puts "            for ( ca_size_t in = 0; in < inner_stride; in++ ) {"
-      wio.puts "              ca_size_t flat = (o * axis_n + a) * inner_stride + in;"
-      wio.puts "              memcpy(cw->ptr + flat * cw->bytes, cv->ptr + a * cv->bytes, cw->bytes);"
-      wio.puts "            }"
-      wio.puts "          }"
+      wio.puts "        ca_size_t idx[CA_RANK_MAX], wstep[CA_RANK_MAX];"
+      wio.puts "        ca_size_t step = 1;"
+      wio.puts "        boolean8_t *cw_m = ca_has_mask(cv) ? (boolean8_t *) cw->mask->ptr : NULL;"
+      wio.puts "        boolean8_t *cv_m = ca_has_mask(cv) ? (boolean8_t *) cv->mask->ptr : NULL;"
+      wio.puts "        for ( int8_t i = 0; i < src->ndim; i++ ) {"
+      wio.puts "          idx[i]   = 0;"
+      wio.puts "          wstep[i] = 0;   /* kept axes: the weight repeats */"
       wio.puts "        }"
-      wio.puts "      }"
-      wio.puts "      /* Propagate cv mask via W-A3 overlay path below (= mask materialize) */"
-      wio.puts "      if ( ca_has_mask(cv) ) {"
-      wio.puts "        /* broadcast cv mask along axis */"
-      wio.puts "        boolean8_t *cw_m = (boolean8_t *)cw->mask->ptr;"
-      wio.puts "        boolean8_t *cv_m = (boolean8_t *)cv->mask->ptr;"
-      wio.puts "        int8_t baxis = slab_axes[0];"
-      wio.puts "        ca_size_t inner_stride = 1;"
-      wio.puts "        for ( int8_t ii = baxis + 1; ii < src->ndim; ii++ ) inner_stride *= src->dim[ii];"
-      wio.puts "        ca_size_t axis_n = src->dim[baxis];"
-      wio.puts "        ca_size_t outer  = ( axis_n && inner_stride ) ? src->elements / (axis_n * inner_stride) : 0;   /* a zero-length axis leaves nothing to fill */"
-      wio.puts "        for ( ca_size_t o = 0; o < outer; o++ ) {"
-      wio.puts "          for ( ca_size_t a = 0; a < axis_n; a++ ) {"
-      wio.puts "            for ( ca_size_t in = 0; in < inner_stride; in++ ) {"
-      wio.puts "              ca_size_t flat = (o * axis_n + a) * inner_stride + in;"
-      wio.puts "              cw_m[flat] = cv_m[a];"
-      wio.puts "            }"
+      wio.puts "        for ( int8_t i = naxes - 1; i >= 0; i-- ) {"
+      wio.puts "          wstep[wax[i]] = step;"
+      wio.puts "          step *= cv->dim[i];"
+      wio.puts "        }"
+      wio.puts "        for ( ca_size_t flat = 0; flat < src->elements; flat++ ) {"
+      wio.puts "          ca_size_t w = 0;"
+      wio.puts "          for ( int8_t i = 0; i < src->ndim; i++ ) w += idx[i] * wstep[i];"
+      wio.puts "          memcpy(cw->ptr + flat * cw->bytes, cv->ptr + w * cv->bytes, cw->bytes);"
+      wio.puts "          if ( cw_m ) cw_m[flat] = cv_m[w];"
+      wio.puts "          for ( int8_t i = src->ndim - 1; i >= 0; i-- ) {"
+      wio.puts "            if ( ++idx[i] < src->dim[i] ) break;"
+      wio.puts "            idx[i] = 0;"
       wio.puts "          }"
       wio.puts "        }"
       wio.puts "      }"
       wio.puts "      ca_detach(cv);"
       wio.puts "    }"
       wio.puts "    else {"
-      wio.puts %Q[      rb_raise(rb_eArgError, "%s: w shape not accepted (val.ndim=%d, val.dim[0]=%ld; expected scalar / [M=%ld] / self.shape)", ca_calling_method_name(), (int)cv->ndim, (long)(cv->ndim >= 1 ? cv->dim[0] : 0), (long)(naxes == 1 ? src->dim[slab_axes[0]] : -1));]
+      wio.puts "      volatile VALUE rexpect = rb_ary_new();"
+      wio.puts "      for ( int8_t i = 0; i < naxes; i++ ) {"
+      wio.puts "        rb_ary_push(rexpect, SIZE2NUM(src->dim[wax[i]]));"
+      wio.puts "      }"
+      wio.puts %Q[      rb_raise(rb_eArgError, "%s: weights of shape %"PRIsVALUE" not accepted (expected a scalar, the shape of the reduced axes %"PRIsVALUE", or self.shape %"PRIsVALUE")", ca_calling_method_name(), rb_funcall(vcv, rb_intern("shape"), 0), rexpect, rb_funcall(self, rb_intern("shape"), 0));]
       wio.puts "    }"
       wio.puts "  }"
       # Mask overlay (= legacy W-A3 path; if the materialized cw carries a mask, overlay it)
@@ -5116,15 +5277,16 @@ module MkKernel
     # The object lane calls Ruby for every cell of the case B/C walk, which
     # runs between a direct attach and detach of self and val; a raise there
     # would leave both attached.  An entity holds no attach, so the lane
-    # reads an entity copy of whichever is a view.
+    # reads an entity copy of whichever is a view, or an entity that leaves
+    # ptr NULL at rest (a CASource).
     entity_bc = if is_object
                   <<~C.chomp
                     volatile VALUE vca_entity = self;
-                            if ( ! ca_is_entity(ca) ) {
+                            if ( ! ca_is_entity(ca) || ! ca->ptr ) {
                               vca_entity = rb_ca_copy(self);
                               GetCArray(vca_entity, ca);
                             }
-                            if ( ! ca_is_entity(cv) ) {
+                            if ( ! ca_is_entity(cv) || ! cv->ptr ) {
                               vsrc_val = rb_ca_copy(vsrc_val);
                               GetCArray(vsrc_val, cv);
                             }
@@ -6051,6 +6213,9 @@ module MkKernel
     # `op_powi_<type>` resolves to `op_powi_int8_t` for int8 source).
     # Substitution uses math_suffix (= typedef name, matches the suffix
     # used in op_powi macro instantiations in ca_op_powi.h).
+    # An object body calls Ruby on every cell and does not vectorize; the
+    # pragma there only adds a "loop not vectorized" warning.
+    simd = ( src == :object ) ? "" : "#pragma omp simd"
     expr_body = raw.gsub(/#1/, "*p1").gsub(/#2/, "*p2").gsub(/#3/, "*p3").gsub(/<type>/, suffix)
     # Option B+C pilot (binop emit substrate hardening, MEMO_BINOP_STRIDED_AUDIT.md):
     # The no-mask body is split into a contig branch (i1==i2==i3==1) using the
@@ -6103,7 +6268,7 @@ module MkKernel
             #{c_type} * __restrict__ r1 = q1;
             #{c_type} * __restrict__ r2 = q2;
             #{c_type} * __restrict__ r3 = q3;
-            #pragma omp simd
+            #{simd}
             for (k=0; k<n; k++) {
               p1 = r1 + k; p2 = r2 + k; p3 = r3 + k;
               { #{expr_body} }
@@ -6111,7 +6276,7 @@ module MkKernel
           }
           else if ( ( apart1 || a1 == a3 ) && ( apart2 || a2 == a3 ) ) {
             /* in place: an iteration reads and writes only its own cell */
-            #pragma omp simd
+            #{simd}
             for (k=0; k<n; k++) {
               p1 = q1 + k; p2 = q2 + k; p3 = q3 + k;
               { #{expr_body} }
@@ -6121,6 +6286,66 @@ module MkKernel
             for (k=0; k<n; k++) {
               p1 = q1 + k; p2 = q2 + k; p3 = q3 + k;
               { #{expr_body} }
+            }
+          }
+        } else if ( i3 == 1 && ( ( i1 == 1 && i2 == 0 ) || ( i1 == 0 && i2 == 1 ) ) ) {
+          /* scalar branch: one operand is a scalar (stride 0).  It is read
+             into a local before the loop, so a store to the output cannot
+             change it and the loop vectorizes like the contig branch. */
+          #{c_type} sv = ( i1 == 0 ) ? *q1 : *q2;
+          #{c_type} *qa = ( i1 == 0 ) ? q2 : q1;
+          #{c_type} *p1, *p2, *p3;
+          uintptr_t aa = (uintptr_t) qa, a3 = (uintptr_t) q3;
+          uintptr_t nb = (uintptr_t) n * sizeof(*q3);
+          (void)p1; (void)p2; (void)p3;
+          if ( i1 == 0 ) {
+            p1 = &sv;
+            if ( a3 + nb <= aa || aa + nb <= a3 ) {
+              #{c_type} * __restrict__ ra = qa;
+              #{c_type} * __restrict__ r3 = q3;
+              #{simd}
+              for (k=0; k<n; k++) {
+                p2 = ra + k; p3 = r3 + k;
+                { #{expr_body} }
+              }
+            }
+            else if ( aa == a3 ) {
+              #{simd}
+              for (k=0; k<n; k++) {
+                p2 = qa + k; p3 = q3 + k;
+                { #{expr_body} }
+              }
+            }
+            else {
+              for (k=0; k<n; k++) {
+                p2 = qa + k; p3 = q3 + k;
+                { #{expr_body} }
+              }
+            }
+          }
+          else {
+            p2 = &sv;
+            if ( a3 + nb <= aa || aa + nb <= a3 ) {
+              #{c_type} * __restrict__ ra = qa;
+              #{c_type} * __restrict__ r3 = q3;
+              #{simd}
+              for (k=0; k<n; k++) {
+                p1 = ra + k; p3 = r3 + k;
+                { #{expr_body} }
+              }
+            }
+            else if ( aa == a3 ) {
+              #{simd}
+              for (k=0; k<n; k++) {
+                p1 = qa + k; p3 = q3 + k;
+                { #{expr_body} }
+              }
+            }
+            else {
+              for (k=0; k<n; k++) {
+                p1 = qa + k; p3 = q3 + k;
+                { #{expr_body} }
+              }
             }
           }
         } else {
@@ -6455,6 +6680,24 @@ module MkKernel
                 { #{expr_body} }
               }
             }
+          } else if ( i3 == 1 && i1 == 1 && i2 == 0 ) {
+            /* scalar on the right: read it once, so the boolean store
+               cannot be taken to change it and the loop vectorizes */
+            #{c_type} sv = *q2;
+            p2 = &sv;
+            for (k=0; k<n; k++) {
+              p1 = q1 + k;
+              p3 = q3 + k;
+              { #{expr_body} }
+            }
+          } else if ( i3 == 1 && i1 == 0 && i2 == 1 ) {
+            #{c_type} sv = *q1;
+            p1 = &sv;
+            for (k=0; k<n; k++) {
+              p2 = q2 + k;
+              p3 = q3 + k;
+              { #{expr_body} }
+            }
           } else {
             for (k=0; k<n; k++) {
               p1 = q1 + k*i1;
@@ -6730,7 +6973,7 @@ module MkKernel
       # surface) + optional CAMath module function, NOT as `<name>_ki`.
       if k[:kind] == :monop
         io.puts %Q[  rb_define_method(rb_cCArray, "#{k[:op]}", rb_ca_#{k[:name]}, 0);] if k[:bind]
-        io.puts %Q[  rb_define_method(rb_cCArray, "#{k[:name]}!", rb_ca_#{k[:name]}_bang, 0);]
+        io.puts %Q[  rb_define_method(rb_cCArray, "#{k[:name]}!", rb_ca_#{k[:name]}_bang, 0);] if k[:bang]
         io.puts %Q[  rb_define_module_function(rb_mCAMath, "#{k[:name]}", rb_cmath_#{k[:name]}, 1);] if k[:cmath]
         return
       end
@@ -6958,11 +7201,10 @@ MkKernel.reduce :max,
 # its identity value (1 for all, 0 for any) for those cells.  An all-
 # masked slab returns the identity (all([]) == true, any([]) == false).
 #
-# Early-break is intentionally NOT implemented; idempotent acc &= v /
-# acc |= v is SIMD-friendly and the branch-free form usually wins on
-# modern CPUs.  For dramatically lopsided inputs (= mostly-false `all`
-# or mostly-true `any`) a profile-driven early-break variant can be
-# added later as a separate kernel.
+# The walk stops once the answer is settled (settled:): any at the first
+# true, all and none at the first false / true.  The test runs between
+# blocks of branch-free `acc |= v` / `acc &= v`, so a slab that never
+# settles keeps the speed of the plain fold.
 MkKernel.header_block <<~C
   /* The square root of a variance: an ε-negative from rounding becomes 0,
      a NaN stays NaN (fmax(NaN, 0.0) is 0.0). */
@@ -6986,6 +7228,8 @@ C
 MkKernel.reduce :all,
   init:            "1",
   reduce:          "acc &= v",
+  settled:         "!acc",
+  reduction_kind:  :min,
   source:          [:bool],
   output:          :bool,
   ruby_scalar:     :BOOL2VAL,
@@ -6995,6 +7239,8 @@ MkKernel.reduce :all,
 MkKernel.reduce :any,
   init:            "0",
   reduce:          "acc |= v",
+  settled:         "acc",
+  reduction_kind:  :max,
   source:          [:bool],
   output:          :bool,
   ruby_scalar:     :BOOL2VAL,
@@ -7009,6 +7255,8 @@ MkKernel.reduce :any,
 MkKernel.reduce :none,
   init:            "1",
   reduce:          "acc &= !v",
+  settled:         "!acc",
+  reduction_kind:  :min,
   source:          [:bool],
   output:          :bool,
   ruby_scalar:     :BOOL2VAL,
@@ -7457,9 +7705,9 @@ MkKernel.reduce :wsum,
 # framework as wsum, but uses state+finish form (= sum + den) for the
 # normalisation `mean = Σv*w / Σw` semantic.
 #
-# Edge case: if all valid weights sum to zero (= den == 0 but some cells
-# valid), finish evaluates 0/0 -> NaN.  Legacy proc_wmean had the same
-# undefined behavior (no division check); mkkernel preserves it.
+# Weights summing to zero (den == 0 with cells present, weights of 0 or of
+# both signs) leave the mean undefined: the cell is UNDEF, as for a slab
+# with no valid cell, rather than 0/0 = NaN or x/0 = +-Infinity.
 #
 # 3.0 breaking semantic changes vs legacy (= identical to wsum W.2):
 #   - calling convention positional -> kwargs (axes positional, opts kw)
@@ -7476,6 +7724,7 @@ MkKernel.reduce :wmean,
   reduce:          "(sum += (double) v * (double) w, den += (double) w)",
   reduction_kind:  { sum: :plus, den: :plus },     # SL.1.4b
   finish:          "sum / den",
+  undefined_if:    "den == 0",
   source:          MkKernel::ALL_NUMERIC,
   output:          :f64,
   ruby_scalar:     :rb_float_new,
@@ -8632,7 +8881,11 @@ MkKernel.monfunc :floor,
     object: '(#2) = rb_funcall((#1), rb_intern("floor"), 0);',
   }
 
+# round: the Ruby methods `round(ndigits)` / `round!(ndigits)` are defined in
+# carray_round.c on top of this kernel, so none is registered here.
 MkKernel.monfunc :round,
+  bind: false,
+  bang: false,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#2) = (#1);",
@@ -8952,22 +9205,23 @@ MkKernel.monfunc :rad_pi,
 # Float NaN included), maximum / minimum let it win.  In both flavours, of
 # two zeros the max is +0 and the min is -0 in either order.  C's fmax /
 # fmin leave that choice to the library (glibc and macOS answer
-# differently), so the float branch does not call them.
+# differently), so the float branch does not call them.  The sign of a
+# zero is read with copysign(1, x) rather than signbit(x): GCC does not
+# vectorize signbit on a double, which left the float64 kernels 17x
+# slower than float32.  NaN is handled before, so copysign never sees one.
 MkKernel.binop :pmax,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) > (#2) ? (#1) : (#2);",
-    float:  "(#3) = isnan(#1) ? (#2) : isnan(#2) ? (#1) : ((#1) > (#2) || ((#1) == (#2) && !signbit(#1))) ? (#1) : (#2);",
     object: '(#3) = ca_obj_extremum_replaces((#2), (#1), rb_intern(">")) ? (#2) : (#1);',
-  }
+  }.merge(MkKernel.float_widths("(#3) = isnan(#1) ? (#2) : isnan(#2) ? (#1) : ((#1) > (#2) || ((#1) == (#2) && copysign<f>(1, (#1)) > 0)) ? (#1) : (#2);"))
 
 MkKernel.binop :pmin,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) < (#2) ? (#1) : (#2);",
-    float:  "(#3) = isnan(#1) ? (#2) : isnan(#2) ? (#1) : ((#1) < (#2) || ((#1) == (#2) && signbit(#1))) ? (#1) : (#2);",
     object: '(#3) = ca_obj_extremum_replaces((#2), (#1), rb_intern("<")) ? (#2) : (#1);',
-  }
+  }.merge(MkKernel.float_widths("(#3) = isnan(#1) ? (#2) : isnan(#2) ? (#1) : ((#1) < (#2) || ((#1) == (#2) && copysign<f>(1, (#1)) < 0)) ? (#1) : (#2);"))
 
 # NaN-propagate variants.  Float
 # branch tests both operands for NaN and short-circuits to NaN; non-
@@ -8978,17 +9232,15 @@ MkKernel.binop :maximum,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) > (#2) ? (#1) : (#2);",
-    float:  "(#3) = isnan(#1) ? (#1) : isnan(#2) ? (#2) : ((#1) > (#2) || ((#1) == (#2) && !signbit(#1))) ? (#1) : (#2);",
     object: '(#3) = CA_OBJ_ISNAN(#1) ? (#1) : CA_OBJ_ISNAN(#2) ? (#2) : ca_obj_cmp((#2), (#1)) > 0 ? (#2) : (#1);',
-  }
+  }.merge(MkKernel.float_widths("(#3) = isnan(#1) ? (#1) : isnan(#2) ? (#2) : ((#1) > (#2) || ((#1) == (#2) && copysign<f>(1, (#1)) > 0)) ? (#1) : (#2);"))
 
 MkKernel.binop :minimum,
   source: MkKernel::ALL_NUMERIC + [:object],
   expr:   {
     int:    "(#3) = (#1) < (#2) ? (#1) : (#2);",
-    float:  "(#3) = isnan(#1) ? (#1) : isnan(#2) ? (#2) : ((#1) < (#2) || ((#1) == (#2) && signbit(#1))) ? (#1) : (#2);",
     object: '(#3) = CA_OBJ_ISNAN(#1) ? (#1) : CA_OBJ_ISNAN(#2) ? (#2) : ca_obj_cmp((#2), (#1)) < 0 ? (#2) : (#1);',
-  }
+  }.merge(MkKernel.float_widths("(#3) = isnan(#1) ? (#1) : isnan(#2) ? (#2) : ((#1) < (#2) || ((#1) == (#2) && copysign<f>(1, (#1)) < 0)) ? (#1) : (#2);"))
 
 # + and - work on the parts independently, so one generic expression
 # covers every numeric data_type at any width.

@@ -217,9 +217,10 @@ ca_string_refuse_cell (VALUE v, const char *where)
 }
 
 /* Every cell of `parent` that is not masked is a String.  Under a masked
-   cell of an entity that can be written, a value that is not a String (the
+   cell of a parent that can be written, a value that is not a String (the
    0 an object array starts with) becomes an empty String, so that the cell
-   is still a String once it is unmasked. */
+   is still a String once it is unmasked.  A view is written through its
+   value array, which leaves the mask as it is. */
 static void
 ca_string_check_cells (VALUE parent_val, CArray *parent)
 {
@@ -247,6 +248,7 @@ ca_string_check_cells (VALUE parent_val, CArray *parent)
     volatile VALUE list =
       rb_funcall(rb_funcall(parent_val, rb_intern("flatten"), 0),
                  rb_intern("to_a"), 0);
+    volatile VALUE values = Qnil, raw = Qnil;
     long n = RARRAY_LEN(list), j;
     for (j = 0; j < n; j++) {
       VALUE v = rb_ary_entry(list, j);
@@ -254,6 +256,20 @@ ca_string_check_cells (VALUE parent_val, CArray *parent)
       if ( ! RB_TYPE_P(v, T_STRING) ) {
         snprintf(where, sizeof(where), "cell %ld", j);
         ca_string_refuse_cell(v, where);
+      }
+    }
+    if ( ! ca_is_readonly(parent) ) {
+      for (j = 0; j < n; j++) {
+        if ( rb_ary_entry(list, j) != CA_UNDEF ) continue;
+        if ( NIL_P(values) ) {
+          values = rb_funcall(rb_funcall(parent_val, rb_intern("value"), 0),
+                              rb_intern("flatten"), 0);
+          raw    = rb_funcall(values, rb_intern("to_a"), 0);
+        }
+        if ( ! RB_TYPE_P(rb_ary_entry(raw, j), T_STRING) ) {
+          rb_funcall(values, rb_intern("[]="), 2, LONG2NUM(j),
+                     rb_utf8_str_new("", 0));
+        }
       }
     }
   }

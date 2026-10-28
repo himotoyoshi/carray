@@ -354,8 +354,8 @@ class TestCategoricalIterator < Test::Unit::TestCase
   # either contract fails here. See CLAUDE.md "reduction / order 統計は寄与ゼロで
   # raise しない".
   def test_reduceat_agrees_with_core_per_segment
-    keys = CA_INT32(2000) { |i| (i * 7) % 40 }
-    val  = CA_DOUBLE(2000) { |i| ((i * 131 + 7) % 997).to_f }
+    keys = CArray.int32(2000) { |i| (i * 7) % 40 }
+    val  = CArray.float64(2000) { |i| ((i * 131 + 7) % 997).to_f }
     val[val.lt(30.0)] = UNDEF                          # some masked values
     cat  = keys.categorize(labels: (0..40).to_a)       # label 40 -> empty category
     grp  = val.group_by_category(cat)

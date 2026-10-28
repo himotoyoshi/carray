@@ -17,6 +17,17 @@ all work as on any other array. This document focuses on the parts that are
 *easy to get wrong* — chiefly the three different ways a boolean cell is shown,
 and how masking turns `&` / `|` into three-valued (Kleene) logic.
 
+> **Two spellings of AND / OR, two rules for a masked cell** (§9):
+>
+> | | `&` / `\|` | `.and` / `.or` |
+> |---|---|---|
+> | rule | three-valued (Kleene): the known side settles it when it can | two-valued: a masked side makes the result masked |
+> | `false` AND unknown | `false` | unknown |
+> | `true` OR unknown | `true` | unknown |
+> | `NOT (false AND unknown)` | `true` | unknown |
+>
+> They agree wherever both sides are known.
+
 ---
 
 ## 1. Two representations, one boundary
@@ -321,6 +332,30 @@ a & bF   # => [0, 0, 0, 0]        U&false = false  (mask cleared)
 This holds identically on the **lazy** path (`a.lazy | b`) — eager and lazy give
 the same result.
 
+### `.and` / `.or` are two-valued
+
+`.and` and `.or` are the same operations with the other rule: a masked cell on
+either side makes the result masked, even where the known side alone would
+settle it.
+
+```ruby
+a.and(bF)   # => [U, U, 0, 0]     U.and(false) = U  (the mask stays)
+a.or(bT)    # => [U, U, 1, 1]     U.or(true)   = U
+```
+
+The difference carries through what follows. With `a = [false, true]` and `b`
+unknown, `(a & b).not` is `[true, U]` — the first cell is settled, since
+`false AND anything` is false — while `a.and(b).not` is `[U, U]`.
+
+Choose by the question you ask:
+
+- `&` / `|` when an answer that the known side settles should stand: a day
+  that is not hot is not "hot and humid", whatever its missing humidity was.
+- `.and` / `.or` when an answer should be given only where both inputs are
+  known — the element-wise form of keeping only complete records. On a
+  `CAFrame`, `df.drop_masked("tmax", "rh")` followed by `&` asks the same
+  question for whole rows, and says so by name.
+
 ### `^`, `~`, `not` propagate the mask
 
 XOR and negation cannot be decided from one side, so a masked input stays masked:
@@ -413,8 +448,9 @@ x.ne(0)               # arbitrary numeric → boolean
 | `b.min` returns a boolean | No — `min`/`max`/`sum`/… return **Integer** (`u64`). `all`/`any`/`none` return boolean. |
 | `b + b` stays boolean | No — arithmetic promotes to `int64`. `& | ^` stay boolean. |
 | `CA_INT([2,0]).boolean` | Raises — cast is strict 0/1. Use `x.ne(0)` / `x > 0`. |
-| `inspect` shows `1`/`0` but `b[i]` is `true` | Both are correct; they are different views (§1). |
 | `true & UNDEF` | Silently `true` (Ruby semantics). Do Kleene on arrays, not scalar `UNDEF`. |
+| `a && b` / `a \|\| b` to combine conditions | Ruby's own operators look only at whether `a` exists, so `a && b` is `b` whole: the first condition is dropped without a word. Use `a & b` / `a \| b`. |
+| `&` and `.and` are the same | Not where a cell is masked: `&` / `\|` are three-valued (§9; `false & U` is `false`, so `(false & U).not` is `true`); `.and` / `.or` are two-valued (`false.and(U)` is `U`). They agree wherever both sides are known. |
 | `count(1.0)` on boolean | Raises — only `true`/`false`/`1`/`0` are accepted. |
 
 ## See also

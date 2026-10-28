@@ -58,7 +58,9 @@ class CArray
         raise ArgumentError,
               "coordinate vector #{k} should be 1-D (got #{a.ndim}-D)"
       end
-      a
+      # A CScalar takes no index, so a scalar axis is read as the
+      # one-cell array it stands for.
+      a.is_a?(CScalar) ? a.reshape(1) : a
     end
 
     ndim = axes.size

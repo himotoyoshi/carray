@@ -22,15 +22,21 @@ class TestCAFrameFrozen < Test::Unit::TestCase
 
   def test_in_place_verbs_are_refused
     d = frozen_frame
-    assert_raise(FrozenError) { d.set_index("a") }
-    assert_raise(FrozenError) { d.reset_index }
-    assert_raise(FrozenError) { d.cast("a" => :float64) }
-    assert_raise(FrozenError) { d.promote }
-    assert_raise(FrozenError) { d.parse_to_time("s") }
     assert_raise(FrozenError) { d.fill("a", 0) }
     assert_raise(FrozenError) { d.mask_eq("a", 1) }
     assert_equal :int32, d["a"].data_type
     assert_equal false, d["a"].has_mask?
+  end
+
+  # The verbs that rebind columns or the index give a new frame, so a frozen
+  # frame answers them and stays as it is.
+  def test_rebinding_verbs_give_a_new_frame
+    d = frozen_frame
+    assert_equal :float64, d.cast("a" => :float64).data_types["a"]
+    assert_equal "a", d.set_index("a").axis_name
+    assert_equal :object, d.promote(:object).data_types["a"]
+    assert_equal :int32, d["a"].data_type
+    assert_nil d.index
   end
 
   def test_verbs_that_return_a_new_frame_still_work

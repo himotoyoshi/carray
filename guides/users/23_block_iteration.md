@@ -206,13 +206,13 @@ a.blocks(2, 2).count_not_masked
 #       [ 4, 4 ] ]
 ```
 
-To work on the raw stored values instead, strip the mask first with `.value`:
+If the missing cell should count with a value of its own, give it one first with `strip_mask`:
 
 ```ruby
-a.value.blocks(2, 2).mean       # masked cell treated as its stored value
+a.strip_mask(0.0).blocks(2, 2).mean
+#  => [ [ 1.25, 4.5 ],                  the masked cell counts as 0.0
+#       [ 10.5, 12.5 ] ]
 ```
-
-> **Order statistics and masks.** `median` / `percentile` / `quantile` do not yet accept a masked source; strip the mask with `.value` first if you hit that limitation.
 
 ## `map` — transform each tile, scatter back
 

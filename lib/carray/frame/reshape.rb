@@ -165,8 +165,8 @@ class CAFrame
         # names-check: two rows for one cell of the grid
         first = cell.to_a.tally.find { |_, count| count > 1 }.first
         raise ArgumentError,
-              "pivot: more than one row for #{index}=#{rlab[first / nc].inspect}, " \
-              "#{columns}=#{clab[first % nc].inspect}; pass aggregate: to combine them"
+              "pivot: more than one row for #{index}=#{CAFrame.__send__(:key_text, rlab[first / nc])}, " \
+              "#{columns}=#{CAFrame.__send__(:key_text, clab[first % nc])}; pass aggregate: to combine them"
       end
       source[cell] = CArray.int64(nrow).seq[placed]
     end
@@ -199,6 +199,61 @@ class CAFrame
     groups.public_send(plan[:aggregate])
   end
 
+  # The bits of each integer type and whether it is signed; the significand
+  # bits of each floating type (a complex type by its parts).
+  INTEGER_BITS = {
+    "int8" => [8, true], "int16" => [16, true], "int32" => [32, true], "int64" => [64, true],
+    "uint8" => [8, false], "uint16" => [16, false], "uint32" => [32, false], "uint64" => [64, false],
+  }.freeze
+  SIGNIFICAND_BITS = { "float32" => 24, "float64" => 53, "cmplx64" => 24, "cmplx128" => 53 }.freeze
+  Ractor.make_shareable(INTEGER_BITS)
+  Ractor.make_shareable(SIGNIFICAND_BITS)
+  private_constant :INTEGER_BITS, :SIGNIFICAND_BITS
+
+  # Whether every value of data type +from+ is exactly a value of +to+, for
+  # numbers and booleans: a boolean in any number, an integer in a wide
+  # enough integer (a signed one never in an unsigned) or in a float whose
+  # significand holds it, a float in a wider float or complex.
+  def self.holds_every_value (from, to)
+    f = CArray.data_type_name(from)
+    t = CArray.data_type_name(to)
+    return true if f == t || f == "boolean"
+    if (fbits, fsigned = INTEGER_BITS[f])
+      if (tbits, tsigned = INTEGER_BITS[t])
+        return fsigned ? (tsigned && tbits >= fbits) : (tsigned ? tbits > fbits : tbits >= fbits)
+      end
+      significand = SIGNIFICAND_BITS[t]
+      return !significand.nil? && (fsigned ? fbits - 1 : fbits) <= significand
+    end
+    fs = SIGNIFICAND_BITS[f]
+    ts = SIGNIFICAND_BITS[t]
+    return false if fs.nil? || ts.nil? || ts < fs
+    return !(f.start_with?("cmplx") && t.start_with?("float"))
+  end
+  private_class_method :holds_every_value
+
+  # The types melt may bring number columns to, narrowest first within each
+  # kind, so the first that holds every column's type is the common one.
+  MELT_TYPES = %w[int8 uint8 int16 uint16 int32 uint32 int64 uint64
+                  float32 float64 cmplx64 cmplx128].freeze
+  Ractor.make_shareable(MELT_TYPES)
+  private_constant :MELT_TYPES
+
+  # The common type of number (and boolean) columns of different types: the
+  # one CArray.result_type picks when it holds every value of every column's
+  # type, else the narrowest that does; nil when no type does. Decided by
+  # the types alone, so a value written to a column later is one the common
+  # type holds too.
+  def self.melt_common_type (pieces)
+    types = pieces.map(&:data_type)
+    holds = ->(to) { types.all? { |t| holds_every_value(t, to) } }
+    first = CArray.result_type(*pieces)
+    return first if holds.(first)
+    name = MELT_TYPES.find { |t| holds.(t) }
+    name&.to_sym
+  end
+  private_class_method :melt_common_type
+
   # Gather a wide frame into a long one.  The +value_columns+ are stacked one
   # after another into a single +value_name+ column, a +var_name+ column says
   # which of them each row came from (a text column), and every +id+ column
@@ -212,8 +267,12 @@ class CAFrame
   #
   # The result is a view frame: the value column is +CArray.meld+ of the
   # melted columns and each id column is +CArray.meld+ of itself, so a write
-  # to the result lands in +self+.  The value columns must therefore share
-  # one data type and one trailing shape; cast first when they do not.
+  # to the result lands in +self+.  Number columns of different types meet
+  # at a type that holds every value of each column's type (int8 and uint8
+  # at int16, int32 and float64 at float64), so a value written later reads
+  # back unchanged; a mixture no type holds (int64 and float64) raises, and
+  # so do other mixtures of types. The value columns share one trailing
+  # shape; cast first when they do not.
   #
   # @param id [String, Array<String>] columns repeated alongside each value.
   # @param value_columns [Array<String>, nil] columns to stack; default all
@@ -222,7 +281,7 @@ class CAFrame
   # @param value_name [String] name of the stacked value column.
   # @return [CAFrame] a view frame of +nrow * value_columns.size+ rows.
   # @raise [ArgumentError] when there is nothing to melt, or the value
-  #   columns differ in data type.
+  #   columns differ in data type and no type holds every value of each.
   def melt(id: [], value_columns: nil, var_name: "variable", value_name: "value")
     ids = column_keys(Array(id), "melt")
     ids.each { |name| self[name] }
@@ -235,9 +294,20 @@ class CAFrame
     pieces = vars.map { |name| self[name] }
     types = pieces.map(&:data_type).uniq
     unless types.size == 1
-      raise ArgumentError,
-            "melt: value columns differ in data type (#{vars.zip(pieces.map(&:data_type)).to_h}); " \
-            "cast them to one type first"
+      # Numbers of different types meet at a type that holds every value of
+      # every column's type, each through a view of its own column (as_type),
+      # so the value column still reads and writes the columns it was made
+      # from, whatever is written to them later.
+      common = nil
+      if pieces.all? { |c| !c.face? && (c.numeric? || c.data_type == :boolean) }
+        common = CAFrame.__send__(:melt_common_type, pieces)
+      end
+      if common.nil?
+        raise ArgumentError,
+              "melt: value columns differ in data type (#{vars.zip(pieces.map(&:data_type)).to_h}) " \
+              "and no type holds every value of each; cast them to one type first"
+      end
+      pieces = pieces.map { |c| c.data_type == common ? c : c.as_type(common) }
     end
     shapes = pieces.map { |c| c.shape.drop(1) }.uniq
     unless shapes.size == 1
@@ -259,7 +329,15 @@ class CAFrame
     end
     n = nrow
     out[var_name]   = CArray.string(Array.new(n * k) { |i| vars[i / n] })
-    out[value_name] = CArray.meld(pieces)
+    begin
+      out[value_name] = CArray.meld(pieces)
+    rescue ArgumentError => e
+      raise unless e.message.start_with?("promote_list:")
+      labels = vars.zip(pieces.map { |c| CArray::Inspector.type_label(c) }).to_h
+      raise ArgumentError,
+            "melt: value columns #{labels} do not meet as one column " \
+            "(#{e.message.delete_prefix("promote_list: ")}); cast them to one type first"
+    end
     CAFrame.new(out)
   end
 
@@ -323,7 +401,7 @@ class CAFrame
     end
     if on
       on = column_name_arg(on, "stack_rows")
-      raise KeyError, "stack_rows: no column #{on.inspect}" unless frame.column_names.include?(on)
+      frame.__send__(:refuse_missing_column, on, "stack_rows") unless frame.column_names.include?(on)
       return stack_rows_on(frame, keys, on)
     end
     grouped = frame.group_by(*keys)
@@ -362,7 +440,7 @@ class CAFrame
   # given as a CArray has no name and is written "key").
   private def group_key_desc(keys, label)
     values = keys.size == 1 ? [label] : label
-    keys.zip(values).map { |k, v| "#{k.is_a?(String) ? k : "key"}=#{v.inspect}" }.join(", ")
+    keys.zip(values).map { |k, v| "#{k.is_a?(String) ? k : "key"}=#{CAFrame.__send__(:key_text, v)}" }.join(", ")
   end
 
   private def stack_rows_on(frame, keys, on)

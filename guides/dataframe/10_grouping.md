@@ -4,7 +4,7 @@
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## Grouping rows — `group_by`
@@ -37,18 +37,10 @@ The visitor totals are floating-point numbers. `sum` is a statistic, and is comp
 
 ### Choosing the columns to summarise
 
-Name columns, and you get their results as arrays — one name gives one array, several give an Array of them:
+Name columns, and the result keeps only those, still labelled by the groups:
 
 ```ruby
-by_shop.sum("revenue").to_a.map { |v| v.round(2) }   # => [22994.93, 15292.67, 22113.01]
-visitors, rating = by_shop.mean("visitors", "rating")
-rating.to_a.map { |v| v.round(2) }                   # => [4.2, 4.6, 3.76]
-```
-
-To keep a frame, `select` or `drop` columns before grouping:
-
-```ruby
-p sales.select("shop", "visitors", "revenue").group_by("shop").mean
+p by_shop.mean("visitors", "revenue")
 # #<CAFrame nrow=3 columns=[visitors:float64, revenue:float64] index="shop">
 # shop       visitors      revenue
 # -------  ----------  -----------
@@ -57,12 +49,21 @@ p sales.select("shop", "visitors", "revenue").group_by("shop").mean
 # central     334.375  3159.001429
 ```
 
+For the values alone, as an array in the order of the groups, summarise the column's groups, `by_shop["revenue"]`:
+
+```ruby
+by_shop["revenue"].sum.to_a.map { |v| v.round(2) }   # => [22994.93, 15292.67, 22113.01]
+by_shop["rating"].mean.to_a.map { |v| v.round(2) }   # => [4.2, 4.6, 3.76]
+```
+
 ### The summaries
 
 | summary | gives each group |
 |---|---|
 | `sum` `prod` | the total, the product |
 | `mean` `median` | the average, the middle value |
+| `percentile` | the value a given percentage of the values lie below: `percentile(90, "revenue")`, the percentage first |
+| `quantile` | the five quartiles at once — the smallest, 25%, the median, 75% and the largest — each a column: `"revenue"` gives `"revenue_p0"` … `"revenue_p100"` |
 | `min` `max` | the smallest, the largest |
 | `variance` `stddev` | the spread (sample), and `variancep` `stddevp` (population) |
 | `count` | the number of values present |
@@ -70,6 +71,8 @@ p sales.select("shop", "visitors", "revenue").group_by("shop").mean
 | `first` `last` | the first, the last value present, in row order |
 | `all` `any` | for yes/no columns: whether every, or some, value is `true` |
 | `accumulate` | the total added up as C adds numbers of the column's type: a total larger than the type can hold wraps around (in an `int8` column, 100 + 100 gives −56). It is for when you want exactly that arithmetic; for a total, use `sum` |
+
+`count` counts each column's values present; the number of rows in each group, missing values or not, is `size`: `sales.group_by("shop").size` gives a frame of one column, `"size"`. A key column is not a summary column — `count("shop")` raises and points at `size`.
 
 Each leaves out missing values, as the same summary on a whole column does (chapter 8). Each applies to the columns whose type has it: a date column has a `min`, `max`, `mean` and `median` but no `sum`; a text column a `min` and `max`, by alphabetical order.
 
@@ -90,7 +93,7 @@ p sales.group_by("shop").last
 `min_count: n` gives `UNDEF` for a group with fewer than `n` values present; `fill_value:` puts a value of your choosing where a result is `UNDEF`:
 
 ```ruby
-by_shop.mean("visitors", min_count: 8).to_a   # => [233.75, UNDEF, 334.375]
+by_shop["visitors"].mean(min_count: 8).to_a   # => [233.75, UNDEF, 334.375]
 ```
 
 The south shop has seven counted days, so with `min_count: 8` it has no average. This is the way to refuse a figure that rests on too little data.
@@ -102,7 +105,7 @@ The south shop has seven counted days, so with `min_count: 8` it has no average.
 Several key names group by their combination. Here the shop table (chapter 12) adds each shop's size, and a computed column says whether the day is a weekend:
 
 ```ruby
-shops = CAFrame.from_csv("shops.csv", types: :infer)
+shops = CAFrame.read_csv("shops.csv")
 df = sales.join(shops.select("shop", "size"), on: "shop")
 df["day_type"] = df["date"].weekday.is_in([0, 6]).then_else("weekend", "weekday")
 p df.select("size", "day_type", "visitors", "revenue").group_by("size", "day_type").mean
@@ -125,7 +128,7 @@ A key need not be a column of the frame. Any array with one value per row will d
 traffic = (sales["visitors"] >= 300).then_else("busy", "normal")
 g = sales.group_by(traffic)
 g.labels                                  # => ["normal", "busy"]
-g.mean("rating").to_a.map { |v| v.round(2) }   # => [4.36, 3.77]
+g["rating"].mean.to_a.map { |v| v.round(2) }   # => [4.36, 3.77]
 ```
 
 Busy days have lower ratings. The south shop's day with no visitor count has no traffic value, so it belongs to neither group (below).
@@ -136,7 +139,7 @@ When the frame has an index, its name works as a key, as a column name does:
 
 ```ruby
 by_label = sales.copy.set_index("shop").group_by("shop")
-by_label.max("visitors").to_a   # => [341, 186, 402]
+by_label["visitors"].max.to_a   # => [341, 186, 402]
 ```
 
 ### Rows whose key is missing
@@ -285,12 +288,28 @@ p df.filter { |f| f["shop"].eq("north") }.select("date", "revenue", "change", "r
 
 `g.fill(name, :ffill)` fills missing values from earlier rows of the same group only, never from another group (chapter 8).
 
+## The first rows of each group — `head`, `tail`
+
+`head(n)` gives the first `n` rows of each group, and `tail(n)` the last, in the order the rows have in the table:
+
+```ruby
+p sales.group_by("shop").head(1)
+# #<CAFrame nrow=3 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
+# date        shop     visitors  revenue  rating
+# ----------  -------  --------  -------  ------
+# 2024-03-04  north         182  2121.39     4.2
+# 2024-03-04  south          95  1391.47     4.6
+# 2024-03-04  central       310   3038.0     3.8
+```
+
+For the rows with the largest values instead, `nlargest(n, "x")` sorts within each group (chapter 18).
+
 ## Keeping whole groups — `filter`
 
 `filter` on a grouped frame keeps the rows of the groups that pass a test. The block receives the grouped frame and returns one value per group, built from group summaries:
 
 ```ruby
-well_rated = sales.group_by("shop").filter { |g| g.mean("rating") >= 4.0 }
+well_rated = sales.group_by("shop").filter { |g| g["rating"].mean >= 4.0 }
 well_rated["shop"].to_a.uniq   # => ["north", "south"]
 
 complete = sales.group_by("shop").filter { |g| g["visitors"].count_not_masked.eq(8) }

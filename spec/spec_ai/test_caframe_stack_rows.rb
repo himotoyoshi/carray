@@ -38,7 +38,7 @@ class TestCAFrameStackRows < Test::Unit::TestCase
     back = @long.stack_rows(by: "station").unstack_rows
     assert_equal 6, back.nrow
     assert_equal @long["station"].to_a, back.index.to_a
-    back.reset_index
+    back = back.reset_index
     @long.column_names.each { |c| assert_equal @long[c].to_a, back[c].to_a, c }
   end
 

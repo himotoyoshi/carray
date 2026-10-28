@@ -67,6 +67,40 @@ class TestBinTo < Test::Unit::TestCase
     assert_equal true, v.bin_to(e).is_masked[3]   # 5.0 == top edge -> over
   end
 
+  # Edges that pass for equally spaced but sit slightly off the straight
+  # line: a value just on one side of a stored edge goes to the bin that
+  # edge bounds, as the binary search over the edges would put it.
+  def test_nearly_uniform_edges_bin_by_the_stored_edges
+    [[1e-6, 5e-13], [1e-6, -5e-13], [1e-4, 8e-13]].each do |dx, d|
+      e = (0..10).map { |k| k * dx }
+      e[5] += d
+      vals = [e[5] - d.abs * 0.4, e[5].prev_float, e[5], e[5].next_float,
+              e[5] + d.abs * 0.4]
+      exp = vals.map { |v| e.rindex { |x| x <= v } }
+      edges = CArray.float64(e.size) { |i| e[i] }
+      x = CArray.float64(vals.size) { |i| vals[i] }
+      assert_equal exp, x.bin_to(edges).to_a, "dx=#{dx} d=#{d}"
+      counts = Array.new(10, 0)
+      exp.each { |k| counts[k] += 1 }
+      assert_equal counts, x.histogram1d(edges: edges).counts.to_a, "dx=#{dx} d=#{d}"
+    end
+  end
+
+  # Edges close together far from zero: v - lo rounds at the scale of lo,
+  # which is a large part of a bin, so an edge value can fall a bin low if
+  # the boundary check does not take the edges' magnitude into account.
+  def test_close_edges_far_from_zero
+    [[3.0e8, 0.1, 3], [1.0e6, 1.0e-9, 100], [1.9755089798478122e14, 0.1, 10]].each do |lo, dx, n|
+      e = (0..n).map { |k| lo + k * dx }
+      vals = e.flat_map { |x| [x.prev_float, x, x.next_float] }
+      exp = vals.map { |v| e.count { |x| x <= v } }
+      edges = CArray.float64(e.size) { |i| e[i] }
+      x = CArray.float64(vals.size) { |i| vals[i] }
+      got = x.bin_to(edges, lfill: -1, ufill: n)
+      assert_equal exp.map { |b| b == 0 ? -1 : b - 1 }, got.to_a, "lo=#{lo} dx=#{dx}"
+    end
+  end
+
   def test_edges_validation
     assert_raise(ArgumentError) { CA_FLOAT64([1.0]).bin_to(CA_FLOAT64([0.0])) }       # < 2 edges
     assert_raise(ArgumentError) { CA_FLOAT64([1.0]).bin_to(CArray.float64(2, 2)) }    # not 1-D

@@ -30,6 +30,7 @@ Indexing and building arrays — the everyday operations.
 
 | Doc | Tag | What it is |
 |---|---|---|
+| [NumPy and CArray](topics/NumPyEquivalents.md) | Reference | The CArray name for a NumPy function, with notes where the two behave differently |
 | [Indexer decision tree](topics/Indexer_decision_tree.md) | Reference | Every kind of `[]` index key and how it is classified |
 | [Element access (`elem_*`)](topics/ElementAccess.md) | Guide | The fastest access to one cell when you hold its per-axis index |
 | [Conditional selection](topics/ConditionalSelection.md) | Guide | `then_else` / `replace_where` / `conditional` / `CArray.select` — pick per cell |
@@ -56,7 +57,7 @@ CArray can present.
 | [CAStack](objects/CAStack.md) | Guide | Outer-axis stack view of K uniform parents (`stack` / `meld` / `montage`) |
 | [Lazy](topics/Lazy.md) | Guide | Lazy element-wise views — `.lazy` / `CArray.lazy` / `CArray.fuse` |
 | [CAFrame](topics/CAFrame.md) | Guide | A lightweight DataFrame over named CArray columns |
-| [CAFrameCSV](topics/CAFrameCSV.md) | Guide | Reading and writing CSV with a CAFrame (`from_csv` / `to_csv`) |
+| [CAFrameCSV](topics/CAFrameCSV.md) | Guide | Reading and writing CSV with a CAFrame (`read_csv` / `write_csv`) |
 
 ## Iterators and reductions
 
@@ -125,9 +126,3 @@ Topic docs are filed by kind:
 The read-through **guide books** live outside `docs/`, in
 [`../guides/`](../guides/): `devel/` (Developer's Guide) and `users/`
 (User's Guide), plus `pdf/` for their bundled editions (`rake pdf:all`).
-
-## Notes
-
-- `interop/MEMORYVIEW_FORMAT.md` is a historical record from the v1.x phase and
-  is **superseded** by [MemoryViewFormat](interop/MemoryViewFormat.md); it is
-  kept only for provenance.

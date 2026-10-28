@@ -244,7 +244,8 @@ class CScalar
   # @!group Construction
 
   # @overload initialize(data_type)
-  #   Allocates a CScalar (0-D CArray) of the given `data_type`.
+  #   Allocates a CScalar of the given `data_type`: one cell on one axis
+  #   (`ndim` 1, `shape` `[1]`).
   #   @param data_type [Symbol, Integer, Class, String]
   #   @return [self]
   # @overload initialize(data_type, bytes:)
@@ -266,6 +267,30 @@ class CScalar
   #   @return [self]
   #   @api private
   def initialize_copy(other); end
+
+  # @!endgroup
+
+  # @!group Indexing and slicing
+
+  # @overload []
+  # @overload [](0)
+  #   Reads the scalar's value.  A CScalar is one cell and takes no index:
+  #   `s[]` and `s[0]` both name that cell, and any other index (another
+  #   integer, a range, `nil`, an index array, a symbol) is refused.  A view
+  #   of the scalar, such as `s.refer(s.data_type, [1])`, takes the usual
+  #   indexes.
+  #   @return [Object] the value, or `UNDEF` if it is masked.
+  #   @raise [ArgumentError] when any other index is given.
+  def [](*index); end
+
+  # @overload []=(value)
+  # @overload []=(0, value)
+  #   Writes the scalar's value.  `s[] = v` and `s[0] = v` both write it;
+  #   any other index is refused.
+  #   @param value [Object] the value, or `UNDEF` to mask the cell.
+  #   @return [Object] value
+  #   @raise [ArgumentError] when any other index is given.
+  def []=(*index_and_value); end
 
   # @!endgroup
 

@@ -23,6 +23,7 @@
 # See devel/PROPOSAL_CASOURCE.md §10.1.
 
 require "test/unit"
+require "tempfile"
 require "carray"
 
 ext_dir = File.expand_path("ext_source_smoke", __dir__)
@@ -342,6 +343,171 @@ class TestCASourceSubclass < Test::Unit::TestCase
     src = region_source
     src[nil, [0, 2, 2]] = CA_UINT8([[70, 71], [72, 73], [74, 75]])
     assert_equal [[70, 2, 71, 4], [72, 6, 73, 8], [74, 10, 75, 12]], src.to_a
+  end
+
+end
+
+# The elem_* fast paths read an entity's ptr directly.  A source is an
+# entity that leaves ptr NULL at rest, so they must fall back to the
+# dispatched path rather than read through NULL.
+class TestCASourceElemAccess < Test::Unit::TestCase
+
+  def source
+    CASmokeSource.new(("\0" * 12).dup, [3, 4]).tap { |s| s.seq!(1) }
+  end
+
+  def assert_still_cold (src)
+    assert_false src.attached?
+    assert_equal 0, src.hold_count
+  end
+
+  def test_elem_fetch
+    src = source
+    assert_equal 1, src.elem_fetch(0)
+    assert_equal 7, src.elem_fetch([1, 2])
+    assert_still_cold src
+  end
+
+  def test_elem_store
+    src = source
+    src.elem_store(0, 90)
+    src.elem_store([2, 3], 91)
+    assert_equal [90, 91], [src[0, 0], src[2, 3]]
+    assert_still_cold src
+  end
+
+  def test_elem_incr_and_decr
+    src = source
+    assert_equal 2, src.elem_incr(0)
+    assert_equal 5, src.elem_decr([1, 1])
+    assert_equal [2, 5], [src[0, 0], src[1, 1]]
+    assert_still_cold src
+  end
+
+  def test_elem_min_and_max
+    src = source
+    src.elem_min(0, 0)
+    src.elem_max([2, 3], 99)
+    assert_equal [0, 99], [src[0, 0], src[2, 3]]
+    assert_still_cold src
+  end
+
+  def test_elem_min_with_a_mask
+    src = source
+    src.elem_mask(1)
+    src.elem_min(0, 0)
+    src.elem_min(1, 0)
+    assert_equal 0, src[0, 0]
+    assert_true src.elem_masked?(1)
+    assert_still_cold src
+  end
+
+end
+
+# Other paths that read an entity's ptr in place: a source has none at
+# rest, so they gather or copy instead.
+class TestCASourceInPlaceReads < Test::Unit::TestCase
+
+  def source
+    CASmokeSource.new(("\0" * 12).dup, [3, 4]).tap { |s| s.seq!(1) }
+  end
+
+  def test_dump_binary_to_a_file
+    src = source
+    Tempfile.create("casource") do |f|
+      f.binmode
+      src.dump_binary(f)
+      f.flush
+      assert_equal (1..12).to_a, File.binread(f.path).bytes
+    end
+    assert_false src.attached?
+  end
+
+  # Taking at least the whole axis goes through the stable ordering pass,
+  # which reads the fibers of an entity in place.
+  def test_nlargest_and_nsmallest_over_the_whole_last_axis
+    src = source
+    assert_equal [[4, 3, 2, 1], [8, 7, 6, 5], [12, 11, 10, 9]],
+                 src.nlargest(4, axis: 1).to_a
+    assert_equal [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]],
+                 src.nsmallest(5, axis: 1).to_a
+    assert_false src.attached?
+  end
+
+end
+
+# A window that yields to a block is closed by an ensure, which Ruby does
+# not run for a suspended Fiber that is collected (an Enumerator stopped
+# with #next and dropped).  The hold it took has to come back once the
+# Fiber is gone, or the source stays published and stops checking its
+# backend.
+class TestCASourceAbandonedWindows < Test::Unit::TestCase
+
+  def source
+    CASmokeSource.new(("\0" * 12).dup, [3, 4]).tap { |s| s.seq!(1) }
+  end
+
+  # The abandoning happens in a method of its own, so that nothing on this
+  # frame still refers to the Enumerator or the Fiber.
+  # Ruby 3.2 keeps the Fiber of the last Enumerator stopped with #next
+  # until another is stopped, so one of nothing is stopped after it.
+  def abandon_enumerator (src, name, **kw)
+    e = src.enum_for(name, **kw)
+    e.next
+    [0].each.next
+    nil
+  end
+
+  def abandon_fiber (&block)
+    Fiber.new(&block).resume
+    nil
+  end
+
+  # Finalizers run after the collection that frees the Fiber, so give them
+  # a few chances.
+  def assert_hold_returns (src)
+    10.times do
+      break if src.hold_count == 0
+      GC.start(full_mark: true, immediate_sweep: true)
+      sleep 0.01
+    end
+    assert_equal 0, src.hold_count
+    assert_false src.attached?
+  end
+
+  def test_each_slab_enumerator
+    src = source
+    abandon_enumerator(src, :each_slab, axis: 1)
+    assert_hold_returns src
+  end
+
+  def test_map_bang_enumerator
+    src = source
+    abandon_enumerator(src, :map!)
+    assert_hold_returns src
+  end
+
+  def test_map_slab_and_reduce_slab_in_a_fiber
+    src = source
+    abandon_fiber { src.map_slab(axis: 1) { |s| Fiber.yield; s } }
+    abandon_fiber { src.reduce_slab(axis: 1) { |s| Fiber.yield; s.sum } }
+    assert_hold_returns src
+  end
+
+  def test_convert_in_a_fiber
+    src = source
+    abandon_fiber { src.convert(CA_INT32) { |v| Fiber.yield; v } }
+    assert_hold_returns src
+  end
+
+  def test_windows_that_close_normally_are_unchanged
+    src = source
+    src.each_slab(axis: 1) { }
+    src.each_slab(axis: 1) { break }
+    src.map! { |v| v + 1 }
+    assert_raise(RuntimeError) { src.map! { raise "stop" } }
+    assert_equal 0, src.hold_count
+    assert_equal [2, 3, 4, 5], src[0, nil].to_a
   end
 
 end

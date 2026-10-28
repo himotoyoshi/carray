@@ -899,8 +899,9 @@ ca_topk_stable (VALUE self, VALUE picked, long axis, int desc)
     for (k = 0; k < ndim; k++) inv[NUM2INT(perm[k])] = INT2FIX(k);
   }
   /* An entity whose fibers already lie along its last axis is read in
-     place; anything else is copied into that layout. */
-  if ( last && ca_is_entity(cv) ) {
+     place; anything else is copied into that layout, as is an entity
+     that leaves ptr NULL at rest (a CASource). */
+  if ( last && ca_is_entity(cv) && cv->ptr ) {
     vals = key;
     ca_update_mask(cv);
   }

@@ -685,11 +685,11 @@ class CArray
 
 end
 
-# Marshal of a view and a scalar: the {CArray#marshal_dump} payload, loaded
-# back by the class method rather than into an empty instance.  A view comes
-# back as a plain array (a copy owns its memory, as #copy gives); a scalar
-# comes back a scalar.  A wrap is refused below.
-[CAView, CAWrap, CScalar].each do |klass|
+# Marshal of a view, a mask and a scalar: the {CArray#marshal_dump} payload,
+# loaded back by the class method rather than into an empty instance.  A
+# view, a wrap and a mask come back as a plain array (a copy owns its
+# memory, as #copy gives); a scalar comes back a scalar.
+[CAView, CAWrap, CScalar, CArrayMask, CAObjectMask].each do |klass|
   klass.class_eval do
     # A Face other than a record is refused: the payload would carry its
     # storage without what makes it the Face (a unit, labels), and load
@@ -703,28 +703,45 @@ end
               "dump its values with to_type(:object)" +
               (storage ? ", or its storage, which ##{storage} gives" : "")
       end
+      return dump_payload unless data_type == CA_OBJECT
+      # An object view dumps its cells by a nested Marshal.dump, which does
+      # not know the objects the outer dump has written.  A cell holding the
+      # view again (directly or through other views) would dump it without
+      # end, so dumping the same view from inside its own dump is refused,
+      # as reading such a cell is.
+      refuse_reentry("Marshal.dump") { dump_payload }
+    end
+
+    private
+
+    # Marshal writes the instance variables of an object that has _dump
+    # after the String it returns, unless the String has instance
+    # variables of its own.  A view keeps its parent in one, so a view of
+    # a large array would carry the whole parent, and a parent holding the
+    # view in a cell would be an object cycle.  The String is given one of
+    # its own, which _load ignores.
+    def dump_payload
       Marshal.dump(CArray.instance_method(:marshal_dump).bind_call(self))
+             .tap { |s| s.instance_variable_set(:@carray_payload, true) }
     end
   end
 end
 
-class CAView
+[CAView, CArrayMask, CAObjectMask].each do |klass|
   # @return [CArray] the plain array a {#_dump} string describes.
-  def self._load (str)
-    CArray.send(:array_from_marshal_payload, Marshal.load(str))
+  # Defined with def, not define_singleton_method: a block's method keeps
+  # the block's self and cannot be called from another Ractor.
+  klass.singleton_class.class_eval do
+    def _load (str)
+      CArray.send(:array_from_marshal_payload, Marshal.load(str))
+    end
   end
 end
 
 class CAWrap
-  # A wrap borrows memory, which Marshal cannot carry to another process;
-  # Ruby would also try to write the objects that keep the borrowed memory
-  # alive.  Its copy owns its memory and marshals.
-  def _dump (_level)
-    raise TypeError,
-          "Marshal cannot carry a #{self.class}: it borrows its memory; " \
-          "dump .copy instead"
-  end
-
+  # A wrap borrows its memory, which Marshal cannot carry to another
+  # process: {#_dump} above writes its values, and the load gives a plain
+  # array that owns a copy of them, as it does for a view of the wrap.
   def self._load (str)
     CArray.send(:array_from_marshal_payload, Marshal.load(str))
   end

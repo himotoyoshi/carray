@@ -4,7 +4,7 @@ A frame is a set of named arrays. You have seen that `df["name"]` gives a column
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## A column is an array
@@ -76,6 +76,26 @@ nums["visitors"][0]   # => 200.0
 ```
 
 For a matrix of its own, `copy` the result: `df.to_ca.copy`.
+
+### Across the columns of each row
+
+The matrix turns a computation across columns into a summary along its second axis, with everything a CArray summary takes. Its result has one value per row, so it goes straight back into the frame. With the shops side by side, the day's total over the three:
+
+```ruby
+wide = sales.pivot(index: "date", columns: "shop", values: "revenue")
+wide["total"] = wide.select(:numeric).to_ca.sum(axis: 1, min_count: 3)
+p wide.head(3)
+# #<CAFrame nrow=3 columns=[central:float64, north:float64, south:float64, total:float64] index="date">
+# date        central    north    south    total
+# ----------  -------  -------  -------  -------
+# 2024-03-04   3038.0  2121.39  1391.47  6550.86
+# 2024-03-05  2717.54   2235.1  1632.61  6585.25
+# 2024-03-06  3078.67  2285.32   1479.8  6843.79
+```
+
+`select(:numeric)` takes the number columns, so the matrix has one type. `min_count: 3` leaves the total missing on a day when a shop's figure is missing.
+
+For the same computation down each of several columns, with the frame's names and index kept, use `transform` (chapter 7): `wide.transform(:numeric) { |col| col / col.max }`.
 
 ## An array as a frame — `to_frame`
 

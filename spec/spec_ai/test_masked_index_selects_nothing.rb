@@ -286,4 +286,80 @@ class TestMaskedIndexSelectsNothing < Test::Unit::TestCase
     i = CA_INT64([2, 0]); i[1] = UNDEF
     assert_raise(ArgumentError) { x.value[i] }
   end
+
+  # The whole view is read axis by axis (no address goes back to an
+  # index), and a region of it as one batch of addresses: both answer as
+  # a cell-by-cell read does, for a hole on an outer and on the inner axis.
+  def test_whole_view_and_region_reads
+    a = CArray.float64(5, 4).seq!
+    a[2, 1] = UNDEF
+    i0 = CA_INT64([4, 0, 2, 3]); i0[1] = UNDEF
+    i1 = CA_INT64([3, 1, 0]);    i1[2] = UNDEF
+    [[i0, nil], [i0, 1..2], [i0, i1], [1..3, i1]].each do |k0, k1|
+      v = a[k0, k1]
+      rows = k0.is_a?(Range) ? k0.to_a : k0.to_a.map { |x| UNDEF.equal?(x) ? nil : x }
+      cols = k1.nil? ? (0...4).to_a : k1.is_a?(Range) ? k1.to_a : k1.to_a.map { |x| UNDEF.equal?(x) ? nil : x }
+      want = rows.map { |r| cols.map { |c| (r.nil? || c.nil?) ? UNDEF : a[r, c] } }
+      assert_equal want, v.copy.to_a
+      assert_equal want.map { |row| row.map { |x| UNDEF.equal?(x) } }, v.is_masked.to_a
+      assert_equal want[1..].map { |row| row[1..] }, v[1..-1, 1..-1].copy.to_a
+      assert_equal want.flatten.reject { |x| UNDEF.equal?(x) }.sum, v.sum
+    end
+  end
+
+  # A parent that can not take a mask refuses the write of a true into the
+  # mask of a view with holes; the write leaves no trace, read whole or by
+  # the cell.
+  class NoMaskSource < CAObject
+    def initialize
+      @d = [0.0, 10.0, 20.0, 30.0]
+      super(CA_FLOAT64, [4])
+    end
+
+    private
+
+    def fetch_addr (addr)
+      @d[addr]
+    end
+
+    def store_addr (addr, value)
+      @d[addr] = value
+    end
+  end
+
+  def test_a_refused_mask_write_leaves_no_trace
+    i = CA_INT64([0, 1, 2, 3]); i[3] = UNDEF
+    g = NoMaskSource.new[i]
+    m = g.mask
+    assert_raise(TypeError) { m[0] = true }
+    assert_equal [false, false, false, true], m.to_a
+    assert_equal false, m[0]
+    assert_equal [0.0, 10.0, 20.0, UNDEF], g.copy.to_a
+  end
+
+  # A parent's transfer may write on the address list it is given; the
+  # grid's own indices are not that list.
+  class ScribblingSource < CAObject
+    def initialize
+      super(CA_FLOAT64, [5])
+    end
+
+    private
+
+    def fetch_addr (addr)
+      addr * 10.0
+    end
+
+    def copy_addrs (addrs, data)
+      addrs.to_a.each_with_index { |a, k| data[k] = a * 10.0 }
+      addrs[] = 4
+    end
+  end
+
+  def test_a_parent_writing_on_the_addresses_leaves_the_grid_alone
+    i = CA_INT64([0, 1, 2, 3]); i[3] = UNDEF
+    g = ScribblingSource.new[i]
+    assert_equal [0.0, 10.0, 20.0, UNDEF], g.copy.to_a
+    assert_equal [0.0, 10.0, 20.0, UNDEF], g.copy.to_a
+  end
 end

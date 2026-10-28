@@ -122,7 +122,7 @@ class CArray
   #   @return [CArray] view with reduced `ndim`.
   def drop_axis
     if ndim == 1
-      return self[]
+      return scalar? ? self : self[]
     else
       newdim = shape.reject{|x| x == 1 }
       newdim = [1] if newdim.empty?     # every axis has size 1: keep one

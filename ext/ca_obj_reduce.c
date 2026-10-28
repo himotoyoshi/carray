@@ -127,7 +127,11 @@ ca_reduce_func_clone (void *ap)
 /* addr-list logic lives in xfer_addrs: GET = OR-reduce `count` adjacent parent
    bytes per addr; PUT = broadcast the value to all `count` parent cells.
    fetch_addr/store_addr forward (n==1), xfer_index = index2addr then xfer_addrs.
-   All forward to a single home; the legacy slots are removed at step 5. */
+
+   A true PUT onto a cell that already reads true leaves the parent cells
+   as they are.  Every sync of a view over a CAReduce sends back its cells,
+   changed or not; broadcasting an unchanged true would mask the parent
+   cells under it that were not masked. */
 static void
 ca_reduce_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
                            void *data, int dir)
@@ -147,6 +151,16 @@ ca_reduce_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
       *(char*)cell = v;
     }
     else {
+      if ( *(char *) cell ) {
+        char q, v = 0;
+        for (i=0; i<ca->count; i++) {
+          ca_fetch_addr(ca->parent, addr*ca->count + i + ca->offset, &q);
+          if ( q ) { v = 1; break; }
+        }
+        if ( v ) {
+          continue;
+        }
+      }
       for (i=0; i<ca->count; i++) {
         ca_store_addr(ca->parent, addr*ca->count + i + ca->offset, cell);
       }

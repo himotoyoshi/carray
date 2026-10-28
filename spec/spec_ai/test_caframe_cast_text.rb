@@ -64,7 +64,7 @@ class TestCAFrameCastText < Test::Unit::TestCase
 
   def test_a_column_casts_to_categorical
     df = CAFrame.new("s" => CArray.string(["x", "y", "x", ""]), "n" => CA_INT32([3, 1, 3, 1]))
-    df.cast("s" => :categorical, "n" => :categorical)
+    df = df.cast("s" => :categorical, "n" => :categorical)
     assert_kind_of CACategorical, df["s"]
     assert_equal ["x", "y", ""], df["s"].labels
     assert_equal ["x", "y", "x", ""], df["s"].to_a
@@ -73,11 +73,11 @@ class TestCAFrameCastText < Test::Unit::TestCase
     assert_same cat, df.cast("s", :categorical)["s"]
   end
 
-  # from_csv reads a types: column as CAConstString, which categorizes
+  # read_csv reads a types: column as CAConstString, which categorizes
   # without a String made per cell; the labels are those to_string gives.
   def test_from_csv_reads_a_column_as_categorical
     csv = "a,b\nx,1\n,2\ny,3\nx,4\n\"\",5\n"
-    df = CAFrame.from_csv(StringIO.new(csv), types: { "a" => :categorical, "b" => :int64 })
+    df = CAFrame.from_csv(csv, types: { "a" => :categorical, "b" => :int64 })
     assert_kind_of CACategorical, df["a"]
     assert_equal ["x", "y", ""], df["a"].labels
     assert_equal ["x", UNDEF, "y", "x", ""], df["a"].to_a

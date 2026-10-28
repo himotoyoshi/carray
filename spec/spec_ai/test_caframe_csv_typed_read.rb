@@ -2,11 +2,12 @@ require "test/unit"
 require "stringio"
 require "carray"
 
-# from_csv with types: reads the body into CAConstString columns (no String
+# read_csv with types: reads the body into CAConstString columns (no String
 # per cell), casts from those, and hands the columns left as text back as
 # CAString. It must give the frame the other two ways give: the Ruby
-# tokenizer, and reading without types: and casting afterwards -- the same
-# names, column classes, data types, values and masks, or the same error.
+# tokenizer, and reading without types: and casting afterwards (a column with
+# a blank value left as text) -- the same names, column classes, data types,
+# values and masks, or the same error.
 class TestCAFrameCSVTypedRead < Test::Unit::TestCase
 
   CELLS = ["1", "-2", "007", "3.5", "-0.0", "1e3", "nan", "inf", "", "\"\"", "\"4\"",
@@ -24,7 +25,7 @@ class TestCAFrameCSVTypedRead < Test::Unit::TestCase
   end
 
   def read(text, **opts)
-    describe(CAFrame.from_csv(StringIO.new(text), **opts))
+    describe(CAFrame.from_csv(text, types: :string, **opts))
   rescue StandardError => e
     [:error, e.class, e.message]
   end
@@ -39,10 +40,18 @@ class TestCAFrameCSVTypedRead < Test::Unit::TestCase
     readers.zip(saved) { |m, f| CArray.define_singleton_method(m, f) }
   end
 
-  # The same input read without types:, cast afterwards.
+  # The same input read without types:, cast afterwards. A column the reader
+  # left a blank value in (a quoted "", spaces) is not inferred: the read
+  # knows such a cell was written as a value, the frame in memory does not.
   def read_then_cast(text, types)
-    df = CAFrame.from_csv(StringIO.new(text))
-    df.cast(types == :infer ? df.infer_types : types)
+    df = CAFrame.from_csv(text, types: :string)
+    if types == :infer
+      blank = df.column_names.select do |name|
+        df[name].to_a.any? { |v| v.is_a?(String) && v.strip.empty? }
+      end
+      types = df.infer_types.reject { |name, _| blank.include?(name) }
+    end
+    df = df.cast(types)
     describe(df)
   rescue StandardError => e
     [:error, e.class, e.message]
@@ -94,13 +103,13 @@ class TestCAFrameCSVTypedRead < Test::Unit::TestCase
     text = "a,b,c\n1,2.5,x\n,\"3\",\"y,\"\"z\"\"\"\n4,bad,\n"
     types = { "a" => :int32, "b" => :float64 }
     assert_equal read_then_cast(text, types), read(text, types: types)
-    df = CAFrame.from_csv(StringIO.new(text), types: types)
+    df = CAFrame.from_csv(text, types: types)
     assert_equal [:int32, :float64, :object], df.columns.map(&:data_type)
     assert_kind_of CAString, df["c"]
   end
 
   def test_a_text_column_writes_through_to_a_view_of_the_frame
-    df = CAFrame.from_csv(StringIO.new("a,b\n1, x \n2,y\n3,z\n"), types: { "a" => :int64 })
+    df = CAFrame.from_csv("a,b\n1, x \n2,y\n3,z\n", types: { "a" => :int64 })
     sub = df.filter { |r| r["a"] > 1 }
     df["b"][1] = "W"
     df["b"].strip!

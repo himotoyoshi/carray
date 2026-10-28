@@ -174,4 +174,13 @@ class TestIterFiberPair < Test::Unit::TestCase
     end
   end
 
+  # The PAIR forms read two sources; a WRITE flag is refused before either
+  # walk opens, so neither array is changed.
+  def test_a_write_flag_is_refused
+    a = CArray.float64(3, 4).seq!
+    err = assert_raise(RuntimeError) { IterPair.write_pair(a, a[], 1) }
+    assert_match(/flag combination/, err.message)
+    assert_equal CArray.float64(3, 4).seq!.to_a, a.to_a
+  end
+
 end

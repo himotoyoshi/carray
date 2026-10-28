@@ -152,7 +152,7 @@ class TestCAFrameFill < Test::Unit::TestCase
     big = 2**53
     df = CAFrame.new({ "t" => CA_FLOAT64([0.0, 1.0, 3.0]), "x" => CA_INT64([big + 1, 0, big + 5]) })
     df["x"][1] = UNDEF
-    df.set_index("t")
+    df = df.set_index("t")
     df.fill("x", :linear)
     assert_equal [big + 1, big + 2, big + 5], df["x"].to_a
   end
@@ -172,5 +172,127 @@ class TestCAFrameFillLinearIndexType < Test::Unit::TestCase
                      index: CA_OBJECT(["a", "b"]))
     e = assert_raise(ArgumentError) { df.fill("w", :linear) }
     assert_match(/unmask\(method: :linear, axis: 0\)/, e.message)
+  end
+end
+
+# An index out of order (stations stacked one after another, each in time
+# order) is read as one series in the order of its values, as windows(on:)
+# and join_asof read it.
+class TestCAFrameFillLinearUnorderedIndex < Test::Unit::TestCase
+  def stacked_stations
+    t = CArray.time(["2024-01-01 00:00", "2024-01-01 00:30", "2024-01-01 01:00",
+                     "2024-01-01 01:30", "2024-01-01 03:00",
+                     "2024-01-01 00:00", "2024-01-01 01:00", "2024-01-01 02:00"])
+    v = CA_FLOAT64([1.5, 1.8, 0.0, 2.4, 3.0, 5.0, 5.5, 6.1])
+    v[2] = UNDEF
+    return CAFrame.new({ "temp" => v }, axis_name: "time", index: t)
+  end
+
+  def test_stacked_stations_interpolate_as_one_series_in_time
+    df = stacked_stations
+    df.fill("temp", :linear)
+    # 01:00 of the first station takes the other station's reading at 01:00
+    assert_equal([1.5, 1.8, 5.5, 2.4, 3.0, 5.0, 5.5, 6.1], df["temp"].to_a)
+  end
+
+  def test_one_station_at_a_time_keeps_them_apart
+    df = stacked_stations
+    first = df.filter { |f| CArray.boolean(f.nrow) { |i| i < 5 } }
+    first.fill("temp", :linear)
+    assert_in_delta(2.1, df["temp"][2], 1e-12)
+  end
+
+  def test_interior_cells_of_an_unordered_index
+    v = CA_FLOAT64([3.0, 0, 0, 0.0])
+    v[1] = UNDEF
+    v[2] = UNDEF
+    df = CAFrame.new({ "x" => CA_FLOAT64([3, 1, 2, 0]), "v" => v }).set_index("x")
+    df.fill("v", :linear)
+    assert_equal([3.0, 1.0, 2.0, 0.0], df["v"].to_a)
+  end
+
+  def test_exterior_of_an_unordered_index_stays_masked
+    v = CA_FLOAT64([3.0, 0, 0, 2.0])
+    v[1] = UNDEF
+    v[2] = UNDEF
+    df = CAFrame.new({ "x" => CA_FLOAT64([3, 0, 1, 2]), "v" => v }).set_index("x")
+    df.fill("v", :linear)
+    assert_equal([3.0, UNDEF, UNDEF, 2.0], df["v"].to_a)
+  end
+
+  def test_time_column_against_an_unordered_index
+    t = CArray.time(["2024-01-01 03:00", "2024-01-01 01:00",
+                     "2024-01-01 02:00", "2024-01-01 00:00"])
+    t[1] = UNDEF
+    df = CAFrame.new("x" => CA_FLOAT64([3, 1, 2, 0]), "when" => t).set_index("x")
+    df.fill("when", :linear)
+    assert_equal(CArray.time("2024-01-01 01:00").parent.to_a,
+                 [df["when"].parent[1]])
+    assert_equal(0, df["when"].count_masked)
+  end
+
+  def test_present_cells_sharing_an_index_value_keep_their_row_order
+    v = CA_FLOAT64([0.0, 10.0, 20.0, 40.0, 0.0])
+    v[4] = UNDEF
+    # x = 1 holds 10 then 20; the masked cell at x = 1.5 lies between the
+    # later of them and x = 2
+    df = CAFrame.new({ "x" => CA_FLOAT64([0, 1, 1, 2, 1.5]), "v" => v }).set_index("x")
+    df.fill("v", :linear)
+    assert_equal([0.0, 10.0, 20.0, 40.0, 30.0], df["v"].to_a)
+  end
+end
+
+# A row whose index is masked (or NaN) has no place on the line: it is not
+# interpolated between, and it is not filled.
+class TestCAFrameFillLinearIndexWithoutPlace < Test::Unit::TestCase
+  def test_a_masked_index_leaves_its_row_masked
+    idx = CA_INT64([0, 1, 2])
+    idx[1] = UNDEF
+    df = CAFrame.new({ "x" => CA_FLOAT64([100, UNDEF, 300]) }, axis_name: "t", index: idx)
+    df.fill("x", :linear)
+    assert_equal [100.0, UNDEF, 300.0], df["x"].to_a
+  end
+
+  def test_a_present_row_with_a_masked_index_is_kept_and_not_used
+    idx = CA_INT64([0, 1, 2, 3])
+    idx[1] = UNDEF
+    df = CAFrame.new({ "x" => CA_FLOAT64([100, 150, UNDEF, 300]) }, axis_name: "t", index: idx)
+    df.fill("x", :linear)
+    assert_equal [100.0, 150.0], df["x"].to_a[0, 2]
+    assert_in_delta 233.333333, df["x"][2], 1e-6
+  end
+
+  def test_a_nan_index
+    df = CAFrame.new({ "x" => CA_FLOAT64([100, UNDEF, 300, 400]) }, axis_name: "t",
+                     index: CA_FLOAT64([0, 1, Float::NAN, 3]))
+    df.fill("x", :linear)
+    assert_equal [100.0, 200.0, 300.0, 400.0], df["x"].to_a
+  end
+
+  def test_a_time_column_keeps_a_present_row_with_a_masked_index
+    t = CArray.time(%w[2024-01-01 2024-01-02 2024-01-03 2024-01-05])
+    t[1] = UNDEF
+    x = CA_FLOAT64([0, 1, 2, 3])
+    x[0] = UNDEF
+    df = CAFrame.new("x" => x, "when" => t).set_index("x")
+    df.fill("when", :linear)
+    assert_equal "2024-01-01", df["when"][0].to_s
+    assert_equal UNDEF, df["when"][1]          # x = 1 lies outside 2..3
+  end
+
+  def test_within_groups
+    idx = CA_INT64([0, 0, 1, 1, 2, 2])
+    idx[3] = UNDEF
+    df = CAFrame.new({ "g" => CA_OBJECT(%w[a b a b a b]), "x" => CA_FLOAT64([0, 100, UNDEF, UNDEF, 20, 300]) },
+                     axis_name: "t", index: idx)
+    df.group_by("g").fill("x", :linear)
+    assert_equal [0.0, 100.0, 10.0, UNDEF, 20.0, 300.0], df["x"].to_a
+  end
+
+  # A constant a column cannot hold names the column.
+  def test_a_constant_the_column_cannot_take_names_it
+    df = CAFrame.new("g" => CA_INT32([1, UNDEF]))
+    e = assert_raise(FloatDomainError) { df.fill("g", Float::NAN) }
+    assert_match(/\Afill: column "g" \(int32\) cannot take NaN/, e.message)
   end
 end

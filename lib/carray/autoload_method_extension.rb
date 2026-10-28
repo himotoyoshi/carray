@@ -31,9 +31,11 @@ module AutoloadMethodExtension
 
   private
 
-  def autoload_define (target, name, library, original_spec)
-    library       = Ractor.make_shareable(library.to_s.dup)
-    original_spec = Ractor.make_shareable(original_spec.to_s.dup)
+  def autoload_define (target, name, library_given, spec_given)
+    # The stub reads these two, so they are never assigned again: Ruby 4.0
+    # refuses to make a Proc shareable when a variable it reads may be.
+    library       = Ractor.make_shareable(library_given.to_s.dup)
+    original_spec = Ractor.make_shareable(spec_given.to_s.dup)
     # Shareable, so the stub answers in any Ractor.  Only the main Ractor
     # loads the library: Ractors that require at the same time can deadlock
     # (Ruby 3.4), so another Ractor is told what to load there instead.

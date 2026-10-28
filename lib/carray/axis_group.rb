@@ -409,7 +409,7 @@ class CAGroupIterator
     # except for a band folded into the count, which has no route but the
     # engine.
     def core_counts? (kw)
-      return false if CArray.__fast_paths_enabled__
+      return false if CArray.__fast_paths_enabled__(:axis_group_count_kernel)
       has_group, fused = AxisGroup.parse_axis(kw[:axis])
       has_group && fused.empty?
     end
@@ -494,8 +494,8 @@ class CAGroupIterator
   # Weighted mean = Sum(v*w) / Sum(w), both over the combined present-set. The
   # `value*0 + weights` denominator carries the same value|weight mask, so its
   # group-sum is Sum(w) over exactly the cells value*weight used. An empty group
-  # (no present pair) is UNDEF (matching CArray#wmean); a present group whose
-  # weights sum to zero yields NaN/Inf (core's 0/0).
+  # (no present pair) and a group whose weights sum to zero are UNDEF, as
+  # CArray#wmean leaves both.
   def wmean (weights, **kw)
     has_group, = AxisGroup.parse_axis(kw[:axis])
     return value.wmean(weights, **kw) unless has_group
@@ -508,7 +508,7 @@ class CAGroupIterator
     # No present pair is UNDEF (an empty group), set on the denominator so
     # the division never meets an empty group's 0 / 0.
     den  = den.copy
-    den[cnt.eq(0)] = UNDEF
+    den[cnt.eq(0).or(den.eq(0))] = UNDEF
     # min_count: counts the present pairs, as the core wmean does.
     pairs = regroup(prod, spec)
     pairs.finish_reduction(:wmean, kw, num / den)
@@ -863,7 +863,7 @@ class CAGroupIterator
   # pass. With the fast paths off it goes through the band loop instead,
   # which then has one position.
   def whole_block? (bslots)
-    bslots.empty? && CArray.__fast_paths_enabled__
+    bslots.empty? && CArray.__fast_paths_enabled__(:axis_group_whole_block)
   end
 
   # Iterate the band positions of a band-preserving grouping. For each band
@@ -923,9 +923,15 @@ class CAGroupIterator
   # paths off (a development build run with CARRAY_GENERAL_PATH set) each
   # group is reduced by the core instead -- except a band folded into the
   # statistic (+fused+), which has no route but the kernel.
+  #
+  # With no band axis the core groups the whole value in one pass, which is
+  # faster than the kernel for every group size (1M cells on an M2 Max: 7.5
+  # to 12.5 ms against 15 ms), so the kernel is taken only with a band.
   def kernel_reads_value? (fused = [])
     return false if value.face? || ! (value.integer? || value.float?)
-    CArray.__fast_paths_enabled__ || ! fused.empty?
+    return true unless fused.empty?
+    return false if spec.slot_meta.none? { |m| m[:kind] == :band }
+    CArray.__fast_paths_enabled__(:axis_group_reduce_kernel)
   end
 
   # Whether the scan kernel gives the core's answer: it reads an integer,
@@ -933,7 +939,7 @@ class CAGroupIterator
   # float64 (an object in object), cummax / cummin in the payload's data type
   # and cumcount in int64 -- not the core's answer for a boolean's running sum.
   def kernel_scans? (op)
-    return false unless CArray.__fast_paths_enabled__
+    return false unless CArray.__fast_paths_enabled__(:axis_group_scan_kernel)
     return false if value.face? || value.complex?
     return true if value.object? || op == :cumcount
     core = CAIterator.core_probe(value).public_send(op).data_type

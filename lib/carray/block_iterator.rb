@@ -74,6 +74,14 @@ class CABlockIterator < CAIterator
             "blocks: expected #{source.ndim} tile sizes (one per axis), " \
             "got #{blocks.size}"
     end
+    # Each tile is read through a view with one axis per tile position and
+    # one per cell in the tile, twice the source's rank.
+    if 2 * source.ndim > CA_RANK_MAX
+      raise ArgumentError,
+            "blocks: a rank #{source.ndim} array would need #{2 * source.ndim} " \
+            "axes for its tiles, beyond the limit of #{CA_RANK_MAX}; " \
+            "blocks works up to rank #{CA_RANK_MAX / 2}"
+    end
 
     @sndim   = source.ndim
     offsets  = Array.new(@sndim, 0)
@@ -93,7 +101,9 @@ class CABlockIterator < CAIterator
     # Absorb a leading offset with a zero-copy pre-slice, so the tile geometry
     # below always starts at index 0.
     @source =
-      if offsets.all?(&:zero?)
+      if source.scalar?
+        source.flatten        # a CScalar takes no index; its one-cell view does
+      elsif offsets.all?(&:zero?)
         source
       else
         source[*offsets.map { |o| o..-1 }]
@@ -517,7 +527,7 @@ class CABlockIterator < CAIterator
       sview = saddr[*strip_ranges].block_view(*tiles)
       grid  = (0...@sndim).map { |i| vview.shape[i] }
       cells = tiles.inject(1) { |p, t| p * t }
-      order = vview.copy.reshape(*(grid + [cells])).sort_addr(axis: @sndim)
+      order = vview.copy.reshape(*(grid + [cells])).sort_index(axis: @sndim)
       src_sorted = sview.reshape(*(grid + [cells])).take_along_axis(order, axis: @sndim)
       out[*strip_ranges].block_view(*tiles)[] = src_sorted.reshape(*(grid + tiles))
     end
@@ -817,7 +827,7 @@ class CABlockIterator < CAIterator
   # A padded entity whose interior holds the source and whose partial-edge
   # margin is masked (UNDEF), sized to exactly cover the ceil tile grid.  When
   # the source already divides evenly this is the source itself (no copy), so
-  # the tiles alias it.  Memoised; feeds the iterate escape hatches.
+  # the tiles alias it.  Kept for one call; feeds the iterate escape hatches.
   def padded_source
     @padded_source ||= begin
       pshape = @sndim.times.map { |i| @shape[i] * @sizes[i] }
@@ -845,6 +855,8 @@ class CABlockIterator < CAIterator
     def lag (*args, **keywords) = @source.__send__(:carry_attrs, super)
     def strip_mask (**keywords) = @source.__send__(:carry_attrs, super)
   end)
+
+  read_source_per_call :@padded_source, :@tile_grid_view
 end
 
 
@@ -857,6 +869,8 @@ class CArray
   #   first for "valid" tiling.
   #   @param blocks [Array<Integer, Range>] per-axis tile sizes (or ranges).
   #   @return [CABlockIterator]
+  #   @raise [ArgumentError] when `self` has a rank above `CA_RANK_MAX / 2`
+  #     (8): the tiles are read through a view of twice the rank.
   def blocks (*blocks)
     CABlockIterator.new(self, *blocks)
   end

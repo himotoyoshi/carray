@@ -3,22 +3,32 @@
 class CAFrame
 
   # The one rule of a frame-wide verb over the frame's columns -- the group
-  # reductions and transforms, the windowed reductions -- kept in one place
-  # so that every verb answers in the same shape:
+  # reductions and transforms, the windowed reductions, and the frame's own
+  # reductions and running values -- kept in one place: which columns a verb
+  # computes, and what a named column without the operation does.
   #
-  # - given names, the CArray (one) or the Array of them (several), as
-  #   +df[...]+ returns columns; a named column whose type has no such
-  #   operation is refused with CArray::DataTypeError, as the core refuses
-  #   it, since it was asked for;
+  # - given names, those columns, as the CArray (one) or a Hash of name to
+  #   result (several); a named column whose type has no such operation is
+  #   refused with CArray::DataTypeError, as the core refuses it, since it
+  #   was asked for;
   # - given none, every column whose type has it, the key columns left out,
-  #   as a Hash of name to result that the caller makes a frame of.
+  #   as a Hash of name to result.
+  #
+  # The caller decides the shape of the answer from these: a verb whose
+  # answers lie on the frame's rows (a transform, a window at the rows,
+  # +keep_rows:+) hands one named column back as it is, as +df[name]+
+  # returns it, and several as a frame on the frame's rows, while a verb
+  # with one row per group, per point or for the whole frame makes a frame
+  # of them, labelled by its rows.
   #
   # Whether a type has the operation is asked of the core on two copies of
   # the column's first row (two blank cells of its kind when it has no
   # rows), so the answer is about the type and not the data: a refusal
   # there means the operation does not apply, while an error in the verb
-  # itself is left to raise. An N-D column (each row a profile) is asked,
-  # and computed, along the rows.
+  # itself is left to raise. An object column is the exception: its type
+  # says nothing of what it holds, so one with no present value is left out
+  # of a verb run over every column. An N-D column (each row a profile) is
+  # asked, and computed, along the rows.
   module ColumnVerbs
 
     private
@@ -29,13 +39,17 @@ class CAFrame
         @frame.column_names.each do |name|
           next if key_names.include?(name)
           col = @frame[name]
+          next if valueless_object_column?(col, verb, args)
           next unless column_has?(col, verb, args, keywords)
           cols[name] = yield(col, name)
         end
         return cols
       end
-      results = names.map do |name|
-        key = @frame.__send__(:column_key, name, verb)
+      # A column named twice would be one result column twice over.
+      keys = CAFrame.__send__(:refuse_repeated_names,
+                              names.map { |name| @frame.__send__(:column_key, name, verb) }, verb)
+      results = keys.map do |key|
+        name = key
         col = @frame[key]
         unless column_has?(col, verb, args, keywords)
           raise CArray::DataTypeError,
@@ -44,7 +58,17 @@ class CAFrame
         end
         yield(col, key)
       end
-      results.size == 1 ? results.first : results
+      results.size == 1 ? results.first : keys.zip(results).to_h
+    end
+
+    # An object column with no present cell says nothing of what it holds,
+    # so a verb run over every column leaves it out, as select leaves it out
+    # of every kind; counting the present cells applies to any column.
+    def valueless_object_column? (col, verb, args)
+      return false if col.face? || col.data_type != CA_OBJECT
+      return false if %i[count_not_masked count_masked].include?(verb)
+      return false if verb == :count && args.empty?
+      col.count_not_masked == 0
     end
 
     # count with no value counts the present cells, which every type has;
@@ -54,10 +78,17 @@ class CAFrame
       verb = :count_not_masked if verb == :count && args.empty?
       # Two cells: one cell does not reach what combines two (a String's
       # median interpolates, its sum adds), and an empty column answers
-      # with the identity without asking the type at all.
+      # with the identity without asking the type at all. The row is the
+      # first that holds a present cell, so a masked first row does not
+      # answer with the identity for a column whose values have none.
       tail = [nil] * (col.ndim - 1)
+      row = 0
+      if col.has_mask? && col.elements > 0
+        present = col.is_not_masked.flatten.where
+        row = present[0] / (col.elements / col.shape[0]) if present.elements > 0
+      end
       probe = if col.shape[0] > 0
-                col[CA_INT64([0, 0]), *tail]
+                col[CA_INT64([row, row]), *tail]
               else
                 col.resize(2, *col.shape[1..])
               end

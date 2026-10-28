@@ -1084,6 +1084,53 @@ ca_lazy_settle_scalar (VALUE operand, int was_scalar)
   return operand;
 }
 
+typedef struct {
+  ca_lazy_eval_fn       eval;
+  void                 *node;
+  const ca_lazy_req_t  *req;
+  void                 *data;
+  int                   dir;
+} ca_lazy_eval_args_t;
+
+static VALUE
+ca_lazy_eval_body (VALUE varg)
+{
+  ca_lazy_eval_args_t *a = (ca_lazy_eval_args_t *) varg;
+  a->eval(a->node, a->req, a->data, a->dir);
+  /* A cell computed as an expression over a node being evaluated (x + 1
+     for a cell holding x) stays lazy, and comparing or computing it later
+     evaluates the node again without end: refuse it here, while the node
+     is still recorded. */
+  if ( a->dir == CA_XFER_GET && ca_is_object_type((CArray *) a->node) ) {
+    ca_refuse_cells_reaching_evaluation(a->req->n, (const VALUE *) a->data);
+  }
+  return Qnil;
+}
+
+void
+ca_lazy_eval_recorded (void *node, int n, CArray **ops,
+                       int nchain, CArray **chain, ca_lazy_eval_fn eval,
+                       const ca_lazy_req_t *req, void *data, int dir)
+{
+  CArray **rec;
+  ca_lazy_eval_args_t a;
+  int i, m = 0, object = ca_is_object_type((CArray *) node);
+  for ( i = 0; i < n; i++ ) {
+    if ( ops[i] && ca_is_object_type(ops[i]) ) object = 1;
+  }
+  if ( ! object ) {
+    eval(node, req, data, dir);
+    return;
+  }
+  rec = ALLOCA_N(CArray *, nchain + 1);
+  rec[m++] = (CArray *) node;
+  for ( i = 0; i < nchain; i++ ) {
+    rec[m++] = chain[i];
+  }
+  a.eval = eval; a.node = node; a.req = req; a.data = data; a.dir = dir;
+  ca_computing_run_nodes(m, rec, ca_lazy_eval_body, (VALUE) &a);
+}
+
 void
 ca_lazy_req_pull (void *operand, const ca_lazy_req_t *req, void *buf, int dir)
 {

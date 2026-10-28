@@ -202,7 +202,9 @@ ca_mv_record_member_spec (VALUE info, char *out, size_t outlen,
    a member it has no item for (see above), or members that overlap or come
    out of offset order (a union).
 
-   The result is frozen and cached on the data_class.  It is an ordinary
+   The result is frozen and cached on the data_class.  Only the main Ractor
+   may set an instance variable on a class, so another Ractor builds the
+   format each time until the main one has cached it.  It is an ordinary
    String that compaction can move, so a view takes a copy of its bytes
    rather than its pointer (ca_mv_get). */
 static VALUE
@@ -245,11 +247,11 @@ ca_mv_struct_format_for_data_class (VALUE data_class)
   }
 
   rb_obj_freeze(buf);
-  rb_ivar_set(data_class, iv, buf);
+  if (ca_in_main_ractor()) rb_ivar_set(data_class, iv, buf);
   return buf;
 
 unsupported:
-  rb_ivar_set(data_class, iv, Qfalse);
+  if (ca_in_main_ractor()) rb_ivar_set(data_class, iv, Qfalse);
   return Qnil;
 }
 
@@ -900,7 +902,7 @@ ca_mv_release (VALUE obj, rb_memory_view_t *view)
 }
 
 /* ---------------- importer ----------------
-   Two-tier API mirroring numo-narray-memoryview:
+   Two-tier API:
 
      CArray.from_memory_view(obj)  -> CArray  (copy, independent buffer)
      CArray.wrap_memory_view(obj)  -> CAWrap  (zero-copy, shared memory)
@@ -1621,9 +1623,13 @@ rb_ca_s_memory_view_reject_reason (VALUE klass, VALUE obj)
                              "producer cannot express yet (nested struct, "
                              "CArray template, :fixlen, or :object)");
     }
-    return rb_sprintf("element data_type (%d) is not exportable via memory_view "
-                      "(CA_FIXLEN without data_class / CA_OBJECT)",
-                      ca->data_type);
+    if (ca->data_type == CA_OBJECT) {
+      return rb_str_new_cstr("an object array holds Ruby objects, not bytes "
+                             "a consumer can read; convert it with to_type "
+                             "first");
+    }
+    return rb_sprintf("data_type %s has no MemoryView format",
+                      ca_type_name[ca->data_type]);
   }
   if (ca_has_mask(ca)) {
     return rb_str_new_cstr("array has a mask; use arr.value (mask-ignoring CARefer) "

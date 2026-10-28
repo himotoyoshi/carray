@@ -10,15 +10,16 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | give columns particular types as the frame is built | `CAFrame.new(..., types:)` | 2 |
 | see an array I have as a table, without copying | `array.to_frame` | 2, 15 |
 | read parsed JSON (an Array of objects) | `CAFrame.from_records` | 2 |
-| read a CSV file | `CAFrame.from_csv` | 3 |
-| read CSV text I already have in a String | `CAFrame.from_csv(StringIO.new(text))` | 3 |
-| have the column types worked out | `from_csv(types: :infer)` | 3 |
+| read a CSV file | `CAFrame.read_csv` | 3 |
+| read CSV text I already have in a String | `CAFrame.from_csv(text)` | 3 |
+| have the column types worked out | `read_csv` (by default) | 3 |
+| read every column as text | `read_csv(types: :string)` | 3 |
 | see the types that would be chosen, before converting | `infer_types` | 3 |
-| treat `-1`, `NA` or another code as missing | `from_csv(missing: [...])` | 3 |
-| be told about cells that cannot be read | `from_csv(on_error: :warn)` | 3 |
-| read a file with title or unit lines | `from_csv(header:, data:, attrs:)` | 3 |
-| read only some columns of a wide file | `from_csv(columns:)` | 3 |
-| read a file that is not UTF-8 | `from_csv(encoding: "Windows-1252:UTF-8")` | 3 |
+| treat `-1`, `NA` or another code as missing | `read_csv(missing: [...])` | 3 |
+| be told about cells that cannot be read | `read_csv(on_error: :warn)` | 3 |
+| read a file with title or unit lines | `read_csv(header:, data:, attrs:)` | 3 |
+| read only some columns of a wide file | `read_csv(columns:)` | 3 |
+| read a file that is not UTF-8 | `read_csv(encoding: "Windows-1252:UTF-8")` | 3 |
 
 ## Looking
 
@@ -27,6 +28,10 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | glance at a frame | `p df` | 4 |
 | print every row | `puts df`, `to_table(rows: nil)` | 4 |
 | check every column's type, missing count and range | `describe` | 4 |
+| pick the columns of a kind (numbers, text, times) | `select(:numeric)`, `drop(:string)` | 5 |
+| one summary of every column, as one row | `df.mean`, `df.max("x", "y")` | 4 |
+| running totals or ranks down the rows | `df.cumsum("x")`, `df.order("x")` | 15 |
+| the same computation on several columns | `transform("a".."c") { \|col\| ... }` | 7 |
 | know the size, the column names, the types | `nrow`, `column_names`, `data_types` | 4 |
 | see the distinct values of a column and their counts | `value_counts` | 4 |
 | find the rows with missing values | `df[df["x"].is_masked]` | 4, 8 |
@@ -52,11 +57,13 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | keep rows whose value is one of several | `is_in([...])` | 6 |
 | keep rows in a range of values or dates | `is_between(lo, hi)` | 6 |
 | keep weekend days | `f["date"].weekday.is_in([0, 6])` | 6 |
-| keep rows whose condition could not be decided | `filter(keep_masked: true)` | 6 |
+| keep rows whose condition could not be decided | `filter(c \| c.is_masked)` | 6 |
 | check rows against rules | `verify` | 6 |
 | sort by columns | `sort_by_key` | 6 |
 | sort by a computed value | `sort_by { \|f\| ... }` | 6 |
-| take the top few rows | `sort_by_key(..., order: :desc).head(n)` | 6 |
+| take the top few rows | `nlargest(n, "x")`, `nsmallest` | 6 |
+| take the top few rows of each group | `group_by(...).nlargest(n, "x")` | 10, 18 |
+| take the first rows of each group | `group_by(...).head(n)`, `.tail(n)` | 10 |
 | remove repeated rows | `df[df.is_duplicate.not]` | 6 |
 | keep groups that pass a test | `group_by(...).filter { \|g\| ... }` | 10 |
 
@@ -90,9 +97,11 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | fill gaps with the previous or next value | `fill(name, :ffill)`, `:bfill` | 8 |
 | fill gaps within each group only | `group_by(...).fill(...)` | 8, 10 |
 | interpolate gaps along dates | `set_index` then `fill(name, :linear)` | 9, 11 |
+| interpolate gaps within each group | `group_by(...).fill(name, :linear)` | 10, 11 |
 | keep the original and add a filled copy | `strip_mask` | 8 |
+| a filled copy of the whole frame | `df.strip_mask(value)`, `df.strip_mask(method: ...)` | 8 |
 | refuse a summary with too few values | `min_count:` | 8, 10 |
-| drop rows with missing values | `filter { \|f\| f["x"].is_not_masked }` | 8 |
+| drop rows with missing values | `drop_masked`, `drop_masked("x", "y")` | 8 |
 
 ## Labels
 
@@ -107,10 +116,12 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | I want to… | use | chapter |
 |---|---|---|
 | a total or average per group | `group_by(...).sum`, `.mean` | 10 |
+| the number of rows in each group | `group_by(...).size` | 10 |
+| how often each value occurs, as a table | `value_counts("x")` | 4 |
 | different summaries for different columns, with names | `aggregate` | 10 |
 | a result per group that uses several columns | `aggregate { \|g\| ... }` | 10 |
 | any Ruby computation on each group's rows | `table { \|g\| ... }` | 10 |
-| a percentile or median per group | `grouped["x"].percentile(90)` | 10 |
+| a percentile or median per group | `grouped.percentile(90, "x")` | 10 |
 | a group's figure on every row | `keep_rows: true` | 10 |
 | each value's share of its group | `x / grouped.sum("x", keep_rows: true)` | 10 |
 | the previous value within each group | `lag` | 10, 11 |
@@ -138,6 +149,7 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 | I want to… | use | chapter |
 |---|---|---|
 | add columns from another table by a key | `join` | 12 |
+| join on a key named differently in the other table | `join(other, on: { "shop" => "code" })` | 12 |
 | keep only rows found in both tables | `join(how: :inner)` | 12 |
 | keep rows whose key is, or is not, in another table | `join(how: :semi)`, `:anti` | 12 |
 | make sure every member of a list has a row | `align` | 12 |
@@ -176,7 +188,8 @@ The chapters are arranged in the order an analysis usually goes. This index is a
 
 | I want to… | use | chapter |
 |---|---|---|
-| a CSV file | `to_csv(path)` | 17 |
-| CSV with another separator or a missing-value code | `to_csv(sep:, missing:)` | 17 |
+| a CSV file | `write_csv(path)` | 17 |
+| CSV with another separator or a missing-value code | `write_csv(sep:, missing:)` | 17 |
 | JSON | `JSON.generate(df.to_records)` | 17 |
+| rows as Ruby Arrays | `df.to_a` | 17 |
 | a text table for a report | `to_table(rows: nil)` | 17 |

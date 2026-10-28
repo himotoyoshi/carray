@@ -264,6 +264,14 @@ a & bF   #  => [ 0, 0, 0, 0 ]     U&false = false  (mask cleared)
 
 This holds identically on the lazy path (`a.lazy | b`) — eager and lazy give the same result.
 
+### `.and` / `.or` are two-valued
+
+`.and` and `.or` are the same operations with the other rule: a masked cell on either side makes the result masked, even where the known side alone would settle it. So `false.and(U)` is `U`, where `false & U` is `false`; and `true.or(U)` is `U`, where `true | U` is `true`. Wherever both sides are known, the two spellings agree.
+
+The difference carries through what follows. With `a = [false, true]` and `b` unknown, `(a & b).not` is `[true, U]` — the first cell is settled, since `false AND anything` is false — while `a.and(b).not` is `[U, U]`.
+
+Choose by the question you ask: `&` / `|` when an answer the known side settles should stand (a day that is not hot is not "hot and humid", whatever its missing humidity), `.and` / `.or` when an answer should be given only where both inputs are known — the element-wise form of keeping only complete records.
+
 ### `^`, `~`, `not` propagate the mask
 
 XOR and negation cannot be decided from one side, so a masked input stays masked:
@@ -344,6 +352,8 @@ x.ne(0)               #  arbitrary numeric → boolean
 | `CA_INT([2, 0]).boolean` | Raises — the cast is strict 0/1. Use `x.ne(0)` / `x > 0`. |
 | `inspect` shows `1`/`0` but `b[i]` is `true` | Both are correct; the printed glyphs are cosmetic. |
 | `true & UNDEF` | Silently `true` (Ruby semantics). Do Kleene on arrays, not scalar `UNDEF`. |
+| `a && b` / `a \|\| b` to combine conditions | Ruby's own operators look only at whether `a` exists, so `a && b` is `b` whole: the first condition is dropped without a word. Use `a & b` / `a \| b`. |
+| `&` and `.and` are the same | Not where a cell is masked: `&` / `\|` are three-valued (`false & U` is `false`, so `(false & U).not` is `true`); `.and` / `.or` are two-valued (`false.and(U)` is `U`). They agree wherever both sides are known. |
 | `count(1.0)` on boolean | Raises — only `true` / `false` / `1` / `0` are accepted. |
 
 ## Quick recap
@@ -353,4 +363,4 @@ x.ne(0)               #  arbitrary numeric → boolean
 - The logical family stays boolean (`& | ^ ~ not`, comparisons, `all` / `any` / `none`); everything numeric promotes — arithmetic to `int64`, value reductions to integer, ratio reductions to float.
 - `(x > 0).sum` counts, `(x > 0).mean` gives a proportion, `(x > 0) * w` zeroes the failing cells.
 - Casting numeric → boolean is strict (0/1 only); express intent with a comparison instead.
-- Masked `&` / `|` are Kleene: the known side decides when it can (`U | true → true`, `U & false → false`); `^` and `not` propagate the mask; `all` / `any` / `none` skip masked cells by default and fold in Kleene style with `skip_masked: false`.
+- Masked `&` / `|` are Kleene: the known side decides when it can (`U | true → true`, `U & false → false`); `.and` / `.or` are the two-valued forms, masked whenever either side is; `^` and `not` propagate the mask; `all` / `any` / `none` skip masked cells by default and fold in Kleene style with `skip_masked: false`.

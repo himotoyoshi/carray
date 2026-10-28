@@ -63,9 +63,8 @@ functions, `CA_SIZE` for indices, `CA_BOOLEAN` for masks, and the like).
 
 ## Accepting a MemoryView producer as an operand
 
-An MV producer (Numo + `numo/narray/memoryview`, Arrow, PyCall numpy, etc. —
-note that bare Numo is *not* an MV) can be an operand at all three coercion
-entry points:
+An MV producer (Arrow, PyCall numpy, etc.) can be an operand at all three
+coercion entry points:
 
 | Entry point | How the MV is handled |
 |---|---|

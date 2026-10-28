@@ -13,7 +13,7 @@
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## Columns
@@ -63,6 +63,16 @@ p sales.select("shop", "revenue").head(3)
 ```
 
 `select` with one name still gives a frame. The frame `select` returns holds the same column arrays as `sales`, so writing through it reaches `sales` (chapter 16).
+
+Columns can also be picked by a Range of names, a pattern, or their kind:
+
+```ruby
+sales.select("visitors".."rating").column_names   # => ["visitors", "revenue", "rating"]
+sales.select(/^r/).column_names                   # => ["revenue", "rating"]
+sales.select(:numeric).column_names               # => ["visitors", "revenue", "rating"]
+```
+
+The kinds are `:numeric`, `:float`, `:integer`, `:complex`, `:string`, `:time`, `:timedelta` and `:categorical`, or a data type such as `:float64`. `:float` picks every float column, whatever its width; `:float64` picks only that width. `drop` takes the same.
 
 To leave out a few columns instead of naming the ones to keep, use `drop`:
 

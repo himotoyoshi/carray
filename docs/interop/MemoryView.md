@@ -360,6 +360,10 @@ end
 
 The lift is not limited to the mask. Inside the block every write is allowed, values included, and a value write lands in the producer's buffer — memory the producer declared immutable. When the producer is a frozen CArray, that array's values change. Keep the block to what the lift is for.
 
+The recipe needs a contiguous producer. A strided producer is wrapped as a view over a read-only byte array, and the lift does not reach that parent, so `v.mask =` still raises; `mask:` is not accepted for strided data either. A read-only strided producer has no zero-copy way to carry a mask: use `.copy`.
+
+A mask borrowed with `wrap_memory_view(data, mask: m)` from a read-only producer stays read-only inside the block: the lift leaves a mask that is itself a wrap alone, so its bits are never written.
+
 Discipline (not enforced by the primitive): use it only on **entities** (CArray / CScalar / CAWrap). On a view of a read-only parent, `mask=` allocates the parent's mask as a side effect (the view chain's `create_mask` recursion) and mutates a buffer the producer declared immutable, breaking the view-inherits-readonly guarantee for sibling views. The author is responsible for knowing that this is safe in their context.
 
 **If you are writing user code, not a library / bridge / class**, `.copy` is the correct answer, not this primitive.
@@ -372,11 +376,31 @@ Discipline (not enforced by the primitive): use it only on **entities** (CArray 
 
 The view is acquired and released inside the call. The result is fully independent; the source object may be freed immediately.
 
+### An export of a buffer lent for a call
+
+Two arrays hold memory only for the length of one call: the `data` a CAObject hook such as `copy_data` receives, and a slab `each_slab` yields along a non-contiguous axis. Both export, so you can hand them to another library inside the hook or the block. The export is valid until the hook returns or the iteration ends; kept longer, it points at memory the array no longer owns. Export `.copy` to keep the bytes.
+
 ### `wrap_memory_view`
 
 The view is held alive by a small TypedData "holder" attached to the returned wrap via an internal ivar. When the wrap is garbage-collected, the holder's `dfree` calls `rb_memory_view_release`. The source object is anchored by a second ivar so it cannot be GC'd while the wrap is alive.
 
 Multiple borrowers of the same source coexist safely (Ruby's MemoryView machinery refcounts the source).
+
+#### A producer that locks while it is borrowed
+
+Some producers restrict what can be done to their memory while a MemoryView of it is out. `IO::Buffer`, which exports a MemoryView from Ruby 4.1, is one: it stays locked until every view is released, and `resize`, `free` and (for a mapped file) unmapping raise `IO::Buffer::LockedError` in the meantime. Reading into the buffer is not blocked, so a loop that reads into the same buffer and processes it through the wrap keeps working.
+
+The wrap gives the view back when it is garbage-collected, not when your code stops using it. Views made from the wrap (`w.reshape(...)`, `w[0..9]`, a slab kept from `each_slab`) keep it reachable as well. So after the last use, the buffer can stay locked until the next collection:
+
+```ruby
+buf = IO::Buffer.map(File.open("data.bin"), nil, 0, IO::Buffer::READONLY)
+w   = CArray::Float32.wrap_memory_view(buf).reshape(nt, ny, nx)
+# ... use w ...
+w = nil
+buf.free          # may raise IO::Buffer::LockedError: w is not collected yet
+```
+
+To release the producer at a known point, either import with `from_memory_view` (a copy, which holds no view at all), or drop every reference to the wrap and its views and run `GC.start` before you resize or free the buffer. CArray has no method that gives the view back early: an array whose memory can disappear while views of it are alive would make many ordinary operations unsafe.
 
 ---
 

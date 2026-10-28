@@ -249,7 +249,7 @@ ca_object_lend_restore (VALUE varg)
   return Qnil;
 }
 
-static void
+static VALUE
 ca_object_call_lending (CAObject *ca, void *ptr, const char *mid)
 {
   ca_object_lend_t l;
@@ -272,7 +272,7 @@ ca_object_call_lending (CAObject *ca, void *ptr, const char *mid)
   data->ptr = (char *) ptr;
   rb_ensure(ca_object_lend_body, (VALUE) &l,
             ca_object_lend_restore, (VALUE) &l);
-  RB_GC_GUARD(l.wrap);
+  return l.wrap;
 }
 
 /* Calls recv.mid(*argv), where some of argv are transient wraps of a
@@ -889,11 +889,10 @@ ca_object_mask_bytes (CAObject *ca)
   return (boolean8_t *) ca->mask->ptr;
 }
 
-/* Whether the mask of this object comes from its mask_* hooks.  Then a
-   fetched value says nothing about the mask: a cell the hooks mask stays
-   masked when its value is read, and only a fetcher answering UNDEF marks
-   one.  Without hooks the mask is what the fetches have answered, so a
-   value fetched clears the cell. */
+/* Whether the mask of this object comes from its mask_* hooks.  A fetched
+   value says nothing about the mask either way: a cell masked -- by the
+   hooks, or without hooks by a write of UNDEF or `mask =` -- stays masked
+   when its value is read, and only a fetcher answering UNDEF marks one. */
 static int
 ca_object_mask_from_hooks (CAObject *ca)
 {
@@ -922,9 +921,6 @@ ca_object_xfer_addr_one (CAObject *ca, ca_size_t addr, void *ptr, int dir)
         }
       }
       else {
-        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
-          ca_object_mask_bytes(ca)[addr] = 0;
-        }
         rb_ca_obj2ptr(ca->self, rval, ptr);
       }
     }
@@ -944,9 +940,6 @@ ca_object_xfer_addr_one (CAObject *ca, ca_size_t addr, void *ptr, int dir)
         }
       }
       else {
-        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
-          ca_object_mask_bytes(ca)[ca_index2addr(ca->mask, idx)] = 0;
-        }
         rb_ca_obj2ptr(ca->self, rval, ptr);
       }
     }
@@ -990,9 +983,6 @@ ca_object_xfer_index_one (CAObject *ca, ca_size_t *idx, void *ptr, int dir)
         }
       }
       else {
-        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
-          ca_object_mask_bytes(ca)[ca_index2addr(ca->mask, idx)] = 0;
-        }
         rb_ca_obj2ptr(ca->self, rval, ptr);
       }
     }
@@ -1008,9 +998,6 @@ ca_object_xfer_index_one (CAObject *ca, ca_size_t *idx, void *ptr, int dir)
         }
       }
       else {
-        if ( ! ca_object_mask_from_hooks(ca) && ca_has_mask(ca) ) {
-          ca_object_mask_bytes(ca)[addr] = 0;
-        }
         rb_ca_obj2ptr(ca->self, rval, ptr);
       }
     }
@@ -1094,6 +1081,34 @@ ca_object_copy_bare_restore (VALUE arg)
   return Qnil;
 }
 
+/* copy_data of an object with no mask yet: an UNDEF the call writes lands
+   on a mask of the wrap's own, which the wrap takes away with it.  The
+   cells it marks are masked on the object, as a fetcher answering UNDEF
+   masks its cell, so a bulk read and a cell read give the same answer. */
+static void
+ca_object_adopt_undef_cells (CAObject *ca, VALUE wrap)
+{
+  CArray *wm = ((CArray *) DATA_PTR(wrap))->mask;
+  boolean8_t *bits;
+  ca_size_t i, n;
+  if ( wm == NULL || wm->ptr == NULL ) {
+    return;
+  }
+  n = ( wm->elements < ca->elements ) ? wm->elements : ca->elements;
+  for ( i = 0; i < n && ! wm->ptr[i]; i++ ) {
+    ;
+  }
+  if ( i == n ) {
+    return;
+  }
+  ca_create_mask(ca);
+  bits = ca_object_mask_bytes(ca);
+  for ( ; i < n; i++ ) {
+    if ( wm->ptr[i] ) bits[i] = 1;
+  }
+  RB_GC_GUARD(wrap);
+}
+
 static void
 ca_object_dispatch_copy (CAObject *ca, void *ptr)
 {
@@ -1108,7 +1123,26 @@ ca_object_dispatch_copy (CAObject *ca, void *ptr)
                 ca_object_copy_bare_restore, (VALUE) &c);
       return;
     }
-    ca_object_call_lending(ca, ptr, "copy_data");
+    if ( ca->data->mask != NULL ) {
+      /* Without hooks the mask is the object's own: a store of the values
+         into the array copy_data is handed (d[] = src) would clear it, so
+         the cells it held masked are masked again after the call, beside
+         those the call marks. */
+      CArray *m = ca->data->mask;
+      volatile VALUE vkept = rb_str_new(m->ptr, (long) m->elements);
+      const char *kept;
+      ca_size_t i;
+      ca_object_call_lending(ca, ptr, "copy_data");
+      kept = RSTRING_PTR(vkept);
+      m = ca->data->mask;
+      for ( i = 0; m != NULL && i < m->elements; i++ ) {
+        if ( kept[i] ) m->ptr[i] = 1;
+      }
+      RB_GC_GUARD(vkept);
+      return;
+    }
+    ca_object_adopt_undef_cells(ca,
+                                ca_object_call_lending(ca, ptr, "copy_data"));
   }
   else {
     ca_size_t addr;

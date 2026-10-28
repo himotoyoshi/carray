@@ -110,7 +110,7 @@ ca_binop_func_t ca_binop_ipower[CA_NTYPE] = {
 
 static void
 ca_ipower_float32_t (ca_size_t n, boolean8_t *m,
-                     char *ptr1, int32_t ipow, char *ptr2)
+                     char *ptr1, int64_t ipow, char *ptr2)
 {
   ca_u_float32_t *p1 = (ca_u_float32_t *) ptr1, *p2 = (ca_u_float32_t *) ptr2;
   if ( m ) {
@@ -125,7 +125,7 @@ ca_ipower_float32_t (ca_size_t n, boolean8_t *m,
 
 static void
 ca_ipower_float64_t (ca_size_t n, boolean8_t *m,
-                     char *ptr1, int32_t ipow, char *ptr2)
+                     char *ptr1, int64_t ipow, char *ptr2)
 {
   ca_u_float64_t *p1 = (ca_u_float64_t *) ptr1, *p2 = (ca_u_float64_t *) ptr2;
   if ( m ) {
@@ -140,7 +140,7 @@ ca_ipower_float64_t (ca_size_t n, boolean8_t *m,
 
 static void
 ca_ipower_cmplx64_t (ca_size_t n, boolean8_t *m,
-                     char *ptr1, int32_t ipow, char *ptr2)
+                     char *ptr1, int64_t ipow, char *ptr2)
 {
   ca_u_cmplx64_t *p1 = (ca_u_cmplx64_t *) ptr1, *p2 = (ca_u_cmplx64_t *) ptr2;
   if ( m ) {
@@ -155,7 +155,7 @@ ca_ipower_cmplx64_t (ca_size_t n, boolean8_t *m,
 
 static void
 ca_ipower_cmplx128_t (ca_size_t n, boolean8_t *m,
-                     char *ptr1, int32_t ipow, char *ptr2)
+                     char *ptr1, int64_t ipow, char *ptr2)
 {
   ca_u_cmplx128_t *p1 = (ca_u_cmplx128_t *) ptr1, *p2 = (ca_u_cmplx128_t *) ptr2;
   if ( m ) {
@@ -195,10 +195,10 @@ rb_ca_ipower (VALUE self, VALUE other)
 {
   volatile VALUE obj;
   CArray *ca, *co;
-  int32_t ipow;
+  int64_t ipow;
   boolean8_t *m;
 
-  ipow = NUM2INT(other);
+  ipow = NUM2LL(other);
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 
@@ -252,10 +252,10 @@ static VALUE
 rb_ca_ipower_bang (VALUE self, VALUE other)
 {
   CArray *ca;
-  int32_t ipow;
+  int64_t ipow;
   boolean8_t *m;
 
-  ipow = NUM2INT(other);
+  ipow = NUM2LL(other);
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
 

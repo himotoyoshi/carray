@@ -1,0 +1,192 @@
+# spec_ai/test_caremap_whole_view.rb
+#
+# Reading or writing a whole CARemap (`copy`, `to_a`, a reduction,
+# `v[] = x`) reads the index array's cells as the parent addresses.  The
+# answers match the cell-by-cell reads for every element width.  The index
+# array a view reads (`mapper`) is read-only; its cells are still checked
+# on every transfer, so one changed past the flag (the private
+# without_read_only_flag) counts from the end when negative and raises
+# before the parent is touched when out of range.
+
+require "test/unit"
+require "carray"
+
+class TestCARemapWholeView < Test::Unit::TestCase
+
+  PERM = [5, 3, 0, 11, 7, 1, 9, 2, 10, 4, 8, 6]
+
+  def index
+    CArray.int64(3, 4) { PERM.dup }
+  end
+
+  def expected (a)
+    flat = a.to_a.flatten
+    PERM.map { |k| flat[k] }.each_slice(4).to_a
+  end
+
+  def test_every_element_width
+    [:boolean, :int8, :uint16, :int32, :float32, :float64,
+     :cmplx64, :cmplx128, :object].each do |t|
+      seq = CArray.int32(3, 4).seq!
+      a = ( t == :boolean ) ? ( seq % 3 ).eq(0) : seq.to_type(t)
+      v = a[index]
+      assert_kind_of CARemap, v, t.to_s
+      assert_equal expected(a), v.copy.to_a, t.to_s
+      assert_equal expected(a), v.to_a, t.to_s
+    end
+  end
+
+  def test_fixlen_width_not_a_power_of_two
+    a = CArray.fixlen(3, 4, bytes: 3)
+    a[] = (0...12).map { |k| format("%03d", k) }
+    assert_equal expected(a), a[index].copy.to_a
+  end
+
+  def test_reduction_reads_the_mapped_cells
+    a = CArray.float64(3, 4).seq!
+    assert_equal PERM.sum.to_f, a[index].sum
+    assert_equal expected(a).map(&:sum), a[index].sum(axis: 1).to_a
+  end
+
+  def test_whole_view_write
+    a = CArray.int32(3, 4).seq!
+    a[index][] = CArray.int32(3, 4) { (100...112).to_a }
+    PERM.each_with_index { |k, i| assert_equal 100 + i, a.to_a.flatten[k] }
+    a[index][] = 7
+    assert_equal [7] * 12, a.to_a.flatten
+  end
+
+  def test_masked_parent
+    a = CArray.int32(3, 4).seq!
+    a[0, 0] = UNDEF
+    v = a[index].copy
+    assert_equal [[false, false, true, false]] + [[false] * 4] * 2,
+                 v.is_masked.to_a
+  end
+
+  # Writes a mapper cell past its read-only flag.
+  def force_mapper_cell (v, value, *pos)
+    m = v.mapper
+    m.send(:without_read_only_flag) { m[*pos] = value }
+  end
+
+  def test_mapper_is_read_only
+    a = CArray.int32(3, 4).seq!
+    idx = index
+    [a[idx], a.sort(axis: 1), a.partition(1, axis: 1), a[idx].dup].each do |v|
+      assert_kind_of CARemap, v
+      assert v.mapper.read_only?
+      assert_raise(RuntimeError) { v.mapper[0, 0] = 0 }
+      assert_raise(RuntimeError) { v.mapper[] = 0 }
+      assert ! v.mapper.copy.read_only?
+    end
+    assert ! idx.read_only?
+    assert_equal expected(a), a[idx].to_a
+  end
+
+  def test_negative_mapper_cell_counts_from_the_end
+    a = CArray.int32(3, 4).seq!
+    v = a[index]
+    force_mapper_cell(v, -1, 0, 0)
+    assert_equal 11, v.copy[0, 0]
+    assert_equal -1, v.mapper[0, 0]
+    v[] = 0
+    assert_equal 0, a[2, 3]
+  end
+
+  def test_out_of_range_mapper_cell_raises_before_the_parent_is_touched
+    a = CArray.int32(3, 4).seq!
+    v = a[index]
+    [12, -13].each do |bad|
+      force_mapper_cell(v, bad, 2, 3)
+      assert_raise(IndexError, bad.to_s) { v.copy }
+      assert_raise(IndexError, bad.to_s) { v[] = 99 }
+      assert_equal (0..11).to_a, a.to_a.flatten
+    end
+  end
+
+  # The parent is a strided view with no buffer of its own, so each
+  # address is translated to the root's address axis by axis.
+  def test_strided_parent_of_every_rank
+    srand(7)
+    [[6, 5], [4, 3, 5], [3, 2, 4, 3], [2, 3, 2, 2, 3]].each do |shape|
+      root = CArray.int32(*shape).seq!
+      [root.transpose,
+       root.reshape(*shape.reverse).transpose,
+       root.transpose(*(0...shape.size).to_a.rotate)].each do |parent|
+        perm = (0...parent.elements).to_a.shuffle
+        idx  = CArray.int64(perm.size) { |k| perm[k] }.reshape(*parent.shape).copy
+        want = parent.copy.to_a.flatten
+        v    = parent[idx]
+        assert_kind_of CARemap, v
+        assert_equal perm.map { |k| want[k] }, v.copy.to_a.flatten, shape.inspect
+        v[] = CArray.int32(perm.size) { |k| -k - 1 }.reshape(*parent.shape)
+        got = parent.copy.to_a.flatten
+        perm.each_with_index { |k, j| assert_equal(-j - 1, got[k]) }
+      end
+    end
+  end
+
+  def test_stepped_slice_parent
+    root = CArray.int32(8, 9).seq!
+    parent = root[(1..7).step(2), (8..0).step(-3)]
+    perm = (0...parent.elements).to_a.reverse
+    idx  = CArray.int64(perm.size) { |k| perm[k] }.reshape(*parent.shape).copy
+    assert_equal parent.copy.to_a.flatten.reverse, parent[idx].copy.to_a.flatten
+  end
+
+  # A parent whose transfer runs Ruby gets its own copy of the checked
+  # addresses: changing the mapper from a hook reaches neither the addresses
+  # already checked nor the view.
+  class HookSource < CAObject
+    attr_accessor :on_fetch
+    attr_reader :seen
+    def initialize
+      super(CA_INT64, [2, 2])
+      @seen = []
+    end
+    private
+    def fetch_addr (addr)
+      @seen << addr
+      @on_fetch.call if @on_fetch
+      return addr * 10
+    end
+  end
+
+  class ScribblingSource < CAObject
+    def initialize
+      super(CA_INT64, [2, 2])
+    end
+    private
+    def copy_addrs (addrs, data)
+      data[] = addrs * 10
+      addrs[] = 0
+    end
+  end
+
+  def test_hook_changing_the_mapper_does_not_reach_the_read
+    src = HookSource.new
+    v = src[CArray.int64(4) { |k| 3 - k }.reshape(2, 2)]
+    m = v.mapper
+    src.on_fetch = lambda do
+      m.send(:without_read_only_flag) { m[3] = 1_000_000 }
+      src.on_fetch = nil
+    end
+    assert_equal [[30, 20], [10, 0]], v.to_a
+    assert_equal [3, 2, 1, 0], src.seen
+  end
+
+  def test_hook_writing_its_address_list_leaves_the_mapper
+    src = ScribblingSource.new
+    v = src[CArray.int64(4) { |k| 3 - k }.reshape(2, 2)]
+    assert_equal [[30, 20], [10, 0]], v.to_a
+    assert_equal [[3, 2], [1, 0]], v.mapper.to_a
+    assert_equal [[30, 20], [10, 0]], v.to_a
+  end
+
+  def test_sort_axis_view
+    a = CArray.float64(3, 4) { [3, 1, 2, 0, 9, 8, 7, 6, 4, 5, 11, 10].map(&:to_f) }
+    assert_equal a.to_a.map(&:sort), a.sort(axis: 1).copy.to_a
+  end
+
+end

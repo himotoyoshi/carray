@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name        = "carray"
-  s.version     = "3.0.5"
+  s.version     = "3.0.6"
   s.authors      = ["himotoyoshi"]
   s.email       = ["himotoyoshi@users.noreply.github.com"]
   s.summary     = "Multi-dimensional numerical array class for Ruby"
@@ -17,7 +17,8 @@ Gem::Specification.new do |s|
   s.homepage    = "https://github.com/himotoyoshi/carray"
   s.license     = "MIT"
   s.platform    = Gem::Platform::RUBY
-  s.required_ruby_version = ">= 3.0"
+  s.required_ruby_version = ">= 3.2"
+  s.add_dependency "prism", ">= 1.0"
   s.files       = [
     *Dir.glob("lib/**/*.rb"),
     *Dir.glob("yard-stubs/**/*.rb"),

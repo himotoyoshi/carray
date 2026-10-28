@@ -227,9 +227,11 @@ ca_moncmp_try_leaf_inplace (CArray *p,
 
 /* Evaluate the cells a request names into `data` (packed, n cells). */
 static void
-ca_moncmp_eval (CAMonCmp *mc, const ca_lazy_req_t *req, void *data)
+ca_moncmp_eval_cells (void *node, const ca_lazy_req_t *req, void *data, int dir)
 {
+  CAMonCmp *mc = (CAMonCmp *) node;
   ca_size_t slab_n = req->n;
+  (void) dir;
   void     *scratch;
   ca_size_t operand_bytes;
   int       is_contig;
@@ -293,6 +295,12 @@ ca_moncmp_eval (CAMonCmp *mc, const ca_lazy_req_t *req, void *data)
   }
 
   if ( ! scratch_is_inplace ) ca_lazy_arena_release(scratch);
+}
+
+static void
+ca_moncmp_eval (CAMonCmp *mc, const ca_lazy_req_t *req, void *data)
+{
+  ca_lazy_eval_recorded(mc, 1, &mc->parent, 0, NULL, ca_moncmp_eval_cells, req, data, CA_XFER_GET);
 }
 
 static void

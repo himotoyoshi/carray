@@ -41,6 +41,29 @@ class TestIteratorSourceAddr < Test::Unit::TestCase
     assert_equal vals.sort, vals
   end
 
+  # Every tile, not only the first: each holds its own source addresses in
+  # ascending value, masked cells last, and a partial edge tile only its cells.
+  def test_block_sort_addr_every_tile
+    src = CArray.float64(5, 7)
+    src[] = (0...35).map { |i| (i * 7) % 11 }
+    src[1, 2] = UNDEF
+    src[3, 5] = UNDEF
+    sa = src.blocks(2, 3).sort_addr
+    sf = src.reshape(src.elements)
+    (0...5).step(2) do |r0|
+      (0...7).step(3) do |c0|
+        rs = r0...[r0 + 2, 5].min
+        cs = c0...[c0 + 3, 7].min
+        addrs = sa[rs, cs].to_a.flatten
+        assert_equal rs.to_a.product(cs.to_a).map { |i, j| i * 7 + j }, addrs.sort, "tile #{r0},#{c0}"
+        vals = addrs.map { |q| sf[q] }
+        present = vals.reject { |v| UNDEF.equal?(v) }
+        assert_equal present.sort, present, "tile #{r0},#{c0}"
+        assert_equal present, vals.first(present.size), "tile #{r0},#{c0}"
+      end
+    end
+  end
+
   # ---- CAWindowIterator -----------------------------------------------------
 
   def test_window_min_max_addr_nearest

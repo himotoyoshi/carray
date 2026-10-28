@@ -291,9 +291,11 @@ ca_bincmp_try_leaf_inplace (CArray *op, int8_t common_dt,
 
 /* Evaluate the cells a request names into `data` (packed, n cells). */
 static void
-ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
+ca_bincmp_eval_cells (void *node, const ca_lazy_req_t *req, void *data, int dir)
 {
+  CABinCmp *bc = (CABinCmp *) node;
   ca_size_t slab_n = req->n;
+  (void) dir;
   int8_t    k;
   void     *left_scratch, *right_scratch;
   ca_size_t left_bytes, right_bytes;
@@ -435,6 +437,12 @@ ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
 
   if ( ! right_is_inplace ) ca_lazy_arena_release(right_scratch);
   if ( ! left_is_inplace  ) ca_lazy_arena_release(left_scratch);
+}
+
+static void
+ca_bincmp_eval (CABinCmp *bc, const ca_lazy_req_t *req, void *data)
+{
+  ca_lazy_eval_recorded(bc, 2, bc->operands, 0, NULL, ca_bincmp_eval_cells, req, data, CA_XFER_GET);
 }
 
 static void

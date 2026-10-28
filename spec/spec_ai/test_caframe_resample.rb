@@ -214,7 +214,8 @@ class TestCAFrameResampleBy < Test::Unit::TestCase
     df = frame
     df["k"] = CA_INT32([0, 0, 0, 0, 1, 1])
     r = df.copy.set_index("time").resample("time", "2 days", origin: "2024-01-01", by: ["shop", "k"]).count("v")
-    assert_equal [2, 1, 1, 2], r.to_a
+    assert_equal [2, 1, 1, 2], r["v"].to_a
+    assert_equal %w[shop k time v], r.column_names
     names = df.resample("time", "2 days", origin: "2024-01-01", by: ["shop", "k"]).sum.column_names
     assert_equal %w[shop k time v], names
   end

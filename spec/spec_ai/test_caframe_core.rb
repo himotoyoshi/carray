@@ -50,7 +50,7 @@ class TestCAFrameConstruction < Test::Unit::TestCase
 
   def test_types_names_an_unknown_column
     err = assert_raise(KeyError) { CAFrame.new({ "r" => [1.5] }, types: { "q" => :float32 }) }
-    assert_equal 'types: names no column "q"', err.message
+    assert_equal 'types: no column "q"', err.message
   end
 
   # A cast column is a new array: the CArray given for it is no longer the
@@ -79,14 +79,15 @@ class TestCAFrameConstruction < Test::Unit::TestCase
     err = assert_raise(TypeError) { CAFrame.new({ a: CA_INT32([1, 2]) }) }
     assert_equal "CAFrame.new: a column name is a String (got :a)", err.message
     df = CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_INT32([3, 4]), "s" => CA_OBJECT(["x_y", "z_w"]))
+    { "select" => [:a], "drop" => [:a], "describe" => [:a], "fill" => [:a, 0] }.each do |verb, args|
+      err = assert_raise(TypeError, verb) { df.public_send(verb, *args) }
+      assert_match(/\A#{verb}: a column name is a String \(got :a\); a Symbol names a kind of column/, err.message)
+    end
     {
-      "select"      => -> { df.select(:a) },
-      "drop"        => -> { df.drop(:a) },
       "rename"      => -> { df.rename("a" => :x) },
       "append"      => -> { df.append(:c, CA_INT32([1, 2])) },
       "sort_by_key" => -> { df.sort_by_key([:a, :desc]) },
       "set_index"   => -> { df.copy.set_index(:a) },
-      "fill"        => -> { df.fill(:a, 0) },
       "cast"        => -> { df.cast(:a, :float64) },
       "pivot"       => -> { df.pivot(index: :a, columns: "b", values: "a") },
       "melt"        => -> { df.melt(id: :a, value_columns: ["b"]) },
@@ -94,7 +95,6 @@ class TestCAFrameConstruction < Test::Unit::TestCase
       "split_column" => -> { df.split_column("s", "_", into: [:x, :y]) },
       "contrast_columns" => -> { df.contrast_columns(:s) },
       "verify"      => -> { df.verify(x: ->(f) { f["a"] > 0 }) },
-      "describe"    => -> { df.describe(:a) },
       "mean"        => -> { df.group_by("s").mean(:a) },
       "aggregate"   => -> { df.group_by("s").aggregate(x: ["a", :sum]) },
     }.each do |verb, call|
@@ -230,9 +230,9 @@ class TestCAFrameColumnAssign < Test::Unit::TestCase
     assert_raise(ArgumentError) { @df["c"] = CA_FLOAT64([1, 2]) }
   end
 
-  def test_a_scalar_right_hand_side_is_refused
-    # No implicit broadcast; write CArray.float64(df.nrow) { 3 }.
-    assert_raise(ArgumentError) { @df["c"] = 3 }
+  def test_a_single_value_is_repeated_on_every_row
+    @df["c"] = 3
+    assert_equal [3] * @df.nrow, @df["c"].to_a
   end
 
   def test_a_frame_right_hand_side_is_refused
@@ -577,6 +577,39 @@ class TestCAFrameFilterAndGather < Test::Unit::TestCase
     assert_raise(ArgumentError) { @df[CA_FLOAT64([1.0, 2.0])] }
   end
 
+  def test_filter_takes_a_selector_directly
+    sub = @df.filter((@df["temp"] > 20) & (@df["rh"] < 50))
+    assert_equal ["tokyo"], sub["station"].to_a
+  end
+
+  def test_filter_refuses_a_selector_and_a_block_together_or_neither
+    mask = @df["temp"] > 20
+    assert_raise(ArgumentError) { @df.filter(mask) { |f| f["temp"] > 0 } }
+    assert_raise(ArgumentError) { @df.filter(mask, mask) }
+    e = assert_raise(ArgumentError) { @df.filter }
+    assert_match(/selector or a block/, e.message)
+    assert_raise(ArgumentError) { @df.filter(@df["temp"]) }   # not boolean
+  end
+
+  def test_the_index_name_is_no_column_and_points_at_the_index
+    df = @df.set_index("station")
+    e = assert_raise(KeyError) { df["station"] }
+    assert_match(/it is the index, read it with df\.index/, e.message)
+    e = assert_raise(KeyError) { df["temp", "station"] }
+    assert_match(/df\.index/, e.message)
+    e = assert_raise(KeyError) { df["nope"] }
+    assert_equal 'no column "nope"', e.message
+  end
+
+  def test_every_verb_points_at_the_index_by_its_name
+    df = @df.set_index("station")
+    [-> { df.select("station") }, -> { df.drop("station") }, -> { df.fill("station", 0) },
+     -> { df.transform("station") { |c| c } }, -> { df.set_index("station") }].each do |call|
+      e = assert_raise(KeyError) { call.() }
+      assert_match(/it is the index, read it with df\.index/, e.message)
+    end
+  end
+
   def test_filter_carries_index
     df = @df.set_index("station")
     sub = df.filter { |f| f["temp"] > 20 }
@@ -584,13 +617,12 @@ class TestCAFrameFilterAndGather < Test::Unit::TestCase
   end
 end
 
-# filter keep_masked: — a masked (UNDEF) selector cell means membership is
-# genuinely undetermined (PROPOSAL_KLEENE_BOOLEAN_LOGIC §9, CLAUDE.md 将来の
-# リファクタリング候補). Default drops it; keep_masked: true carries the UNDEF
-# forward as masked data cells while keeping the index value present.
-class TestCAFrameFilterKeepMasked < Test::Unit::TestCase
+# A masked (UNDEF) selector cell means the row's membership is undetermined.
+# filter does not keep such a row, as ca[selector] does not; the selector
+# decides otherwise, and the result stays a sub-frame of views.
+class TestCAFrameFilterUndetermined < Test::Unit::TestCase
   def setup
-    # row 1's predicate input is masked -> its selector cell is UNDEF
+    # row 2's predicate input is masked -> its selector cell is UNDEF
     @df = CAFrame.new(
       "a" => CA_INT32([10, 20, 30, 40]),
       "b" => CA_FLOAT64([0.5, 1.5, 2.5, 3.5]),
@@ -598,118 +630,34 @@ class TestCAFrameFilterKeepMasked < Test::Unit::TestCase
     @df["a"][2] = UNDEF   # selector a > 15 -> [F, T, U, T]
   end
 
-  def test_default_drops_undetermined_row
+  def test_undetermined_row_is_not_kept
     sub = @df.filter { |f| f["a"] > 15 }
-    assert_equal 2, sub.nrow
     assert_equal [20, 40], sub["a"].to_a
     assert_equal [1.5, 3.5], sub["b"].to_a
   end
 
-  def test_keep_masked_carries_undef_forward
-    sub = @df.filter(keep_masked: true) { |f| f["a"] > 15 }
-    assert_equal 3, sub.nrow
-    # true rows keep their values; the undetermined row's cells are masked
-    assert_equal [20, nil, 40], sub["a"].to_a.map { |v| v == UNDEF ? nil : v }
-    assert_equal [false, true, false], sub["a"].mask.to_a
-    assert_equal [false, true, false], sub["b"].mask.to_a
+  def test_selector_chooses_the_undetermined_rows
+    s = @df["a"] > 15
+    assert_equal [2.5], @df.filter(s.is_masked)["b"].to_a
+    kept = @df.filter(s.strip_mask(true))
+    assert_equal [20, UNDEF, 40], kept["a"].to_a   # masked only where it was
+    assert_equal [1.5, 2.5, 3.5], kept["b"].to_a
   end
 
-  def test_keep_masked_does_not_corrupt_parent
-    @df.filter(keep_masked: true) { |f| f["a"] > 15 }
-    assert_equal [10, 20, nil, 40], @df["a"].to_a.map { |v| v == UNDEF ? nil : v }
-    assert_equal [0.5, 1.5, 2.5, 3.5], @df["b"].to_a
+  def test_result_is_a_view
+    sub = @df.filter((@df["a"] > 15).strip_mask(true))
+    sub["b"][1] = -1.0
+    assert_equal [0.5, 1.5, -1.0, 3.5], @df["b"].to_a
   end
 
-  # keep_masked: has to write the carried-forward UNDEF into the result, so the
-  # result is materialized -- and materialized means the index too, not just the
-  # columns. Writing the result must not reach the parent through either.
-  def test_keep_masked_result_index_is_independent
-    df = CAFrame.new({ "v" => CA_INT32([10, 20, 30, 40]) },
-                     index: CA_INT32([100, 200, 300, 400]), axis_name: "id")
-    df["v"][2] = UNDEF
-    sub = df.filter(keep_masked: true) { |f| f["v"] > 15 }
-    sub.index[0] = -1
-    assert_equal [100, 200, 300, 400], df.index.to_a
-  end
-
-  # The same call site must not switch between sharing and copying on whether
-  # that day's data happened to produce an undetermined cell (the reasoning
-  # CAFrame.md section 3 gives for splice always snapshotting).
-  def test_keep_masked_is_materialized_whether_or_not_the_selector_is_masked
-    cols = { "v" => CA_INT32([10, 20, 30, 40]) }
-    unmasked = CAFrame.new(cols.transform_values(&:copy),
-                           index: CA_INT32([100, 200, 300, 400]))
-    masked   = CAFrame.new(cols.transform_values(&:copy),
-                           index: CA_INT32([100, 200, 300, 400]))
-    masked["v"][2] = UNDEF
-
-    [unmasked, masked].each do |df|
-      before_v = df["v"].to_a
-      before_i = df.index.to_a
-      sub = df.filter(keep_masked: true) { |f| f["v"] > 15 }
-      sub["v"][0] = -1
-      sub.index[0] = -1
-      assert_equal before_v, df["v"].to_a
-      assert_equal before_i, df.index.to_a
+  def test_keep_masked_is_gone
+    s = @df["a"] > 15
+    [-> { @df.filter(keep_masked: true) { s } }, -> { @df.filter(s, keep_masked: true) }].each do |call|
+      e = assert_raise(ArgumentError) { call.() }
+      assert_match(/filter: unknown keyword :keep_masked; .*strip_mask\(true\)/, e.message)
     end
-  end
-
-  # A read-only Face column (categorical, CAConstString) takes the mask the
-  # other columns take, and keeps its Face; so do the other Faces.
-  def test_keep_masked_with_face_columns
-    df = CAFrame.new(
-      "c" => CA_OBJECT(%w[b a c a]).categorize,
-      "s" => CArray.const_string(%w[w x y z]),
-      "t" => CArray.time(%w[2024-01-01 2024-01-02 2024-01-03 2024-01-04], unit: :D),
-      "v" => CA_FLOAT64([1, 2, 3, 4]),
-    )
-    sel = df["v"] > 1.5
-    sel[2] = UNDEF
-    sub = df.filter(keep_masked: true) { sel }
-    assert_kind_of CACategorical, sub["c"]
-    assert_kind_of CAConstString, sub["s"]
-    assert_kind_of CATime, sub["t"]
-    assert_equal ["a", UNDEF, "a"], sub["c"].to_a
-    assert_equal ["x", UNDEF, "z"], sub["s"].to_a
-    assert_equal ["2024-01-02", UNDEF, "2024-01-04"], sub["t"].to_a.map { |v| UNDEF.equal?(v) ? v : v.to_s }
-    assert_equal ["a", "c", "a"], df["c"].to_a.values_at(1, 2, 3)
-  end
-
-  def test_keep_masked_with_an_nd_column
-    df = CAFrame.new("m" => CA_INT32([[1, 2], [3, 4], [5, 6]]), "v" => CA_FLOAT64([1, 2, 3]))
-    sel = df["v"] > 0
-    sel[1] = UNDEF
-    sub = df.filter(keep_masked: true) { sel }
-    assert_equal [[false, false], [true, true], [false, false]], sub["m"].is_masked.to_a
-    assert_equal [false, false, false, false, false, false], df["m"].is_masked.flatten.to_a
-  end
-
-  def test_keep_masked_without_masked_selector_equals_drop
-    df = CAFrame.new("a" => CA_INT32([10, 20, 30, 40]))
-    drop = df.filter { |f| f["a"] > 15 }
-    keep = df.filter(keep_masked: true) { |f| f["a"] > 15 }
-    assert_equal drop["a"].to_a, keep["a"].to_a
-    assert_equal 3, keep.nrow
-  end
-
-  def test_keep_masked_preserves_index_on_undetermined_row
-    df = CAFrame.new({ "v" => CA_INT32([10, 20, 30, 40]) },
-                     index: CA_INT32([100, 200, 300, 400]), axis_name: "id")
-    df["v"][2] = UNDEF
-    sub = df.filter(keep_masked: true) { |f| f["v"] > 15 }
-    assert_equal "id", sub.axis_name
-    assert_equal [200, 300, 400], sub.index.to_a   # index value present, unmasked
-    assert_equal false, sub.index.has_mask?        # the index carries no masked cell
-  end
-
-  def test_keep_masked_all_undetermined
-    df = CAFrame.new("v" => CA_INT32([1, 2, 3]))
-    df["v"][0..2] = UNDEF
-    keep = df.filter(keep_masked: true) { |f| f["v"] > 0 }
-    assert_equal 3, keep.nrow
-    assert_equal [true, true, true], keep["v"].mask.to_a
-    drop = df.filter { |f| f["v"] > 0 }
-    assert_equal 0, drop.nrow
+    e = assert_raise(ArgumentError) { @df.filter(s, how: 1) }
+    assert_equal "filter: unknown keyword :how", e.message
   end
 end
 
@@ -861,18 +809,18 @@ class TestCAFrameAxisNameRoundTrip < Test::Unit::TestCase
 
   def test_reset_index_restores_the_name_the_frame_had_before
     df = frame("obs")
-    df.set_index("t")
+    df = df.set_index("t")
     assert_equal "t", df.axis_name
-    df.reset_index
+    df = df.reset_index
     assert_equal "obs", df.axis_name
     assert_equal ["t", "v"], df.column_names
   end
 
   def test_the_round_trip_is_the_identity_on_the_default_name
     df = CAFrame.new("t" => CA_INT32([1, 2]), "v" => CA_FLOAT64([1, 2]))
-    before = df.axis_name
-    df.set_index("t").reset_index
-    assert_equal before, df.axis_name
+    back = df.set_index("t").reset_index
+    assert_equal df.axis_name, back.axis_name
+    assert_equal df.column_names, back.column_names
   end
 
   # Only the name held before the frame had an index is remembered, so a second
@@ -880,9 +828,9 @@ class TestCAFrameAxisNameRoundTrip < Test::Unit::TestCase
   def test_a_second_set_index_does_not_replace_the_remembered_name
     df = CAFrame.new({ "a" => CA_INT32([1, 2]), "b" => CA_INT32([7, 8]),
                        "v" => CA_FLOAT64([1, 2]) }, axis_name: "obs")
-    df.set_index("a")
-    df.set_index("b")
-    df.reset_index
+    df = df.set_index("a")
+    df = df.set_index("b")
+    df = df.reset_index
     assert_equal "obs", df.axis_name
   end
 
@@ -891,17 +839,17 @@ class TestCAFrameAxisNameRoundTrip < Test::Unit::TestCase
   def test_a_frame_born_with_an_index_resets_to_the_default
     df = CAFrame.new({ "v" => CA_FLOAT64([1, 2]) },
                      index: CA_INT32([9, 8]), axis_name: "obs")
-    df.reset_index
+    df = df.reset_index
     assert_equal CAFrame::DEFAULT_AXIS_NAME, df.axis_name
     assert_equal ["obs", "v"], df.column_names
   end
 
   def test_resetting_twice_is_harmless
-    df = frame("obs")
-    df.set_index("t").reset_index
+    df = frame("obs").set_index("t").reset_index
     assert_equal "obs", df.axis_name
-    df.reset_index
+    df = df.reset_index
     assert_equal "obs", df.axis_name
+    assert_equal %w[t v], df.column_names
   end
 end
 
@@ -916,7 +864,7 @@ class TestCAFrameReindexKeepsTheOldIndex < Test::Unit::TestCase
 
   def test_the_replaced_index_comes_back_as_a_column
     df = frame.set_index("a")
-    df.set_index("b")
+    df = df.set_index("b")
     assert_equal [7, 8], df.index.to_a
     assert_equal "b", df.axis_name
     assert_includes df.column_names, "a"
@@ -926,10 +874,10 @@ class TestCAFrameReindexKeepsTheOldIndex < Test::Unit::TestCase
   # Where it lands is the same place reset_index puts it: the front.
   def test_reindexing_equals_reset_then_set
     direct = frame.set_index("a")
-    direct.set_index("b")
+    direct = direct.set_index("b")
     composed = frame.set_index("a")
-    composed.reset_index
-    composed.set_index("b")
+    composed = composed.reset_index
+    composed = composed.set_index("b")
     assert_equal composed.column_names, direct.column_names
     assert_equal composed.axis_name, direct.axis_name
     assert_equal composed.index.to_a, direct.index.to_a
@@ -937,7 +885,7 @@ class TestCAFrameReindexKeepsTheOldIndex < Test::Unit::TestCase
 
   def test_reindexing_does_not_change_the_row_count_or_lose_data
     df = frame.set_index("a")
-    df.set_index("b")
+    df = df.set_index("b")
     assert_equal 2, df.nrow
     assert_equal ["a", "v"], df.column_names
     assert_equal [10.0, 20.0], df["v"].to_a
@@ -946,8 +894,8 @@ class TestCAFrameReindexKeepsTheOldIndex < Test::Unit::TestCase
   # The remembered name is still the one held before any index was set.
   def test_reindexing_then_resetting_restores_the_original_axis_name
     df = frame.set_index("a")
-    df.set_index("b")
-    df.reset_index
+    df = df.set_index("b")
+    df = df.reset_index
     assert_equal "obs", df.axis_name
     assert_equal ["b", "a", "v"], df.column_names
   end
@@ -971,7 +919,7 @@ class TestCAFrameRowAndFilterMessages < Test::Unit::TestCase
   end
 end
 
-# A column given as Ruby Strings is a text column, as from_csv reads text,
+# A column given as Ruby Strings is a text column, as read_csv reads text,
 # with the String methods; a mix of kinds stays an object column.
 class TestCAFrameStringColumns < Test::Unit::TestCase
   def test_strings_make_a_text_column
@@ -1026,5 +974,14 @@ class TestCAFrameTimeColumnsFromRecords < Test::Unit::TestCase
     r = g.table { |f| { "last" => f["t"][-1] } }
     assert_equal CATime, r.data_types["last"]
     assert_equal ["2024-03-05", "2024-03-06"], r["last"].to_a.map(&:to_s)
+  end
+
+  # An empty Array from the block on a frame with no rows keeps the column's
+  # type; there is no value to type it by.
+  def test_transform_of_no_rows_keeps_the_type
+    df = CAFrame.new("n" => CA_FLOAT64([1, 2]), "t" => CArray.time(%w[2024-01-01 2024-01-02]))[0...0]
+    out = df.transform { |c| c.to_a }
+    assert_equal :float64, out["n"].data_type
+    assert_kind_of CATime, out["t"]
   end
 end

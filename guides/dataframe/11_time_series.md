@@ -6,11 +6,10 @@ The examples use the daily `sales` frame and a small log of orders from a café'
 
 ```ruby
 require "carray"
-require "stringio"
 
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 
-orders = CAFrame.from_csv(StringIO.new(<<~CSV), types: :infer)
+orders = CAFrame.from_csv(<<~CSV)
   time,item,qty
   2024-03-04 08:12,coffee,2
   2024-03-04 08:47,tea,1
@@ -22,7 +21,7 @@ orders = CAFrame.from_csv(StringIO.new(<<~CSV), types: :infer)
   2024-03-04 16:03,cake,1
 CSV
 
-prices = CAFrame.from_csv(StringIO.new(<<~CSV), types: :infer)
+prices = CAFrame.from_csv(<<~CSV)
   since,item,price
   2024-03-01 00:00,coffee,3.20
   2024-03-01 00:00,tea,2.80
@@ -66,17 +65,17 @@ orders["time"].hour.to_a   # => [8, 8, 9, 11, 11, 14, 14, 16]
 
 | your times are… | turn them into a time column with |
 |---|---|
-| written year first: `2024-03-04`, `2024-03-04 08:12` | `from_csv(types: :infer)` or `types: { "time" => :time }` when reading |
+| written year first: `2024-03-04`, `2024-03-04 08:12` | `read_csv` (inferred) or `types: { "time" => :time }` when reading |
 | text in another layout: `04/03/2024`, `Mar 4, 2024` | `parse_to_time(name, format)` |
 | numbers counted from a starting date: seconds since 1970, a spreadsheet's day numbers | `to_time(name, unit:, epoch:)` |
 
 #### Text — `parse_to_time`
 
-`parse_to_time` converts a text column, changing the frame:
+`parse_to_time` gives a new frame with a text column converted:
 
 ```ruby
 d = CAFrame.new("day" => CArray.string(["04/03/2024", "15/03/2024", "01/04/2024"]))
-d.parse_to_time("day", "%d/%m/%Y")
+d = d.parse_to_time("day", "%d/%m/%Y")
 d["day"].to_a.map(&:to_s)   # => ["2024-03-04", "2024-03-15", "2024-04-01"]
 ```
 
@@ -108,11 +107,11 @@ Some systems store a time as a count: seconds since 1970, hours since some date,
 
 ```ruby
 x = CAFrame.new("t" => CA_INT64([1709510400, 1709514000]))
-x.to_time("t", unit: :s)
+x = x.to_time("t", unit: :s)
 x["t"].to_a.map(&:to_s)   # => ["2024-03-04T00:00:00Z", "2024-03-04T01:00:00Z"]
 
 sheet = CAFrame.new("day" => CA_INT64([45355, 45356]))
-sheet.to_time("day", unit: :D, epoch: "1899-12-30")   # spreadsheet day numbers
+sheet = sheet.to_time("day", unit: :D, epoch: "1899-12-30")   # spreadsheet day numbers
 sheet["day"].to_a.map(&:to_s)   # => ["2024-03-04", "2024-03-05"]
 ```
 
@@ -134,7 +133,7 @@ orders["time"].floor(unit: :h).to_a.map(&:to_s).first(3)
 `resample(time_column, unit)` groups rows into periods of time. It returns a grouped frame, so every summary of chapter 10 applies:
 
 ```ruby
-p orders.resample("time", "1 hour").sum("qty").to_a   # sold per hour
+p orders.resample("time", "1 hour")["qty"].sum.to_a   # sold per hour
 p orders.drop("item").resample("time", "1 hour").sum
 # [3.0, 1.0, 5.0, 3.0, 1.0]
 # #<CAFrame nrow=5 columns=[qty:float64] index="time">
@@ -206,7 +205,7 @@ p orders.drop("item").resample("time", "1 hour", fill: true).sum
 By default a period is named by its start, and holds the times at or after it: the 08:00 row covers 08:00 up to, but not including, 09:00. With `label: :right` a period is named by its end, and holds the times up to and including it — the usual convention for a figure that describes the period before a time, such as "orders in the two hours up to 12:00":
 
 ```ruby
-p orders.resample("time", "2 hours", label: :right).count("qty").to_a
+p orders.resample("time", "2 hours", label: :right)["qty"].count_not_masked.to_a
 # [3, 2, 2, 1]
 ```
 
@@ -284,8 +283,7 @@ p full
 `CArray.time_range` makes every day from the first to the last; `"1 hour"` or `"15 minutes"` make other grids. Once the gaps are rows, they can be filled. With the dates as the index, `:linear` interpolates in time:
 
 ```ruby
-full.set_index("date")
-full.cast("revenue" => :float64).fill("revenue", :linear)
+full = full.set_index("date").cast("revenue" => :float64).fill("revenue", :linear)
 full.at("2024-03-07")["revenue"].round(2)   # => 2804.26
 ```
 

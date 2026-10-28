@@ -19,9 +19,10 @@
   read it directly, so the registration is a no-op and nothing attaches.
 
   A fourth class, CAIterOffsetNoXfer, is the same conversion layer with no
-  xfer_stride slot, so a kernel walk over a view of it attaches it as the
-  root, and a sync that can be made to raise.  It pins that ca_iter_ensure
-  finishes every walk it opened when finishing one of them raises.
+  xfer_stride slot, so a region of it is moved through the dispatcher's
+  default (its xfer_addrs), and a write-back that can be made to raise.  It
+  pins that a partial transfer reaches only the cells asked for, and that
+  ca_iter_ensure finishes every walk it opened when finishing one raises.
 
   The pair is the point.  Neither class is known to the classifier's
   built-in list, so the unregistered one reproduces what a companion gem
@@ -52,6 +53,8 @@ static VALUE rb_cCAIterOffsetUnreg;
 static VALUE rb_cCAIterOffsetUnregMask;
 static VALUE rb_cCAIterOffsetNoXfer;
 static VALUE rb_cCAIterOffsetNoXferMask;
+static VALUE rb_cCAIterOffsetNoAttach;
+static VALUE rb_cCAIterOffsetNoAttachMask;
 
 typedef struct {
   /* CAView prefix — field-for-field identical to the core's views */
@@ -295,6 +298,11 @@ OFFSET_DATA_TYPE(caiteroffsetnoxfer_data_type, "CAIterOffsetNoXfer",
                  caview_data_type, ca_free)
 OFFSET_DATA_TYPE(caiteroffsetnoxfer_mask_data_type, "CAIterOffsetNoXferMask",
                  caiteroffsetnoxfer_data_type, ca_free_nop)
+OFFSET_DATA_TYPE(caiteroffsetnoattach_data_type, "CAIterOffsetNoAttach",
+                 caview_data_type, ca_free)
+OFFSET_DATA_TYPE(caiteroffsetnoattach_mask_data_type,
+                 "CAIterOffsetNoAttachMask",
+                 caiteroffsetnoattach_data_type, ca_free_nop)
 
 /* --- constructor ---------------------------------------------------- */
 
@@ -418,6 +426,22 @@ rb_offset_register (VALUE klass, VALUE robj_type, VALUE rkind)
 static ca_operation_function_t noxfer_func;
 static int noxfer_fail_sync = 0;
 
+/* An operation table with no allocate / attach / sync / detach slots,
+   which ca_install_obj_type refuses. */
+static ca_operation_function_t noattach_func;
+
+static VALUE
+rb_install_without_attach (VALUE klass)
+{
+  (void) klass;
+  ca_install_obj_type(rb_cCAIterOffsetNoAttach,
+                      &caiteroffsetnoattach_data_type,
+                      rb_cCAIterOffsetNoAttachMask,
+                      &caiteroffsetnoattach_mask_data_type,
+                      &noattach_func, sizeof(noattach_func));
+  return Qnil;
+}
+
 static void
 noxfer_func_sync (void *ap)
 {
@@ -425,6 +449,19 @@ noxfer_func_sync (void *ap)
     rb_raise(rb_eRuntimeError, "CAIterOffsetNoXfer: sync failed");
   }
   offset_func_sync(ap);
+}
+
+/* A walk over a view of this array writes its region back through
+   xfer_addrs rather than sync (the array is not attached whole), so the
+   same switch fails that write. */
+static void
+noxfer_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
+                        void *data, int dir)
+{
+  if ( noxfer_fail_sync && dir == CA_XFER_PUT ) {
+    rb_raise(rb_eRuntimeError, "CAIterOffsetNoXfer: sync failed");
+  }
+  offset_func_xfer_addrs(ap, n, addrs, data, dir);
 }
 
 static VALUE
@@ -511,6 +548,7 @@ Init_iter_source_kind (void)
   noxfer_func = offset_func;
   noxfer_func.xfer_stride = NULL;
   noxfer_func.sync        = noxfer_func_sync;
+  noxfer_func.xfer_addrs  = noxfer_func_xfer_addrs;
   rb_cCAIterOffsetNoXfer     = rb_define_class("CAIterOffsetNoXfer",
                                                rb_cCAView);
   rb_cCAIterOffsetNoXferMask = rb_define_class("CAIterOffsetNoXferMask",
@@ -521,6 +559,16 @@ Init_iter_source_kind (void)
                         rb_cCAIterOffsetNoXferMask,
                         &caiteroffsetnoxfer_mask_data_type,
                         &noxfer_func, sizeof(noxfer_func));
+
+  noattach_func = offset_func;
+  noattach_func.allocate = NULL;
+  noattach_func.attach   = NULL;
+  noattach_func.sync     = NULL;
+  noattach_func.detach   = NULL;
+  rb_cCAIterOffsetNoAttach     = rb_define_class("CAIterOffsetNoAttach",
+                                                 rb_cCAView);
+  rb_cCAIterOffsetNoAttachMask = rb_define_class("CAIterOffsetNoAttachMask",
+                                                 rb_cCAIterOffsetNoAttach);
 
   stride_reg_func = ca_stride_func;
   stride_reg_func.attach   = stride_reg_func_attach;
@@ -562,6 +610,8 @@ Init_iter_source_kind (void)
                              rb_stride_reg_wrap, 1);
   rb_define_singleton_method(rb_cCAIterOffsetNoXfer, "wrap",
                              rb_offset_wrap, 2);
+  rb_define_singleton_method(rb_cCAIterOffset, "install_without_attach",
+                             rb_install_without_attach, 0);
   rb_define_singleton_method(rb_cCAIterOffsetNoXfer, "fail_sync=",
                              rb_noxfer_set_fail_sync, 1);
   rb_define_singleton_method(rb_cCAIterOffsetNoXfer, "ensure_walks",

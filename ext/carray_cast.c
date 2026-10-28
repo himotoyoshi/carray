@@ -1609,7 +1609,6 @@ static VALUE
 rb_ca_as_type_internal (int argc, VALUE *argv, VALUE self)
 {
   volatile VALUE obj, rtype = Qnil, ropt, rbytes = Qnil;
-  CArray *ca;
   int8_t data_type;
   ca_size_t bytes;
 
@@ -1618,14 +1617,12 @@ rb_ca_as_type_internal (int argc, VALUE *argv, VALUE self)
 
   rb_ca_guess_type_and_bytes(rtype, rbytes, &data_type, &bytes);
 
-  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  if ( ca->data_type == data_type ) {
-    if ( ! ca_is_fixlen_type(ca) ) {
-      return self;
-    }
-  }
+  rb_check_carray_object(self);
 
-  /* Natural-width cast: dispatch via helper (CAMonOp for numeric,
+  /* A view also when the data_type is the receiver's own: what is done to
+     it (an attribute, a freeze) stays with it.
+
+     Natural-width cast: dispatch via helper (CAMonOp for numeric,
      CAFake for CA_FIXLEN sizing / CA_OBJECT / class-rtype). */
   if ( bytes == (ca_size_t) ca_sizeof[data_type] ) {
     obj = ca_type_adapt_view(self, rtype, data_type, CA_ADAPT_VIEW);
@@ -3434,7 +3431,7 @@ rb_ca_read_text_as_number (int argc, VALUE *argv, VALUE self)
   if ( ca->data_type != CA_OBJECT ) {
     rb_raise(rb_eArgError, "decimal reading needs an object array");
   }
-  if ( ! ca_is_entity(ca) ) {
+  if ( ! ca_is_entity(ca) || ! ca->ptr ) {
     src = rb_ca_copy(src);
     TypedData_Get_Struct(src, CArray, &carray_data_type, ca);
   }
@@ -3571,7 +3568,7 @@ rb_ca_infer_number_type_of_text (VALUE self)
   if ( ca->data_type != CA_OBJECT ) {
     rb_raise(rb_eArgError, "type inference needs an object array");
   }
-  if ( ! ca_is_entity(ca) ) {
+  if ( ! ca_is_entity(ca) || ! ca->ptr ) {
     src = rb_ca_copy(src);
     TypedData_Get_Struct(src, CArray, &carray_data_type, ca);
   }
@@ -3634,7 +3631,7 @@ ca_const_string_buffer_and_ranges (VALUE cs, VALUE *buffer, CArray **ranges)
   *buffer = rb_funcall(cs, rb_intern("buffer"), 0);
   vranges = rb_ca_parent(cs);
   TypedData_Get_Struct(vranges, CArray, &carray_data_type, *ranges);
-  if ( ! ca_is_entity(*ranges) ) {
+  if ( ! ca_is_entity(*ranges) || ! (*ranges)->ptr ) {
     vranges = rb_ca_copy(vranges);
     TypedData_Get_Struct(vranges, CArray, &carray_data_type, *ranges);
   }

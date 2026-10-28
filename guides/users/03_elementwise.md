@@ -249,7 +249,7 @@ c > 3        #  => [ 0, 0, 0, 1, 1 ]
 c <= 2       #  => [ 1, 1, 0, 0, 0 ]
 ```
 
-> **`==` is not an element-wise `eq`.** `a == b` answers one question about the two arrays taken whole — are they equal? — with a single `true` or `false`. The element-wise comparison is `a.eq(b)`, and `a.ne(b)` for `!=`. `==` is Ruby's own whole-object equality, and cannot be repurposed.
+> **`==` is not an element-wise `eq`.** `a == b` answers one question about the two arrays taken whole — are they equal? — with a single `true` or `false`. The element-wise comparison is `a.eq(b)`, and `a.ne(b)` for `!=`. `==` is Ruby's own whole-object equality, and cannot be repurposed. It asks whether the contents are the same, so an array with NaN equals its copy; `eq` compares cell by cell, where NaN equals nothing.
 >
 > ```ruby
 > c = CA_INT([1, 2, 3, 4, 5])

@@ -10,6 +10,7 @@
 #include "carray.h"
 #include "carray_internal.h"   /* ca_lazy_arena_enter / _exit */
 #include "ca_iter_substrate.h"
+#include "ca_obj_face.h"
 #include <stdarg.h>
 
 /* definition of ca_endian */
@@ -28,6 +29,10 @@ VALUE ca_mask_class[CA_OBJ_TYPE_MAX];
 const rb_data_type_t *ca_mask_typeddata[CA_OBJ_TYPE_MAX];
 ca_operation_function_t ca_func[CA_OBJ_TYPE_MAX];
 int ca_obj_num = 0;
+
+/* The number of obj_types carray installs for itself, set once
+   Init_carray_ext has installed them all; 0 until then. */
+int ca_obj_num_builtin = 0;
 
 /* 
    definition of validity of each data_type [1 for valid, 0 for invalid]
@@ -348,6 +353,14 @@ ca_install_obj_type (VALUE klass,
              func_size,
              (size_t) (offsetof(ca_operation_function_t, xfer_all) +
                        sizeof(((ca_operation_function_t *) 0)->xfer_all)));
+  }
+
+  /* ca_allocate / ca_attach / ca_sync / ca_detach call these four slots
+     without asking, from any path that takes a view's buffer. */
+  if ( ! func->allocate || ! func->attach || ! func->sync || ! func->detach ) {
+    rb_raise(rb_eArgError,
+             "ca_install_obj_type: operation table has no allocate / attach / "
+             "sync / detach slot");
   }
 
   /* A refused table takes no number. */
@@ -811,75 +824,330 @@ ca_index2addr (void *ap, ca_size_t *idx)
 
 /* ------------------------------------------------------------------- */
 
-/* The cyclic reference detection should be done in 
-     + ca_fetch_addr, ca_fetch_index,
-     + ca_store_addr, ca_store_index,
-  to avoid the system stack error in reference of the object array.
-*/
+/* Recursion over object arrays.
 
-void
-ca_set_cyclic_check(void *ap)
+   A cell of an object array can hold the array itself or a view of it.
+   Reading such a cell, or computing over the array, would come back into
+   the same cells without end.  Both are refused when they enter an array
+   that the same Ruby method is already reading or computing over, in this
+   thread and fiber: rb_exec_recursive keeps that record, as it does for an
+   Array that holds itself (Array#flatten, Array#inspect).  The array is
+   not written to, so a frozen array, or one shared between Ractors, is
+   read and computed over as any other.
+
+   A read, a computation and the evaluation of a lazy expression are
+   recorded apart (CA_RECURSION_READ / CA_RECURSION_COMPUTE /
+   CA_RECURSION_EVAL): a computation reads the cells it computes over, and
+   a reduction over a lazy expression evaluates it. */
+
+#define CA_RECURSION_COMPUTE 0
+#define CA_RECURSION_READ    1
+#define CA_RECURSION_EVAL    2
+
+static VALUE
+ca_recursion_key (CArray *ca, int kind)
 {
-  CArray *ca = (CArray *) ap;
-  /* ca.data_type == CA_OBJECT */
-  if ( ca_is_object_type(ca) ) {
-    if ( ca->flags & CA_FLAG_CYCLE_CHECK ) {
-      rb_raise(rb_eArgError, "cyclic reference is not allowed in CArray");
+  /* the struct of an array is aligned, so the low two bits are free */
+  return ULL2NUM(((unsigned long long) (uintptr_t) ca) | (unsigned long long) kind);
+}
+
+NORETURN(static void ca_refuse_cyclic (int kind));
+
+static void
+ca_refuse_cyclic (int kind)
+{
+  if ( kind == CA_RECURSION_COMPUTE ) {
+    rb_raise(rb_eArgError, "%s: cyclic reference is not allowed in CArray",
+             ca_calling_method_name());
+  }
+  rb_raise(rb_eArgError, "cyclic reference is not allowed in CArray");
+}
+
+typedef struct {
+  int        n;
+  CArray   **ops;
+  int        kind;       /* CA_RECURSION_COMPUTE or CA_RECURSION_EVAL */
+  int        k;
+  VALUE    (*body)(VALUE);
+  VALUE      arg;
+} ca_computing_t;
+
+static VALUE ca_computing_next (ca_computing_t *c);
+
+static VALUE
+ca_computing_step (VALUE key, VALUE varg, int recursive)
+{
+  (void) key;
+  if ( recursive ) {
+    ca_refuse_cyclic(CA_RECURSION_COMPUTE);   /* names the method */
+  }
+  return ca_computing_next((ca_computing_t *) varg);
+}
+
+static VALUE
+ca_computing_next (ca_computing_t *c)
+{
+  while ( c->k < c->n ) {
+    CArray *ca = c->ops[c->k++];
+    int j, seen = 0;
+    if ( ! ca || ( c->kind == CA_RECURSION_COMPUTE && ! ca_is_object_type(ca) ) ) continue;
+    for ( j = 0; j < c->k - 1; j++ ) {
+      if ( c->ops[j] == ca ) seen = 1;
     }
-    ca_set_flag(ca, CA_FLAG_CYCLE_CHECK);
+    if ( seen ) continue;
+    return rb_exec_recursive(ca_computing_step,
+                             ca_recursion_key(ca, c->kind),
+                             (VALUE) c);
   }
+  return c->body(c->arg);
+}
+
+static VALUE ca_recursion_probe (VALUE key, VALUE arg, int recursive);
+
+/* Whether ca is, or reaches through its parents, a lazy node being
+   evaluated (recorded by ca_computing_run_nodes).  A cell value that does
+   would come back into that evaluation when it is computed.  The walk is
+   bounded; past the bound the value is not refused here, and is caught when
+   it is evaluated, as a deeper expression is. */
+static int
+ca_reaches_evaluating_walk (CArray *ca, int *budget)
+{
+  if ( --(*budget) < 0 ) {
+    return 0;
+  }
+  if ( RTEST(rb_exec_recursive(ca_recursion_probe,
+                               ca_recursion_key(ca, CA_RECURSION_EVAL),
+                               Qnil)) ) {
+    return 1;
+  }
+  if ( ca_is_entity(ca) ) {
+    return 0;
+  }
+  if ( ca_test_flag(ca, CA_FLAG_MULTI_PARENTS) ) {
+    CAMultiParent *mp = (CAMultiParent *) ca;
+    int32_t k;
+    for ( k = 0; k < mp->n_parents; k++ ) {
+      if ( mp->parents[k] && ca_reaches_evaluating_walk(mp->parents[k], budget) ) {
+        return 1;
+      }
+    }
+    return 0;
+  }
+  return ((CAView *) ca)->parent
+           ? ca_reaches_evaluating_walk(((CAView *) ca)->parent, budget)
+           : 0;
 }
 
 void
-ca_clear_cyclic_check(void *ap)
+ca_refuse_cells_reaching_evaluation (ca_size_t n, const VALUE *cells)
 {
-  CArray *ca = (CArray *) ap;
-  /* ca.data_type == CA_OBJECT */
-  if ( ca_is_object_type(ca) ) {
-    ca_unset_flag(ca, CA_FLAG_CYCLE_CHECK);
-  }
-}
-
-void
-ca_test_cyclic_check(void *ap, void *ptr)
-{
-  CArray *ca = (CArray *) ap;
-
-  /* ca.data_type == CA_OBJECT */
-  if ( ca_is_object_type(ca) ) {
-    VALUE rval = *(VALUE*) ptr;
-    if ( rb_obj_is_carray(rval) ) {
+  ca_size_t i;
+  for ( i = 0; i < n; i++ ) {
+    if ( rb_obj_is_carray(cells[i]) ) {
       CArray *cv;
-      TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
-      if ( ca_test_flag(cv, CA_FLAG_CYCLE_CHECK) ) {
-        rb_raise(rb_eArgError, "cyclic reference is not allowed in CArray");
+      int budget = 1024;
+      TypedData_Get_Struct(cells[i], CArray, &carray_data_type, cv);
+      if ( ! ca_is_entity(cv) && ca_reaches_evaluating_walk(cv, &budget) ) {
+        ca_refuse_cyclic(CA_RECURSION_COMPUTE);
       }
     }
   }
 }
 
-/* Runs body(arg) -- one transfer of an object cell or cells -- with ca's
-   cycle check set, and clears the check however body leaves.  Either
-   direction can call into Ruby: a GET through a CAObject slot or the
-   check of what it delivered, a PUT that converts the caller's value.  A
-   raise that skipped the clear would leave every later access to ca
-   reporting a cyclic reference.  A PUT into an entity only copies VALUEs
-   and cannot raise, so it runs unprotected. */
+/* Runs body(arg), a computation over ops[0..n), with each object array
+   among them recorded as computed over.  Raises when one of them is
+   already being computed over by the same method: a cell's value, or an
+   element's operation, led the computation back into it. */
+VALUE
+ca_computing_run (int n, CArray **ops, VALUE (*body)(VALUE), VALUE arg)
+{
+  ca_computing_t c;
+  c.n = n; c.ops = ops; c.kind = CA_RECURSION_COMPUTE; c.k = 0; c.body = body; c.arg = arg;
+  return ca_computing_next(&c);
+}
+
+/* As ca_computing_run, for the nodes of a lazy expression evaluated over
+   object cells: every array of ops[0..n) is recorded whatever its data type
+   (a comparison is boolean), apart from computations, so a reduction over
+   the expression evaluating it is no re-entry. */
+VALUE
+ca_computing_run_nodes (int n, CArray **ops, VALUE (*body)(VALUE), VALUE arg)
+{
+  ca_computing_t c;
+  c.n = n; c.ops = ops; c.kind = CA_RECURSION_EVAL; c.k = 0; c.body = body; c.arg = arg;
+  return ca_computing_next(&c);
+}
+
+static VALUE
+ca_recursion_probe (VALUE key, VALUE arg, int recursive)
+{
+  (void) key; (void) arg;
+  return recursive ? Qtrue : Qfalse;
+}
+
+static VALUE
+ca_refuse_reentry_step (VALUE self, VALUE name, int recursive)
+{
+  (void) self;
+  if ( recursive ) {
+    rb_raise(rb_eArgError, "%" PRIsVALUE ": cyclic reference is not allowed in CArray",
+             name);
+  }
+  return rb_yield(Qnil);
+}
+
+/* refuse_reentry(name) { ... } -- runs the block, refusing as cyclic a
+   second call for the same array from inside it (rb_exec_recursive, by
+   the receiver).  Ruby code that walks the cells of an object array and
+   comes back to the array through a cell, such as the nested dump of a
+   view, goes through this. */
+static VALUE
+rb_ca_refuse_reentry (VALUE self, VALUE name)
+{
+  return rb_exec_recursive(ca_refuse_reentry_step, self, name);
+}
+
+/* A cell read that delivers an array being read refuses it: the array the
+   cell was read from (an entity is not recorded, see ca_with_cyclic_check)
+   or one recorded further out. */
+void
+ca_test_cyclic_check (void *ap, void *ptr)
+{
+  CArray *ca = (CArray *) ap;
+  if ( ca_is_object_type(ca) ) {
+    VALUE rval = *(VALUE *) ptr;
+    if ( rb_obj_is_carray(rval) ) {
+      CArray *cv;
+      TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
+      if ( cv == ca ||
+           RTEST(rb_exec_recursive(ca_recursion_probe,
+                                   ca_recursion_key(cv, CA_RECURSION_READ),
+                                   Qnil)) ) {
+        ca_refuse_cyclic(CA_RECURSION_READ);
+      }
+    }
+  }
+}
+
+/* Refuse to write into an object array a value that is a CArray sharing
+   its cells -- the array itself or a view of it.  Reading such a cell back
+   is refused as cyclic (ca_test_cyclic_check); refusing the write where it
+   passes through here reports the mistake where it is made.  A write that
+   reaches the cells another way is still caught when the cell is read.
+   data holds n VALUEs. */
+static void
+ca_refuse_storing_self (CArray *ca, const void *data, ca_size_t n)
+{
+  const char *d = (const char *) data;
+  ca_size_t i;
+  for (i=0; i<n; i++) {
+    VALUE rval;
+    memcpy(&rval, d + i * sizeof(VALUE), sizeof(VALUE));
+    if ( rb_obj_is_carray(rval) ) {
+      CArray *cv;
+      TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
+      if ( ca_shares_root(ca, cv) ) {
+        rb_raise(rb_eArgError, "%s: can not store an object array into itself",
+                 ca_calling_method_name());
+      }
+    }
+  }
+}
+
+typedef struct {
+  VALUE (*body)(VALUE);
+  VALUE  arg;
+} ca_reading_t;
+
+static VALUE
+ca_reading_step (VALUE key, VALUE varg, int recursive)
+{
+  ca_reading_t *r = (ca_reading_t *) varg;
+  (void) key;
+  if ( recursive ) {
+    ca_refuse_cyclic(CA_RECURSION_READ);
+  }
+  return r->body(r->arg);
+}
+
+static char ca_obj_moves_cells[CA_OBJ_TYPE_MAX];
+
+void
+ca_register_cell_moving_view (int8_t obj_type)
+{
+  ca_obj_moves_cells[(uint8_t) obj_type] = 1;
+}
+
+/* Whether the transfers of a Face are the forwarders of ca_obj_face.c, which
+   hand the request to the parent unchanged.  A Face with transfer slots of
+   its own (one defined in Ruby on CAObject, or by an extension) may run Ruby
+   and answers no. */
+static int
+ca_face_forwards_transfers (CArray *ca)
+{
+  ca_operation_function_t *f = &ca_func[ca->obj_type];
+  return f->xfer_index  == ca_face_xfer_index  &&
+         f->xfer_addrs  == ca_face_xfer_addrs  &&
+         f->xfer_stride == ca_face_xfer_stride &&
+         f->xfer_all    == ca_face_xfer_all;
+}
+
+/* Whether a transfer of ca reaches entities through cell-moving views only:
+   then it calls no Ruby on the way.  An unknown view, one that computes its
+   cells (CAObject, a lazy expression) or converts them, answers no. */
+static int
+ca_transfer_calls_no_ruby (CArray *ca, int depth)
+{
+  while ( ! ca_is_entity(ca) ) {
+    if ( depth++ > 64 ) {
+      return 0;
+    }
+    if ( ca_test_flag(ca, CA_FLAG_MULTI_PARENTS) ) {
+      CAMultiParent *mp = (CAMultiParent *) ca;
+      int32_t k;
+      if ( ! ca_obj_moves_cells[(uint8_t) ca->obj_type] ) {
+        return 0;
+      }
+      for ( k = 0; k < mp->n_parents; k++ ) {
+        if ( ! mp->parents[k] ||
+             ! ca_transfer_calls_no_ruby(mp->parents[k], depth) ) {
+          return 0;
+        }
+      }
+      return 1;
+    }
+    if ( ca_is_face(ca) ? ! ca_face_forwards_transfers(ca)
+                        : ! ( ca_is_stride_family(ca) ||
+                              ca_obj_moves_cells[(uint8_t) ca->obj_type] ) ) {
+      return 0;
+    }
+    ca = ((CAView *) ca)->parent;
+    if ( ! ca ) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+/* Runs body(arg) -- one transfer of an object cell or cells -- with ca
+   recorded as being read.  Entering a transfer of ca again from inside it
+   is refused as cyclic.  A transfer of an entity, or of views that only move
+   cells down to entities, copies VALUEs and calls no Ruby, so it cannot be
+   entered again; it is not recorded, and a cell holding the array itself is
+   caught by ca_test_cyclic_check. */
 static void
 ca_with_cyclic_check (CArray *ca, int dir, VALUE (*body)(VALUE), VALUE arg)
 {
-  int state = 0;
-  ca_set_cyclic_check(ca);
-  if ( dir == CA_XFER_PUT && ca_is_entity(ca) ) {
+  ca_reading_t r;
+  (void) dir;
+  if ( ca_transfer_calls_no_ruby(ca, 0) ) {
     body(arg);
+    return;
   }
-  else {
-    rb_protect(body, arg, &state);
-  }
-  ca_clear_cyclic_check(ca);
-  if ( state ) {
-    rb_jump_tag(state);
-  }
+  r.body = body;
+  r.arg  = arg;
+  rb_exec_recursive(ca_reading_step, ca_recursion_key(ca, CA_RECURSION_READ),
+                    (VALUE) &r);
 }
 
 /* ------------------------------------------------------------------- */
@@ -911,6 +1179,58 @@ ca_store_addr (void *ap, ca_size_t addr, void *pval)
    entry; ca_fetch_index / ca_store_index are thin wrappers (kept as
    public C-API for external ext gems).  Every view supplies an
    xfer_index slot. */
+
+/* ---- A write through a view, tried first against a stack's stand-ins ----
+   (ca_multi_parent_value_trial_below) */
+
+typedef struct {
+  int        kind;
+  CArray    *ca;
+  ca_size_t  n;
+  ca_size_t *addrs;
+  ca_size_t *starts;
+  ca_size_t *counts;
+  ca_size_t *strides;
+  void      *data;
+  ca_size_t  base;
+  int8_t     ndim;
+  ca_size_t *steps;
+} ca_value_trial_put_t;
+
+enum { CA_TRIAL_ADDRS, CA_TRIAL_STRIDE, CA_TRIAL_ALL, CA_TRIAL_FILL,
+       CA_TRIAL_FILL_STRIDE, CA_TRIAL_FILL_ADDRS, CA_TRIAL_SYNC };
+
+static VALUE
+ca_value_trial_put_body (VALUE arg)
+{
+  ca_value_trial_put_t *a = (ca_value_trial_put_t *) arg;
+  switch ( a->kind ) {
+  case CA_TRIAL_ADDRS:
+    ca_xfer_addrs(a->ca, a->n, a->addrs, a->data, CA_XFER_PUT); break;
+  case CA_TRIAL_STRIDE:
+    ca_xfer_stride(a->ca, a->starts, a->counts, a->strides, a->data, CA_XFER_PUT); break;
+  case CA_TRIAL_ALL:
+    ca_xfer_all(a->ca, a->data, CA_XFER_PUT); break;
+  case CA_TRIAL_FILL:
+    ca_fill_data(a->ca, a->data); break;
+  case CA_TRIAL_FILL_STRIDE:
+    ca_fill_stride(a->ca, a->base, a->ndim, a->counts, a->steps, a->data); break;
+  case CA_TRIAL_FILL_ADDRS:
+    ca_fill_addrs(a->ca, a->n, a->addrs, a->data); break;
+  case CA_TRIAL_SYNC:
+    ca_func[a->ca->obj_type].sync(a->ca); break;
+  }
+  return Qnil;
+}
+
+#define CA_VALUE_TRIAL_PUT(...) \
+  do { \
+    ca_value_trial_put_t a_ = { __VA_ARGS__ }; \
+    CArray *m_ = ca_multi_parent_value_trial_below(a_.ca); \
+    if ( m_ != NULL ) { \
+      ca_multi_parent_value_trial_through(m_, ca_value_trial_put_body, (VALUE) &a_); \
+    } \
+  } while (0)
 
 static inline void
 ca_xfer_index_dispatch (CArray *ca, ca_size_t *idx, void *data, int dir)
@@ -950,6 +1270,7 @@ ca_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
     ca_refuse_read_only();
   }
 
+
   /* Fast path: non-CA_OBJECT element type needs no GC protection. */
   if ( ca->data_type != CA_OBJECT ) {
     ca_xfer_index_dispatch(ca, idx, data, dir);
@@ -957,6 +1278,9 @@ ca_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
   }
 
   /* CA_OBJECT slow path: cyclic check. */
+  if ( dir == CA_XFER_PUT ) {
+    ca_refuse_storing_self(ca, data, 1);
+  }
   {
     struct ca_xfer_index_args args;
     args.ca  = ca;
@@ -1030,7 +1354,27 @@ ca_xfer_addrs_dispatch (CArray *ca, ca_size_t n, ca_size_t *addrs,
       return;
     }
     /* Per-cell loop for arbitrary (non-sequential) addrs:
-       fancy gather/scatter from CASelect 2-D mapper, CSA sparse mask, etc.  */
+       fancy gather/scatter from CASelect 2-D mapper, CSA sparse mask, etc.
+       Cells of 1, 2, 4 or 8 bytes are copied with that length as a
+       constant, which the compiler turns into one load and store (and
+       which stays legal for an unaligned buffer); a length known only at
+       run time is a call per cell. */
+#define CA_XFER_ADDRS_AS(W) \
+    do { \
+      if ( dir == CA_XFER_GET ) { \
+        for (i=0; i<n; i++) memcpy(d + i * (W), ca->ptr + (W) * addrs[i], (W)); \
+      } \
+      else { \
+        for (i=0; i<n; i++) memcpy(ca->ptr + (W) * addrs[i], d + i * (W), (W)); \
+      } \
+    } while (0)
+    switch ( ca->bytes ) {
+    case 1: CA_XFER_ADDRS_AS(1); return;
+    case 2: CA_XFER_ADDRS_AS(2); return;
+    case 4: CA_XFER_ADDRS_AS(4); return;
+    case 8: CA_XFER_ADDRS_AS(8); return;
+    }
+#undef CA_XFER_ADDRS_AS
     for ( i = 0; i < n; i++ ) {
       char *p = ca->ptr + ca->bytes * addrs[i];
       if ( dir == CA_XFER_GET ) memcpy(d + i * ca->bytes, p, ca->bytes);
@@ -1078,6 +1422,11 @@ ca_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data, int dir)
     ca_refuse_read_only();
   }
 
+  if ( dir == CA_XFER_PUT && ca->ptr == NULL ) {
+    CA_VALUE_TRIAL_PUT(CA_TRIAL_ADDRS, ca, n, addrs, NULL, NULL, NULL, data);
+  }
+
+
   /* Fast path: non-CA_OBJECT element type needs no GC protection. */
   if ( ca->data_type != CA_OBJECT ) {
     ca_xfer_addrs_dispatch(ca, n, addrs, data, dir);
@@ -1085,6 +1434,9 @@ ca_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *data, int dir)
   }
 
   /* CA_OBJECT slow path: cyclic check. */
+  if ( dir == CA_XFER_PUT ) {
+    ca_refuse_storing_self(ca, data, n);
+  }
   {
     struct ca_xfer_addrs_args args;
     args.ca    = ca;
@@ -1440,7 +1792,6 @@ ca_xfer_stride_dispatch (CArray *ca, ca_size_t *starts, ca_size_t *counts,
   int8_t    ndim = ca->ndim;
   ca_size_t native[CA_RANK_MAX];
   ca_size_t base = 0;
-  ca_size_t doff = 0;
   ca_size_t s;
   int8_t    k;
   ca_size_t idx[CA_RANK_MAX];
@@ -1467,18 +1818,27 @@ ca_xfer_stride_dispatch (CArray *ca, ca_size_t *starts, ca_size_t *counts,
     return;
   }
 
-  /* fallback: per-cell via byte offset -> flat addr -> index -> xfer_index. */
-  for ( k = 0; k < ndim; k++ ) idx[k] = 0;
-  /* empty: its one caller, ca_xfer_stride, returns on an empty region */
-  while ( 1 ) {
-    ca_size_t soff = base, vidx[CA_RANK_MAX];
-    for ( k = 0; k < ndim; k++ ) soff += idx[k] * strides[k];
-    ca_addr2index(ca, soff / ca->bytes, vidx);
-    ca_xfer_index_dispatch(ca, vidx, d + doff, dir);
-    doff += ca->bytes;
-    k = ndim - 1;
-    while ( k >= 0 ) { if ( ++idx[k] < counts[k] ) break; idx[k] = 0; k--; }
-    if ( k < 0 ) break;
+  /* fallback for a type without xfer_stride: the region's cells by address,
+     handed to xfer_addrs in one call (data is packed over counts, as
+     xfer_addrs takes it). */
+  {
+    volatile VALUE holder = 0;
+    ca_size_t n = 1, i = 0;
+    ca_size_t *addrs;
+    for ( k = 0; k < ndim; k++ ) n *= counts[k];
+    addrs = ALLOCV_N(ca_size_t, holder, n);
+    for ( k = 0; k < ndim; k++ ) idx[k] = 0;
+    /* empty: its one caller, ca_xfer_stride, returns on an empty region */
+    while ( 1 ) {
+      ca_size_t soff = base;
+      for ( k = 0; k < ndim; k++ ) soff += idx[k] * strides[k];
+      addrs[i++] = soff / ca->bytes;
+      k = ndim - 1;
+      while ( k >= 0 ) { if ( ++idx[k] < counts[k] ) break; idx[k] = 0; k--; }
+      if ( k < 0 ) break;
+    }
+    ca_xfer_addrs_dispatch(ca, n, addrs, d, dir);
+    ALLOCV_END(holder);
   }
 }
 
@@ -1523,11 +1883,22 @@ ca_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
 
   if ( ca_region_is_empty(ca->ndim, counts) ) return;
 
+  if ( dir == CA_XFER_PUT && ca->ptr == NULL ) {
+    CA_VALUE_TRIAL_PUT(CA_TRIAL_STRIDE, ca, 0, NULL, starts, counts, strides, data);
+  }
+
+
   if ( ca->data_type != CA_OBJECT ) {
     ca_xfer_stride_dispatch(ca, starts, counts, strides, data, dir);
     return;
   }
 
+  if ( dir == CA_XFER_PUT ) {
+    ca_size_t n = 1;
+    int8_t k;
+    for (k=0; k<ca->ndim; k++) n *= counts[k];
+    ca_refuse_storing_self(ca, data, n);
+  }
   {
     struct ca_xfer_stride_args args;
     args.ca = ca; args.starts = starts; args.counts = counts;
@@ -1587,6 +1958,9 @@ ca_xfer_all (void *ap, void *data, int dir)
   /* An empty view moves nothing; see ca_xfer_stride. */
   if ( ca->elements == 0 ) {
     return;
+  }
+  if ( dir == CA_XFER_PUT && ca->ptr == NULL ) {
+    CA_VALUE_TRIAL_PUT(CA_TRIAL_ALL, ca, 0, NULL, NULL, NULL, NULL, data);
   }
   /* Universal arena lifetime hook.  ca_xfer_all is the single universal
      entry for materialise (to_ca -> ca_copy -> ca_copy_data ->
@@ -1679,14 +2053,111 @@ rb_ca_s_attached_views (VALUE klass)
   return LONG2NUM(__atomic_load_n(&ca_attached_views, __ATOMIC_RELAXED));
 }
 
-/* Set once at load from CARRAY_GENERAL_PATH; see carray_internal.h. */
+/* Set once at load from CARRAY_GENERAL_PATH and CARRAY_SHORTCUTS_OFF; see
+   carray_internal.h. */
 int ca_fast_paths_on = 1;
 int ca_iter_transfer_only_on = 0;
+unsigned char ca_shortcut_off[CA_SC_COUNT];
 
-static VALUE
-rb_ca_s_fast_paths_enabled (VALUE klass)
+/* In the order of enum ca_shortcut. */
+static const char *ca_shortcut_names[CA_SC_COUNT] = {
+  "shift_whole_view",
+  "stack",
+  "stack_outer_k",
+  "fiber_fused_conversion",
+  "per_slab_hoist",
+  "protect_only_may_raise",
+  "stack_addrs_k0",
+  "stack_stride_box",
+  "stack_stride_reloc",
+  "stack_parents_k0",
+  "stack_fold",
+  "meld_stride_box",
+  "meld_parents_axis0",
+  "median_partition",
+  "percentile_partition",
+  "loop_interchange",
+  "stack_loop_interchange",
+  "lazy_streaming_reduce",
+  "short_fiber_reduce",
+  "meld_reduce",
+  "segment_nunique",
+  "segment_scan_kernel",
+  "segment_edge_kernel",
+  "segment_reduce_kernel",
+  "segment_all_any_kernel",
+  "categorical_group_by_index",
+  "axis_group_count_kernel",
+  "axis_group_whole_block",
+  "axis_group_reduce_kernel",
+  "axis_group_scan_kernel",
+  "window_fold_by_offset",
+};
+
+static int
+ca_shortcut_lookup (const char *name, long len)
 {
-  return ca_fast_paths_on ? Qtrue : Qfalse;
+  int i;
+  for (i=0; i<CA_SC_COUNT; i++) {
+    if ( (long) strlen(ca_shortcut_names[i]) == len
+         && ! strncmp(ca_shortcut_names[i], name, len) ) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/* CARRAY_SHORTCUTS_OFF is a comma-separated list of names.  A name it does
+   not know is warned about, so a misspelt one does not leave the shortcut
+   on unnoticed. */
+static void
+ca_shortcuts_off_from_env (void)
+{
+  const char *p = getenv("CARRAY_SHORTCUTS_OFF");
+  if ( ! p ) {
+    return;
+  }
+  while ( *p ) {
+    const char *q = strchr(p, ',');
+    long len = q ? (long) (q - p) : (long) strlen(p);
+    if ( len > 0 ) {
+      int id = ca_shortcut_lookup(p, len);
+      if ( id < 0 ) {
+        rb_warn("CARRAY_SHORTCUTS_OFF: unknown shortcut %.*s", (int) len, p);
+      }
+      else {
+        ca_shortcut_off[id] = 1;
+      }
+    }
+    if ( ! q ) {
+      break;
+    }
+    p = q + 1;
+  }
+}
+
+/* CArray.__fast_paths_enabled__ answers whether the fast paths are on;
+   with a name, whether that one is. */
+static VALUE
+rb_ca_s_fast_paths_enabled (int argc, VALUE *argv, VALUE klass)
+{
+  VALUE rname;
+  int id;
+
+  rb_scan_args(argc, argv, "01", &rname);
+  if ( NIL_P(rname) ) {
+    return ca_fast_paths_on ? Qtrue : Qfalse;
+  }
+  if ( SYMBOL_P(rname) ) {
+    rname = rb_sym2str(rname);
+  }
+  StringValue(rname);
+  id = ca_shortcut_lookup(RSTRING_PTR(rname), RSTRING_LEN(rname));
+  if ( id < 0 ) {
+    rb_raise(rb_eArgError, "__fast_paths_enabled__: unknown shortcut %"PRIsVALUE,
+             rname);
+  }
+  return ca_fast_path(id) ? Qtrue : Qfalse;
 }
 
 static VALUE
@@ -1880,27 +2351,37 @@ ca_sync_all_step (VALUE arg)
   return Qnil;
 }
 
+/* Syncs `ca`, carrying on past a raise: the first exception is kept in
+   *error (left as it is when one is already there), to be raised once
+   the others have been synced.  A throw or break cannot wait, and goes at
+   once. */
+void
+ca_sync_carry_on (CArray *ca, volatile VALUE *error)
+{
+  int tag = 0;
+  rb_protect(ca_sync_all_step, (VALUE) ca, &tag);
+  if ( tag ) {
+    VALUE err = rb_errinfo();
+    if ( ! RTEST(rb_obj_is_kind_of(err, rb_eException)) ) {
+      rb_jump_tag(tag);
+    }
+    if ( NIL_P(*error) ) {
+      *error = err;
+    }
+    rb_set_errinfo(Qnil);
+  }
+}
+
 /* Syncs every one of list[0..n-1] in turn, carrying on past one that
    raises so that the others still receive what was written, then raises
-   the first exception.  A throw or break cannot wait, and goes at once. */
+   the first exception. */
 void
 ca_sync_all (CArray **list, int32_t n)
 {
   volatile VALUE error = Qnil;
   int32_t k;
   for ( k = 0; k < n; k++ ) {
-    int tag = 0;
-    rb_protect(ca_sync_all_step, (VALUE) list[k], &tag);
-    if ( tag ) {
-      VALUE err = rb_errinfo();
-      if ( ! RTEST(rb_obj_is_kind_of(err, rb_eException)) ) {
-        rb_jump_tag(tag);
-      }
-      if ( NIL_P(error) ) {
-        error = err;
-      }
-      rb_set_errinfo(Qnil);
-    }
+    ca_sync_carry_on(list[k], &error);
   }
   if ( ! NIL_P(error) ) {
     rb_exc_raise(error);
@@ -2092,6 +2573,234 @@ ca_attach_window (int32_t n, CArray **list, const char *modes,
   return result;
 }
 
+/* ---- A window whose Fiber is abandoned ------------------------------------
+
+   A window that yields to a block is closed by rb_ensure.  Ruby does not
+   run the ensure of a Fiber that is suspended and then collected -- an
+   Enumerator stopped with #next and dropped is one -- so such a window
+   would stay open for good: a view keeps its attach, and a source that
+   publishes its ptr only while held (a CASource) keeps it published and
+   stops checking its backend.
+
+   The guard closes it from a finalizer instead.  The window's state lives
+   on the heap, owned by the guard; a sentinel object that only the
+   window's frame refers to carries a finalizer that holds the guard.  When
+   the Fiber is collected the sentinel goes with it, and the finalizer --
+   which runs outside GC, where Ruby may be called -- runs `cleanup`.  A
+   window that closes normally disarms the guard first.
+
+   `mark` marks the VALUEs `arg` holds, which nothing else does once the
+   frame that referred to them is gone.  The guard frees `arg` with xfree. */
+
+typedef struct {
+  void (*cleanup) (void *arg);
+  void (*mark)    (void *arg);
+  void  *arg;
+  int    armed;
+} ca_window_guard_t;
+
+static void
+ca_window_guard_mark (void *p)
+{
+  ca_window_guard_t *g = (ca_window_guard_t *) p;
+  if ( g->arg && g->mark ) {
+    g->mark(g->arg);
+  }
+}
+
+static void
+ca_window_guard_free (void *p)
+{
+  ca_window_guard_t *g = (ca_window_guard_t *) p;
+  xfree(g->arg);
+  xfree(g);
+}
+
+static const rb_data_type_t ca_window_guard_data_type = {
+  .wrap_struct_name = "CArrayWindowGuard",
+  .function = {
+    .dmark = ca_window_guard_mark,
+    .dfree = ca_window_guard_free,
+    .dsize = NULL,
+  },
+  .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+static VALUE
+ca_window_guard_cleanup_step (VALUE gv)
+{
+  ca_window_guard_t *g;
+  TypedData_Get_Struct(gv, ca_window_guard_t, &ca_window_guard_data_type, g);
+  g->cleanup(g->arg);
+  return Qnil;
+}
+
+/* The finalizer is the guard itself, called with the sentinel's object id.
+   A proc made here would capture the frame it is made in -- inside the
+   Fiber -- and keep the Fiber alive through the finalizer table. */
+static VALUE rb_cCAWindowGuard;
+
+static VALUE
+ca_window_guard_call (VALUE gv, VALUE object_id)
+{
+  ca_window_guard_t *g;
+  int tag = 0;
+  (void) object_id;
+  TypedData_Get_Struct(gv, ca_window_guard_t, &ca_window_guard_data_type, g);
+  if ( g->armed && g->cleanup ) {
+    g->armed = 0;
+    rb_protect(ca_window_guard_cleanup_step, gv, &tag);
+    if ( tag ) {
+      rb_set_errinfo(Qnil);
+    }
+  }
+  return Qnil;
+}
+
+/* Takes ownership of arg (allocated with xmalloc).  Returns the guard and
+   stores the sentinel; the caller keeps both on its frame (RB_GC_GUARD)
+   for as long as the window may be open. */
+VALUE
+ca_window_guard_arm (void (*cleanup)(void *), void (*mark)(void *), void *arg,
+                     VALUE *sentinel)
+{
+  ca_window_guard_t *g;
+  volatile VALUE gv, sv;
+  gv = TypedData_Make_Struct(rb_cCAWindowGuard, ca_window_guard_t,
+                             &ca_window_guard_data_type, g);
+  g->cleanup = cleanup;
+  g->mark    = mark;
+  g->arg     = arg;
+  g->armed   = 1;
+  sv = rb_class_new_instance(0, NULL, rb_cObject);
+  rb_define_finalizer(sv, gv);
+  *sentinel = sv;
+  return gv;
+}
+
+/* Called first thing when the window closes normally, so that cleanup
+   cannot also run from the finalizer. */
+void
+ca_window_guard_disarm (VALUE gv, VALUE sentinel)
+{
+  ca_window_guard_t *g;
+  TypedData_Get_Struct(gv, ca_window_guard_t, &ca_window_guard_data_type, g);
+  g->armed = 0;
+  /* rb_undefine_finalizer is declared in the headers but not exported by
+     every libruby (3.4.1 lacks it), so go through ObjectSpace. */
+  rb_funcall(rb_const_get(rb_cObject, rb_intern("ObjectSpace")),
+             rb_intern("undefine_finalizer"), 1, sentinel);
+}
+
+/* ca_attach_window for a window that yields to a block, closed by the
+   guard above if its Fiber is abandoned.  The context, the list and the
+   modes are copied to the heap, since the caller's frame goes with the
+   Fiber; `owners` keeps the arrays in list alive until then. */
+
+typedef struct {
+  ca_window_ctx_t w;
+  VALUE           owners;
+  CArray         *list[CA_RANK_MAX];
+  char            modes[CA_RANK_MAX + 1];
+} ca_guarded_window_t;
+
+static void
+ca_guarded_window_mark (void *p)
+{
+  ca_guarded_window_t *gw = (ca_guarded_window_t *) p;
+  rb_gc_mark(gw->owners);
+  rb_gc_mark(gw->w.masks);
+  rb_gc_mark(gw->w.sync_err);
+}
+
+static void
+ca_guarded_window_cleanup (void *p)
+{
+  ca_guarded_window_t *gw = (ca_guarded_window_t *) p;
+  ca_attach_window_close((VALUE) &gw->w);
+}
+
+typedef struct {
+  ca_guarded_window_t *gw;
+  VALUE guard;
+  VALUE sentinel;
+} ca_guarded_window_run_t;
+
+static VALUE
+ca_guarded_window_close (VALUE varg)
+{
+  ca_guarded_window_run_t *r = (ca_guarded_window_run_t *) varg;
+  ca_window_guard_disarm(r->guard, r->sentinel);
+  return ca_attach_window_close((VALUE) &r->gw->w);
+}
+
+VALUE
+ca_attach_window_yielding (VALUE owners, int32_t n, CArray **list,
+                           const char *modes, VALUE (*body)(VALUE), VALUE arg)
+{
+  ca_guarded_window_t *gw;
+  ca_guarded_window_run_t r;
+  volatile VALUE guard, sentinel;
+  VALUE result;
+  int   tag = 0;
+
+  if ( n < 1 || n > CA_RANK_MAX ) {   /* rank-check: a count of arrays, bounded by gw->list */
+    rb_raise(rb_eRuntimeError, "[BUG] ca_attach_window_yielding: %d arrays", (int) n);
+  }
+  gw = ZALLOC(ca_guarded_window_t);
+  gw->owners = owners;
+  memcpy(gw->list, list, sizeof(CArray *) * (size_t) n);
+  memcpy(gw->modes, modes, (size_t) n);
+  gw->w.n         = n;
+  gw->w.list      = gw->list;
+  gw->w.modes     = gw->modes;
+  gw->w.opened    = 0;
+  gw->w.body_done = 0;
+  gw->w.sync_tag  = 0;
+  gw->w.sync_err  = Qnil;
+  gw->w.body      = body;
+  gw->w.arg       = arg;
+  gw->w.masks     = Qnil;
+  guard = ca_window_guard_arm(NULL, ca_guarded_window_mark, gw, (VALUE *) &sentinel);
+  ca_attach_window_save_masks(&gw->w);
+
+  rb_protect(ca_attach_window_open, (VALUE) &gw->w, &tag);
+  if ( tag ) {
+    ca_window_guard_disarm(guard, sentinel);
+    while ( gw->w.opened > 0 ) {
+      gw->w.opened--;
+      if ( gw->w.list[gw->w.opened] ) {
+        ca_detach(gw->w.list[gw->w.opened]);
+      }
+    }
+    ca_attach_window_restore_masks(&gw->w);
+    rb_jump_tag(tag);
+  }
+
+  /* Only now is there something for the finalizer to close. */
+  {
+    ca_window_guard_t *g;
+    TypedData_Get_Struct(guard, ca_window_guard_t, &ca_window_guard_data_type, g);
+    g->cleanup = ca_guarded_window_cleanup;
+  }
+
+  r.gw       = gw;
+  r.guard    = guard;
+  r.sentinel = sentinel;
+  result = rb_ensure(ca_attach_window_body,   (VALUE) &gw->w,
+                     ca_guarded_window_close, (VALUE) &r);
+  if ( gw->w.sync_tag && RB_TYPE_P(gw->w.sync_err, T_OBJECT) &&
+       RTEST(rb_obj_is_kind_of(gw->w.sync_err, rb_eException)) ) {
+    VALUE err = gw->w.sync_err;
+    RB_GC_GUARD(guard);
+    RB_GC_GUARD(sentinel);
+    rb_exc_raise(err);
+  }
+  RB_GC_GUARD(guard);
+  RB_GC_GUARD(sentinel);
+  return result;
+}
+
 /* re-gather an attached view's buffer from its parent */
 
 void
@@ -2138,6 +2847,12 @@ ca_sync (void *ap)
   if ( ca_is_readonly(ca) ) {
     ca_refuse_read_only();
   }
+
+  /* Before the mask is synced: a refused write leaves the mask as well. */
+  if ( ca_is_view(ca) && ! CAVIEW(ca)->nosync ) {
+    CA_VALUE_TRIAL_PUT(CA_TRIAL_SYNC, ca, 0, NULL, NULL, NULL, NULL, NULL);
+  }
+
 
   /* Only a mask that exists can hold writes: one made inside the window
      is attached with the view (ca_create_mask).  Making one here would
@@ -2370,6 +3085,11 @@ ca_fill_data (void *ap, void *aptr)
     ca_refuse_read_only();
   }
 
+  if ( ca->ptr == NULL ) {
+    CA_VALUE_TRIAL_PUT(CA_TRIAL_FILL, ca, 0, NULL, NULL, NULL, NULL, ptr);
+  }
+
+
   if ( ca_is_view(ca) ) {   /* view array */
     if ( ca_is_attached(ca) ) { /* ca is to be attached */
       ca_func[CA_OBJ_ARRAY].fill_data(ap, ptr);
@@ -2425,6 +3145,12 @@ ca_fill_stride (void *ap, ca_size_t base, int8_t ndim,
   }
 
   if ( ca_region_is_empty(ndim, counts) ) return;
+
+  if ( ca->ptr == NULL ) {
+    CA_VALUE_TRIAL_PUT(CA_TRIAL_FILL_STRIDE, ca, 0, NULL, NULL, counts, NULL, ptr,
+                       base, ndim, steps);
+  }
+
 
   if ( ca_func[ca->obj_type].fill_stride ) {
     ca_func[ca->obj_type].fill_stride(ap, base, ndim, counts, steps, ptr);
@@ -2543,6 +3269,11 @@ ca_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
   if ( ca_is_readonly(ca) ) {
     ca_refuse_read_only();
   }
+
+  if ( ca->ptr == NULL ) {
+    CA_VALUE_TRIAL_PUT(CA_TRIAL_FILL_ADDRS, ca, n, addrs, NULL, NULL, NULL, ptr);
+  }
+
 
   if ( ca_func[ca->obj_type].fill_addrs ) {
     ca_func[ca->obj_type].fill_addrs(ap, n, addrs, ptr);
@@ -3067,6 +3798,13 @@ Init_carray_core (void)
 
   ca_init_obj_type();
 
+  rb_define_private_method(rb_cCArray, "refuse_reentry", rb_ca_refuse_reentry, 1);
+
+  rb_cCAWindowGuard = rb_define_class_under(rb_cCArray, "WindowGuard", rb_cObject);
+  rb_undef_alloc_func(rb_cCAWindowGuard);
+  rb_undef_method(CLASS_OF(rb_cCAWindowGuard), "new");
+  rb_define_method(rb_cCAWindowGuard, "call", ca_window_guard_call, 1);
+
 #ifdef CARRAY_DEV_BUILD
   rb_define_singleton_method(rb_cCArray, "attach", rb_ca_s_attach, -1);
   rb_define_singleton_method(rb_cCArray, "attach!", rb_ca_s_attach_bang, -1);
@@ -3085,9 +3823,10 @@ Init_carray_core (void)
     const char *general = getenv("CARRAY_GENERAL_PATH");
     ca_fast_paths_on = !( general && general[0] && strcmp(general, "0") );
     ca_iter_transfer_only_on = ( general && ! strcmp(general, "2") );
+    ca_shortcuts_off_from_env();
   }
   rb_define_singleton_method(rb_cCArray, "__fast_paths_enabled__",
-                             rb_ca_s_fast_paths_enabled, 0);
+                             rb_ca_s_fast_paths_enabled, -1);
   rb_define_singleton_method(rb_cCArray, "__iter_by_transfer_only__",
                              rb_ca_s_iter_by_transfer_only, 0);
 #endif

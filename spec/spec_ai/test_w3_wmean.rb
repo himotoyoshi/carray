@@ -121,13 +121,27 @@ class TestW3Wmean < Test::Unit::TestCase
 
   # ---- division edge cases --------------------------------------------
 
-  def test_zero_weights_yields_nan
-    # Σw = 0 + 0 = 0, Σ(v*w) = 0; finish: 0/0 = NaN.  Legacy proc_wmean
-    # had identical behavior (no division check).
+  # Weights summing to zero leave the mean undefined: UNDEF, as for no valid
+  # cell, rather than 0/0 = NaN or x/0 = +-Infinity -- in every lane and on
+  # every path that computes a weighted mean.
+  def test_weights_summing_to_zero_give_undef
     a = CArray.float64(2) { 1.0 }
-    w = CArray.float64(2) { 0.0 }
-    r = a.wmean(w)
-    assert_true(r.nan?, "wmean with zero weights should be NaN (got #{r})")
+    assert_same UNDEF, a.wmean(CArray.float64(2) { 0.0 })
+    assert_same UNDEF, CA_FLOAT64([1, 2]).wmean(CA_FLOAT64([1, -1]))
+    assert_same UNDEF, CA_INT32([1, 2]).wmean(CA_FLOAT64([0, 0]))
+    assert_same UNDEF, CA_OBJECT([1, 2]).wmean(CA_OBJECT([0, 0]))
+    m = CArray.float64(2, 2) { 1.0 }
+    w = CA_FLOAT64([[0, 0], [1, 1]])
+    assert_equal [UNDEF, 1.0], m.wmean(w, axis: 1).to_a
+    assert_equal [-1.0, 1.0], m.wmean(w, axis: 1, fill_value: -1.0).to_a
+    cat = CA_OBJECT(%w[a a b b]).categorize
+    x   = CA_FLOAT64([1, 2, 3, 4])
+    wz  = CA_FLOAT64([0, 0, 1, 1])
+    assert_equal [UNDEF, 3.5], x.group_by_category(cat).wmean(wz).to_a
+    assert_equal [UNDEF, 3.5], x[cat].wmean(wz, axis: :group).to_a
+    h = CArray.float64(2, 4) { |i| i + 1 }
+    assert_equal [[UNDEF, UNDEF], [UNDEF, UNDEF]],
+                 h.group_by_category(cat).wmean(CArray.float64(2, 4) { 0.0 }, axis: 1).to_a
   end
 
   # ---- 3.0 breaking: complex rejection --------------------------------
@@ -169,5 +183,19 @@ class TestW3Wmean < Test::Unit::TestCase
     w = CArray.float64(3, 2) { 1.0 }
     # mean over all cells = 21/6 = 3.5
     assert_in_delta(3.5, a.wmean(w), 1e-12)
+  end
+
+  # A masked weight given as one value (UNDEF, or a CScalar that is masked)
+  # leaves every cell without a weight: no cell contributes, so the mean is
+  # UNDEF as for a fully masked weight array, and the sum is 0.
+  def test_a_masked_single_weight
+    x = CArray.float64(4, 3).seq!(1)
+    one = CScalar.float64
+    one[0] = UNDEF
+    assert_equal [UNDEF] * 4, x.wmean(one, axis: 1).to_a
+    assert_equal [UNDEF] * 4, x.wmean(UNDEF, axis: 1).to_a
+    assert_equal [UNDEF] * 4, x.to_type(:object).wmean(one, axis: 1).to_a
+    assert_same UNDEF, x.wmean(UNDEF)
+    assert_equal [0.0] * 4, x.wsum(UNDEF, axis: 1).to_a
   end
 end

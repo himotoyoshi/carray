@@ -369,7 +369,8 @@ rb_ca_convert (int argc, VALUE *argv, VALUE self)
 
   list[0] = c.ca;
   list[1] = c.co;
-  ca_attach_window(2, list, "rw", ca_convert_body, (VALUE) &c);
+  ca_attach_window_yielding(rb_assoc_new(self, obj), 2, list, "rw",
+                            ca_convert_body, (VALUE) &c);
 
   return obj;
 }
@@ -417,9 +418,11 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
     ca_size_t total = ca_length(ca);
     GetOpenFile(io, iop);
     rb_io_check_writable(iop);
-    if ( ca_is_entity(ca) ) {
+    if ( ca_is_entity(ca) && ca->ptr ) {
       /* Owned ca->ptr: write through the IO buffer machinery so peak
-         stays at ca_length instead of doubling via a Ruby String. */
+         stays at ca_length instead of doubling via a Ruby String.  An
+         entity that leaves ptr NULL at rest (a CASource) takes the
+         gather below. */
       ssize_t n = rb_io_bufwrite(io, ca->ptr, (size_t) total);
       if ( n < 0 || (ca_size_t) n != total ) {
         rb_raise(rb_eRuntimeError,
@@ -428,7 +431,8 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
       }
     }
     else {
-      /* View: no chunked gather API, so materialise into one buffer. */
+      /* View, or entity without a ptr: no chunked gather API, so
+         materialise into one buffer. */
       volatile VALUE buf = rb_str_new(NULL, total);
       ca_copy_data(ca, RSTRING_PTR(buf));
       rb_io_write(io, buf);
@@ -545,7 +549,7 @@ rb_ca_load_binary (VALUE self, VALUE io)
 }
 
 /* The double nearest to the shortest decimal that reads back as x, the
-   float32 value, as from_csv reads text into float32: strtod, then the cast
+   float32 value, as read_csv reads text into float32: strtod, then the cast
    to float.  Its digits are those of the decimal (at most 9, which a double
    holds), so Float#to_s writes them. */
 static double

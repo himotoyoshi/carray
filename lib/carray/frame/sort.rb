@@ -5,7 +5,7 @@
 # the single-key instance CArray#sort_index) -- and gathering every column and
 # the index by that address into a view-frame in key order:
 #
-#   sort_by_key(*keys, order:, masked_position:)  -- sort by named columns, with
+#   sort_by_key(*keys, descending:, masked_position:)  -- sort by named columns, with
 #                           per-key or blanket ascending/descending.
 #   sort_by { |f| ... }  -- sort by key CArrays the block builds (the escape,
 #                           §4.3): derived or composite keys are ordinary column
@@ -25,19 +25,20 @@ class CAFrame
   # row permutation and gathers every column and the index by it.
   #
   # Each key is a **column name** (or the index axis name), or a
-  # **`[name, :asc | :desc]`** pair for a per-key direction. The +order:+ keyword
-  # is the direction for bare-name keys (default +:asc+). +masked_position:+
+  # **`[name, :asc | :desc]`** pair for a per-key direction. +descending: true+
+  # sorts the bare-name keys from largest to smallest (default ascending), as
+  # +CArray#order+ takes it. +masked_position:+
   # sends masked key rows to the +:last+ (default) or +:first+ end.
   #
   #   df.sort_by_key("temp")                              # one column, ascending
   #   df.sort_by_key("station", "temp")                   # lexicographic
-  #   df.sort_by_key("temp", order: :desc)                # all keys descending
+  #   df.sort_by_key("temp", descending: true)            # all keys descending
   #   df.sort_by_key(["station", :asc], ["temp", :desc])  # per-key direction
   #   df.sort_by_key("temp", masked_position: :first)     # masked rows first
   #   df.sort_by_key("time")                              # by the index
-  def sort_by_key(*specs, order: :asc, masked_position: :last)
+  def sort_by_key(*specs, descending: false, masked_position: :last)
     raise ArgumentError, "sort_by_key requires at least one key" if specs.empty?
-    validate_sort_order(order)
+    order = descending ? :desc : :asc
     named = specs.map do |spec|
       name, dir = parse_sort_key_spec(spec, order)
       [column_key(name, "sort_by_key"), key_column(column_key(name, "sort_by_key"), "sort_by_key"), dir]
@@ -74,6 +75,50 @@ class CAFrame
     false
   end
 
+  # The +n+ rows with the largest values of the key columns, largest first,
+  # as a view-frame: +sort_by_key(*keys, descending: true).head(n)+. Several
+  # keys break ties in turn, as +sort_by_key+ takes them; rows that tie on
+  # every key keep their order. A NaN and a masked key lose to every value,
+  # as +CArray#nlargest+ has them, so they come only when fewer than +n+
+  # rows have a value.
+  #
+  #   df.nlargest(3, "revenue")
+  #   df.nsmallest(2, "rank", "time")
+  #
+  # @param n [Integer] how many rows, 0 or more.
+  # @param keys [Array<String>] the key columns (or the index axis name).
+  # @return [CAFrame]
+  # @raise [ArgumentError] when +n+ is negative or no key is given.
+  def nlargest (n, *keys)
+    return largest_or_smallest("nlargest", n, keys, true)
+  end
+
+  # The +n+ rows with the smallest values of the key columns, smallest first,
+  # as +nlargest+ gives the largest.
+  #
+  # @param n [Integer] how many rows, 0 or more.
+  # @param keys [Array<String>] the key columns (or the index axis name).
+  # @return [CAFrame]
+  # @raise [ArgumentError] when +n+ is negative or no key is given.
+  def nsmallest (n, *keys)
+    return largest_or_smallest("nsmallest", n, keys, false)
+  end
+
+  private def largest_or_smallest (verb, n, keys, descending)
+    unless n.is_a?(Integer)
+      raise TypeError, "#{verb}: the count is an Integer (got #{n.inspect})"
+    end
+    raise ArgumentError, "#{verb}: the count must be 0 or more (got #{n})" if n < 0
+    raise ArgumentError, "#{verb}: give at least one key column" if keys.empty?
+    keys.each { |k| column_key(k, verb) }
+    begin
+      return sort_by_key(*keys, descending: descending).head(n)
+    rescue ArgumentError, KeyError, TypeError, CArray::DataTypeError => e
+      # The sort is this verb's own, so its refusal names this verb.
+      raise e.class, e.message.sub(/\Asort_by_key:/, "#{verb}:"), e.backtrace
+    end
+  end
+
   # Sort rows by key columns the block builds (memo §4.3 escape). The block
   # receives the frame and returns a key CArray, or an Array of them for a
   # multi-key lexicographic sort; rows are sorted ascending by +CArray.sort_addr+
@@ -81,11 +126,13 @@ class CAFrame
   # +filter+: where +sort_by_key+ takes plain column names, the block form lets
   # you build any key with CArray ops -- a descending key is its dense
   # descending rank, derived or composite keys are ordinary column math.
-  # +masked_position:+ places masked key rows first or last (default last).
+  # +descending: true+ sorts every key from largest to smallest, as
+  # +sort_by_key+ takes it; +masked_position:+ places masked key rows first or
+  # last (default last).
   #
   #   df.sort_by { |f| (f["temp"] - target).abs }   # nearest-to-target first
-  #   df.sort_by { |f| f["temp"].order(descending: true, method: :dense) }
-  def sort_by(masked_position: :last)
+  #   df.sort_by(descending: true) { |f| f["name"].length }
+  def sort_by(descending: false, masked_position: :last)
     raise ArgumentError, "sort_by requires a block" unless block_given?
     keys = yield(self)
     keys = [keys] unless keys.is_a?(Array)
@@ -99,6 +146,7 @@ class CAFrame
               "sort_by key #{i} must be a 1-D column of length #{nrow} (got shape #{k.shape.inspect})"
       end
     end
+    keys = keys.map { |k| k.order(descending: true, method: :dense) } if descending
     select_rows(CArray.sort_addr(*keys, masked_position: masked_position))
   end
 

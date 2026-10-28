@@ -4,7 +4,7 @@ Most questions about a table start by narrowing it down — the weekend days, on
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## `filter` — rows where a condition holds
@@ -54,6 +54,21 @@ sales.filter { |f| f["shop"].eq("south") | (f["revenue"] > 3500) }.nrow         
 sales.filter { |f| f["shop"].is_in(["north", "south"]).not }.nrow                # => 8
 ```
 
+Do not use `&&`, `||` or `!` here. They are Ruby's own operators: they look only at whether the array on their left exists, not at its cells, so `&&` and `||` hand back one of the two conditions whole, and `!` gives `false`. `&&` is the dangerous one, because it raises nothing and quietly keeps the rows of the second condition alone:
+
+```ruby
+sales.filter { |f| (f["visitors"] > 300) & f["shop"].eq("north") }.nrow    # => 2
+sales.filter { |f| f["visitors"] > 300 && f["shop"].eq("north") }.nrow     # => 8, every north row
+```
+
+The methods `.and` and `.or` combine conditions too, and need no parentheses around a comparison on their left:
+
+```ruby
+sales.filter { |f| (f["visitors"] > 300).and(f["shop"].eq("north")) }.nrow   # => 2
+```
+
+They differ from `&` and `|` only where a cell is missing. `&` and `|` settle a row from the side that is known — a row that fails one condition fails, and a row that passes one passes, whatever the other — while `.and` and `.or` leave the row undetermined when either side is missing. `filter` leaves out undetermined rows, so `&` and `.and` keep the same rows, but `.or` leaves out a row that `|` keeps because its known side is true.
+
 `is_between` also takes a Range, and `exclude:` leaves out one end or both:
 
 ```ruby
@@ -99,31 +114,7 @@ A condition is undetermined for a row when a value it reads is missing. The nort
 sales.filter { |f| f["rating"] >= 4.3 }.nrow   # => 11
 ```
 
-Sometimes you want to keep those rows to look at later, because they might belong. `keep_masked: true` keeps them, with their cells marked missing:
-
-```ruby
-p sales.filter(keep_masked: true) { |f| f["shop"].eq("north") & (f["rating"] >= 4.3) }
-# #<CAFrame nrow=4 columns=[date:CATime[D], shop:CAString, visitors:int64, revenue:float64, rating:float64]>
-# date        shop   visitors  revenue  rating
-# ----------  -----  --------  -------  ------
-# 2024-03-05  north       175   2235.1     4.3
-# 2024-03-07  north       204  2681.38     4.4
-# _           _             _        _       _
-# 2024-03-11  north       188  2261.26     4.3
-```
-
-The third row is the undetermined one. Every cell of it is missing, so nothing in the row says which one it was. Only the index is left as it is, so a frame whose index is **unique** keeps track of the row. `sales` has no column that is unique on its own — each date has three rows and each shop eight — so number the rows and make the numbers the index:
-
-```ruby
-numbered = sales.append("row", CArray.int64(sales.nrow).seq!, before: "date").set_index("row")
-kept = numbered.filter(keep_masked: true) { |f| f["shop"].eq("north") & (f["rating"] >= 4.3) }
-kept.index.to_a   # => [3, 9, 15, 21]
-numbered.at(15)["date"].to_s   # => "2024-03-09"
-```
-
-Row 15 is the undetermined one, and `at(15)` finds it in the numbered frame. A column the data already has, such as an order number, serves as well as row numbers, as long as no two rows share a value.
-
-To keep the undetermined rows with their values instead, choose them together with the rows where the condition holds:
+Sometimes you want to keep those rows to look at later, because they might belong. Choose them together with the rows where the condition holds:
 
 ```ruby
 c = sales["shop"].eq("north") & (sales["rating"] >= 4.3)
@@ -137,9 +128,7 @@ p sales[c | c.is_masked]
 # 2024-03-11  north       188  2261.26     4.3
 ```
 
-`c.is_masked` is `true` where the condition could not be decided, so `c | c.is_masked` is `true` for both kinds of row. Only the rating that was missing to begin with is missing here.
-
-Unlike an ordinary `filter`, `keep_masked: true` returns a frame of its own: writing to it does not change the original. `sales[c | c.is_masked]` is an ordinary row selection, and shares its cells with `sales`.
+`c.is_masked` is `true` where the condition could not be decided, so `c | c.is_masked` is `true` for both kinds of row. The kept rows are as they are in `sales`: only the rating that was missing to begin with is missing here. It is an ordinary row selection, and shares its cells with `sales`.
 
 To choose the undetermined rows on purpose, test the mask directly:
 
@@ -152,7 +141,7 @@ sales.filter { |f| f["rating"].is_masked }["shop"].to_a   # => ["north"]
 When you have expectations about the data — counts are not negative, ratings run from 1 to 5 — `verify` checks every row against each of them and returns one column of verdicts per rule. Here the file is read without telling it about the `-1` code, as you might the first time:
 
 ```ruby
-unchecked = CAFrame.from_csv("sales.csv", types: :infer, missing: ["n/a"])
+unchecked = CAFrame.read_csv("sales.csv", missing: ["n/a"])
 report = unchecked.verify(
   "visitors not negative" => ->(f) { f["visitors"] >= 0 },
   "rating from 1 to 5"    => ->(f) { f["rating"].is_between(1, 5) },
@@ -202,7 +191,7 @@ p sales.sort_by_key("revenue").head(3)
 # 2024-03-11  south       101   1525.1     4.7
 ```
 
-`order: :desc` sorts every key from largest to smallest. To give each key its own direction, give `[name, :asc]` or `[name, :desc]` pairs:
+`descending: true` sorts every key from largest to smallest. To give each key its own direction, give `[name, :asc]` or `[name, :desc]` pairs:
 
 ```ruby
 p sales.sort_by_key(["shop", :asc], ["revenue", :desc]).head(4)
@@ -237,7 +226,7 @@ p sales.sort_by { |f| (f["revenue"] - target).abs }.head(3)
 # 2024-03-07  central       322  3060.93     4.0
 ```
 
-The block can return an Array of keys, which then work as `sort_by_key`'s several keys do. For a key in descending order, use `order(descending: true)` on it, which works for any type of column:
+The block can return an Array of keys, which then work as `sort_by_key`'s several keys do. `sort_by(descending: true)` sorts every key from largest to smallest. For one key in descending order among several, use `order(descending: true)` on it, which works for any type of column:
 
 ```ruby
 by_shop = sales.sort_by { |f| [f["shop"], f["visitors"].order(descending: true, method: :dense)] }
@@ -246,12 +235,14 @@ by_shop["visitors"][0..2].to_a   # => [402, 388, 355]
 
 ### The top rows
 
-Sorting and then taking the first rows gives the largest or smallest few:
+`nlargest(n, key)` gives the `n` rows with the largest values of a key, largest first, and `nsmallest` the smallest — the same as sorting and taking the first rows:
 
 ```ruby
-top3 = sales.sort_by_key("revenue", order: :desc).head(3)
+top3 = sales.nlargest(3, "revenue")
 top3["shop"].to_a   # => ["north", "north", "central"]
 ```
+
+A missing value or a NaN is never among the largest or the smallest; it comes only when fewer than `n` rows have a value.
 
 A sorted frame shares its cells with the original, in the new order, as other row selections do.
 

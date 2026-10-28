@@ -4,7 +4,7 @@ A frame you make from another frame usually **shares its cells** with it. This c
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## Parts of a frame are views
@@ -47,7 +47,8 @@ Copy when you are about to change a part and want the original as it was, when y
 | operation |
 |---|
 | `select`, and `df["a", "b"]` (the columns themselves) |
-| `filter`, `df[rows]`, `head`, `tail` |
+| `filter`, `df[rows]`, `head`, `tail`, `drop_masked`, `nlargest`, `nsmallest` |
+| `head`, `tail`, `nlargest`, `nsmallest` of each group |
 | `sort_by_key`, `sort_by` |
 | `join(how: :semi)`, `join(how: :anti)` |
 | `CAFrame.meld`, `CAFrame.stack` |
@@ -60,9 +61,15 @@ Copy when you are about to change a part and want the original as it was, when y
 
 | operation | shares |
 |---|---|
-| `append`, `drop`, `rename` | every column |
+| `append`, `drop`, `rename`, `set_index`, `reset_index` | every column |
+| `cast`, `promote`, `parse_to_time`, `to_time` | every column but the converted ones, which are new |
 | `paste` | the columns of both frames |
-| `join(how: :left)`, `join(how: :inner)`, `join_asof` | this frame's columns; the other frame's are copied |
+| `join(how: :left)`, `join_asof` | this frame's columns; the other frame's are copied |
+| `join(how: :inner)` | the columns of both frames, picked by row |
+| `join(how: :right)` | the other frame's columns; this frame's are copied |
+| `join(..., view: :full)`, `join_asof(..., view: :full)` | every column, with holes where a row has no match (experimental) |
+| `strip_mask` | the columns with nothing to fill; the filled ones are new |
+| `transform` | what the block returns, as it returns it |
 | `split_column`, `contrast_columns` | the columns not split |
 | `stack_columns`, `unstack_column` | the other columns; the new columns are views of the old |
 
@@ -72,22 +79,21 @@ Copy when you are about to change a part and want the original as it was, when y
 |---|
 | `copy` |
 | `CAFrame.concatenate` |
-| `join(how: :outer)`, `join(how: :right)`, `align` |
+| `join(how: :outer)` without `view: :full`, `align` |
+| `lag` |
 | `pivot`, `pivot_grid` |
-| `filter(keep_masked: true)` |
-| group summaries, `resample`, `describe` |
+| group summaries, `resample`, `describe`, `value_counts`, the one-row summaries (`df.mean`, ...) |
 | `to_records`, `to_csv` |
 
 ## Methods that change a frame
 
-Some methods change the frame you call them on. Whether the change also reaches other frames sharing the same columns depends on what they change:
+Methods that change the table — `cast`, `set_index` and the others in the first table above — give a new frame and leave the one you called them on as it is. A few methods change the frame you call them on. Whether the change also reaches other frames sharing the same columns depends on what they change:
 
 | method | reaches frames sharing the column? |
 |---|---|
 | writing a cell, `fill`, `mask_eq`, `df["c"] = UNDEF`, `df[rows] = UNDEF` | yes: the stored cells change |
-| `cast`, `promote`, `parse_to_time`, `to_time` | no: the frame gets a new column, and the others keep the old one |
 | `df["c"] = column` | no: the name now refers to a different column |
-| `df["c"] = nil`, `set_index`, `reset_index` | no: only this frame's set of columns changes |
+| `df["c"] = nil` | no: only this frame's set of columns changes |
 
 For example, filling a column fills it for every frame that shares it:
 
@@ -97,12 +103,13 @@ part.group_by("shop").fill("visitors", :ffill)
 sales["visitors"][7]   # => 102
 ```
 
-while converting it does not:
+while converting it gives a new frame with a new column, and neither `part` nor `sales` changes:
 
 ```ruby
-part.cast("visitors", :float64)
-part["visitors"].data_type    # => :float64
-sales["visitors"].data_type   # => :int64
+floats = part.cast("visitors", :float64)
+floats["visitors"].data_type   # => :float64
+part["visitors"].data_type     # => :int64
+sales["visitors"].data_type    # => :int64
 ```
 
 ## Protecting a frame
@@ -113,7 +120,8 @@ When a frame should not change — a reference table that several parts are take
 |---|---|---|
 | add, remove or replace a column | refused | refused |
 | delete, mask or replace rows | refused | refused |
-| methods that change the frame (`fill`, `cast`, `set_index`, …) | refused | refused |
+| methods that change the frame (`fill`, `mask_eq`) | refused | refused |
+| methods that give a new frame (`cast`, `set_index`, …) | allowed; the new frame is not frozen | allowed; the new frame is not frozen, and the columns it shares stay read-only |
 | write a cell through a column | **allowed** | refused |
 
 `freeze` fixes the frame's structure, as `Array#freeze` fixes an Array's elements but not the objects in it. `protect` also makes every cell refuse writes:

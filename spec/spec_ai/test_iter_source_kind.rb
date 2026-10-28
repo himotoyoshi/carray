@@ -159,4 +159,23 @@ class TestIterSourceKindRegistration < Test::Unit::TestCase
     assert_equal 6, view.max
   end
 
+  # carray's own types are classified from their operation tables, so a
+  # registration for one is refused instead of moving every array of that
+  # type onto the transfer walk.
+  def test_carrays_own_types_cannot_be_registered
+    grid = CArray.int32(5).seq![CA_INT64([0, 2, 4])]
+    err = assert_raise(ArgumentError) do
+      CAIterOffset.register(grid.obj_type, CA_ITER_SRC_ATTACH)
+    end
+    assert_match(/carray's own/, err.message)
+    assert_equal 6, grid.sum
+  end
+
+  # Every path that takes a view's buffer calls its allocate / attach /
+  # sync / detach slots, so a table without them is refused at install.
+  def test_a_table_without_an_attach_slot_is_refused
+    err = assert_raise(ArgumentError) { CAIterOffset.install_without_attach }
+    assert_match(/no allocate \/ attach \/ sync \/ detach slot/, err.message)
+  end
+
 end

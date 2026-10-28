@@ -525,7 +525,10 @@ ca_randomn_bang_fill (VALUE arg)
     CA_U(double) *p = (CA_U(double) *)ca->ptr;
     ca_size_t pairs = n / 2;
     for (i = 0; i < pairs; i++) {
-      box_muller_pair(&c->source, &p[2*i], &p[2*i+1]);
+      double r1, r2;
+      box_muller_pair(&c->source, &r1, &r2);
+      p[2*i]   = r1;
+      p[2*i+1] = r2;
     }
     if (n % 2 == 1) {
       double r1, r2;

@@ -156,7 +156,7 @@ static void                                                                   \
 msd_refine_##SUFFIX (CArray *key, ca_size_t *perm, void *vbuf,                \
                      msd_runs_t *in, msd_runs_t *out, int masked_last)        \
 {                                                                             \
-  const TYPE *ptr = (const TYPE *) key->ptr;                                  \
+  const CA_U(TYPE) *ptr = (const CA_U(TYPE) *) key->ptr;                      \
   const boolean8_t *m = ( key->mask ) ? (boolean8_t *) key->mask->ptr : NULL; \
   ca_pair_##SUFFIX *buf = (ca_pair_##SUFFIX *) vbuf;                          \
   ca_size_t r;                                                                \

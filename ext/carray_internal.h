@@ -35,6 +35,18 @@
    CArray#initialize_dup / #initialize_clone. */
 void ca_keep_chain_flags (CArray *view, CArray *src);
 
+/* A reshape / flatten folded onto the root of its source (CA_FLAG_FOLDED,
+   ca_obj_refer.c).  The source is not on the view's C parent chain, so a
+   read-only flag it takes after the view is made would not be seen by
+   ca_is_readonly.  The view records its source here; ca_is_readonly asks the
+   source of a view that carries the flag.  The source stays alive while the
+   view does (the view's @parent).  ca_fold_source answers NULL for a view
+   with no record; ca_fold_forget drops the record when the view is freed. */
+#define CA_FLAG_FOLDED 8192
+void    ca_fold_note_source (CArray *view, CArray *src);
+CArray *ca_fold_source (CArray *view);
+void    ca_fold_forget (CArray *view);
+
 /* ---- bulk bit pack / unpack (ca_obj_bitarray.c) --------------------------
 
    Drive the CABitarray whole-view xfer_all / xfer_addrs fast paths, which
@@ -188,8 +200,23 @@ ca_mask_from_bytes (CArray *ca, const boolean8_t *m)
 
 void    ca_attach_all (CArray **list, int32_t n);
 void    ca_sync_all   (CArray **list, int32_t n);
+void    ca_sync_carry_on (CArray *ca, volatile VALUE *error);
 VALUE   ca_attach_window (int32_t n, CArray **list, const char *modes,
                           VALUE (*body)(VALUE), VALUE arg);
+
+/* A window that yields to a block can be left open for good: Ruby does not
+   run the ensure of a suspended Fiber that is collected (an Enumerator
+   stopped with #next and dropped).  ca_window_guard_arm makes a guard that
+   runs cleanup(arg) from a finalizer when that happens; the window disarms
+   it when it closes normally.  arg is heap memory the guard frees, and
+   mark marks the VALUEs it holds.  ca_attach_window_yielding is
+   ca_attach_window with such a guard; owners keeps the arrays alive. */
+VALUE   ca_window_guard_arm (void (*cleanup)(void *), void (*mark)(void *),
+                             void *arg, VALUE *sentinel);
+void    ca_window_guard_disarm (VALUE guard, VALUE sentinel);
+VALUE   ca_attach_window_yielding (VALUE owners, int32_t n, CArray **list,
+                                   const char *modes, VALUE (*body)(VALUE),
+                                   VALUE arg);
 
 /* ---- Filling a result Ruby does not own yet (carray_copy.c) ---------------
 
@@ -272,6 +299,8 @@ int ca_shares_root (void *ap, void *aq);
    view's shape (carray_mask.c).  Installed directly in operation tables. */
 
 void    ca_view_func_create_mask (void *ap);
+void    ca_view_sync_mask_after_parent (void *ap);
+void    ca_view_pass_mask_to_parent (void *ap);
 
 /* Running count of the present cells of any data type along axis (Qnil:
    the flattened array), read off the mask alone (carray_mask.c).  The
@@ -307,6 +336,21 @@ int     ca_lazy_req_is_packed (const ca_lazy_req_t *req, void *view);
 void    ca_lazy_req_pull   (void *operand, const ca_lazy_req_t *req,
                             void *buf, int dir);
 boolean8_t *ca_lazy_req_mask (const ca_lazy_req_t *req, int n, CArray **ops);
+
+/* Runs eval(node, req, data, dir), the evaluation of a lazy node over the
+   cells req names.  When the node or one of its operands ops[0..n) is an
+   object array, the evaluation calls Ruby on each cell, and a cell holding
+   an expression over the node comes back into it: the node, and the nodes
+   of its chain in chain[0..nchain), are then recorded as computed over
+   (ca_computing_run_nodes), so coming back is refused as cyclic.  The
+   operands are not recorded: an expression over the same operand that does
+   not need the node is no cycle.  Otherwise eval runs as it is. */
+typedef void (*ca_lazy_eval_fn) (void *node, const ca_lazy_req_t *req,
+                                 void *data, int dir);
+void    ca_lazy_eval_recorded (void *node, int n, CArray **ops,
+                               int nchain, CArray **chain,
+                               ca_lazy_eval_fn eval, const ca_lazy_req_t *req,
+                               void *data, int dir);
 VALUE   ca_lazy_settle_scalar (VALUE operand, int was_scalar);
 
 /* Non-zero iff the array a view's cells come from -- the parent, or the
@@ -424,6 +468,27 @@ void        ca_check_rank_fits (long ndim, const char *name);
    caller reads both when it takes the buffer back (ca_obj_object.c). */
 #define CA_FLAG_LENT        2048
 #define CA_FLAG_LENT_VIEWED 4096
+
+/* A computation over object arrays.  A cell whose value is the array
+   itself or a view of it makes the kernel call back into a computation
+   over the same cells; entering an array that the same method is already
+   computing over, in this thread and fiber, is refused as cyclic, as
+   reading such a cell is (ca_test_cyclic_check).  ca_computing_run runs
+   body(arg) with the object arrays among ops[0..n) recorded
+   (rb_exec_recursive, carray_core.c); nothing is written to the arrays. */
+VALUE ca_computing_run (int n, CArray **ops, VALUE (*body)(VALUE), VALUE arg);
+VALUE ca_computing_run_nodes (int n, CArray **ops, VALUE (*body)(VALUE), VALUE arg);
+/* Refuses as cyclic a cell among cells[0..n) that is an array reaching a
+   lazy node being evaluated: computing it would come back into the node. */
+void  ca_refuse_cells_reaching_evaluation (ca_size_t n, const VALUE *cells);
+
+/* Registers a view type whose transfers only move cells between its parents
+   and the caller (an index view: CAGrid, CASelect, CAWindow, CAStack, ...),
+   calling no Ruby.  A transfer through such views down to entities cannot
+   come back into an array, and is not recorded (ca_with_cyclic_check). */
+void ca_register_cell_moving_view (int8_t obj_type);
+VALUE ca_iter_ensure_computing (CArray *ca, int32_t n, ca_iter_state *states,
+                                VALUE (*body)(VALUE), VALUE arg);
 
 #define CA_CHECK_DATA_TYPE_GIVEN(data_type) \
   do { \
@@ -696,19 +761,41 @@ CArray     *ca_multi_parent_mask (CArray *p, CArray **standin);
 void        ca_multi_parent_mask_refresh (CArray *mask, CArray **parents,
                                           CArray **standins, int32_t n);
 
-/* Before a write to a multi-parent view's mask: when a parent that can
-   never carry a mask (a value array, a mask array) is among the parents,
-   run the write `body(arg)` once against blank all-false masks in place of
-   every parent's mask and refuse it with that TypeError if it put a true
-   into such a parent's part.  A refused write then changes no parent.
-   Does nothing when no such parent is there. */
-void        ca_multi_parent_mask_refuse_first (CArray *mask, CArray **parents,
-                                               CArray **standins, int32_t n,
-                                               VALUE (*body)(VALUE),
-                                               VALUE arg);
+void        ca_multi_parent_check_part (CArray *part, const char *name);
+
+/* A write to a stack or meld goes to its parts one after another, and a
+   part that converts the value on its way (a writable cast) can refuse it
+   after the parts before it were written.  ca_multi_parent_value_trial
+   gives a stack or meld laid out as `ca` over scratch arrays standing for
+   its parts (held by `keep`), to run the write against first, when
+   ca_multi_parent_value_needs_trial says such a part is there. */
+int         ca_multi_parent_value_needs_trial (CArray *ca);
+CArray     *ca_multi_parent_value_trial (CArray *ca, VALUE keep);
+
+/* A write through the view `ca` that reaches a stack or meld needing the
+   trial, in pieces: ca_multi_parent_value_trial_below gives the stack or
+   meld, and ca_multi_parent_value_trial_through runs the write against its
+   stand-ins first. */
+CArray     *ca_multi_parent_value_trial_below (CArray *ca);
+void        ca_multi_parent_value_trial_through (CArray *m, VALUE (*body)(VALUE),
+                                                 VALUE arg);
+
+#define CA_MULTI_PARENT_VALUE_TRIAL(ap, t, call) \
+  do { \
+    if ( ca_multi_parent_value_needs_trial((CArray *) (ap)) ) { \
+      volatile VALUE keep_ = rb_ary_new(); \
+      CArray *t = ca_multi_parent_value_trial((CArray *) (ap), keep_); \
+      call; \
+      RB_GC_GUARD(keep_); \
+    } \
+  } while (0)
+int         ca_monop_writable_cast_target (CArray *ca, int8_t *target);
+
+void        ca_multi_parent_mask_adopt (CArray *mask, CArray **parents,
+                                        CArray **standins, int32_t n);
 
 /* ca_mask_standin_settle for each part of a multi-parent view's mask
-   still reading its stand-in, the parts that can have no mask first. */
+   still reading its stand-in. */
 void        ca_multi_parent_mask_settle (CArray *mask, CArray **parents,
                                          CArray **standins, int32_t n);
 
@@ -774,7 +861,7 @@ ca_obj_equal (VALUE a, VALUE b)
 /* ---- fast paths (carray_core.c) --------------------------------------------
 
    A fast path answers what a general path also answers, by a different
-   algorithm.  Each one tests ca_fast_paths_enabled() alongside its own
+   algorithm.  Each one tests ca_fast_path(CA_SC_name) alongside its own
    condition, so a development build run with CARRAY_GENERAL_PATH=1 in the
    environment takes the general path everywhere and the test suite
    compares the two.  A release build has no switch: the test is the
@@ -794,13 +881,61 @@ ca_obj_equal (VALUE a, VALUE b)
 
 ---------------------------------------------------------------------------- */
 
+/* The number of obj_types carray installs for itself (carray_core.c). */
+extern int ca_obj_num_builtin;
+
+/* Each fast path has a name, so that a development build can switch it off
+   alone: CARRAY_SHORTCUTS_OFF=stack,stack_outer_k in the environment turns
+   off the ones named, CARRAY_GENERAL_PATH=1 all of them.  A fast path tests
+   ca_fast_path(CA_SC_name) alongside its own condition.  The names are in
+   ca_shortcut_names (carray_core.c) in this order; the Ruby ones are asked
+   through CArray.__fast_paths_enabled__(:name). */
+enum ca_shortcut {
+  CA_SC_SHIFT_WHOLE_VIEW,
+  CA_SC_STACK,
+  CA_SC_STACK_OUTER_K,
+  CA_SC_FIBER_FUSED_CONVERSION,
+  CA_SC_PER_SLAB_HOIST,
+  CA_SC_PROTECT_ONLY_MAY_RAISE,
+  CA_SC_STACK_ADDRS_K0,
+  CA_SC_STACK_STRIDE_BOX,
+  CA_SC_STACK_STRIDE_RELOC,
+  CA_SC_STACK_PARENTS_K0,
+  CA_SC_STACK_FOLD,
+  CA_SC_MELD_STRIDE_BOX,
+  CA_SC_MELD_PARENTS_AXIS0,
+  CA_SC_MEDIAN_PARTITION,
+  CA_SC_PERCENTILE_PARTITION,
+  CA_SC_LOOP_INTERCHANGE,
+  CA_SC_STACK_LOOP_INTERCHANGE,
+  CA_SC_LAZY_STREAMING_REDUCE,
+  CA_SC_SHORT_FIBER_REDUCE,
+  /* asked from lib/carray */
+  CA_SC_MELD_REDUCE,
+  CA_SC_SEGMENT_NUNIQUE,
+  CA_SC_SEGMENT_SCAN_KERNEL,
+  CA_SC_SEGMENT_EDGE_KERNEL,
+  CA_SC_SEGMENT_REDUCE_KERNEL,
+  CA_SC_SEGMENT_ALL_ANY_KERNEL,
+  CA_SC_CATEGORICAL_GROUP_BY_INDEX,
+  CA_SC_AXIS_GROUP_COUNT_KERNEL,
+  CA_SC_AXIS_GROUP_WHOLE_BLOCK,
+  CA_SC_AXIS_GROUP_REDUCE_KERNEL,
+  CA_SC_AXIS_GROUP_SCAN_KERNEL,
+  CA_SC_WINDOW_FOLD_BY_OFFSET,
+  CA_SC_COUNT
+};
+
 #ifdef CARRAY_DEV_BUILD
 extern int ca_fast_paths_on;
 extern int ca_iter_transfer_only_on;
+extern unsigned char ca_shortcut_off[CA_SC_COUNT];
 #define ca_fast_paths_enabled()    (ca_fast_paths_on)
+#define ca_fast_path(id)           (ca_fast_paths_on && ! ca_shortcut_off[id])
 #define ca_iter_by_transfer_only() (ca_iter_transfer_only_on)
 #else
 #define ca_fast_paths_enabled()    (1)
+#define ca_fast_path(id)           (1)
 #define ca_iter_by_transfer_only() (0)
 #endif
 

@@ -43,10 +43,15 @@ class TestCAFrameRowMask < Test::Unit::TestCase
     assert_equal [true, false, true, false, true, false], df["a"].is_masked.to_a
   end
 
-  def test_mask_block_array_slice
+  # A Ruby Array would be CArray's [start, count, step], where [0, 2] reads
+  # as rows 0 and 1; it is refused, as df[] refuses it.
+  def test_mask_refuses_a_ruby_array
     df = mk
-    df[[1, 3, 1]] = UNDEF   # start 1, count 3, step 1
-    assert_equal [false, true, true, true, false, false], df["a"].is_masked.to_a
+    e = assert_raise(ArgumentError) { df[[1, 3, 1]] = UNDEF }
+    assert_match(/CA_INT64\(\[1, 3, 1\]\)/, e.message)
+    assert_equal 0, df["a"].count_masked
+    assert_raise(ArgumentError) { df[[0, 2]] = nil }
+    assert_equal 6, df.nrow
   end
 
   def test_mask_keeps_index
@@ -201,10 +206,10 @@ class TestCAFrameRowSplice < Test::Unit::TestCase
     assert_equal [0, 1, 2, 3, 77], df["a"].to_a
   end
 
-  def test_splice_block_array_form
-    # [start, count] is a contiguous BLOCK: start 2, count 3 -> rows 2, 3, 4.
+  def test_splice_refuses_a_ruby_array
     df = mk
-    df[[2, 3]] = ins(50, 51)
+    assert_raise(ArgumentError) { df[[2, 3]] = ins(50, 51) }
+    df[2..4] = ins(50, 51)
     assert_equal [0, 1, 50, 51, 5], df["a"].to_a
   end
 

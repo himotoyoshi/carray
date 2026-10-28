@@ -45,14 +45,14 @@ class CArray
                 "unmask: pass either a constant fill value or method:, not both"
         end
         held = gap_fill(method, axis, "unmask")
-        # Copy the filled values in place (a Face takes a Face of its own kind
-        # as it is).
-        value[] = held.value
-        if held.has_mask?
-          self.mask = held.mask              # residual leading/trailing mask
-        else
-          super()                   # fully filled: drop the mask
-        end
+        # Write only the cells the fill gave a value (a Face takes a Face of
+        # its own kind as it is). Writing every cell would let a view that
+        # reaches one cell twice send that cell's unfilled copy back last,
+        # masking it again.
+        return self unless has_mask?
+        filled = is_masked
+        filled = filled.and(held.is_not_masked) if held.has_mask?
+        self[filled] = held[filled] if filled.any
         return self
       end
       fill.equal?(MASK_FILL_UNSET) ? super() : super(fill)
@@ -161,7 +161,12 @@ class CArray
   end
 
   # Fill the masked cells of this 1-D array by linear interpolation against
-  # the coordinate `x` (same length, ascending over the present cells).
+  # the coordinate `x` (same length).  `x` need not be in order: the present
+  # cells are read as one series in the order of their `x`, so a frame whose
+  # index restarts for each station interpolates across the stations by
+  # time (interpolate one station at a time to keep them apart).  Present
+  # cells sharing an `x` keep their row order.  A cell whose `x` is masked,
+  # NaN or infinite has no place on the line: it is not used and not filled.
   # The one rule both the core (x = cell position) and CAFrame (x = index)
   # use: present cells come back exactly as they are, in this array's own
   # type; a masked cell inside the span of the present ones takes the
@@ -170,17 +175,34 @@ class CArray
   # NaN or Inf stored in a present cell is left alone.  A Face goes through
   # its own linear_fetch, which keeps its unit and rounds to its grid.
   def linear_fill_along (x)
-    present = is_not_masked
+    # A cell whose coordinate is masked, NaN or infinite has no place on the
+    # line: it is no point to interpolate between, and is not filled.
+    placed = x.is_not_masked
+    placed &= x.is_finite if !x.face? && x.float?
+    placed = placed.strip_mask(false)
+    present = is_not_masked & placed
     # Fewer than two valid points -> nothing to interpolate between; leave
     # every masked cell masked.
     return copy if present.count(true) < 2
-    addr = x[present].linear_section(x)       # valid positions -> monotonic grid
+    grid  = x[present]
+    order = nil
+    if ( grid[1..-1] < grid[0..-2] ).any
+      order = grid.sort_addr                  # stable: ties keep their row order
+      grid  = grid[order]
+    end
+    addr = grid.linear_section(x)             # valid positions -> monotonic grid
+    fill = (is_masked & placed & addr.is_finite).strip_mask(false)
     if face?
-      # The Face's linear_fetch already masks the exterior (out of range) and
-      # lands on its own grid.
-      return self[present].linear_fetch(addr)
+      # The Face's linear_fetch lands on its own grid; only the cells to fill
+      # take it, so a present cell comes back as it is.
+      known = self[present]
+      known = known[order] if order
+      out = copy
+      out[fill] = known.linear_fetch(addr)[fill] if fill.any
+      return out
     end
     v = value[present]
+    v = v[order] if order
     # A complex value interpolates its real and imaginary parts.
     interp = v.complex? ? v.linear_fetch(addr) : v.float64.linear_fetch(addr)
     # An integer array takes the nearest integer, half away from zero (as a
@@ -189,9 +211,7 @@ class CArray
     interp = interp.round if integer?
     # Built from the values alone, so a fully filled result carries no mask.
     out      = value.copy
-    masked   = is_masked
-    fill     = masked & addr.is_finite
-    exterior = masked & fill.not
+    exterior = is_masked & fill.not
     out[fill] = interp[fill] if fill.any
     out[exterior] = UNDEF if exterior.any
     out

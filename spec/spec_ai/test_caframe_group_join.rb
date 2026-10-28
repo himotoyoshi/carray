@@ -96,7 +96,7 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
 
   def test_filter_names_the_type_the_block_gave
     grp = CAFrame.new("g" => CA_INT32([1, 1, 2]), "v" => CA_FLOAT64([1, 2, 3])).group_by("g")
-    err = assert_raise(ArgumentError) { grp.filter { |x| x.mean("v") } }
+    err = assert_raise(ArgumentError) { grp.filter { |x| x["v"].mean } }
     assert_match(/\(got a float64 CArray\)/, err.message)
   end
 
@@ -326,10 +326,11 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     assert_kind_of CATime, mean
     assert_equal CArray.time(["2024-01-02", "2024-01-05"]).to_a, mean.to_a
     assert_equal ["a", "c"], g.min["s"].to_a
-    # an empty frame keeps the same columns
+    # an empty frame keeps the same columns, except an object column, which
+    # has no value to show what it holds
     e = df[CA_BOOLEAN([0, 0, 0])].group_by("k")
-    assert_equal %w[t v s b o], e.min.column_names
-    assert_equal %w[t v b o z], e.mean.column_names
+    assert_equal %w[t v s b], e.min.column_names
+    assert_equal %w[t v b z], e.mean.column_names
   end
 
   def test_minimum_of_a_raw_fixlen_column_per_group
@@ -357,20 +358,28 @@ class TestCAFrameGroupBy < Test::Unit::TestCase
     assert_equal 2, g.mean.nrow
   end
 
-  # Named columns come back as df[...] gives them: one CArray, or an Array.
+  # Named columns give the frame of those columns, one row per group; with
+  # keep_rows one comes back as df[name] gives it, several as a frame.
   def test_reductions_take_column_names
     g = @df.group_by("station")
-    assert_equal [20.55, 27.65, 15.0], g.mean("temp").to_a.map { |v| v.round(2) }
+    r = g.mean("temp")
+    assert_equal ["temp"], r.column_names
+    assert_equal g.mean.index.to_a, r.index.to_a
+    assert_equal [20.55, 27.65, 15.0], r["temp"].to_a.map { |v| v.round(2) }
     assert_equal [22.1, 30.0, 22.1, 30.0, 15.0], g.max("temp", keep_rows: true).to_a
-    hi, wind = g.max("temp", "wind")
-    assert_equal [22.1, 30.0, 15.0], hi.to_a
-    assert_equal [3, 2], wind.shape
+    r = g.max("temp", "wind")
+    assert_equal %w[temp wind], r.column_names
+    assert_equal [22.1, 30.0, 15.0], r["temp"].to_a
+    assert_equal [3, 2], r["wind"].shape
     assert_equal [1.55, -2.35, -1.55, 2.35, 0.0],
                  (@df["temp"] - g.mean("temp", keep_rows: true)).to_a.map { |v| v.round(2) }
     assert_raise(KeyError) { g.mean("nope") }
     assert_raise(TypeError) { g.mean(:temp) }
-    err = assert_raise(CArray::DataTypeError) { g.sum("station") }
-    assert_equal 'sum: column "station" (object) has no sum', err.message
+    err = assert_raise(ArgumentError) { g.sum("station") }
+    assert_equal 'sum: "station" is the group key, already in the result', err.message
+    d = CAFrame.new("k" => CA_INT32([1, 1]), "s" => CA_OBJECT(%w[x y]))
+    err = assert_raise(CArray::DataTypeError) { d.group_by("k").sum("s") }
+    assert_equal 'sum: column "s" (object) has no sum', err.message
   end
 
   def test_is_duplicate_marks_later_repeats
@@ -958,7 +967,7 @@ end
 class TestCAFrameJoinEmptyFrame < Test::Unit::TestCase
   def setup
     @full  = CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_FLOAT64([1.5, 2.5]))
-    @empty = CAFrame.from_csv(StringIO.new("a,b\n"))
+    @empty = CAFrame.from_csv("a,b\n", types: :string)
   end
 
   def test_an_empty_frame_of_other_types_joins_in_either_place
@@ -1058,7 +1067,7 @@ class TestCAFrameSort < Test::Unit::TestCase
   end
 
   def test_sort_by_key_order_desc
-    s = @df.sort_by_key("temp", order: :desc)
+    s = @df.sort_by_key("temp", descending: true)
     assert_equal [30.0, 25.0, 22.0, 19.0], s["temp"].to_a
   end
 
@@ -1071,7 +1080,7 @@ class TestCAFrameSort < Test::Unit::TestCase
   end
 
   def test_sort_by_key_blanket_order_over_multi_key
-    m = @df.sort_by_key("station", "temp", order: :desc)
+    m = @df.sort_by_key("station", "temp", descending: true)
     assert_equal %w[tokyo tokyo osaka osaka], m["station"].to_a
     assert_equal [22.0, 19.0, 30.0, 25.0], m["temp"].to_a
   end
@@ -1086,7 +1095,7 @@ class TestCAFrameSort < Test::Unit::TestCase
 
   def test_sort_by_key_object_descending
     df = CAFrame.new("s" => CA_OBJECT(%w[b a b c]))
-    assert_equal %w[c b b a], df.sort_by_key("s", order: :desc)["s"].to_a
+    assert_equal %w[c b b a], df.sort_by_key("s", descending: true)["s"].to_a
   end
 
   def test_sort_by_key_masked_position
@@ -1097,7 +1106,7 @@ class TestCAFrameSort < Test::Unit::TestCase
   end
 
   def test_sort_by_key_bad_order_and_spec_raise
-    assert_raise(ArgumentError) { @df.sort_by_key("temp", order: :up) }
+    assert_raise(ArgumentError) { @df.sort_by_key("temp", order: :desc) }   # the keyword is descending:
     assert_raise(ArgumentError) { @df.sort_by_key(["temp"]) }         # 1-element spec
     assert_raise(ArgumentError) { @df.sort_by_key(["temp", :up]) }    # bad per-key dir
   end
@@ -1346,7 +1355,7 @@ class TestCAFrameJoinSemiAnti < Test::Unit::TestCase
 
   def test_shares_columns_and_index_as_filter
     df = CAFrame.new("k" => CA_INT64([1, 2, 3]), "v" => CA_INT32([4, 5, 6]))
-    df.set_index("k")
+    df = df.set_index("k")
     s = df.join(CAFrame.new("k" => CA_INT64([2, 3])), on: "k", how: :semi)
     assert_equal [2, 3], s.index.to_a
     s["v"][0] = 50

@@ -2,9 +2,7 @@ require "test/unit"
 require "carray"
 
 # Direct tests of the consumer-side format parser per
-# devel/MEMORYVIEW_FORMAT.md.  Mirrors the equivalent test on the
-# numo-narray-memoryview side (test/test_format_parser.rb) so that
-# both implementations cover the same (format, item_size) matrix.
+# docs/interop/MemoryViewFormat.md.
 #
 # Uses the private CArray.parse_memory_view_format(format,
 # item_size) hook to exercise the parser without going through a
@@ -87,7 +85,7 @@ class TestFormatParser < Test::Unit::TestCase
 
   # v1.1: legacy v1.0 compat synonyms for complex (ff/dd).
   # New producers emit Zf/Zd; these rows ensure interop with
-  # pre-v1.1 CArray and pre-076351a numo-narray-memoryview.
+  # pre-v1.1 CArray.
   def test_compat_synonym_complex64_ff
     assert_equal(CA_CMPLX64, parse("ff", 8))
   end

@@ -90,6 +90,19 @@ class TestShapeStrictStore < Test::Unit::TestCase
     assert_raise(ArgumentError) { t[] = CArray.int32(5, 3, 4).seq }
   end
 
+  # An empty destination takes an empty source whose size-1 axes stretch
+  # onto it, as the binary operator does.
+  def test_stretch_onto_an_empty_destination
+    t = CArray.float32(2, 0)
+    t[] = CArray.float32(1, 0)
+    t.add!(CArray.float32(1, 0))
+    assert_equal (CArray.float32(2, 0) + CArray.float32(1, 0)).shape, t.shape
+    u = CArray.float32(0, 3)
+    u.add!(CArray.float32(0, 1))
+    assert_equal [0, 3], u.shape
+    assert_raise(ArgumentError) { CArray.float32(2, 0).add!(CArray.float32(3, 0)) }
+  end
+
   def test_larger_source_is_refused
     t = CArray.int32(3, 4)
     assert_raise(ArgumentError) { t[] = CArray.int32(5, 4).seq }

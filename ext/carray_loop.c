@@ -247,7 +247,7 @@ ca_map_bang_run (VALUE self, VALUE (*body)(VALUE), int mode)
   c.self = self;
   c.ridx = rb_ary_new2(c.ca->ndim);
   c.mode = mode;
-  ca_attach_window(1, &c.ca, "w", body, (VALUE) &c);
+  ca_attach_window_yielding(self, 1, &c.ca, "w", body, (VALUE) &c);
   return self;
 }
 

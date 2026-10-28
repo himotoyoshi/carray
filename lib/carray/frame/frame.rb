@@ -12,7 +12,7 @@
 
 class CAFrame
   # Raised when the contents of a column cannot be read as asked: a cell
-  # that does not read as the type a +cast+ (or +from_csv+'s +types:+) asks
+  # that does not read as the type a +cast+ (or +read_csv+'s +types:+) asks
   # for under on_error: :raise, a cell +parse_to_time+ cannot read, a column
   # whose time format +infer_time_format+ / parse_to_time(name, :infer)
   # cannot find, or a float column +to_time+ cannot read as whole counts.
@@ -131,7 +131,7 @@ class CAFrame
             "axis_name #{@axis_name.inspect} collides with a column of the same name"
     end
 
-    cast(types, on_error: on_error, option_name: :types) unless types.nil?
+    cast_in_place(types, on_error: on_error, option_name: :types) unless types.nil?
   end
 
   # --- df[...] : key type decides the axis (memo §13.2) ------------------
@@ -155,13 +155,13 @@ class CAFrame
               "df[...] with several keys returns columns; every key must be a String " \
               "(use df.select(...) for a subset frame)"
       end
-      return keys.map { |k| @columns.fetch(k) { raise KeyError, "no column #{k.inspect}" } }
+      return keys.map { |k| @columns.fetch(k) { refuse_missing_column(k) } }
     end
 
     key = keys.first
     case key
     when String
-      @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+      @columns.fetch(key) { refuse_missing_column(key) }
     when Integer
       row(key)
     when Range
@@ -182,10 +182,33 @@ class CAFrame
               "CArray df[] key must be boolean or integer (got #{key.data_type})"
       end
     when Symbol
-      raise ArgumentError, "df[symbol] is reserved for predicate keys"
+      raise ArgumentError,
+            "df[symbol] is reserved for predicate keys; name a column with a String: " \
+            "df[#{key.to_s.inspect}]"
+    when Array
+      refuse_array_key(key)
     else
       raise ArgumentError, "unsupported df[] key: #{key.class}"
     end
+  end
+
+  # A Ruby Array is no df[] key, read or written: CArray reads one as
+  # [start, count], where [0, 2] would be rows 0 and 1 rather than rows 0
+  # and 2. Says what to write for what the Array holds.
+  private def refuse_array_key(key, verb = "df[]")
+    strings = !key.empty? && key.all? { |k| k.is_a?(String) }
+    hint = if strings && verb == "df[]"
+             "for columns, df[#{key.map(&:inspect).join(', ')}] or " \
+             "df.select(#{key.map(&:inspect).join(', ')})"
+           elsif strings
+             "a column is named by one String, df[#{key.first.inspect}] = ..."
+           elsif !key.empty? && key.all? { |k| k == true || k == false }
+             "for rows, a boolean CArray: df[CA_BOOLEAN(#{key.inspect})]"
+           else
+             "for rows, an integer CArray: df[CA_INT64(#{key.inspect})] " \
+             "(a Range picks a run of rows: df[0..2])"
+           end
+    raise ArgumentError, "#{verb} takes no Ruby Array; #{hint}"
   end
 
   # --- df[...] = value : row-level assignment ---------------------------
@@ -205,12 +228,13 @@ class CAFrame
   #
   # +sel+ is a row-axis indexer key, classified exactly as CArray classifies a
   # 1-D column key (docs/topics/Indexer_decision_tree.md): a slice (BLOCK —
-  # Range / ArithmeticSequence / [start, count, step]), a boolean CArray
-  # (SELECT), an integer CArray (GRID), or an Integer (a single row). Mask and
-  # delete take any of them and are forwarded to the column indexer, so their
-  # errors match the rest of CArray. Splice reuses the same classifier
-  # (CArray.scan_index) but needs a contiguous slice, so it takes an Integer or
-  # a step-1 BLOCK (Range, step-1 ArithmeticSequence, or [start, count]); a
+  # Range / ArithmeticSequence), a boolean CArray (SELECT), an integer CArray
+  # (GRID), or an Integer (a single row). A Ruby Array, which the column
+  # indexer would read as [start, count], is refused, as df[] refuses it.
+  # Mask and delete take the others and are forwarded to the column indexer,
+  # so their errors match the rest of CArray. Splice reuses the same
+  # classifier (CArray.scan_index) but needs a contiguous slice, so it takes
+  # an Integer or a step-1 BLOCK (Range, step-1 ArithmeticSequence); a
   # strided or scattered selector raises.
   #
   # Delete and splice rebuild the column set, so an alias previously taken
@@ -249,6 +273,8 @@ class CAFrame
     # String names a column, anything else selects rows.
     if selector.is_a?(String)
       column_assign(selector, value)
+    elsif selector.is_a?(Array)
+      refuse_array_key(selector, "df[] =")
     elsif UNDEF.equal?(value)
       mask_rows(selector)
     elsif value.nil?
@@ -320,6 +346,8 @@ class CAFrame
   # untouched.
   #
   #   df["temp"] = col     -> bind the name to that column (a new name is added)
+  #   df["unit"] = "degC"  -> a column holding that one value on every row,
+  #                           typed as a record's value is (from_records)
   #   df["temp"] = nil     -> remove the column
   #   df["temp"] = UNDEF   -> mask every cell of the column, in place
   private def column_assign(key, value)
@@ -331,9 +359,25 @@ class CAFrame
       raise ArgumentError,
             "df[name] = takes a column, not a CAFrame; take one with " \
             "other[\"name\"], or splice rows with df[rows] = other"
+    elsif one_value?(value)
+      if @columns.empty? && @index.nil?
+        raise ArgumentError,
+              "df[#{key.inspect}] = #{value.inspect}: the frame has no rows to repeat " \
+              "the value on yet; give a column (a CArray or an Array)"
+      end
+      # Typed from the one value, so a frame with no rows gets the type a
+      # frame with rows gets.
+      one = CAFrame.__send__(:build_record_column, [value], 1)
+      rebind_column(key, one[CArray.int64(@nrow).fill(0), *([nil] * (one.ndim - 1))].copy)
     else
       rebind_column(key, value)
     end
+  end
+
+  # A value that is not a column: neither an Array nor anything that turns
+  # into a CArray.
+  private def one_value?(value)
+    return !value.is_a?(Array) && !value.is_a?(CArray) && !value.respond_to?(:to_ca)
   end
 
   # Bind +key+ to +column+, adding the name when it is new.  This is where a
@@ -366,7 +410,7 @@ class CAFrame
   # Remove a column.  +drop+ is the same edit as a new frame (§3.8); this is
   # the in-place form, which is all an assignment can be.
   private def delete_column(key)
-    raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
+    refuse_missing_column(key) unless @columns.key?(key)
     @columns.delete(key)
     @nrow = 0 if @columns.empty? && @index.nil?
     self
@@ -377,9 +421,79 @@ class CAFrame
   # counterpart, and like it the write goes through to the stored column and
   # is visible through every alias.
   private def mask_column(key)
-    col = @columns.fetch(key) { raise KeyError, "no column #{key.inspect}" }
+    col = @columns.fetch(key) { refuse_missing_column(key) }
     col[] = UNDEF
     self
+  end
+
+  # The names that the arguments of select / drop / transform pick: a name,
+  # a Range or Regexp expanded as stack_columns expands it, or a Symbol for
+  # the columns of a kind (columns_of_kind); none twice.
+  private def names_selected(args, verb)
+    names = args.flat_map do |a|
+      case a
+      when Range, Regexp then columns_selected(a, verb)
+      when Symbol        then columns_of_kind(a, verb)
+      when Array         then names_selected(a, verb)
+      else                    [a]
+      end
+    end
+    return column_keys(names, verb)
+  end
+
+  # The names of the columns of a kind, in the frame's order:
+  #   :numeric      numbers (CArray#numeric?: integers, floats, complex)
+  #   :float        floats of any width (CArray#float?)
+  #   :integer      integers of any width, signed or not (CArray#integer?)
+  #   :complex      complex numbers of any width (CArray#complex?)
+  #   :string       text: CAString, CAConstString, CAFixlenString, or an
+  #                 object column whose present cells are all Strings
+  #   :time         CATime
+  #   :timedelta    CATimedelta
+  #   :categorical  CACategorical
+  # or a data type as cast names it (:float64, :int32, :boolean, ...), which
+  # picks the columns of that type that are not a Face. :float, :integer and
+  # :complex are the kinds, not the C type names cast reads them as.
+  private def columns_of_kind(kind, verb)
+    matches =
+      case kind
+      when :numeric     then ->(col) { col.numeric? }
+      when :float       then ->(col) { !col.face? && col.float? }
+      when :integer     then ->(col) { !col.face? && col.integer? }
+      when :complex     then ->(col) { !col.face? && col.complex? }
+      when :string      then ->(col) { string_kind_column?(col) }
+      when :time        then ->(col) { col.is_a?(CATime) }
+      when :timedelta   then ->(col) { col.is_a?(CATimedelta) }
+      when :categorical then ->(col) { col.is_a?(CACategorical) }
+      else
+        # A Symbol that is neither is a column name written as a Symbol.
+        name = begin
+                 CArray.data_type_name(kind)
+               rescue ArgumentError, TypeError, CArray::DataTypeError
+                 CAFrame.__send__(:column_key, kind, verb,
+                                  hint: "a Symbol names a kind of column (:numeric, :float, " \
+                                        ":integer, :complex, :string, :time, :timedelta, " \
+                                        ":categorical) or a data type")
+               end
+        ->(col) { !col.face? && CArray.data_type_name(col.data_type) == name }
+      end
+    names = @columns.keys.select { |key| matches.(@columns[key]) }
+    raise ArgumentError, "#{verb}: #{kind.inspect} selects no column" if names.empty?
+    return names
+  end
+
+  # A column of text: a string Face, or an object column whose present
+  # cells are all Strings (one with none present is not).
+  private def string_kind_column?(col)
+    return true if col.is_a?(CArray::StringOperationMixin)
+    return false if col.face? || col.data_type != :object
+    found = false
+    col.each do |v|
+      next if UNDEF.equal?(v)
+      return false unless v.is_a?(String)
+      found = true
+    end
+    return found
   end
 
   # Column projection (memo §13.2): a view-frame holding the named columns as
@@ -388,45 +502,98 @@ class CAFrame
   # selects rows. +select+ takes no block — row conditions go through +filter+
   # (old carray-dataframe fused the two into +select(cols) { cond }+; here they
   # are orthogonal and compose by chaining: +df.select(...).filter { ... }+).
+  # Each argument is a name, a Range of names (the columns from one to the
+  # other, in the frame's order) or a Regexp (the names it matches), as
+  # +stack_columns+ takes them.
+  #
+  #   df.select("station", "tmax".."rain")
+  #   df.select(/^t/)
   def select(*names)
     raise ArgumentError, "select requires at least one column name" if names.empty?
     cols = {}
-    column_keys(names, "select").each do |key|
-      raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
+    names_selected(names, "select").each do |key|
+      refuse_missing_column(key) unless @columns.key?(key)
       cols[key] = @columns[key]
     end
     rebuild(cols)
   end
 
-  # Filter rows with a block that receives the frame and returns a boolean
-  # column (memo §15). The block builds the mask from +f["col"]+ / +f.index+.
-  # Keep the rows where the block's boolean selector is true.
+  # Keep the rows where a boolean selector is true. The selector is given
+  # directly (+df.filter(df["temp"] > 0)+), or built by a block that receives
+  # the frame (+df.filter { |f| f["temp"] > 0 }+), from +f["col"]+ /
+  # +f.index+. Give one or the other, not both.
   #
-  # A masked (UNDEF) selector cell means the row's membership is *genuinely
-  # undetermined* (e.g. the predicate read a masked input). By default such
-  # rows are silently dropped, exactly as a false cell would be. Pass
-  # +keep_masked: true+ to carry the UNDEF forward instead: the undetermined
-  # rows survive into the result with their data cells masked (and their index
-  # value kept, so the row stays identifiable), leaving a later, better-informed
-  # pass to re-judge them. Definitely-true rows carry their values through
-  # unchanged in both modes.
+  # Combine conditions with +&+ / +|+ (or +.and+ / +.or+, which leave a row
+  # undetermined when either side is masked) and negate with +.not+. Ruby's
+  # +&&+ / +||+ look only at whether the left array exists, so +a && b+ is +b+
+  # and the first condition is silently dropped.
   #
-  # The default is a view-frame. +keep_masked: true+ returns a **materialized**
-  # frame instead -- carrying the UNDEF forward means writing it into the
-  # result, which a view cannot do without masking the parent's rows. That holds
-  # whether or not the selector actually carries a masked cell, so the same call
-  # site does not switch between sharing and copying with the data.
-  def filter(keep_masked: false)
-    mask = yield(self)
+  # A masked (UNDEF) selector cell means the row's membership is undetermined
+  # (e.g. the predicate read a masked input). Such a row is not kept, as a
+  # false cell is not, as +ca[selector]+ does. Settle it in the selector to
+  # choose otherwise: +s.is_masked+ selects the undetermined rows,
+  # +s.strip_mask(true)+ keeps them along with the true ones.
+  #
+  # The result is a sub-frame of views sharing the frame's cells.
+  def filter(*selector, **options)
+    CAFrame.__send__(:refuse_filter_keywords, options, "filter")
+    if selector.size > 1
+      raise ArgumentError, "filter takes one selector (got #{selector.size})"
+    end
+    if selector.empty?
+      unless block_given?
+        raise ArgumentError, "filter needs a boolean selector or a block"
+      end
+      mask = yield(self)
+      given = "filter block must return"
+    else
+      if block_given?
+        raise ArgumentError, "filter takes a selector or a block, not both"
+      end
+      mask = selector.first
+      given = "filter selector must be"
+    end
     unless mask.is_a?(CArray) && mask.data_type == :boolean
       raise ArgumentError,
-            "filter block must return a boolean CArray (got #{mask.is_a?(CArray) ? "a #{CArray::Inspector.type_label(mask)} CArray" : mask.class})"
+            "#{given} a boolean CArray (got #{mask.is_a?(CArray) ? "a #{CArray::Inspector.type_label(mask)} CArray" : mask.class})" +
+            CAFrame.__send__(:equality_hint, mask)
     end
     unless mask.shape == [@nrow]
       raise ArgumentError,
             "filter mask has shape #{mask.shape.inspect}, expected [#{@nrow}] (one value per row)"
     end
-    select_rows(mask, keep_masked: keep_masked)
+    select_rows(mask)
+  end
+
+  # Keep the rows that have no masked cell in the named columns (every
+  # column when none is named), as a sub-frame of views, as +filter+ returns.
+  # A cell of an N-D column masks its row. The index is a column here only
+  # when named, by the row axis name. A NaN is a value, not a masked cell:
+  # mask it first (+df["x"][:is_invalid] = UNDEF+) to drop its row too.
+  #
+  #   df.drop_masked                    # rows complete in every column
+  #   df.drop_masked("tmax", "tmin")    # rows with both temperatures
+  #
+  # @param names [Array<String, Range, Regexp, Symbol>] the columns to look
+  #   at, picked as +select+ picks them.
+  # @return [CAFrame]
+  # @raise [KeyError] for a name that is no column.
+  def drop_masked (*names)
+    keys = names.empty? ? @columns.keys : names_selected(names, "drop_masked")
+    holes = CArray.boolean(@nrow).fill(false)
+    keys.each do |key|
+      col = if @columns.key?(key)
+              @columns[key]
+            elsif @index && key == @axis_name
+              @index
+            else
+              refuse_missing_column(key)
+            end
+      masked = col.is_masked
+      masked = masked.any(axis: (1...masked.ndim).to_a) if masked.ndim > 1
+      holes |= masked
+    end
+    return select_rows(holes.not)
   end
 
   # Judge every row against named rules, and return the verdicts as a frame:
@@ -472,7 +639,8 @@ class CAFrame
       unless verdict.is_a?(CArray) && verdict.data_type == :boolean
         raise ArgumentError,
               "verify: rule #{key.inspect} must return a boolean CArray (got " \
-              "#{verdict.is_a?(CArray) ? "a #{verdict.data_type} CArray" : verdict.class})"
+              "#{verdict.is_a?(CArray) ? "a #{verdict.data_type} CArray" : verdict.class})" +
+              CAFrame.__send__(:equality_hint, verdict)
       end
       unless verdict.shape[0] == @nrow
         raise ArgumentError,
@@ -486,13 +654,17 @@ class CAFrame
     CAFrame.new(verdicts, axis_name: @axis_name, index: @index)
   end
 
-  # Move a column to the index and name the row axis after it (memo §3).
-  # An index-role change: the data is unchanged, so this mutates self and
-  # returns it (memo §3.8). Any existing index is replaced.
+  # A new frame with a column moved to the index and the row axis named
+  # after it (memo §3); this frame is left as it is, and the two share their
+  # columns. Any existing index is replaced, going back to being a column.
   def set_index(name)
+    return dup.__send__(:set_index_in_place, name)
+  end
+
+  private def set_index_in_place(name)
     refuse_if_frozen
     key = column_key(name, "set_index")
-    raise KeyError, "no column #{key.inspect}" unless @columns.key?(key)
+    refuse_missing_column(key) unless @columns.key?(key)
     idx = @columns[key]
     unless idx.ndim == 1
       raise ArgumentError, "index must be a 1-D column (got ndim #{idx.ndim})"
@@ -515,10 +687,14 @@ class CAFrame
     self
   end
 
-  # Drop the index back into an ordinary column (the inverse of set_index).
-  # Also an index-role change, so it mutates self (memo §3.8). The former
-  # index becomes the first column, named after the row axis.
+  # A new frame with the index back as an ordinary column (the inverse of
+  # set_index); this frame is left as it is. The former index becomes the
+  # first column, named after the row axis.
   def reset_index
+    return dup.__send__(:reset_index_in_place)
+  end
+
+  private def reset_index_in_place
     refuse_if_frozen
     return self unless @index
     @columns   = { @axis_name => @index }.merge(@columns)
@@ -599,6 +775,35 @@ class CAFrame
                 attrs: @attrs)
   end
 
+  # Whether +other+ is a frame holding the same table: the same column names
+  # in the same order, each column equal as CArray#== has it (data type,
+  # shape, the present values and where the cells are masked), and the same
+  # index and row axis name. Attributes are not compared.
+  #
+  # @param other [Object]
+  # @return [Boolean]
+  def == (other)
+    return true if equal?(other)
+    return false unless other.is_a?(CAFrame)
+    return false unless column_names == other.column_names && @axis_name == other.axis_name
+    return false unless @nrow == other.nrow
+    if @index.nil? || other.index.nil?
+      return false unless @index.nil? && other.index.nil?
+    else
+      return false unless @index == other.index
+    end
+    return @columns.all? { |name, col| col.shape == other[name].shape && col == other[name] }
+  end
+
+  # A key value as an error message shows it: a String quoted, an element of
+  # a Face (a time, say) as it reads.
+  def self.key_text (value)
+    return value.inspect if value.is_a?(String) || value.is_a?(Numeric) || value.nil?
+    return value.to_s if value.class.name.to_s.end_with?("::Element")
+    return value.inspect
+  end
+  private_class_method :key_text
+
   # +dup+ / +clone+ share the column data -- that is the CArray dup contract
   # (§3.6) -- but must not share the columns Hash itself: Ruby's shallow copy
   # hands over the same Hash object, so a membership edit (+append+ / +drop+ /
@@ -608,13 +813,14 @@ class CAFrame
     super
     @columns = @columns.dup
     @attrs   = @attrs.dup if @attrs
+    @name_views = nil
   end
 
   # Marshal writes the instance variables as they are.  Loading stores the
   # attribute values again as set_attr does, as frozen copies: Marshal
   # brings back a value thawed.
   private def marshal_dump
-    instance_variables.to_h { |name| [name, instance_variable_get(name)] }
+    (instance_variables - [:@name_views]).to_h { |name| [name, instance_variable_get(name)] }
   end
 
   private def marshal_load(ivars)
@@ -681,6 +887,94 @@ class CAFrame
     (@attrs ? @attrs.dup : {}).freeze
   end
 
+  # The frame's attributes with Symbol keys, frozen.  The keys of Hashes
+  # nested in the values become Symbols as well.
+  def attrs_symkey
+    CArray.__send__(:attr_symbolize_keys, attrs)
+  end
+
+  # Set attributes on columns and return self.  The columns are the ones
+  # named, or every column when none is named.  With attributes, they are
+  # set on those columns; with none, each column gets its own name as the
+  # attribute "name", which is what the frame knows of a column and a column
+  # taken out of it does not:
+  #
+  #   df.set_column_attrs                                # "name" on every column
+  #   df.set_column_attrs(period: "I")                   # period on every column
+  #   df.set_column_attrs(df.attrs)                      # the frame's attributes
+  #   df.set_column_attrs("hr", long_name: "Hour")       # long_name on "hr"
+  #   df.set_column_attrs("hr", "cnt", station: "A")     # station on both
+  #
+  # The attributes come as keywords, as a Hash given last, or both; an empty
+  # Hash sets nothing (df.set_column_attrs(df.attrs) on a frame with no
+  # attributes does not set "name").  Keys and values follow
+  # CArray#set_attrs.  A column's other attributes are kept, and the index
+  # is not a column.  A column is named once.  Every name, key, value and
+  # column is checked before any is written.  The attributes belong to the
+  # columns, not the table, so a frozen or protected frame takes them; a
+  # frozen column refuses them.
+  #
+  # Attributes given are set on the column arrays themselves, so frames that
+  # share a column (select, rename, append, drop, paste and dup share them)
+  # all see them, as they all see its cells.  A name is not about the data
+  # but about this frame, so it is not set on the shared array: the column
+  # is replaced by a view of it (+refer+, the same data, Face and mask) that
+  # carries the name, and the array's other attributes still show through
+  # it.  Each frame names its own view, whatever order frames are named in,
+  # and a frame that names nothing shows no name.  Giving names replaces
+  # columns, so a frozen frame refuses it unless every column named already
+  # is this frame's own named view.
+  def set_column_attrs(*names, **keywords)
+    given = names.last.is_a?(Hash) || !keywords.empty?
+    attrs = names.last.is_a?(Hash) ? names.pop.merge(keywords) : keywords
+    targets = names.empty? ? @columns.keys : column_keys(names, "set_column_attrs")
+    columns = targets.map { |name| @columns.fetch(name) { refuse_missing_column(name, "set_column_attrs") } }
+    attrs.each do |key, value|
+      CArray.__send__(:attr_normalize_key, key)
+      CArray.__send__(:attr_validate_value, value)
+    end
+    columns.each { |col| col.__send__(:attr_check_writable) }
+    if given
+      # On the arrays the names were put in front of, so every frame
+      # sharing the data sees them.
+      columns.each { |col| CAFrame.__send__(:named_source, col).set_attrs(attrs) }
+      return self
+    end
+    own = @name_views || {}
+    reuse = targets.zip(columns).map do |name, col|
+      own.key?(col) && @columns.count { |_, c| c.equal?(col) } == 1
+    end
+    if frozen? && !reuse.all?
+      raise FrozenError.new("set_column_attrs: a name goes on a view of the column that " \
+                            "replaces it in this frame, and a frozen CAFrame keeps its " \
+                            "columns; name the columns before freezing, or name a copy",
+                            receiver: self)
+    end
+    targets.zip(columns, reuse).each do |name, col, same|
+      view = same ? col : CAFrame.__send__(:name_view, col)
+      (@name_views ||= {}.compare_by_identity)[view] = true
+      @columns[name] = view
+      view.set_attr("name", name)
+    end
+    self
+  end
+
+  # A view of +col+ to carry a frame's name for it: the same data, Face and
+  # mask, with the column's other attributes showing through. It remembers
+  # the column it was made from (named_source).
+  def self.name_view(col)
+    view = col.refer
+    view.instance_variable_set(:@named_source, named_source(col))
+    view
+  end
+  private_class_method :name_view
+
+  # The array a name view was made from, or +col+ itself.
+  def self.named_source(col)
+    col.instance_variable_get(:@named_source) || col
+  end
+  private_class_method :named_source
+
   # Whether the frame has any attribute, or the attribute +key+.
   def has_attr?(key = nil)
     return !(@attrs.nil? || @attrs.empty?) if key.nil?
@@ -705,6 +999,16 @@ class CAFrame
   # Number of columns.
   def ncol
     @columns.size
+  end
+
+  # [nrow, ncol]. The index is not a column, so it is not counted.
+  def shape
+    return [@nrow, @columns.size]
+  end
+
+  # Whether the frame has no rows.
+  def empty?
+    return @nrow == 0
   end
 
   # Number of rows (axis-0 length N).
@@ -750,7 +1054,9 @@ class CAFrame
     unless ca.is_a?(CArray)
       raise ArgumentError, "column did not convert to a CArray (got #{ca.class})"
     end
-    ca
+    # A CScalar takes no index but [] and [0]; a column is selected by rows,
+    # so the scalar enters as the one-cell array it views.
+    ca.scalar? ? ca.flatten : ca
   end
 
   private def row(i)
@@ -936,14 +1242,7 @@ class CAFrame
     end
   end
 
-  private def select_rows(selector, keep_masked: false)
-    if keep_masked && selector.is_a?(CArray) && selector.data_type == :boolean
-      # Not gated on selector.has_mask?: gating there would make the same call
-      # site return a view-frame or a materialized one depending on whether that
-      # run's data happened to produce an undetermined cell (the reason splice
-      # always snapshots -- see CAFrame.md section 3).
-      return select_rows_keep_masked(selector)
-    end
+  private def select_rows(selector)
     cols = {}
     @columns.each do |name, col|
       cols[name] = col[selector, *([nil] * (col.ndim - 1))]
@@ -952,33 +1251,32 @@ class CAFrame
     CAFrame.new(cols, axis_name: @axis_name, index: new_index, attrs: @attrs)
   end
 
-  private def select_rows_keep_masked(selector)
-    keep       = selector.strip_mask(1)   # true where selected OR undetermined
-    undet_kept = selector.is_masked[keep] # among kept rows, which were undetermined
-    cols = {}
-    any_undet = undet_kept.any
-    @columns.each do |name, col|
-      tail = [nil] * (col.ndim - 1)
-      g = col[keep, *tail]
-      if any_undet
-        # mask_where copies and masks in one step, so a read-only Face
-        # (categorical, CAConstString) takes the mask as any column does.
-        cells = CArray.boolean(*g.shape)
-        cells[] = false
-        cells[undet_kept, *tail] = true
-        cols[name] = g.mask_where(cells)
-      else
-        cols[name] = g.copy
-      end
+  # df["name"] for a name that is no column. The index is not a column, so
+  # its name is refused too, pointing at df.index. +verb+, when given, leads
+  # the message.
+  private def refuse_missing_column(key, verb = nil)
+    lead = verb ? "#{verb}: " : ""
+    if @index && key == @axis_name
+      raise KeyError,
+            "#{lead}no column #{key.inspect}: it is the index, read it with df.index " \
+            "(reset_index makes it a column again)"
     end
-    # The index is copied along with the columns. Its values are carried over
-    # unmasked (an undetermined row keeps its label, as mask_rows leaves the
-    # index alone), but a materialized frame has to be materialized whole: an
-    # aliased index would write through to the parent from a frame whose columns
-    # do not.
-    new_index = @index ? @index[keep].copy : nil
-    CAFrame.new(cols, axis_name: @axis_name, index: new_index, attrs: @attrs)
+    raise KeyError, "#{lead}no column #{key.inspect}"
   end
+
+  # filter takes no keyword. keep_masked:, which it once took, is named
+  # with where its work went: the selector settles an undetermined row.
+  def self.refuse_filter_keywords(options, verb)
+    return if options.empty?
+    names = options.keys.map(&:inspect).join(", ")
+    message = "#{verb}: unknown keyword#{options.size > 1 ? "s" : ""} #{names}"
+    if options.key?(:keep_masked)
+      message += "; to keep the rows whose condition is undetermined, select them " \
+                 "in the selector (s.strip_mask(true))"
+    end
+    raise ArgumentError, message
+  end
+  private_class_method :refuse_filter_keywords
 
   # A column name given as an argument: a String, as the frame's column
   # keys are. Symbols are the frame's options and types, never names.
@@ -1019,6 +1317,29 @@ class CAFrame
     raise ArgumentError, message
   end
   private_class_method :refuse_repeated_names
+
+  # A condition that gave true or false rather than a boolean CArray has, as
+  # likely as not, compared two arrays whole with == or !=.
+  def self.equality_hint(value)
+    return "" unless value == true || value == false
+    "; == and != compare whole arrays, eq and ne compare cell by cell " \
+      "(f[\"x\"].eq(\"a\"))"
+  end
+  private_class_method :equality_hint
+
+  # percentile(p, *names): the percentage comes first. A name there is the
+  # order of median's arguments carried over, said so; a percentage out of
+  # range is refused by the core here, before any column is asked whether
+  # it has a percentile.
+  def self.check_percentage(p)
+    unless p.is_a?(Numeric)
+      raise ArgumentError,
+            "percentile: give the percentage first, then the column names " \
+            "(got #{p.inspect}; percentile(90, \"x\"))"
+    end
+    CArray.float64(1).percentile(p)
+  end
+  private_class_method :check_percentage
 
   # The labels an index is made of from a key -- a group's first values,
   # the resample bins, the sorted pivot keys -- as the key column shows

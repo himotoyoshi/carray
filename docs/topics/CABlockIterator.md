@@ -51,7 +51,12 @@ a.blocks([b0, b1, ...])    # ... or one Array of sizes
 a.blocks(lo..hi, ...)      # a range: size = hi - lo + 1, start = lo (a leading offset)
 ```
 
-Give one size (or range) per axis. A range block spec carries both a **size**
+Give one size (or range) per axis. The tiles are read through a `block_view`
+with twice the source's rank, so `blocks` takes arrays up to rank 8 (half of
+`CA_RANK_MAX`, 16); a higher rank raises `ArgumentError` when `blocks` is
+called.
+
+A range block spec carries both a **size**
 (its length) and a **leading offset** (its start), kept for compatibility with
 2.0:
 

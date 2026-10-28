@@ -4,9 +4,8 @@ Each recipe here is a complete answer to a common question, using the methods of
 
 ```ruby
 require "carray"
-require "stringio"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
-shops = CAFrame.from_csv("shops.csv", types: :infer)
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
+shops = CAFrame.read_csv("shops.csv")
 ```
 
 ## Check a file you have just received
@@ -14,7 +13,7 @@ shops = CAFrame.from_csv("shops.csv", types: :infer)
 You have a new file and want to know whether it can be trusted before you use it. Read it, look at the types and the missing counts, and check the values against what you know about them:
 
 ```ruby
-fresh = CAFrame.from_csv("sales.csv", types: :infer, missing: ["n/a"], on_error: :warn)
+fresh = CAFrame.read_csv("sales.csv", missing: ["n/a"], on_error: :warn)
 puts fresh.describe.to_table
 # column    type       count  masked  unique  min         max         mean         stddev
 # --------  ---------  -----  ------  ------  ----------  ----------  -----------  ----------
@@ -61,19 +60,20 @@ p expected.join(partial, on: ["shop", "date"], how: :anti)
 
 ## The best day of each shop
 
-Sort by the figure, largest first, and keep the first row of each shop:
+`nlargest` on the shops' groups gives each shop's largest rows, the shops in the order they first appear:
 
 ```ruby
-ranked = sales.sort_by_key("revenue", order: :desc)
-best = ranked[ranked.is_duplicate("shop").not]
+best = sales.group_by("shop").nlargest(1, "revenue")
 p best.select("shop", "date", "revenue")
 # #<CAFrame nrow=3 columns=[shop:CAString, date:CATime[D], revenue:float64]>
 # shop     date        revenue
 # -------  ----------  -------
 # north    2024-03-10  4112.58
-# central  2024-03-09   3939.6
 # south    2024-03-10  2785.04
+# central  2024-03-09   3939.6
 ```
+
+`nlargest(3, "revenue")` gives each shop's three best days, largest first. A missing figure is never among the largest.
 
 ## Change from the previous day, per shop
 
@@ -194,7 +194,7 @@ Split the table by shop, put each shop on the full list of days, interpolate alo
 days = CArray.time_range("2024-03-04", "2024-03-11", unit: :D)
 filled = ["north", "south", "central"].map { |s|
   part = sales.filter { |f| f["shop"].eq(s) }.drop("shop").align("date", days)
-  part.set_index("date").cast("visitors" => :float64).fill("visitors", :linear)
+  part = part.set_index("date").cast("visitors" => :float64).fill("visitors", :linear)
   part.append("shop", CArray.string(part.nrow) { s })
 }
 all = CAFrame.concatenate(filled)
@@ -210,7 +210,7 @@ Files of the same layout, one per week, are read and put after one another. `con
 ```ruby norun
 files = Dir.glob("sales_week_*.csv").sort
 all = CAFrame.concatenate(files.map { |path|
-  CAFrame.from_csv(path, types: :infer, missing: ["-1", "n/a"])
+  CAFrame.read_csv(path, missing: ["-1", "n/a"])
 })
 ```
 

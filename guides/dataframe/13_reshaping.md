@@ -4,7 +4,7 @@ The same figures can be laid out two ways. `sales` is **long**: one row per shop
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 ```
 
 ## Long to wide — `pivot`
@@ -101,6 +101,6 @@ p long.head(4)
 - `var_name:` and `value_name:` name the two new columns (`"variable"` and `"value"` by default).
 - If the table has an index, it is kept as an id column.
 
-The stacked columns must have the same type, because the result's value column is a view of them: no data is copied, and writing to the long table writes to the wide one. Use `copy` for a table of its own, and `cast` the columns to one type first if they differ.
+The result's value column is a view of the stacked columns: no data is copied, and writing to the long table writes to the wide one. Use `copy` for a table of its own. Number columns of different types — counts and amounts, say — meet at a type that holds every value of each column's type and stay a view. When no type does (64-bit integer counts beside floats), or when text or time columns are stacked with numbers, `melt` raises, so `cast` those to one type first.
 
 `melt` then `pivot` on the same columns gives back the wide table's values.

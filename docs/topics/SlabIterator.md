@@ -156,6 +156,14 @@ refs = []
 ca.each_slab(axis: 1) { |row| refs << row }   # refs all point at iter N-1 data
 ```
 
+A MemoryView export of the slab (`Fiddle::MemoryView.new(row)`,
+`CArray.wrap_memory_view(row)`, or a C extension that reads it) is valid only
+for the iteration it was made in. Inside the block it reads the current slab,
+so handing each slab to another library there works. When the slab is a copy
+in the iterator's scratch (a non-contiguous axis), the next iteration refills
+that scratch and the walk frees it at its end, and an export taken out of the
+block keeps pointing at it. Export `row.copy` to keep one.
+
 In-block derived views (`row[range]`, `row + 1`,
 `(row > 0).as_int32`, `row.median`) read the current iter's data
 correctly. The slab is presented as a `CAStride` whose

@@ -415,8 +415,8 @@ class CACategorical < CAObject
   # Memoised: the codes are read-only (immutable storage), so the counts are a
   # pure function of the categorical and stay valid for its lifetime. The same
   # cached array backs {#reduceat_index} and {#group_addr}, so a wide aggregate
-  # over the same categorical pays the count once. (Do not mutate the returned
-  # array — it is shared; take `.copy` for a scratch buffer.) A derived-view /
+  # over the same categorical pays the count once. The returned array is shared,
+  # so it is frozen; take `.copy` for a scratch buffer. A derived-view /
   # composite categorical caches too: read-only rides from the codes as a flag,
   # not a Ruby freeze, so the object stays non-frozen and the memo ivar sticks.
   # @overload category_sizes
@@ -429,8 +429,7 @@ class CACategorical < CAObject
     bc  = codes.bincount
     out = CArray.new(bc.data_type, [@labels.size], bytes: bc.bytes)   # new zero-fills
     out[0...bc.elements] = bc if bc.elements > 0
-    @category_sizes = out
-    out
+    @category_sizes = out.freeze
   end
 
   # Back-compatible alias; {#category_sizes} is the canonical name (a histogram
@@ -635,7 +634,7 @@ class CACategorical < CAObject
   # Memoised (see the grouping-plan note above): the counting sort is the
   # dominant grouping cost, so it is computed once and shared by every payload
   # column and by CACategoricalIterator, and kept for the categorical's
-  # lifetime (an int64 per cell). Do not mutate the returned array.
+  # lifetime (an int64 per cell). The returned array is shared, so it is frozen.
   # @overload group_addr
   #   Returns a length-{#elements} integer CArray of flat storage
   #   addresses that order the cells by category (excluded cells last).
@@ -645,8 +644,7 @@ class CACategorical < CAObject
     out = codes.reshape(elements).__send__(:addresses_by_category,
                                            reduceat_index.copy, @labels.size,
                                            category_sizes.sum)
-    @group_addr = out
-    out
+    @group_addr = out.freeze
   end
 
   # Segment start offsets into the category-contiguous layout produced by
@@ -663,7 +661,7 @@ class CACategorical < CAObject
     return @reduceat_index if @reduceat_index
     # Every boundary but the last; the copy makes it an entity the
     # reduceat kernels can read directly.
-    @reduceat_index = CArray.segment_offsets(lengths: category_sizes)[0...-1].copy
+    @reduceat_index = CArray.segment_offsets(lengths: category_sizes)[0...-1].copy.freeze
   end
 
   # @overload categorize(labels: nil, sort_labels: false)

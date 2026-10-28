@@ -4,16 +4,16 @@ A frame can have an **index**: an array of labels, one per row — a date, a nam
 
 ```ruby
 require "carray"
-sales = CAFrame.from_csv("sales.csv", types: :infer, missing: ["-1", "n/a"])
+sales = CAFrame.read_csv("sales.csv", missing: ["-1", "n/a"])
 north = sales.filter { |f| f["shop"].eq("north") }.drop("shop").copy
 ```
 
 ## Making a column the index — `set_index`
 
-`set_index` moves a column into the index. It changes the frame and returns it:
+`set_index` gives a new frame with a column moved into the index; the frame you called it on keeps the column. Keep the result:
 
 ```ruby
-north.set_index("date")
+north = north.set_index("date")
 p north
 # #<CAFrame nrow=8 columns=[visitors:int64, revenue:float64, rating:float64] index="date">
 # date        visitors  revenue  rating
@@ -42,8 +42,10 @@ The index's name is the frame's **axis name** — the name of its row axis. `set
 
 ```ruby
 north.reset_index.column_names   # => ["date", "visitors", "revenue", "rating"]
-north.set_index("date")
+north.index.class                # => CATime  -- north itself still has its index
 ```
+
+Both give a new frame over the same columns, not a copy: writing a cell through either frame changes the other (chapter 16). Use `copy` for a frame of its own.
 
 A frame can also be built with an index (chapter 2):
 
@@ -112,6 +114,8 @@ The index sits beside the columns, and the methods that work on columns leave it
 - `drop` does not remove it, and `select` does not need to name it.
 - Arithmetic between columns ignores it. Columns of the same frame line up because they are the same rows, not because of their labels.
 
+Where a method takes a **key** rather than columns — `group_by`, `sort_by_key`, `join(on:)`, `pivot(index:)`, `resample`, `windows(on:)` — the index's name does reach the index, as a column's name reaches the column. So a key reads the index and a column does not: after `group_by("shop").sum`, `sort_by_key("shop")` works and `select("shop")` raises, pointing at `df.index`.
+
 It goes everywhere the rows go: `filter`, `head`, sorting, `copy` and the other row selections carry each row's label with it. A row Hash includes it under the axis name, and `to_csv` writes it as the first column.
 
 While a frame has an index, a column cannot have the index's name: `north.append("date", …)` raises, because `"date"` already names the row axis.
@@ -121,19 +125,25 @@ While a frame has an index, a column cannot have the index's name: `north.append
 `set_index` on a frame that already has one puts the old index back as a column first, so no labels are lost:
 
 ```ruby
-df = sales.copy.set_index("shop")
-df.set_index("date")
+df = sales.set_index("shop").set_index("date")
 df.column_names   # => ["shop", "visitors", "revenue", "rating"]
 ```
 
 `reset_index` restores the axis name the frame had before `set_index`.
+
+`rename` renames the index as it renames a column:
+
+```ruby
+summary = sales.group_by("shop").sum("revenue")
+summary.rename("shop" => "store").axis_name   # => "store"
+```
 
 ## Indexes that repeat
 
 An index may hold the same label more than once — `sales` indexed by `shop` has eight rows for each. Everything works except `at`, which needs one row per label:
 
 ```ruby
-by_shop = sales.copy.set_index("shop")
+by_shop = sales.set_index("shop")
 by_shop.at("north")   # raises ArgumentError
 by_shop.filter { |f| f.index.eq("north") }.nrow   # => 8
 ```
@@ -150,4 +160,4 @@ df.filter { |f| f.index.is_masked }
 
 Use one when the rows have a natural label you will look up or slice by, or that should stay with the rows through every operation — dates in a time series, identifiers of records. Leave it out when no column plays that part; nothing in CAFrame requires one.
 
-One more reason to have a **unique** index: `filter(keep_masked: true)` and `df[rows] = UNDEF` make every cell of a row missing, and the index is then the only thing left that says which row it was. When no column is unique, an index of row numbers does the job (chapter 6).
+One more reason to have a **unique** index: `df[rows] = UNDEF` makes every cell of a row missing, and the index is then the only thing left that says which row it was. When no column is unique, an index of row numbers (`CArray.int64(df.nrow).seq!`) does the job.

@@ -249,9 +249,11 @@ ca_size_t ca_binop_materialise_call_count = 0;
 
 /* Evaluate the cells a request names into `data` (packed, n cells). */
 static void
-ca_binop_eval (CABinOp *bo, const ca_lazy_req_t *req, void *data)
+ca_binop_eval_cells (void *node, const ca_lazy_req_t *req, void *data, int dir)
 {
+  CABinOp  *bo = (CABinOp *) node;
   ca_size_t slab_n = req->n;
+  (void) dir;
   int8_t    k;
   void     *scratch;
   volatile VALUE holder;
@@ -348,6 +350,13 @@ ca_binop_eval (CABinOp *bo, const ca_lazy_req_t *req, void *data)
   }
 
   ca_lazy_arena_release(scratch);
+}
+
+static void
+ca_binop_eval (CABinOp *bo, const ca_lazy_req_t *req, void *data)
+{
+  ca_lazy_eval_recorded(bo, 2, bo->operands, 0, NULL, ca_binop_eval_cells,
+                        req, data, CA_XFER_GET);
 }
 
 static void

@@ -11,6 +11,22 @@ class TestAttributeInherit < Test::Unit::TestCase
     @b.set_attr(:units, "K")
   end
 
+  # attrs_symkey is attrs with Symbol keys, nested Hashes included.
+  def test_attrs_symkey
+    v = @a[0, nil]
+    v.set_attr(:info, { "k" => 1, "list" => [{ "x" => "y" }, 2] })
+    h = v.attrs_symkey
+    assert_equal({ units: "m/s", info: { k: 1, list: [{ x: "y" }, 2] } }, h)
+    assert h.frozen?
+    assert h[:info].frozen?
+    assert h[:info][:list].frozen?
+    assert h[:info][:list][0].frozen?
+    assert_equal({ "k" => 1, "list" => [{ "x" => "y" }, 2] }, v.attr(:info))
+    assert_equal({}, CArray.int32(2).attrs_symkey)
+    s = CArray.stack([@a, @a])
+    assert_equal({ units: "m/s" }, s.attrs_symkey)
+  end
+
   def test_copy_keeps_attributes
     assert_equal({ "units" => "m/s" }, @a.copy.attrs)
   end
@@ -208,7 +224,7 @@ class TestAttributeInherit < Test::Unit::TestCase
   end
 
   def test_frame_text_cast_and_outer_join_keep_attributes
-    df = CAFrame.from_csv(StringIO.new("a,b\nK,m\n1,x\n2,y\n"), attrs: [:units])
+    df = CAFrame.from_csv("a,b\nK,m\n1,x\n2,y\n", attrs: [:units], types: :string)
     assert_equal "m", df.head(1)["b"].attr(:units)
     assert_equal "K", df.cast(:infer)["a"].attr(:units)
     assert_equal "K", df.cast("a" => :float64)["a"].attr(:units)
@@ -225,7 +241,7 @@ class TestAttributeInherit < Test::Unit::TestCase
     assert_equal "m", a.categorize.attr(:units)
     assert_equal "m", a.categorize(sort_labels: true).attr(:units)
     csv = "t,b,c,i\nT,B,C,I\n2024-01-01,1,x,3\n2024-01-02,0,y,4\n"
-    read = -> { CAFrame.from_csv(StringIO.new(csv), attrs: [:units]) }
+    read = -> { CAFrame.from_csv(csv, attrs: [:units], types: :string) }
     assert_equal "B", read.().cast("b" => :boolean)["b"].attr(:units)
     assert_equal "I", read.().cast("i" => :int32).cast("i" => :boolean)["i"].attr(:units)
     assert_equal "T", read.().cast("t" => :time)["t"].attr(:units)

@@ -2,7 +2,7 @@ require "test/unit"
 require "carray"
 require "stringio"
 
-# CAFrame#cast takes :infer and a map with default: -- the shapes from_csv /
+# CAFrame#cast takes :infer and a map with default: -- the shapes read_csv /
 # from_records' types: takes -- and an error about the map names the option
 # it came in through.
 class TestCAFrameCastDefault < Test::Unit::TestCase
@@ -14,12 +14,11 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
   CSV
 
   def frame
-    CAFrame.from_csv(StringIO.new(CSV_TEXT))
+    CAFrame.from_csv(CSV_TEXT, types: :string)
   end
 
   def test_infer
-    df = frame
-    assert_same df, df.cast(:infer)
+    df = frame.cast(:infer)
     assert_equal :float64, df["temp"].data_type
     assert_equal :int64, df["count"].data_type
     assert_equal :int64, df["id"].data_type
@@ -30,13 +29,13 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
   def test_infer_matches_infer_types
     a = frame.cast(:infer)
     b = frame
-    b.cast(b.infer_types)
+    b = b.cast(b.infer_types)
     assert_equal b.data_types, a.data_types
   end
 
   def test_infer_takes_on_error
     df = frame
-    df.cast(:infer, on_error: :warn)
+    df = df.cast(:infer, on_error: :warn)
     assert_equal :float64, df["temp"].data_type
   end
 
@@ -61,7 +60,7 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
 
   def test_default_type_alone
     df = CAFrame.new("a" => CA_INT32([1, 2]), "b" => CA_INT16([3, 4]))
-    df.cast(default: :float64)
+    df = df.cast(default: :float64)
     assert_equal [:float64, :float64], df.column_names.map { |n| df[n].data_type }
   end
 
@@ -93,7 +92,7 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
   def test_an_unknown_column_raises_keyerror_naming_cast
     df = frame
     err = assert_raise(KeyError) { df.cast(default: :infer, "nope" => :int32) }
-    assert_match(/\Acast /, err.message)
+    assert_match(/\Acast: /, err.message)
     assert_match(/"nope"/, err.message)
     assert_equal :object, df["temp"].data_type
   end
@@ -147,7 +146,7 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
   def test_option_name_names_the_option
     df = frame
     err = assert_raise(ArgumentError) { df.cast("bad", option_name: :types) }
-    assert_match(/\Atypes: takes a map of column types or :infer/, err.message)
+    assert_match(/\Atypes: takes a map of column types, :infer or :string/, err.message)
     err = assert_raise(KeyError) { df.cast({ "nope" => :int32 }, option_name: :types) }
     assert_match(/\Atypes: /, err.message)
     err = assert_raise(TypeError) { df.cast({ defualt: :infer }, option_name: :types) }
@@ -155,14 +154,14 @@ class TestCAFrameCastDefault < Test::Unit::TestCase
   end
 
   def test_from_csv_errors_name_types
-    err = assert_raise(ArgumentError) { CAFrame.from_csv(StringIO.new(CSV_TEXT), types: "bad") }
-    assert_match(/\Atypes: takes a map of column types or :infer/, err.message)
+    err = assert_raise(ArgumentError) { CAFrame.from_csv(CSV_TEXT, types: "bad") }
+    assert_match(/\Atypes: takes a map of column types, :infer or :string/, err.message)
     err = assert_raise(KeyError) do
-      CAFrame.from_csv(StringIO.new(CSV_TEXT), types: { "nope" => :int32 })
+      CAFrame.from_csv(CSV_TEXT, types: { "nope" => :int32 })
     end
     assert_match(/\Atypes: /, err.message)
     err = assert_raise(TypeError) do
-      CAFrame.from_csv(StringIO.new(CSV_TEXT), types: { defualt: :infer })
+      CAFrame.from_csv(CSV_TEXT, types: { defualt: :infer })
     end
     assert_match(/\Atypes: /, err.message)
   end

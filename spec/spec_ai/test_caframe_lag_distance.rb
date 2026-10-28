@@ -1,0 +1,138 @@
+# frozen_string_literal: true
+
+require "test/unit"
+require "carray"
+
+# lag(before: / after:) gives each row the value of the row whose key is an
+# exact distance away, within each group for GroupedFrame#lag.
+class TestCAFrameLagDistance < Test::Unit::TestCase
+  # Two stations stacked one after another, each in time order.
+  def stations
+    t = CArray.time(["2024-01-01 00:00", "2024-01-01 00:30", "2024-01-01 01:00",
+                     "2024-01-01 01:30", "2024-01-01 03:00",
+                     "2024-01-01 00:00", "2024-01-01 01:00", "2024-01-01 02:00"])
+    v = CA_FLOAT64([1.5, 1.8, 0.0, 2.4, 3.0, 5.0, 5.5, 6.1])
+    v[2] = UNDEF
+    v.set_attr("units", "degC")
+    return CAFrame.new({ "station" => CA_OBJECT(%w[A A A A A B B B]), "temp" => v },
+                       axis_name: "time", index: t)
+  end
+
+  def test_before_within_each_group
+    lag = stations.group_by("station").lag("temp", before: "1 hour")
+    assert_equal [UNDEF, UNDEF, 1.5, 1.8, UNDEF, UNDEF, 5.0, 5.5], lag.to_a
+  end
+
+  def test_after_within_each_group
+    lag = stations.group_by("station").lag("temp", after: "30 minutes")
+    # A's 00:30 looks at 01:00, whose value is masked
+    assert_equal [1.8, UNDEF, 2.4, UNDEF, UNDEF, UNDEF, UNDEF, UNDEF], lag.to_a
+  end
+
+  def test_a_row_count_is_still_the_default
+    lag = stations.group_by("station").lag("temp")
+    assert_equal [UNDEF, 1.5, 1.8, UNDEF, 2.4, UNDEF, 5.0, 5.5], lag.to_a
+  end
+
+  def test_the_key_can_be_a_column
+    df = stations.reset_index
+    lag = df.group_by("station").lag("temp", before: "1 hour", on: "time")
+    assert_equal [UNDEF, UNDEF, 1.5, 1.8, UNDEF, UNDEF, 5.0, 5.5], lag.to_a
+  end
+
+  def test_rows_out_of_order
+    df  = stations
+    rev = df[CA_INT64([7, 6, 5, 4, 3, 2, 1, 0])].copy
+    lag = rev.group_by("station").lag("temp", before: "1 hour")
+    assert_equal [5.5, 5.0, UNDEF, UNDEF, 1.8, 1.5, UNDEF, UNDEF], lag.to_a
+  end
+
+  def test_without_names_a_frame_without_the_key_columns
+    out = stations.group_by("station").lag(before: "1 hour")
+    assert_equal ["temp"], out.column_names
+    assert_equal "time", out.axis_name
+    assert_equal 8, out.nrow
+  end
+
+  def test_the_result_shows_the_columns_attributes
+    lag = stations.group_by("station").lag("temp", before: "1 hour")
+    assert_equal "degC", lag.attr("units")
+  end
+
+  def test_a_frame_without_groups
+    t  = CArray.time(["2024-01-01 02:00", "2024-01-01 00:00", "2024-01-01 01:00"])
+    df = CAFrame.new({ "v" => CA_FLOAT64([3, 1, 2]) }, axis_name: "time", index: t)
+    assert_equal [2.0, UNDEF, 1.0], df.lag("v", before: "1 hour").to_a
+    assert_equal [UNDEF, 2.0, 3.0], df.lag("v", after: "1 hour").to_a
+    assert_equal [UNDEF, 3.0, 1.0], df.lag("v", n: 1).to_a
+  end
+
+  def test_a_distance_finer_than_the_key_is_not_rounded_onto_it
+    t  = CArray.time(["2024-01-01", "2024-01-02"], unit: :D)
+    df = CAFrame.new({ "v" => CA_FLOAT64([1, 2]) }, axis_name: "t", index: t)
+    assert_equal [UNDEF, UNDEF], df.lag("v", before: "1 hour").to_a
+    assert_equal [UNDEF, 1.0], df.lag("v", before: "24 hours").to_a
+  end
+
+  def test_a_number_key
+    df = CAFrame.new("x" => CA_FLOAT64([0, 1, Float::NAN, Float::NAN, Float::INFINITY, 2]),
+                     "v" => CA_FLOAT64([10, 11, 12, 13, 14, 15]))
+    # NaN and infinite keys are no distance from any key
+    assert_equal [UNDEF, 10.0, UNDEF, UNDEF, UNDEF, 11.0],
+                 df.lag("v", before: 1, on: "x").to_a
+  end
+
+  def test_refusals
+    df  = stations
+    grp = df.group_by("station")
+    assert_raise(ArgumentError) { grp.lag("temp", n: 1, before: "1 hour") }
+    assert_raise(ArgumentError) { grp.lag("temp", before: "1 hour", after: "1 hour") }
+    assert_raise(ArgumentError) { grp.lag("temp", on: "time") }
+    assert_raise(ArgumentError) { grp.lag("temp", before: 1) }           # not a duration
+    assert_raise(ArgumentError) { grp.lag("temp", before: "-1 hour") }
+    e = assert_raise(ArgumentError) { df.lag("temp", before: "1 hour") }  # times repeat across stations
+    assert_match(/key repeats/, e.message)
+    e = assert_raise(ArgumentError) { df.reset_index.lag("temp", before: "1 hour") }
+    assert_match(/no index/, e.message)
+  end
+
+  # An integer key moved by the width matches no row outside the key's
+  # range, rather than wrapping onto the row at the other end.
+  def test_integer_key_does_not_wrap
+    df = CAFrame.new("k" => CA_UINT8([0, 255, 1]), "v" => CA_FLOAT64([1, 2, 3]))
+    assert_equal [UNDEF, UNDEF, 1.0], df.lag("v", before: 1, on: "k").to_a
+    assert_equal [3.0, UNDEF, UNDEF], df.lag("v", after: 1, on: "k").to_a
+    assert_equal [UNDEF, UNDEF, UNDEF], df.lag("v", before: 256, on: "k").to_a
+    big = CAFrame.new("k" => CA_INT64([2**63 - 1, -2**63]), "v" => CA_FLOAT64([1, 2]))
+    assert_equal [UNDEF, UNDEF], big.lag("v", after: 1, on: "k").to_a
+    assert_equal [2.0, UNDEF], big.lag("v", before: 2**64 - 1, on: "k").to_a
+    u = CAFrame.new("k" => CA_UINT64([0, 2**64 - 1]), "v" => CA_FLOAT64([1, 2]))
+    assert_equal [2.0, UNDEF], u.lag("v", after: 2**64 - 1, on: "k").to_a
+  end
+
+  # A Float width on an integer key is the whole number it names; a width
+  # that is not a whole number is at no key.
+  def test_float_width_on_integer_key
+    d = CAFrame.new("k" => CA_INT64([2**53, 2**53 + 1, 2**53 + 2]), "v" => CA_FLOAT64([1, 2, 3]))
+    assert_equal [UNDEF, 1.0, 2.0], d.lag("v", before: 1.0, on: "k").to_a
+    assert_equal [UNDEF, UNDEF, UNDEF], d.lag("v", before: 1.5, on: "k").to_a
+  end
+
+  # lag gives a new array in every form, so filling a stored lag column
+  # leaves the column it came from alone.
+  def test_lag_by_rows_is_a_new_array
+    df = CAFrame.new("temp" => CA_FLOAT64([1, 2, 3, 4]))
+    df["prev"] = df.lag("temp", n: 1)
+    df["temp"][1] = UNDEF
+    df.fill("prev", -9.0)
+    assert_equal [1.0, UNDEF, 3.0, 4.0], df["temp"].to_a
+    assert_equal [-9.0, 1.0, 2.0, 3.0], df["prev"].to_a
+  end
+
+  # A distance is taken along a time, a duration or a number key.
+  def test_a_text_key_is_refused
+    df = CAFrame.new("k" => CA_OBJECT(%w[a b]), "v" => CA_FLOAT64([1, 2]))
+    e = assert_raise(ArgumentError) { df.lag("v", before: 1, on: "k") }
+    assert_match(/\Alag: the key "k" is object/, e.message)
+  end
+end

@@ -26,7 +26,20 @@ class CArray
   #   bypassing the mask. The returned view itself cannot carry a
   #   mask (`value_array? == true`).
   #
-  #   Use this to read or write the data slot of masked elements.
+  #   This is a method for peeking at the internal state of an array, and
+  #   nothing more. What a masked cell holds is not defined: a computation
+  #   leaves there whatever it happens to. Use it on the spot, as in
+  #   `a.value.copy`, `a.value[nil, 1].copy` or `a.value[nil, 1] = 2`; do
+  #   not keep the view to carry around (`b = a.value`,
+  #   `b = a.value[nil, 1]`), do not compute with it, and do not mix it
+  #   with other arrays (as an operand, or as a part of {CArray.stack} or
+  #   {CArray.meld}). To take the mask off, use {#unmask} or
+  #   {#strip_mask} and give the masked cells a value.
+  #
+  #   A library that handles the mask itself may use `value` on the spot
+  #   to hand the stored cells on together with {#mask}, as long as it
+  #   reads nothing from the masked ones.
+  #
   #   Nothing in a value array is masked, so `unmask` on it does nothing,
   #   while a write that would mask a cell (`UNDEF`, `mask=`,
   #   `invert_mask`) raises TypeError.
@@ -83,6 +96,12 @@ class CArray
   # either a constant (the positional `fill_value`) or a scan `method:`
   # that derives values from neighbouring valid cells (mask gap-fill).
   # The two are mutually exclusive: passing both raises `ArgumentError`.
+  #
+  # On a view, the values are written through to the cells it views. A
+  # position with no cell behind it -- the place of a masked cell of an
+  # index array (`a[i]`), as a join with `view: :full` gives for an
+  # unmatched row -- takes no write and stays masked, without an error.
+  # `strip_mask` gives a new array, where every masked cell takes a value.
   #
   # @overload unmask
   #   Clears the mask state of every element of `self`, leaving the

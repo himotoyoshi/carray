@@ -1,4 +1,4 @@
-/* CSV body reader for CAFrame.from_csv.
+/* CSV body reader for CAFrame.read_csv.
 
    CArray.__csv_read_body_as_string_cells__(text, sep, quote, ncol, keep)
      -> [ncol, cells, records]

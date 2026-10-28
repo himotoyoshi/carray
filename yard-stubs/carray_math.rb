@@ -231,6 +231,13 @@ class CArray
   #   integer base with a negative integer exponent truncates toward
   #   zero rather than producing a fraction (`2 ** -1` is `0`). Cast to
   #   a float `data_type` first when a fractional power is wanted.
+  #   A float or complex array raised to an Integer is computed by
+  #   repeated multiplication rather than by `pow`.  Its rounding error
+  #   grows roughly in proportion to the exponent (tens of ulps at 100,
+  #   hundreds of thousands at a million), where `Float#**` and the same
+  #   exponent given as a Float are within an ulp or so; give the exponent
+  #   as a Float when a large one needs full precision.  The exponent can
+  #   be any Integer that fits 64 bits.
   #   Masked elements stay masked.
   #   @param other [CArray, Numeric] exponent, broadcast to `self.shape`.
   #   @return [CArray] result of the promoted `data_type` of the two
@@ -949,13 +956,15 @@ class CArray
   # @overload &(other)
   #   Returns the element-wise conjunction of `self` and `other`: a
   #   bitwise `AND` on integer arrays, a logical `AND` on boolean ones.
+  #   **On boolean arrays it is three-valued (Kleene); {#and} is the
+  #   two-valued form.** The two give different answers where one side
+  #   is masked.
   #
-  #   On boolean arrays the masked elements follow three-valued
-  #   (Kleene) logic rather than propagating blindly: an unknown
-  #   element `AND` `false` is `false`, because the answer does not
-  #   depend on the unknown. Only where the result genuinely depends on
-  #   a masked element is the result masked. {#and} is the two-valued
-  #   form that always propagates.
+  #   An unknown (masked) element `AND` `false` is `false`, because the
+  #   answer does not depend on the unknown; only where the result
+  #   genuinely depends on a masked element is the result masked. So
+  #   `(a & b).not` is `true` where `a` is `false`, whatever `b` is,
+  #   while `a.and(b).not` stays masked where `b` is.
   #   @param other [CArray, Integer, true, false] the other operand,
   #     broadcast to `self.shape`.
   #   @return [CArray] `:boolean` for boolean operands, otherwise the
@@ -972,8 +981,9 @@ class CArray
   # @overload |(other)
   #   Returns the element-wise disjunction of `self` and `other`: a
   #   bitwise `OR` on integer arrays, a logical `OR` on boolean ones.
-  #   Boolean operands follow Kleene logic as in {#&}, so an unknown
-  #   element `OR` `true` is `true`.
+  #   **On boolean arrays it is three-valued (Kleene) as {#&} is; {#or}
+  #   is the two-valued form.** An unknown element `OR` `true` is
+  #   `true`.
   #   @param other [CArray, Integer, true, false] the other operand,
   #     broadcast to `self.shape`.
   #   @return [CArray] `:boolean` for boolean operands, otherwise the
@@ -1055,13 +1065,16 @@ class CArray
   def not; end
 
   # @overload and(other)
-  #   Returns the two-valued logical `AND` of two boolean arrays.
+  #   Returns the logical `AND` of two boolean arrays, **two-valued: a
+  #   masked element on either side makes the result masked**, even
+  #   where the other side alone would settle the answer. {#&} is the
+  #   three-valued form, and the two differ exactly there: `false & U`
+  #   is `false`, `false.and(U)` is `U`.
   #
-  #   Where {#&} applies Kleene logic, this form propagates the mask
-  #   unconditionally: if either element is masked the result is
-  #   masked, even when the unmasked element alone would settle the
-  #   answer. Use it when an unknown operand should make the result
-  #   unknown regardless.
+  #   Use it when the answer should be given only where both inputs are
+  #   known -- the element-wise counterpart of keeping only complete
+  #   records -- and {#&} when an answer the known side settles should
+  #   stand.
   #   @param other [CArray, true, false] the other operand, broadcast
   #     to `self.shape`.
   #   @return [CArray] `:boolean`.
@@ -1070,8 +1083,10 @@ class CArray
   def and(other); end
 
   # @overload or(other)
-  #   Returns the two-valued logical `OR` of two boolean arrays,
-  #   propagating the mask unconditionally as {#and} does.
+  #   Returns the logical `OR` of two boolean arrays, **two-valued: a
+  #   masked element on either side makes the result masked**, as
+  #   {#and} does. {#|} is the three-valued form: `true | U` is `true`,
+  #   `true.or(U)` is `U`.
   #   @param other [CArray, true, false] the other operand.
   #   @return [CArray] `:boolean`.
   #   @raise [CArray::DataTypeError] for any `data_type` other than

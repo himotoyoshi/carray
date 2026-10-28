@@ -152,7 +152,7 @@ boundary; the header is the authority for everything else.
 
 ### 1.3 Minimum requirements
 
-- **Ruby 3.0 or later.** CArray 3.0 requires it unconditionally —
+- **Ruby 3.2 or later**, the floor CArray's gemspec sets. Within it,
   `ruby/memory_view.h` (Ruby 3.0+) is a hard build requirement, and
   the code assumes `xmalloc` raises `NoMemoryError` on OOM rather than
   returning `NULL`.
@@ -269,7 +269,8 @@ kinds exist:
 - **`CArray`** with `obj_type == CA_OBJ_ARRAY` — the regular case.
   `ptr` owns a buffer allocated by `xmalloc`, freed by `ca_free`.
   `ndim` is 1 or more.
-- **`CScalar`** (`CA_OBJ_SCALAR`) — a zero-dimensional array. Layout
+- **`CScalar`** (`CA_OBJ_SCALAR`) — one cell on one axis (`ndim` 1,
+  `dim[0]` 1). Layout
   is identical to `CArray` plus a single trailing `ca_size_t _dim`
   cell that `dim` points to. `xfree(ca->dim)` is therefore incorrect
   for a `CScalar`; the `dim` storage is part of the struct.
@@ -475,7 +476,7 @@ most of what an extension needs:
 /* Where the array sits in the hierarchy */
 #define ca_is_entity(ca)   (ca_func[(ca)->obj_type].entity_type == CA_REAL_ARRAY)
 int  ca_is_virtual    (void *ap);   /* derived view */
-int  ca_is_scalar     (void *ap);   /* CScalar (ndim 0) */
+int  ca_is_scalar     (void *ap);   /* CScalar: one cell on one axis */
 
 /* Attachment / writability state */
 #define ca_is_attached(ca) ((ca)->ptr != NULL)
@@ -1907,11 +1908,8 @@ that has to line up. `docs/MemoryViewFormat.md` is the authority on
 CArray's format-string contract (PEP 3118, strict at the top level).
 Practical notes per peer:
 
-- **Numo::NArray** — Numo does not itself implement the MemoryView
-  producer protocol in the shipped release, so the interop is not
-  symmetric out of the box; where a MemoryView bridge exists (e.g.
-  `numo-narray-memoryview`), CArray consumes and produces against it
-  with the format synonyms documented in `docs/MemoryViewFormat.md`.
+- **Numo::NArray** — Numo does not implement the MemoryView protocol,
+  so an NArray can not be exchanged with CArray through it.
 - **NumPy via PyCall** — NumPy arrays expose a buffer with a PEP 3118
   format; `CArray.from_memory_view(numpy_array)` copies it in,
   `wrap_memory_view` shares it. Strided NumPy arrays import fine (copy

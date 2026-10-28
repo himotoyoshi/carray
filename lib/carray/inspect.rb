@@ -262,7 +262,11 @@ class CArray
   #   count, and a truncated data preview.
   #   @return [String]
   def inspect
-    return CArray::Inspector.new(self).inspect_string
+    # A cell of an object array can hold an expression over the array, whose
+    # inspect shows the array again: that is refused as cyclic, as reading a
+    # cell that holds the array is.
+    return CArray::Inspector.new(self).inspect_string unless object?
+    refuse_reentry("inspect") { CArray::Inspector.new(self).inspect_string }
   end
 
   # @overload inspect_full
@@ -290,7 +294,8 @@ class CArray
   #
   #   @return [String]
   def inspect_full
-    return CArray::Inspector.new(self).inspect_string(abbrev: false)
+    return CArray::Inspector.new(self).inspect_string(abbrev: false) unless object?
+    refuse_reentry("inspect_full") { CArray::Inspector.new(self).inspect_string(abbrev: false) }
   end
 
   private
