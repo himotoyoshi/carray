@@ -34,6 +34,8 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
      neighbour ("as well", "the producer above") or leave unnamed the
      method, class or keyword it is about. -->
 
+## 3.0.7 (unreleased)
+
 ## 3.0.6
 
 - New: `CAFrame` answers the column reductions itself, as a frame of one
