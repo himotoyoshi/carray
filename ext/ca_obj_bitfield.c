@@ -480,7 +480,9 @@ ca_bitfield_func_sync (void *ap)
 {
   CABitfield *ca = (CABitfield *) ap;
   ca_bitfield_sync(ca);
+  ca_view_pass_mask_to_parent(ca);
   ca_sync(ca->parent);
+  ca_view_sync_mask_after_parent(ca);
 }
 
 static void

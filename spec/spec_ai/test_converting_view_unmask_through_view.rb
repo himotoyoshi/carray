@@ -2,7 +2,7 @@ require 'test/unit'
 require 'carray'
 
 # A value written into the masked cells of a converting view (a fake, a
-# writable cast, a byte swap) reaches the root and clears the mask, also
+# writable cast, a byte swap, a bitfield) reaches the root and clears the mask, also
 # when the view sits on a parent whose mask is a view (a transpose, a
 # grid, a stepped block).
 class TestConvertingViewUnmaskThroughView < Test::Unit::TestCase
@@ -17,6 +17,7 @@ class TestConvertingViewUnmaskThroughView < Test::Unit::TestCase
     "fake"       => [->(x) { x.fake(:uint32) },                     99],
     "cast"       => [->(x) { CArray.wrap_writable(x, CA_FLOAT64) }, 99],
     "swap_bytes" => [->(x) { x.swap_bytes },                        [99].pack("l").reverse.unpack1("l")],
+    "bitfield"   => [->(x) { x.bitfield(0..7) },                    99],
   }
 
   def root
