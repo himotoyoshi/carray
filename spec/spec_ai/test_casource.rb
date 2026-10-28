@@ -449,9 +449,12 @@ class TestCASourceAbandonedWindows < Test::Unit::TestCase
 
   # The abandoning happens in a method of its own, so that nothing on this
   # frame still refers to the Enumerator or the Fiber.
+  # Ruby 3.2 keeps the Fiber of the last Enumerator stopped with #next
+  # until another is stopped, so one of nothing is stopped after it.
   def abandon_enumerator (src, name, **kw)
     e = src.enum_for(name, **kw)
     e.next
+    [0].each.next
     nil
   end
 
