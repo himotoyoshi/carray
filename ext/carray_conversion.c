@@ -411,6 +411,9 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
     if ( ca_length(ca) != RSTRING_LEN(io) ) {
       rb_str_resize(io, ca_length(ca));
     }
+    /* the bytes are written behind Ruby's back: drop the cached code
+       range, or the string keeps answering 7-bit for any contents */
+    rb_str_modify(io);
     ca_copy_data(ca, RSTRING_PTR(io));
     break;
   case T_FILE: {
