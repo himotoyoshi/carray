@@ -2531,6 +2531,44 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
            ca_coerce_operand_name(*other, cb));
 }
 
+/* The three operands of a three-operand expression at their common data_type.
+   Pairs find that type, and they find it for operands that are not arrays
+   yet.  An array then goes to it in one step: taken through the pairs, it
+   would pass through the type of the first pair (an int8 -1 becomes 255 in
+   uint8 and stays 255 in uint64), and the answer would depend on the order
+   of the operands. */
+void
+rb_ca_cast_three (volatile VALUE *v1, volatile VALUE *v2, volatile VALUE *v3)
+{
+  volatile VALUE original[3];
+  volatile VALUE *cast[3];
+  CArray *ca;
+  int8_t common;
+  int i;
+
+  original[0] = *v1;
+  original[1] = *v2;
+  original[2] = *v3;
+  cast[0] = v1;
+  cast[1] = v2;
+  cast[2] = v3;
+
+  rb_ca_cast_self_or_other(v1, v2);
+  rb_ca_cast_self_or_other(v1, v3);
+  rb_ca_cast_self_or_other(v2, v3);
+  rb_ca_cast_self_or_other(v1, v2);
+
+  TypedData_Get_Struct(*v1, CArray, &carray_data_type, ca);
+  common = ca->data_type;
+  for ( i = 0; i < 3; i++ ) {
+    if ( ! rb_obj_is_carray(original[i]) ) continue;
+    TypedData_Get_Struct(original[i], CArray, &carray_data_type, ca);
+    if ( ca->data_type != common && ! ca_is_face(ca) ) {
+      *cast[i] = rb_ca_wrap_readonly(original[i], INT2NUM(common));
+    }
+  }
+}
+
 /* Refuses a pair of arrays with no common data_type in the words of
    rb_ca_cast_self_or_other (the eager operators'), and returns otherwise
    without casting either.  A lazy builder calls it before it works out

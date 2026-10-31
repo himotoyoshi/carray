@@ -107,4 +107,32 @@ class TestLazyExprRegressions < Test::Unit::TestCase
     o = CA_OBJECT([Word.new("a"), Word.new("b")])
     assert_equal (2 + o).to_a.map(&:text), (2 + o.lazy).to_a.map(&:text)
   end
+
+  # --- a three-operand expression converts each operand once ---------------
+
+  def test_mixed_types_do_not_depend_on_the_order_of_the_operands
+    a = cell(:uint8, 23, 1)
+    b = cell(:int8, -1, 1)
+    c = cell(:uint64, 95, 1)
+    assert_equal [72], a.fma(b, c).to_a
+    assert_equal [72], b.fma(a, c).to_a
+    assert_equal a.fma(c, b).to_a, a.lazy.fma(c.lazy, b.lazy).to_a
+    assert_equal a.fma(b, c).to_a, a.lazy.fma(b.lazy, c.lazy).to_a
+  end
+
+  def test_a_negative_integer_reaches_a_float_common_type_as_itself
+    a = cell(:uint64, 3, 1)
+    b = cell(:int8, -2, 1)
+    c = cell(:float32, 0.5, 1)
+    assert_equal [-6.5], a.fms(b, c).to_a
+    assert_equal [-6.5], a.lazy.fms(b.lazy, c.lazy).to_a
+  end
+
+  def test_a_scalar_operand_goes_to_the_common_type_in_one_step
+    a = cell(:uint8, 23, 1)
+    b = scalar(:int8, -1)
+    c = cell(:uint64, 95, 1)
+    assert_equal [72], a.fma(b, c).to_a
+    assert_equal [72], a.lazy.fma(b, c.lazy).to_a
+  end
 end

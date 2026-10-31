@@ -360,6 +360,7 @@ VALUE   ca_lazy_settle_scalar (VALUE operand, int was_scalar);
    of one view all take the same branch. */
 
 int     ca_parent_lends_no_memory (void *ap);
+void    rb_ca_cast_three (volatile VALUE *v1, volatile VALUE *v2, volatile VALUE *v3);
 
 /* Transfers of the descriptor views (CAGrid, CASelect, CASelectAxis,
    CAWindow) whose parent holds no ptr (ca_axis_dispatch.c).

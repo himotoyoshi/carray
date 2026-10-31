@@ -1853,16 +1853,8 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
   volatile VALUE out;
   CArray *ca1, *ca2, *ca3, *cao;
 
-  /* Pairwise data_type promotion: ((self, other2) -> common), then
-     ((self', other3) -> common).  Mirrors how the binop driver normalises
-     two operands; for triop we apply it twice.  After this, all three
-     CArrays share the same data_type (and unbound-repeats are resolved). */
-  rb_ca_cast_self_or_other(&self, &other2);
-  rb_ca_cast_self_or_other(&self, &other3);
-  rb_ca_cast_self_or_other(&other2, &other3);
-  /* one more pass to re-normalise self vs other2 in case the
-     other2/other3 cast widened other2 above self's data_type  */
-  rb_ca_cast_self_or_other(&self, &other2);
+  /* After this, all three CArrays share the same data_type. */
+  rb_ca_cast_three(&self, &other2, &other3);
 
   TypedData_Get_Struct(self,   CArray, &carray_data_type, ca1);
   TypedData_Get_Struct(other2, CArray, &carray_data_type, ca2);
