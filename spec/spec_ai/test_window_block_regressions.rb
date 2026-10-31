@@ -67,4 +67,26 @@ class TestWindowBlockRegressions < Test::Unit::TestCase
     it = masked_source.windows(-1..1, bounds: :nearest)
     assert_equal it.sliding_view.mean(axis: [1]).to_a, it.mean.to_a
   end
+
+  # --- fixlen cells are not folded offset by offset -------------------------
+
+  def fixlen
+    CA_OBJECT(%w[s2 s1 s3]).to_type(:fixlen, bytes: 2)
+  end
+
+  def test_extremes_of_fixlen_windows
+    assert_equal %w[s1 s1 s1], fixlen.windows(-1..1).min.to_a
+    assert_equal %w[s2 s3 s3], fixlen.windows(-1..1).max.to_a
+  end
+
+  def test_a_narrow_window_refuses_as_the_core_does
+    %i[sum accumulate prod mean all any].each { |op|
+      kind = begin
+        fixlen.public_send(op, axis: [0]) ; nil
+      rescue StandardError => e
+        e.class
+      end
+      assert_raise(kind, op.to_s) { fixlen.windows(-1..1).public_send(op) }
+    }
+  end
 end

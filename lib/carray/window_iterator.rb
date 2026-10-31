@@ -567,6 +567,8 @@ class CAWindowIterator < CAIterator
     return nil unless op == :mean || OFFSET_FOLD.key?(op)
     # The elementwise kernels act on a Face's storage; its reductions are its own.
     return nil if @source.face?
+    # Fixed-length cells have no elementwise kernels and no neutral value.
+    return nil if @source.data_type == CA_FIXLEN
     # An undefined constant margin is a masked one, which a fold must skip.
     return nil if @fill_value.equal?(UNDEF)
     return nil if @widths.any? { |width| width > OFFSET_FOLD_MAX_WIDTH }
