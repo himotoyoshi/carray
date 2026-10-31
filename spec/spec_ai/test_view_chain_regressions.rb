@@ -66,4 +66,66 @@ class TestViewChainRegressions < Test::Unit::TestCase
     dirty_scratch
     assert_equal [true] * 9, (m.lazy + 0).broadcast_to(3, 3).is_masked.to_a.flatten
   end
+
+  # --- writes through a view of a parent whose cells overlap ---------------
+
+  def overlap_view
+    a = CArray.int32(12).seq!
+    [a, a.sliding_windows(3).diagonal]
+  end
+
+  def test_in_place_operations_reach_every_cell_of_the_view
+    want = [100, 1, 102, 3, 104, 5, 6, 7, 8, 9, 10, 11]
+
+    a, v = overlap_view
+    v.add!(100)
+    assert_equal want, a.to_a
+
+    a, v = overlap_view
+    v.map! { |x| x + 100 }
+    assert_equal want, a.to_a
+
+    a, v = overlap_view
+    v[] = v + 100
+    assert_equal want, a.to_a
+  end
+
+  def test_seq_reaches_every_cell_of_the_view
+    a, v = overlap_view
+    v.seq!(100)
+    assert_equal [100, 1, 101, 3, 102, 5, 6, 7, 8, 9, 10, 11], a.to_a
+  end
+
+  def test_mask_writes_reach_every_cell_of_the_view
+    a, v = overlap_view
+    v.invert_mask
+    assert_equal [0, 2, 4], a.is_masked.to_a.each_index.select { |i| a.is_masked[i] }
+
+    a, v = overlap_view
+    v[] = UNDEF
+    v.unmask(7)
+    assert_equal [7, 1, 7, 3, 7, 5, 6, 7, 8, 9, 10, 11], a.to_a
+    assert_equal 0, a.count_masked
+  end
+
+  def test_views_of_overlapping_parents_that_select_cells
+    a = CArray.int32(6).seq!
+    a.sliding_windows(3)[CA_INT64([0, 5, 10])].add!(100)
+    assert_equal [100, 1, 2, 103, 104, 5], a.to_a
+
+    a = CArray.int32(6).seq!
+    w = a.sliding_windows(3)
+    w[CA_BOOLEAN([1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]).reshape(4, 3)].add!(100)
+    assert_equal [100, 1, 102, 3, 104, 5], a.to_a
+
+    a = CArray.int32(6).seq!
+    a.sliding_windows(3)[CA_INT64([0, 2]), CA_INT64([1])].map! { |x| x + 100 }
+    assert_equal [0, 101, 2, 103, 4, 5], a.to_a
+  end
+
+  def test_a_reshape_of_an_overlapping_parent
+    a = CArray.int32(6).seq!
+    a.sliding_windows(3).reshape(3, 4)[CA_INT64([0, 1]), CA_INT64([0])].add!(100)
+    assert_equal [100, 1, 102, 3, 4, 5], a.to_a
+  end
 end

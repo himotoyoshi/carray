@@ -1145,7 +1145,10 @@ static int ca_layout_is_contiguous (int8_t ndim, const ca_size_t *dim,
    Entities hold their own buffer.  A CAStride-family root is one the fold
    declined to walk through (a reshape over a transpose); its own attach
    folds onward from itself, so the answer is the one for the root it folds
-   to.  What is left is the
+   to -- unless two of its cells share memory (sliding windows).  Its buffer
+   then holds several copies of a cell, and sending the buffer back would
+   let a stale copy overwrite one a view wrote, so it has nothing to lend
+   either.  What is left is the
    boundary views that compute or fetch their contents -- CAObject, the lazy
    per-element transforms, whatever a companion gem installed.  All of them
    answer a region request: through their xfer_stride slot, or, when a type
@@ -1153,6 +1156,39 @@ static int ca_layout_is_contiguous (int8_t ndim, const ca_size_t *dim,
    addresses to xfer_addrs.  Attaching one instead would produce all of it
    and write all of it back, so a cell nobody touched would go through the
    view's conversion both ways. */
+/* May two cells of this layout land on the same bytes?  With the axes in
+   order of stride, none can when each stride clears everything the smaller
+   ones reach.  The test is sufficient, not exact: a layout that interleaves
+   its axes answers yes and takes the longer way. */
+static int
+ca_layout_cells_may_overlap (int8_t ndim, const ca_size_t *dim,
+                             const ca_size_t *strides, ca_size_t bytes)
+{
+  ca_size_t s[CA_RANK_MAX], d[CA_RANK_MAX];
+  ca_size_t reach = bytes;
+  int n = 0;
+  int8_t k;
+  int i, j;
+
+  for (k = 0; k < ndim; k++) {
+    if ( dim[k] > 1 ) {
+      ca_size_t a = strides[k] < 0 ? -strides[k] : strides[k];
+      for (i = n; i > 0 && s[i-1] > a; i--) {
+        s[i] = s[i-1];
+        d[i] = d[i-1];
+      }
+      s[i] = a;
+      d[i] = dim[k];
+      n++;
+    }
+  }
+  for (j = 0; j < n; j++) {
+    if ( s[j] < reach ) return 1;
+    reach += s[j] * (d[j] - 1);
+  }
+  return 0;
+}
+
 int
 ca_root_lends_no_memory (void *ap)
 {
@@ -1168,7 +1204,8 @@ ca_root_lends_no_memory (void *ap)
     ca_size_t cs[CA_RANK_MAX];
     ca_size_t base;
     ca_stride_compose_to_root((CAStride *) root, &below, cs, &base);
-    return ca_root_lends_no_memory(below);
+    return ca_root_lends_no_memory(below)
+        || ca_layout_cells_may_overlap(root->ndim, root->dim, cs, root->bytes);
   }
   return 1;
 }
@@ -1176,7 +1213,7 @@ ca_root_lends_no_memory (void *ap)
 /* The same question for the parent of a view that is not itself in the
    CAStride family (CAGrid, ...): whether the array its cells come from --
    the parent, or the root a CAStride parent folds to -- has no memory to
-   lend.  Like ca_root_lends_no_memory it asks only what those arrays are,
+   lend, or the parent has cells that share memory.  Like ca_root_lends_no_memory it asks only what those arrays are,
    so the lifecycle slots can rely on getting the same answer from attach
    to detach. */
 int
@@ -1189,7 +1226,8 @@ ca_parent_lends_no_memory (void *ap)
     ca_size_t cs[CA_RANK_MAX];
     ca_size_t base;
     ca_stride_compose_to_root((CAStride *) parent, &root, cs, &base);
-    return ca_root_lends_no_memory(root);
+    return ca_root_lends_no_memory(root)
+        || ca_layout_cells_may_overlap(parent->ndim, parent->dim, cs, parent->bytes);
   }
   return ca_root_lends_no_memory(parent);
 }
