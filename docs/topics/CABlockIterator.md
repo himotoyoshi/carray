@@ -122,7 +122,9 @@ array:
   of real cells in a tile (fewer at a partial edge). The invariant
   `elements = count_not_masked + count_masked` holds per tile, the masked count
   being the out-of-bounds cells of an edge tile.
-- All reductions accept `min_count:` / `fill_value:`, passed straight to the core.
+- `min_count:` / `fill_value:` go straight to the core reduction, so the reductions
+  that take them there take them here. `all`, `any`, `first`, `last`, `nunique`
+  and `quantile` do not.
 - `min_index` / `max_index` return the position **within the tile** (a flat index
   into its cells).
 - `wsum` / `wmean` take a weight kernel shaped like one full tile; at a partial

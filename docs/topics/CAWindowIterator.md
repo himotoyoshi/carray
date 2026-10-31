@@ -128,8 +128,11 @@ array (or a shrunk one under `:truncate`):
 | counting | `count` / `count_not_masked` / `count_masked` / `count(v)` · `elements` |
 
 `elements` is the (constant) window size; `count_not_masked` is the effective
-number of in-bounds cells per window (the renormalizing denominator). All
-reductions accept `min_count:` / `fill_value:`.
+number of in-bounds cells per window (the renormalizing denominator).
+
+`min_count:` / `fill_value:` go to the core reduction, so the reductions that take
+them there take them here. `all`, `any`, `first`, `last`, `nunique` and `quantile`
+do not.
 
 `sum` answers in the type the core promotes to — float64 for an integer
 source. `accumulate` is the same fold kept in the source's own type, wrapping
@@ -162,21 +165,17 @@ it is both correct and faster than the default `:skip`.
 ## Order statistics
 
 `median` / `percentile` / `quantile` need every value of a window held together.
-Two constraints of the core order statistics shape the surface:
+The core order statistics take a **single** axis, so a multi-axis (N-D) window is
+materialized and its window axes flattened into one before the core call.
 
-- they take a **single** axis, so a multi-axis (N-D) window is materialized and
-  its window axes flattened into one before the core call;
-- they do **not** accept a masked input, so the default `:skip` (masked margin)
-  is **rejected** with a message. Use an **unmasked** margin:
+Masked cells are left out of each window, and under the default `:skip` so is the
+margin, as for the other reductions:
 
 ```ruby
-sig.windows(-2..2, bounds: :nearest).median      # edge-extended
-sig.windows(-2..2, bounds: :truncate).median     # interior only, output shrinks
-sig.windows(-2..2).median                         # raises: :skip has a masked margin
+sig.windows(-2..2).median                         # edge windows use the cells they have
+sig.windows(-2..2, bounds: :nearest).median       # edge-extended
+sig.windows(-2..2, bounds: :truncate).median      # interior only, output shrinks
 ```
-
-(When the core gains masked per-axis order statistics this restriction lifts and
-`:skip` will work directly.)
 
 ## Generic iteration — `each` / `reduce`
 
@@ -193,7 +192,7 @@ a.windows(-1..1, bounds: :truncate).reduce { |window| window.max - window.min }
 result); `reduce(init) { |acc, x| ... }` is the element-wise fold.
 
 There is **no `map`**: windows overlap, so an element-wise scatter back to the
-source is ill-defined. Calling it is a `NoMethodError`.
+source is ill-defined. Calling it raises `NotImplementedError`.
 
 ## Performance and recommended settings
 
