@@ -53,4 +53,21 @@ class TestFloatIsNotACount < Test::Unit::TestCase
     e = assert_raise(TypeError) { A.blocks(2..) }
     assert_match(/blocks/, e.message)
   end
+
+  # --- the address helpers read a key as `[]` does ---------------------------
+
+  def test_index2addr_reads_a_float_key_as_a_position
+    m = CArray.int32(2, 3).seq
+    assert_equal 2, A.index2addr(2.0)
+    assert_equal 5, m.index2addr(1, 2.0)
+    assert_raise(IndexError) { A.index2addr(2.5) }
+    assert_raise(IndexError) { A.index2addr(Float::NAN) }
+  end
+
+  def test_addr2index_reads_a_float_key_as_a_position
+    m = CArray.int32(2, 3).seq
+    assert_equal [1, 1], m.addr2index(4.0)
+    assert_raise(IndexError) { m.addr2index(4.5) }
+    assert_raise(IndexError) { m.addr2index(1e30) }
+  end
 end

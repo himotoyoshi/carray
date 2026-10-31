@@ -2091,12 +2091,21 @@ parse_shape_kwarg (VALUE rshape, int *out_ndim, ca_size_t *dim,
   *out_elements = elements;
 }
 
+/* A scalar key of index2addr / addr2index, by the rule of `[]`: a Float that
+   is a whole number is that position, any other is no position at all. */
+static VALUE
+ca_scalar_position_key (VALUE v)
+{
+  return RB_FLOAT_TYPE_P(v) ? SIZE2NUM(ca_index_key_value(v)) : v;
+}
+
 static VALUE
 addr2index_do (int ndim, ca_size_t *dim, ca_size_t elements, VALUE raddr)
 {
   volatile VALUE out;
   int i;
 
+  raddr = ca_scalar_position_key(raddr);
   /* Scalar path (Integer input): returns Ruby Array of N Integers.
    * Preserves legacy shape for callers like `i, j = ca.addr2index(k)`. */
   if ( rb_obj_is_kind_of(raddr, rb_cInteger) ) {
@@ -2253,11 +2262,17 @@ index2addr_do (int ndim, ca_size_t *dim, int argc, VALUE *argv)
   ca_size_t out_dim[CA_RANK_MAX];
   ca_size_t out_elements = 1;
   int shape_from = -1;
+  VALUE keys[CA_RANK_MAX];
 
   if ( argc != ndim ) {
     rb_raise(rb_eArgError,
              "wrong number of indices (%d for %d)", argc, ndim);
   }
+
+  for (i = 0; i < ndim; i++) {
+    keys[i] = ca_scalar_position_key(argv[i]);
+  }
+  argv = keys;
 
   for (i = 0; i < ndim; i++) {
     if ( ! rb_obj_is_kind_of(argv[i], rb_cInteger) ) {

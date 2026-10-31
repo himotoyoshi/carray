@@ -38,6 +38,12 @@ elem_index_value (VALUE v)
   }
 }
 
+ca_size_t
+ca_index_key_value (VALUE v)
+{
+  return elem_index_value(v);
+}
+
 /* T_ARRAY index parser.  ridx is assumed already known to be T_ARRAY.
    Direct VALUE * access + FIXNUM_P fast path eliminates rb_ary_entry
    bounds check and NUM2SIZE Bignum branching for the common case. */
