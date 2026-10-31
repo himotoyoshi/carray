@@ -622,6 +622,7 @@ rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
 {
   CArray *l, *r;
   int8_t  l_in_dt, r_in_dt;
+  int     left_scalar;
   int     signed_side = 0;
   volatile VALUE l_resolved, r_resolved;
 
@@ -687,8 +688,9 @@ rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
   TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);
   TypedData_Get_Struct(r_resolved, CArray, &carray_data_type, r);
 
-  if ( l->elements != r->elements ) {
-    if ( r->elements == 1 ) {
+  left_scalar = ca_is_scalar(l) && ! ca_is_scalar(r);
+  if ( l->elements != r->elements || left_scalar ) {
+    if ( r->elements == 1 && ! left_scalar ) {
       /* CScalar right: handled via right_is_scalar */
     }
     else if ( l->elements == 1 ) {

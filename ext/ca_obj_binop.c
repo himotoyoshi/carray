@@ -555,6 +555,7 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
 {
   CArray *l, *r;
   int8_t  l_in_dt, r_in_dt;
+  int     left_scalar;
   volatile VALUE l_resolved, r_resolved;
 
   /* Collapse markers on both sides. */
@@ -634,14 +635,20 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
            op commutes (ADD / MUL / BIT_*).  Non-commutative +
            left scalar wraps left in a broadcast view of right's
            shape so the kernel sees matched shapes; cost is N
-           reads of the scalar cell with stride 0. */
-  if ( l->elements != r->elements ) {
-    if ( r->elements == 1 ) {
+           reads of the scalar cell with stride 0.
+       A left CScalar is taken here also beside a one-cell array, whose
+       shape is the answer's. */
+  left_scalar = ca_is_scalar(l) && ! ca_is_scalar(r);
+  if ( l->elements != r->elements || left_scalar ) {
+    if ( r->elements == 1 && ! left_scalar ) {
       /* CScalar-vs-array, right.  xfer_stride handles this with
          right_step = 0. */
     }
     else if ( l->elements == 1 ) {
-      int commutes = ( op_id == CA_BINOP_ADD     ||
+      /* An object cell answers an operator for itself, so which operand
+         receives it is part of the expression. */
+      int commutes = l->data_type != CA_OBJECT &&
+                     ( op_id == CA_BINOP_ADD     ||
                        op_id == CA_BINOP_MUL     ||
                        op_id == CA_BINOP_BIT_AND ||
                        op_id == CA_BINOP_BIT_OR  ||
