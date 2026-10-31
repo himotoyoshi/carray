@@ -365,16 +365,9 @@ class CABlockIterator < CAIterator
   def count (*args, **kw)
     return count_not_masked(**kw) if args.empty?
     kw = CAIterator.reduce_keywords(:count, kw)
-    out = nil
-    each_region do |strip_ranges, tiles, out_ranges|
-      view = @source[*strip_ranges].block_view(*tiles)
-      # block_view is a CAStride, so #count is not shadowed; dispatch
-      # CArray#count explicitly anyway, matching the family regularity.
-      red = CArray.instance_method(:count).bind_call(view, *args, axis: @tile_axes, **kw)
-      out ||= CArray.new(red.data_type, @shape, bytes: red.bytes)
-      out[*out_ranges] = red
-    end
-    out
+    # block_view is a CAStride, so #count is not shadowed; dispatch
+    # CArray#count explicitly anyway, matching the family regularity.
+    assemble { |view, _| CArray.instance_method(:count).bind_call(view, *args, axis: @tile_axes, **kw) }
   end
 
   # @overload count_not_masked
@@ -803,6 +796,8 @@ class CABlockIterator < CAIterator
       end
       pgv[*g, *nils] = scanned
     end
+    # a source with no cells has no tile; its own scan gives the type
+    return @source.copy.reshape(@source.elements).public_send(op, *args).reshape(*@source.shape) unless pout
     pout[*@sndim.times.map { |i| 0...@source.shape[i] }].copy
   end
 

@@ -89,4 +89,35 @@ class TestWindowBlockRegressions < Test::Unit::TestCase
       assert_raise(kind, op.to_s) { fixlen.windows(-1..1).public_send(op) }
     }
   end
+
+  # --- blocks over no cells -------------------------------------------------
+
+  def test_scans_of_no_cells
+    [[0], [0, 3], [3, 0]].each { |shape|
+      a = CArray.float64(*shape)
+      it = a.blocks(*shape.map { 2 })
+      %i[cumsum cumprod cummax cummin cumcount].each { |op|
+        got = it.public_send(op)
+        assert_equal shape, got.shape, "#{op} #{shape}"
+        assert_equal a.public_send(op).data_type, got.data_type, "#{op} #{shape}"
+      }
+    }
+  end
+
+  def test_count_of_a_value_over_no_cells
+    [[0], [0, 3], [3, 0]].each { |shape|
+      it = CArray.float64(*shape).blocks(*shape.map { 2 })
+      got = it.count(1)
+      assert_kind_of CArray, got
+      assert_equal it.count_not_masked.shape, got.shape
+      assert_equal it.count_not_masked.data_type, got.data_type
+    }
+  end
+
+  def test_count_of_a_value_over_cells
+    a = CArray.int32(5) { |i| [1, 1, 2, 1, 1][i] }
+    assert_equal [2, 1, 1], a.blocks(2).count(1).to_a
+    a[1] = UNDEF
+    assert_equal [1, 1, 1], a.blocks(2).count(1).to_a
+  end
 end
