@@ -567,11 +567,13 @@ class CAWindowIterator < CAIterator
     return nil unless op == :mean || OFFSET_FOLD.key?(op)
     # The elementwise kernels act on a Face's storage; its reductions are its own.
     return nil if @source.face?
+    # An undefined constant margin is a masked one, which a fold must skip.
+    return nil if @fill_value.equal?(UNDEF)
     return nil if @widths.any? { |width| width > OFFSET_FOLD_MAX_WIDTH }
-    return nil if neutral_value(op).nil?
     # pmin / pmax let NaN lose, so a window holding only NaN would fold to the
     # neutral value; the core answers NaN there.
     return nil if (op == :min || op == :max) && source_has_nan?
+    return nil if neutral_value(op).nil?
 
     folded = op == :mean ? fold_mean : accumulate_offsets(op)
     folded = mask_empty_windows(folded) if EMPTY_WINDOW_IS_UNDEFINED.include?(op)
@@ -640,6 +642,7 @@ class CAWindowIterator < CAIterator
   end
 
   def source_has_nan?
+    return true if @bounds == :constant && @fill_value.is_a?(Float) && @fill_value.nan?
     return false unless @source.float? || @source.data_type == CA_OBJECT
     @source.is_nan.any
   end
@@ -659,9 +662,9 @@ class CAWindowIterator < CAIterator
   # What stands in for a cell the fold must not see: a margin the boundary
   # policy does not fill, or a masked cell of the source.  For sum, prod, all
   # and any that is the operation's identity.  For min and max it is any value
-  # that cannot win, and the array's own extreme is one -- so no table of
-  # per-type limits is needed.  Nil means there is none to be had (a source
-  # masked everywhere), and the caller delegates instead.
+  # that cannot win, and the extreme of the array and its constant margin is
+  # one -- so no table of per-type limits is needed.  Nil means there is none
+  # to be had (a source masked everywhere), and the caller delegates instead.
   def neutral_value (op)
     @neutral_value ||= {}
     return @neutral_value[op] if @neutral_value.key?(op)
@@ -678,7 +681,8 @@ class CAWindowIterator < CAIterator
 
   def source_extreme (op)
     value = @source.send(op)
-    value.equal?(UNDEF) ? nil : value
+    return nil if value.equal?(UNDEF)
+    @bounds == :constant ? [value, @fill_value || 0].public_send(op) : value
   end
 
   # The buffer the offsets are read from: the source with its margins filled
@@ -722,13 +726,19 @@ class CAWindowIterator < CAIterator
   # real values, so the count is the whole window and one Integer says it;
   # `:skip` counts the in-bounds offsets, which is separable -- the count on
   # one axis depends on that axis alone.  A masked source has to be counted for
-  # real, by accumulating over the same offsets.
+  # real, by accumulating over the same offsets; a cell of a constant margin
+  # counts once, whatever its value.
   def window_cell_counts
     return @window_cell_counts unless @window_cell_counts.nil?
     @window_cell_counts =
       if @source.has_mask?
-        accumulate_offsets(:sum, pad_for(@source.is_not_masked.int64, 0),
-                           :add!, CA_INT64)
+        present = @source.is_not_masked.int64
+        present = if @bounds == :constant
+                    pad_source(present, @lefts, @rights, :constant, 1)
+                  else
+                    pad_for(present, 0)
+                  end
+        accumulate_offsets(:sum, present, :add!, CA_INT64)
       elsif @bounds != :skip
         @widths.inject(:*)
       else
