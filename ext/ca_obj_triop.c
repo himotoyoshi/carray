@@ -139,8 +139,8 @@ ca_triop_setup (CATriOp *ca, CArray *op1, CArray *op2, CArray *op3,
   ca->op2       = op2;
   ca->op3       = op3;
   ca->op_id     = op_id;
-  ca->op2_is_scalar = ( op2->elements == 1 && op1->elements > 1 ) ? 1 : 0;
-  ca->op3_is_scalar = ( op3->elements == 1 && op1->elements > 1 ) ? 1 : 0;
+  ca->op2_is_scalar = ( op2->elements == 1 ) ? 1 : 0;
+  ca->op3_is_scalar = ( op3->elements == 1 ) ? 1 : 0;
   ca->operands[0] = op1;
   ca->operands[1] = op2;
   ca->operands[2] = op3;

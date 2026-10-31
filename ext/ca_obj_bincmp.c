@@ -142,7 +142,7 @@ ca_bincmp_setup (CABinCmp *ca, CArray *left, CArray *right, uint16_t op_id,
   ca->nosync    = 0;
   ca->right     = right;
   ca->op_id     = op_id;
-  ca->right_is_scalar = ( right->elements == 1 && left->elements > 1 ) ? 1 : 0;
+  ca->right_is_scalar = ( right->elements == 1 ) ? 1 : 0;
   /* Builder has already cast both operands to common data_type.  */
   ca->common_dt = left->data_type;
   ca->sign_fix  = 0;

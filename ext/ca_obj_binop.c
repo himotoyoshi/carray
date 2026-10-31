@@ -153,12 +153,13 @@ ca_binop_setup (CABinOp *ca, CArray *left, CArray *right, uint16_t op_id)
   ca->operands[1] = right;
   ca->parents     = ca->operands;
   ca->n_parents   = 2;
-  /* right_is_scalar fast path: when right holds a single element,
-     xfer_stride pulls only that cell into scratch and walks the
-     kernel with element-stride 0 (broadcast).  The symmetric
+  /* right_is_scalar: a right of one cell is pulled once and walked with
+     element-stride 0, also when left has one cell too -- a view over this
+     node can ask for that one cell several times, and a CScalar right has
+     fewer axes than the request.  The symmetric
      left_is_scalar case is currently handled by wrapping left in
      a broadcast view of right's shape (correct but slower). */
-  ca->right_is_scalar = ( right->elements == 1 && left->elements > 1 ) ? 1 : 0;
+  ca->right_is_scalar = ( right->elements == 1 ) ? 1 : 0;
 
   memcpy(ca->dim, left->dim, left->ndim * sizeof(ca_size_t));
 
