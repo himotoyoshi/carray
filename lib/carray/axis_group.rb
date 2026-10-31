@@ -846,16 +846,19 @@ class CAGroupIterator
     place   = Array.new(gslots.size, 1)                 # place value per slot
     (gslots.size - 2).downto(0) { |i| place[i] = place[i + 1] * gslots[i + 1][:k] }
     comp = nil
+    groups = kdims.inject(1, :*)
     gslots.each_with_index do |m, i|
       target = Array.new(gb_rank, 1)
       m[:axes].each { |a| target[gaxes.index(a)] = shape[a] }
       term = m[:codes].reshape(*target)
+      # The composite code has to reach the last group in the codes' type.
+      term = term.int64 if groups > CACategorical::MAX_LABELS[term.data_type]
       term = term * place[i] if place[i] != 1
       comp = comp.nil? ? term : comp + term
     end
     gb_size = gaxes.map { |a| shape[a] }.inject(1, :*)
     ccat = CACategorical.from_codes(comp.reshape(gb_size),
-                                    CArray.int32(kdims.inject(1, :*)).seq!)
+                                    CArray.int32(groups).seq!)
     [ccat, kdims, gslots, bslots, gaxes]
   end
 
