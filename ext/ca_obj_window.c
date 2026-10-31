@@ -275,10 +275,11 @@ static int
 ca_window_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
 {
   CAWindow *w = (CAWindow *) ap;
-  ca_window_mask_current(w);
-  /* A write folded through to a stand-in would bypass the settle in this
-     window's write slots. */
-  if ( ca_window_mask_reads_standin(w) ) {
+  /* A mask window never folds.  A write folded through to a stand-in would
+     bypass the settle in this window's write slots, and answering by what
+     the window reads now would change when a write settles: a view attached
+     over this window would detach a root it never attached. */
+  if ( w->mask_owner ) {
     return 0;
   }
   ca_size_t synth_strides[CA_RANK_MAX];

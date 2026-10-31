@@ -128,4 +128,41 @@ class TestViewChainRegressions < Test::Unit::TestCase
     a.sliding_windows(3).reshape(3, 4)[CA_INT64([0, 1]), CA_INT64([0])].add!(100)
     assert_equal [100, 1, 102, 3, 4, 5], a.to_a
   end
+
+  # --- invert_mask on a view whose mask is made of windows -----------------
+
+  def test_invert_mask_through_a_window_and_a_refer
+    a = CArray.int32(2, 6).seq!
+    v = a.shift(0, 0, fill_value: 7).block_view(2, 3).reshape(1, 12)
+    v.invert_mask
+    assert_equal [true] * 12, a.is_masked.to_a.flatten
+  end
+
+  def test_invert_mask_leaves_nothing_attached
+    omit "development build only" unless CArray.respond_to?(:__attached_views__)
+    n = CArray.__attached_views__
+    a = CArray.int32(2, 6).seq!
+    a.shift(0, 0, fill_value: 7).block_view(2, 3).reshape(1, 12).invert_mask
+    assert_equal n, CArray.__attached_views__
+  end
+
+  class Cold < CAObject
+    def initialize(back)
+      @back = back
+      super(back.data_type, back.shape)
+    end
+
+    def create_mask; end
+
+    private
+
+    def fetch_addr(addr) = @back[addr]
+    def store_addr(addr, value) = (@back[addr] = value)
+  end
+
+  def test_invert_mask_through_a_window_of_a_computed_root
+    c = Cold.new(CArray.float64(6).seq!)
+    c.window(3..3).reshape(1, 1).invert_mask
+    assert_equal [false, false, false, true, false, false], c.is_masked.to_a
+  end
 end
