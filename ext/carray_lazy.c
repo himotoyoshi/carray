@@ -1286,7 +1286,7 @@ ca_mask_of_operands_func_clone (void *ap)
 static int
 ca_mask_of_operands_operand_is_scalar (CAMaskOfOperands *lm, CArray *op)
 {
-  return ( op->elements == 1 && lm->elements > 1 );
+  return op->elements == 1;
 }
 
 static void
