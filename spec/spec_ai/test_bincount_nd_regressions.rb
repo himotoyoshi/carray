@@ -53,4 +53,29 @@ class TestBincountNdRegressions < Test::Unit::TestCase
     h = d.bincount_nd(lengths: [6, 6, 6], weights: CA_FLOAT64([2.5]))
     assert_equal 2.5, h.counts[5, 5, 5]
   end
+
+  # --- a channel with every cell masked ------------------------------------
+
+  def test_a_channel_with_no_present_cell_drops_every_sample
+    x = CArray.int32(2, 2).seq!
+    x[nil, 1] = UNDEF
+    h = x.bincount_nd(lengths: [4, 4])
+    assert_equal 0, h.total
+    assert_equal 0, h.counts.sum
+  end
+
+  def test_it_answers_as_the_path_with_a_fiber_does
+    y = CArray.int32(1, 2, 2).seq!
+    y[nil, nil, 1] = UNDEF
+    assert_equal [0], y.bincount_nd(lengths: [4, 4]).total.to_a
+  end
+
+  def test_such_a_chunk_leaves_the_accumulator_as_it_was
+    h = labels(:int32, 1, 2).bincount_nd(lengths: [3, 3])
+    c = labels(:int32, 0, 0, 1, 1)
+    c[nil, 0] = UNDEF
+    h.add(c)
+    assert_equal 1, h.total
+    assert_equal 1, h.counts[1, 2]
+  end
 end

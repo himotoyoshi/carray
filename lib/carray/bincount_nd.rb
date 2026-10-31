@@ -273,7 +273,10 @@ class CArray
         ravel = nil
         (0...@m).each do |k|
           b = tchunk[nil, k]
-          b = b.clip(0, @lengths[k]) if b.max > @lengths[k] - 1
+          top = b.max
+          # No present cell in a channel: every sample is dropped.
+          return self if top == UNDEF
+          b = b.clip(0, @lengths[k]) if top > @lengths[k] - 1
           b = b.int64 if widen
           term = strides_ext[k] == 1 ? b : b * strides_ext[k]
           ravel = ravel.nil? ? term : ravel + term
