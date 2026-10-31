@@ -1061,7 +1061,7 @@ class CAGroupIterator
     gb_rank  = gaxes.size
     gb_shape = gaxes.map { |a| shape[a] }
     gb_size  = gb_shape.inject(1, :*)
-    nvalid   = ccat.category_sizes.int64.sum
+    nvalid   = ccat.category_sizes.int64.sum.to_i
     nband    = bslots.map { |m| m[:len] }.inject(1, :*)
     out = CArray.int64(nband * nvalid)
     cursor = 0

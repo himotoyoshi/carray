@@ -88,10 +88,15 @@ class CABlockIterator < CAIterator
     @sizes   = Array.new(@sndim)
     blocks.each_with_index do |b, i|
       if b.is_a?(Range)
+        unless b.begin.is_a?(Integer) && b.end.is_a?(Integer)
+          raise TypeError, "blocks: axis #{i} takes a Range of Integer positions, got #{b.inspect}"
+        end
         offsets[i] = b.begin
         @sizes[i]  = b.end - b.begin + (b.exclude_end? ? 0 : 1)
+      elsif b.is_a?(Integer)
+        @sizes[i]  = b
       else
-        @sizes[i]  = Integer(b)
+        raise TypeError, "blocks: a tile size must be an Integer (got #{b.class})"
       end
       if @sizes[i] < 1
         raise ArgumentError, "blocks: tile size on axis #{i} must be >= 1"

@@ -20,6 +20,7 @@ rb_ca_s_each_index_internal (int ndim, VALUE *dim, uint8_t indim, VALUE ridx)
   int32_t is_leaf = (indim == ndim - 1);
   ca_size_t i;
 
+  if ( ! NIL_P(dim[indim]) ) ca_integer_arg(dim[indim], "a dimension", "each_index");
   if ( NIL_P(dim[indim]) ) {
     rb_ary_store(ridx, indim, Qnil);
     if ( is_leaf ) {

@@ -3397,18 +3397,18 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
       }
       bytes = ( maxlen > 0 ) ? maxlen : 1;   /* all empty: one NUL byte */
     } else {
-      bytes = NUM2SIZE(bytes_v);
+      bytes = ca_integer_arg(bytes_v, "bytes", NULL);
     }
     shape = rb_funcall(rb_cCArray, id_guess_array_shape_cast, 1, v);
     ndim = RARRAY_LEN(shape);
-    for ( i = 0; i < ndim; i++ ) dim[i] = NUM2SIZE(rb_ary_entry(shape, i));
+    for ( i = 0; i < ndim; i++ ) dim[i] = ca_integer_arg(rb_ary_entry(shape, i), "a dimension", NULL);
     obj = rb_carray_new(CA_FIXLEN, (int8_t) ndim, dim, bytes, NULL);
     rb_ca_store_all(obj, v);
     return obj;
   }
   else if ( NIL_P(v) ) {
     ca_size_t dim0 = 0;
-    ca_size_t bytes = NIL_P(bytes_v) ? 1 : NUM2SIZE(bytes_v);
+    ca_size_t bytes = NIL_P(bytes_v) ? 1 : ca_integer_arg(bytes_v, "bytes", NULL);
     return rb_carray_new(CA_FIXLEN, 1, &dim0, bytes, NULL);
   }
   else {
@@ -3425,7 +3425,7 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
          check reports it. */
       ca_size_t bytes = 0;
       if ( ! NIL_P(bytes_v) ) {
-        bytes = NUM2SIZE(bytes_v);
+        bytes = ca_integer_arg(bytes_v, "bytes", NULL);
       }
       else if ( RB_TYPE_P(v, T_STRING) ) {
         bytes = ( RSTRING_LEN(v) > 0 ) ? RSTRING_LEN(v) : 1;

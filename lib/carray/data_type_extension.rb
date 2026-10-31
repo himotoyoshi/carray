@@ -151,6 +151,7 @@ class CArray
     #   @param n [Integer] number of samples.
     #   @return [CArray]
     def linspace (x1, x2, n = 100)
+      raise TypeError, "linspace: n must be an Integer (got #{n.class})" unless n.is_a?(Integer)
       data_type = self::DataType
       unless data_type
         guess = guess_data_type_from_values(x1, x2)

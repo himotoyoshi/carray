@@ -707,6 +707,7 @@ class CAFrame
   # The first +n+ rows as a positional view-frame (memo §11.3). +n+ larger
   # than +nrow+ yields the whole frame; +n+ of 0 yields an empty frame.
   def head(n = 5)
+    raise TypeError, "head: the count is an Integer (got #{n.inspect})" unless n.is_a?(Integer)
     raise ArgumentError, "head count must be non-negative (got #{n})" if n < 0
     row_span(0, [n, @nrow].min)
   end
@@ -714,6 +715,7 @@ class CAFrame
   # The last +n+ rows as a positional view-frame (memo §11.3). +n+ larger
   # than +nrow+ yields the whole frame; +n+ of 0 yields an empty frame.
   def tail(n = 5)
+    raise TypeError, "tail: the count is an Integer (got #{n.inspect})" unless n.is_a?(Integer)
     raise ArgumentError, "tail count must be non-negative (got #{n})" if n < 0
     row_span(@nrow - [n, @nrow].min, @nrow)
   end

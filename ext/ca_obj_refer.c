@@ -560,8 +560,8 @@ rb_ca_refer_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
     Check_Type(rdim, T_ARRAY);
     CA_CHECK_RANK_GIVEN(RARRAY_LEN(rdim));   /* before dim[] is filled */
     ndim = RARRAY_LEN(rdim);
-    for (i = 0; i < ndim; i++) dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
-    if (! NIL_P(roffset)) offset = NUM2SIZE(roffset);
+    for (i = 0; i < ndim; i++) dim[i] = ca_integer_arg(rb_ary_entry(rdim, i), "a dimension", NULL);
+    if (! NIL_P(roffset)) offset = ca_integer_arg(roffset, "the offset", NULL);
     /* When rtype is a data_class the result is a record array.  It is
        built on the storage, never on a Face, so that a Face stays on top
        of the chain: re-reading a record array as its own data_class lifts
@@ -723,7 +723,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
       new_dim[i] = ca->dim[src];
     }
     else {
-      new_dim[i] = NUM2SIZE(argv[i]);
+      new_dim[i] = ca_integer_arg(argv[i], "a dimension", "reshape");
     }
     /* A product too large to count cannot equal the element count; an
        extent of zero anywhere makes it zero whatever it overflowed to. */

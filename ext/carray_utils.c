@@ -103,6 +103,14 @@ ca_get_loop_count (int n, ...)
   return elements;
 }
 
+/* A bound of a range that is not a key of `[]`: a window or a bit range says
+   how many cells, so a Float is refused rather than cut down. */
+static ca_size_t
+ca_range_bound (VALUE v)
+{
+  return ca_integer_arg(v, "a range bound", NULL);
+}
+
 /*
   ca_parse_range and ca_parse_range_without_check parse the following
   types of range specifications
@@ -138,7 +146,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
   }
   else if ( rb_obj_is_kind_of(arg, rb_cInteger) ) {
                                      /* i */
-    start = NUM2SIZE(arg);
+    start = ca_range_bound(arg);
     CA_CHECK_INDEX(start, size);
     *poffset = start;
     *pcount  = 1;
@@ -146,8 +154,8 @@ ca_parse_range (VALUE arg, ca_size_t size,
   }
   else if ( rb_obj_is_kind_of(arg, rb_cRange) ) {
                                      /* i..j */
-    start = NUM2SIZE(RANGE_BEG(arg));
-    last  = NUM2SIZE(RANGE_END(arg));
+    start = ca_range_bound(RANGE_BEG(arg));
+    last  = ca_range_bound(RANGE_END(arg));
     excl  = RTEST(RANGE_EXCL(arg));
     CA_CHECK_INDEX(start, size);
     if ( last < 0 ) {
@@ -168,10 +176,10 @@ ca_parse_range (VALUE arg, ca_size_t size,
     rb_arithmetic_sequence_components_t x;
     rb_arithmetic_sequence_extract(arg, &x);
 
-    start = NUM2SIZE(x.begin);
-    last  = NUM2SIZE(x.end);
+    start = ca_range_bound(x.begin);
+    last  = ca_range_bound(x.end);
     excl  = RTEST(x.exclude_end);
-    step  = NUM2SIZE(x.step);
+    step  = ca_range_bound(x.step);
     if ( step == 0 ) {
       rb_raise(rb_eArgError, "step should not be 0");
     }
@@ -209,7 +217,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
       VALUE arg0 = rb_ary_entry(arg, 0);
       VALUE arg1 = rb_ary_entry(arg, 1);
       if ( NIL_P(arg0) ) {              /* [nil,k] */
-        step  = NUM2SIZE(arg1);
+        step  = ca_range_bound(arg1);
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "step should not be 0");
         }
@@ -224,10 +232,10 @@ ca_parse_range (VALUE arg, ca_size_t size,
         *pstep   = step;
       }
       else if ( rb_obj_is_kind_of(arg0, rb_cRange) ) { /* [i..j,k] */
-        start = NUM2SIZE(RANGE_BEG(arg0));
-        last  = NUM2SIZE(RANGE_END(arg0));
+        start = ca_range_bound(RANGE_BEG(arg0));
+        last  = ca_range_bound(RANGE_END(arg0));
         excl  = RTEST(RANGE_EXCL(arg0));
-        step  = NUM2SIZE(arg1);
+        step  = ca_range_bound(arg1);
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "step should not be 0");
         }
@@ -260,10 +268,10 @@ ca_parse_range (VALUE arg, ca_size_t size,
         rb_arithmetic_sequence_components_t x;
         rb_arithmetic_sequence_extract(arg0, &x);
 
-        start = NUM2SIZE(x.begin);
-        last  = NUM2SIZE(x.end);
+        start = ca_range_bound(x.begin);
+        last  = ca_range_bound(x.end);
         excl  = RTEST(x.exclude_end);
-        step  = NUM2SIZE(x.step);
+        step  = ca_range_bound(x.step);
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "step should not be 0");
         }
@@ -293,8 +301,8 @@ ca_parse_range (VALUE arg, ca_size_t size,
       }
 #endif      
       else {                            /* [i,n] */
-        start = NUM2SIZE(arg0);
-        count = NUM2SIZE(arg1);
+        start = ca_range_bound(arg0);
+        count = ca_range_bound(arg1);
         CA_CHECK_INDEX(start, size);
         bound = start + (count - 1);
         if ( count > 0 && ( bound < 0 || bound >= size ) ) {
@@ -306,9 +314,9 @@ ca_parse_range (VALUE arg, ca_size_t size,
       }
     }
     else if ( RARRAY_LEN(arg) == 3 ) { /* [i,n,k] */
-      start = NUM2SIZE(rb_ary_entry(arg, 0));
-      count = NUM2SIZE(rb_ary_entry(arg, 1));
-      step  = NUM2SIZE(rb_ary_entry(arg, 2));
+      start = ca_range_bound(rb_ary_entry(arg, 0));
+      count = ca_range_bound(rb_ary_entry(arg, 1));
+      step  = ca_range_bound(rb_ary_entry(arg, 2));
       if ( step == 0 ) {
         rb_raise(rb_eArgError, "step should not be 0");
       }
@@ -345,15 +353,15 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
   }
   else if ( rb_obj_is_kind_of(arg, rb_cInteger) ) {
                                      /* i */
-    start = NUM2SIZE(arg);
+    start = ca_range_bound(arg);
     *poffset = start;
     *pcount  = 1;
     *pstep   = 1;
   }
   else if ( rb_obj_is_kind_of(arg, rb_cRange) ) {
                                      /* i..j */
-    start = NUM2SIZE(RANGE_BEG(arg));
-    last  = NUM2SIZE(RANGE_END(arg));
+    start = ca_range_bound(RANGE_BEG(arg));
+    last  = ca_range_bound(RANGE_END(arg));
     excl  = RTEST(RANGE_EXCL(arg));
     if ( excl ) {
       last += ( (last>=start) ? -1 : 1 );
@@ -367,10 +375,10 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
     rb_arithmetic_sequence_components_t x;
     rb_arithmetic_sequence_extract(arg, &x);
 
-    start = NUM2SIZE(x.begin);
-    last  = NUM2SIZE(x.end);
+    start = ca_range_bound(x.begin);
+    last  = ca_range_bound(x.end);
     excl  = RTEST(x.exclude_end);
-    step  = NUM2SIZE(x.step);
+    step  = ca_range_bound(x.step);
     if ( step == 0 ) {
       rb_raise(rb_eArgError, "%s: step should not be 0",
                ca_calling_method_name());
@@ -394,7 +402,7 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
       VALUE arg1 = rb_ary_entry(arg, 1);
       if ( NIL_P(arg0) ) {              /* [nil,k] */
         start = 0;
-        step  = NUM2SIZE(arg1);
+        step  = ca_range_bound(arg1);
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "%s: step should not be 0",
                    ca_calling_method_name());
@@ -405,10 +413,10 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
         *pstep   = step;
       }
       else if ( rb_obj_is_kind_of(arg0, rb_cRange) ) { /* [i..j,k] */
-        start = NUM2SIZE(RANGE_BEG(arg0));
-        last  = NUM2SIZE(RANGE_END(arg0));
+        start = ca_range_bound(RANGE_BEG(arg0));
+        last  = ca_range_bound(RANGE_END(arg0));
         excl  = RTEST(RANGE_EXCL(arg0));
-        step  = NUM2SIZE(arg1);
+        step  = ca_range_bound(arg1);
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "%s: step should not be 0",
                    ca_calling_method_name());
@@ -426,10 +434,10 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
         rb_arithmetic_sequence_components_t x;
         rb_arithmetic_sequence_extract(arg0, &x);
 
-        start = NUM2SIZE(x.begin);
-        last  = NUM2SIZE(x.end);
+        start = ca_range_bound(x.begin);
+        last  = ca_range_bound(x.end);
         excl  = RTEST(x.exclude_end);
-        step  = NUM2SIZE(x.step);
+        step  = ca_range_bound(x.step);
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "%s: step should not be 0",
                    ca_calling_method_name());
@@ -444,17 +452,17 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
       }
 #endif
       else {                            /* [i,n] */
-        start = NUM2SIZE(arg0);
-        count = NUM2SIZE(arg1);
+        start = ca_range_bound(arg0);
+        count = ca_range_bound(arg1);
         *poffset = start;
         *pcount  = count;
         *pstep    = 1;
       }
     }
     else if ( RARRAY_LEN(arg) == 3 ) { /* [i,n,k] */
-      start = NUM2SIZE(rb_ary_entry(arg, 0));
-      count = NUM2SIZE(rb_ary_entry(arg, 1));
-      step  = NUM2SIZE(rb_ary_entry(arg, 2));
+      start = ca_range_bound(rb_ary_entry(arg, 0));
+      count = ca_range_bound(rb_ary_entry(arg, 1));
+      step  = ca_range_bound(rb_ary_entry(arg, 2));
       *poffset = start;
       *pcount  = count;
       *pstep   = step;
@@ -1196,7 +1204,7 @@ rb_ca_guess_type_and_bytes (VALUE rtype, VALUE rbytes,
         *bytes = 0;
       }
       else {
-        *bytes = NUM2SIZE(rbytes);
+        *bytes = ca_integer_arg(rbytes, "bytes", NULL);
       }
     }
   }

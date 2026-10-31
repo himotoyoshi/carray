@@ -1903,7 +1903,7 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
   ndim = (int) RARRAY_LEN(rdim);
   CA_CHECK_RANK_GIVEN(ndim);
   for (i=0; i<ndim; i++) {
-    dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
+    dim[i] = ca_integer_arg(rb_ary_entry(rdim, i), "a dimension", NULL);
   }
   CA_CHECK_DIM_GIVEN(ndim, dim);
   elements = ca_shape_elements(ndim, dim, 1);
@@ -2080,7 +2080,7 @@ parse_shape_kwarg (VALUE rshape, int *out_ndim, ca_size_t *dim,
   }
   ca_check_rank_fits(ndim, NULL);
   for (i = 0; i < ndim; i++) {
-    dim[i] = NUM2SIZE(rb_ary_entry(rshape, i));
+    dim[i] = ca_integer_arg(rb_ary_entry(rshape, i), "a dimension", NULL);
     if ( dim[i] < 0 ) {
       rb_raise(rb_eArgError, "negative dim %" PRId64 " at axis %d",
                (ca_size_t) dim[i], i);

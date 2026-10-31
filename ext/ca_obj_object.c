@@ -1763,7 +1763,7 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
 
   ndim = RARRAY_LEN(rdim);
   for (i=0; i<ndim; i++) {
-    dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
+    dim[i] = ca_integer_arg(rb_ary_entry(rdim, i), "a dimension", NULL);
   }
 
   TypedData_Get_Struct(self, CAObject, &caobject_data_type, ca);

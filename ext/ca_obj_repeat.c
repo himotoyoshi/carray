@@ -233,7 +233,7 @@ rb_ca_repeat (int argc, VALUE *argv, VALUE self)
       }
     }
     else {
-      count[i] = NUM2SIZE(argv[i]);
+      count[i] = ca_integer_arg(argv[i], "a repeat count", "repeat");
       if ( count[i] == 0 ) {
         rb_raise(rb_eArgError,
                  "zero repeat count specified in creating CARepeat object");

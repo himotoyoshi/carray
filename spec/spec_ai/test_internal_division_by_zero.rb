@@ -17,9 +17,12 @@ class TestInternalDivisionByZero < Test::Unit::TestCase
 
   def test_window_with_a_zero_step_is_refused
     a = CArray.int32(5).seq
-    [[1..3, 0], [nil, 0], [0..2, 0.5], 0.step(2, 0.5), (0.0..2.0).step(0.5)].each do |r|
+    [[1..3, 0], [nil, 0]].each do |r|
       e = assert_raise(ArgumentError, r.inspect) { a.window(r) }
       assert_match(/step should not be 0/, e.message)
+    end
+    [[0..2, 0.5], 0.step(2, 0.5), (0.0..2.0).step(0.5)].each do |r|
+      assert_raise(TypeError, r.inspect) { a.window(r) }
     end
     assert_equal [1, 2, 3], a.window([1..3, 1]).to_a
   end

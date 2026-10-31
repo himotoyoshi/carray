@@ -311,7 +311,7 @@ rb_ca_broadcast_to (int argc, VALUE *argv, VALUE self)
   }
 
   for (i = 0; i < target_ndim; i++) {
-    target_dim[i] = NUM2SIZE(argv[i]);
+    target_dim[i] = ca_integer_arg(argv[i], "a dimension", "broadcast_to");
     if (target_dim[i] < 0) {
       rb_raise(rb_eArgError,
                "broadcast_to: negative dim at axis %d", i);
