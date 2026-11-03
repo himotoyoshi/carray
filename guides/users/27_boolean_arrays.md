@@ -12,7 +12,7 @@ A boolean array is a normal `CArray` (`CArray.boolean(...)` builds one; there is
 
 A boolean cell has two representations, split by where the value goes:
 
-| Where you meet it | What you get | Example |
+| Where | Value | Example |
 |---|---|---|
 | Any Ruby-land path (`inspect` printing, `b[i]`, `each`, `to_a`) | Ruby `true` / `false` (printed as `1` / `0`) | `b[0]` → `true`, `b.to_a` → `[true, false, true, true, false]` |
 | Numeric-cast and serialize paths (`to_type(:int32)`, `Marshal`, `.ca` save, MemoryView export) | `uint8` `0` / `1` (raw storage bytes) | `b.to_type(:int32).to_a` → `[1, 0, 1, 1, 0]` |
@@ -29,7 +29,7 @@ b.to_type(:int32).to_a #  => [1, 0, 1, 1, 0]     (numeric downstream)
 
 The one glyph twist is that `inspect` prints `1` / `0` rather than `t` / `f`. In a printed grid the letters `t` / `f` are two narrow shapes that are hard to tell apart, while `1` / `0` read cleanly and line up with neighbouring numeric columns. The values inside the array are still Ruby `true` / `false`; printing is just cosmetic.
 
-Everywhere you actually hold the values as Ruby objects — indexing, iterating, collecting via `to_a`, pattern-matching — you get real Ruby booleans, so the usual idioms just work:
+Wherever the values become Ruby objects (indexing, iterating, collecting with `to_a`, pattern matching), they are real Ruby booleans, so the usual idioms work:
 
 ```ruby
 b.to_a.each { |v| do_something if v }         #  runs only where true
@@ -37,7 +37,7 @@ b.to_a.filter { |v| v }                        #  keeps the true cells
 case b[i] in true then ... end                 #  pattern match works
 ```
 
-The numeric encoding shows up when you deliberately ask for it — a cast to `:int32` for counting, `Marshal` and the binary format for storage, MemoryView for handing bytes to another library. Those paths carry raw `uint8` `0` / `1` because that is what the receiving side needs.
+The numeric encoding appears only on request: a cast to `:int32` for counting, `Marshal` and the binary format for storage, MemoryView for handing bytes to another library. Those paths carry raw `uint8` `0` / `1` because that is what the receiving side needs.
 
 ## Constructing boolean arrays
 
@@ -50,7 +50,7 @@ CA_INT([3, 0, 5]) > 0              #  comparison → [1, 0, 1]   (the usual way)
 CA_INT([1, 2, 3]).eq(CA_INT([1, 0, 3]))   #  element-wise equality → [1, 0, 1]
 ```
 
-Comparisons are the normal source of boolean arrays; you rarely build one by hand.
+Comparisons are the normal source of boolean arrays; building one by hand is rare.
 
 ### Casting a numeric array to boolean is strict (only 0/1)
 
@@ -63,7 +63,7 @@ CA_INT([0, 3, 0]).to_type(CA_BOOLEAN)
 CA_INT([2, 0]).boolean                  #  same error
 ```
 
-To turn an arbitrary numeric array into a truth array, use a **comparison**, which is the operation that actually expresses your intent:
+To turn an arbitrary numeric array into a truth array, use a **comparison**, which states the intent:
 
 ```ruby
 x.ne(0)      #  "non-zero?"  → boolean
@@ -113,7 +113,7 @@ b == c      #  => false — WHOLE-ARRAY structural equality (one Ruby boolean).
 b.eq(c)     #  => [ 1, 0, 0, 1, 1 ] — element-wise equality (a boolean array).
 ```
 
-Use `~` / `.not` for per-cell negation and `.eq` for per-cell equality. `==` and `!` follow ordinary Ruby object semantics and collapse to a single value.
+Use `~` / `.not` for element-wise negation and `.eq` for element-wise equality. `==` and `!` follow ordinary Ruby object semantics and collapse to a single value.
 
 ## Comparison operators — produce boolean
 
@@ -146,7 +146,7 @@ Mixing boolean with a numeric operand follows ordinary type promotion (`bool + f
 a + (a > threshold)   #  add 1 where the condition holds
 ```
 
-Note that `& | ^` stay boolean; only the arithmetic operators (`+ - * / % **`, unary `-`) promote. The dispatcher distinguishes them automatically — you never choose.
+Note that `& | ^` stay boolean; only the arithmetic operators (`+ - * / % **`, unary `-`) promote. The dispatcher distinguishes them automatically.
 
 ## Reductions
 
@@ -170,7 +170,7 @@ b.sum(axis: 0) #  => a uint64 CArray
 (x > 0).sum    #  count how many pass
 ```
 
-`min` / `max` overlap in *meaning* with `all` / `any` but differ in *type*: `b.min` is `Integer 0/1`, while `b.all` is `true` / `false`. Reach for `all` / `any` when you want a boolean, `min` / `max` when you want a number.
+`min` / `max` overlap in *meaning* with `all` / `any` but differ in *type*: `b.min` is `Integer 0/1`, while `b.all` is `true` / `false`. Use `all` / `any` for a boolean and `min` / `max` for a number.
 
 ### Ratio reductions → float
 
@@ -270,7 +270,7 @@ This holds identically on the lazy path (`a.lazy | b`) — eager and lazy give t
 
 The difference carries through what follows. With `a = [false, true]` and `b` unknown, `(a & b).not` is `[true, U]` — the first cell is settled, since `false AND anything` is false — while `a.and(b).not` is `[U, U]`.
 
-Choose by the question you ask: `&` / `|` when an answer the known side settles should stand (a day that is not hot is not "hot and humid", whatever its missing humidity), `.and` / `.or` when an answer should be given only where both inputs are known — the element-wise form of keeping only complete records.
+Choose by the question: `&` / `|` when an answer the known side settles should stand (a day that is not hot is not "hot and humid", whatever its missing humidity), `.and` / `.or` when an answer should be given only where both inputs are known — the element-wise form of keeping only complete records.
 
 ### `^`, `~`, `not` propagate the mask
 
@@ -307,7 +307,7 @@ true  & UNDEF   #  => true         (SILENTLY WRONG: Ruby's `true & x` treats
 
 Do Kleene logic on **arrays**, where it is correct, not on scalar `UNDEF` values.
 
-### Masked arithmetic just propagates
+### Masked arithmetic propagates the mask
 
 Outside `&` / `|`, a masked boolean flows through arithmetic like any masked cell — the result cell is masked:
 

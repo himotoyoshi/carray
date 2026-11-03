@@ -1,8 +1,8 @@
 # Iterating and displaying arrays
 
-Two everyday mechanics that the topical chapters do not otherwise cover: walking an array's elements in plain Ruby, and how an array shows itself when you print or inspect it.
+Two everyday mechanics that the topical chapters do not otherwise cover: walking an array's elements in plain Ruby, and how an array looks when it is printed or inspected.
 
-For the array-wide operations you will usually reach for first — arithmetic, reductions, per-slab work — see [Element-wise operations](03_elementwise.md), [Reduction and statistics](04_reduction_and_statistics.md), and [Per-slab iteration](11_slab_iteration.md). This chapter is about the plain-Ruby `each`-style loops for the times you genuinely want to visit elements one by one.
+For the array-wide operations that are usually the first choice (arithmetic, reductions, slab iteration), see [Element-wise operations](03_elementwise.md), [Reduction and statistics](04_reduction_and_statistics.md), and [Slab iteration](11_slab_iteration.md). This chapter is about the plain-Ruby `each`-style loops for cases that must visit elements one by one.
 
 ## Iterating over elements
 
@@ -52,7 +52,7 @@ a.map! { |x| x * x }
 a                          #  => [ 0, 1, 4, 9, 16 ]
 ```
 
-A caution: element-by-element Ruby iteration crosses from C into Ruby on every cell, so it is far slower than a vectorised operation. When you can express the work as arithmetic (`a * a`), a reduction (`a.sum`), or a per-slab routine (chapter 11), prefer that; reach for `each` / `map!` when the per-cell logic is genuinely arbitrary Ruby.
+A caution: element-by-element Ruby iteration crosses from C into Ruby on every cell, so it is far slower than a vectorised operation. When the work can be expressed as arithmetic (`a * a`), a reduction (`a.sum`), or a slab method (chapter 11), prefer that. Use `each` / `map!` when the logic for each cell is arbitrary Ruby code.
 
 ## How an array displays
 
@@ -69,7 +69,7 @@ Large arrays are abbreviated with `...` so the output stays readable — the dis
 
 ### The whole array: `inspect_full`
 
-When the array *is* what you came to look at, `inspect_full` renders the same thing with the eliding dropped:
+To see the whole array, `inspect_full` renders the same thing with the eliding dropped:
 
 ```ruby
 a = CArray.int32(8, 12).seq!
@@ -92,7 +92,7 @@ It returns a String and holds the whole array in it, which is the cost: a line i
 
 ### `to_s` is *not* a printable form
 
-One sharp edge worth knowing: `to_s` on a numeric array returns the **raw bytes** of the underlying storage as a binary `String`, not a human-readable rendering. It is the packed data, useful for writing bytes out, but not what you want to look at:
+Note that `to_s` on a numeric array returns the **raw bytes** of the underlying storage as a binary `String`, not a human-readable rendering. It is the packed data, useful for writing bytes out but not for reading:
 
 ```ruby
 CArray.int32(3).seq.to_s

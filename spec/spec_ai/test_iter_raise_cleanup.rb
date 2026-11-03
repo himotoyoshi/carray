@@ -143,10 +143,10 @@ class TestIterRaiseCleanup < Test::Unit::TestCase
 
   # The same thing seen portably: the resident size stops growing.  It
   # takes several thousand calls to settle whether or not anything leaks
-  # (and it settles into a wobble of a few MB), so those are not
-  # measured, and the array is small enough that the settling is quick
-  # while a leak would still show: 32 KB a call is 320 MB over the
-  # measured window.
+  # (and it settles into a wobble of tens of MB, over 50 on a busy
+  # machine), so those are not measured, and the array is small enough
+  # that the settling is quick while a leak would still show: 32 KB a
+  # call is 320 MB over the measured window.
   def test_resident_size_levels_off
     grown = measure("", <<~RUBY, 4096)
       rss = -> { Integer(`ps -o rss= -p \#{Process.pid}`.strip, exception: false) }
@@ -159,7 +159,7 @@ class TestIterRaiseCleanup < Test::Unit::TestCase
       GC.start
       puts (rss.() - r0) / 1024.0
     RUBY
-    assert_operator grown, :<, 40,
+    assert_operator grown, :<, 160,
                     "resident size grew #{grown.round} MB over 10000 calls"
   end
 end

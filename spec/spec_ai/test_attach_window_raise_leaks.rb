@@ -262,7 +262,9 @@ class TestAttachWindowRaiseLeaks < Test::Unit::TestCase
     o = CArray.object(4, 6).seq!
     o[1, 1] = RAISING_EQ
     v = o[nil, 0..4]
-    [[v], -> { v == v.copy }]
+    other = v.copy
+    other[1, 1] = 0            # a cell identical in both is not asked
+    [[v], -> { v == other }]
   end
 
   releases("sort_addr_elements_do_not_compare", ArgumentError) do

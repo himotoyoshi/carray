@@ -191,7 +191,7 @@ class CArray
     extend DataTypeNewConstructor
     extend DataTypeExtension
     # @!visibility private
-    TypeSymbol = :complex64
+    TypeSymbol = :cmplx64
     # @!visibility private
     DataType   = CA_CMPLX64
   end
@@ -208,7 +208,7 @@ class CArray
     extend DataTypeNewConstructor
     extend DataTypeExtension
     # @!visibility private
-    TypeSymbol = :complex128
+    TypeSymbol = :cmplx128
     # @!visibility private
     DataType   = CA_CMPLX128
   end

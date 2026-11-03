@@ -8,6 +8,7 @@
 
 #include "carray.h"
 #include "carray_internal.h"   /* ca_view_inherit_mask */
+#include "ca_obj_face.h"       /* CA_WRAPPER_LIFT */
 
 extern ca_operation_function_t ca_stride_func;
 
@@ -87,7 +88,12 @@ rb_ca_farray_new (VALUE cary)
 VALUE
 rb_ca_farray (VALUE self)
 {
-  return rb_ca_farray_new(self);
+  volatile VALUE obj = rb_ca_farray_new(self);
+  CArray *ca;
+
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  CA_WRAPPER_LIFT(obj, self, ca);
+  return obj;
 }
 
 static VALUE

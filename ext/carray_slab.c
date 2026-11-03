@@ -117,7 +117,7 @@ ca_slab_parse_axes (ca_slab_iter_state_t *st, VALUE axis_arg, int8_t src_ndim)
      init_val   : VALUE — REDUCE_FIBER initial accumulator, or Qundef
                   if not applicable.  Stored as Qnil if Qundef.       */
 static void
-slab_state_init (ca_slab_iter_state_t *st, VALUE source, int8_t form,
+slab_state_init (ca_slab_iter_state_t *st, volatile VALUE source, int8_t form,
                  VALUE axis_arg, VALUE data_type, VALUE init_val)
 {
   CArray *src;
@@ -422,8 +422,9 @@ ca_slab_setup_input_slab_view (ca_slab_iter_state_t *st, CArray *src,
       ca_size_t exp = src->bytes;
       int8_t k;
       st->own_scratch_elements = elements;
-      st->own_data_scratch     = (char *) xmalloc(elements * src->bytes);
+      st->own_data_scratch     = ca_alloc_cells_of(src->data_type, elements, src->bytes);
       if ( has_mask ) {
+        /* cells: boolean, which the collector does not read */
         st->own_mask_scratch   = (boolean8_t *) xmalloc(elements);
       }
       /* Carrier wraps our own scratch.  Direct field assignment of
@@ -516,6 +517,14 @@ ca_slab_advance_slab_view (ca_slab_iter_state_t *st,
                            CArray *src, char *p_in, boolean8_t *m_in,
                            int in_alias)
 {
+  /* A fiber of no cells has no address, but the view and its mask must
+     still read as attached. */
+  static char no_cells;
+  if ( st->t1->slab_elements == 0 ) {
+    if ( p_in == NULL ) p_in = &no_cells;
+    if ( m_in == NULL ) m_in = (boolean8_t *) &no_cells;
+  }
+
   if ( in_alias ) {
     /* ALIAS — single-axis OR multi-axis contig.  ptr fast path uses
        ca_index2addr * bytes + ptr (= safe since slab is row-major
@@ -751,7 +760,7 @@ ca_slab_run_map (ca_slab_iter_state_t *st)
                                                    st->t1->slab_dims);
   if ( st->own_data_scratch != NULL ) {
     st->own_out_scratch =
-      (char *) xmalloc(st->own_scratch_elements * st->out_bytes);
+      ca_alloc_cells_of(st->out_data_type, st->own_scratch_elements, st->out_bytes);
   }
 
   /* Step 4: per-slab loop.
@@ -779,7 +788,7 @@ ca_slab_run_map (ca_slab_iter_state_t *st)
     piece = ca_slab_piece(st);
     while ( ca_iter_state_next_slab_axes(st->t1,     &p_in,  &m_in) &&
             ca_iter_state_next_slab_axes(st->t1_out, &p_out, &m_out) ) {
-      VALUE result;
+      volatile VALUE result;
 
       ca_slab_advance_slab_view(st, slab_cs, carrier_cw,
                                 src, p_in, m_in, in_alias);

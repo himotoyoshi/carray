@@ -815,7 +815,7 @@ address_basis_open (int argc, VALUE *argv, VALUE module)
     ca_size_t *cells   = (ca_size_t *) (bc + n);
     int       *flags   = (int *) (cells + (size_t) n * 2 * CA_RANK_MAX);
     for ( i = 0; i < n; i++ ) {
-      VALUE   object = rb_ary_entry(arrays, i);
+      volatile VALUE   object = rb_ary_entry(arrays, i);
       VALUE   starts = NIL_P(box_start) ? Qnil : rb_ary_entry(box_start, i);
       VALUE   counts = NIL_P(box_count) ? Qnil : rb_ary_entry(box_count, i);
       int8_t  k;
@@ -967,6 +967,72 @@ address_basis_tier (VALUE module, VALUE object)
 
 /* ------------------------------------------------------------------- */
 
+/* The call of a sweep, with the parts locked: a view that runs Ruby while
+   it hands over its cells (a CAObject) could otherwise resize a part under
+   the pointer the slab writes through. */
+typedef struct {
+  ca_cslab_r_t   function;
+  const char    *fsync;
+  int            n;
+  const VALUE   *arrays;
+  void         **table;
+  volatile VALUE *parts;
+  int            nparts;
+  int            nlocked;    /* parts[0..nlocked) were considered for a lock */
+} address_basis_sweep_call_t;
+
+/* Whether parts[i] is a String to lock: not frozen, and not one that an
+   earlier part already is. */
+static int
+address_basis_sweep_locks (address_basis_sweep_call_t *c, int i)
+{
+  int k;
+  if ( OBJ_FROZEN(c->parts[i]) ) return 0;
+  for ( k = 0; k < i; k++ ) {
+    if ( c->parts[k] == c->parts[i] ) return 0;
+  }
+  return 1;
+}
+
+static VALUE
+address_basis_sweep_body (VALUE arg)
+{
+  address_basis_sweep_call_t *c = (address_basis_sweep_call_t *) arg;
+  const VALUE *a = c->arrays;
+  for ( ; c->nlocked < c->nparts; c->nlocked++ ) {
+    if ( address_basis_sweep_locks(c, c->nlocked) ) {
+      rb_str_locktmp(c->parts[c->nlocked]);
+    }
+  }
+  switch ( c->n ) {
+  case 1: ca_call_cslab_1_r(c->function, c->fsync, a[0], c->table); break;
+  case 2: ca_call_cslab_2_r(c->function, c->fsync, a[0], a[1], c->table); break;
+  case 3: ca_call_cslab_3_r(c->function, c->fsync, a[0], a[1], a[2], c->table); break;
+  case 4: ca_call_cslab_4_r(c->function, c->fsync, a[0], a[1], a[2], a[3],
+                            c->table); break;
+  case 5: ca_call_cslab_5_r(c->function, c->fsync, a[0], a[1], a[2], a[3], a[4],
+                            c->table); break;
+  case 6: ca_call_cslab_6_r(c->function, c->fsync, a[0], a[1], a[2], a[3], a[4],
+                            a[5], c->table); break;
+  case 7: ca_call_cslab_7_r(c->function, c->fsync, a[0], a[1], a[2], a[3], a[4],
+                            a[5], a[6], c->table); break;
+  }
+  return Qnil;
+}
+
+static VALUE
+address_basis_sweep_unlock (VALUE arg)
+{
+  address_basis_sweep_call_t *c = (address_basis_sweep_call_t *) arg;
+  int i;
+  for ( i = 0; i < c->nlocked; i++ ) {
+    if ( address_basis_sweep_locks(c, i) ) {
+      rb_str_unlocktmp(c->parts[i]);
+    }
+  }
+  return Qnil;
+}
+
 /*
  * call-seq:
  *   CArray::AddressBasis.sweep(function, fsync, arrays, *parts) -> nil
@@ -996,11 +1062,12 @@ address_basis_sweep (int argc, VALUE *argv, VALUE module)
 {
   volatile VALUE rfunction, rfsync, rarrays;
   ca_cslab_r_t function;
-  const char *fsync;
+  char fsync[8];
   VALUE vholder = 0;
   void **table;
-  VALUE *arrays;
+  volatile VALUE arrays[7];
   volatile VALUE *parts;
+  address_basis_sweep_call_t call;
   int i, n, nparts;
 
   rb_check_arity(argc, 3, UNLIMITED_ARGUMENTS);
@@ -1026,10 +1093,16 @@ address_basis_sweep (int argc, VALUE *argv, VALUE module)
     rb_raise(rb_eArgError, "%s: a sweep takes 1 to 7 arrays, got %d",
              ca_calling_method_name(), n);
   }
-  fsync = StringValueCStr(rfsync);
-  if ( (int) strlen(fsync) != n ) {
-    rb_raise(rb_eArgError, "%s: fsync has %d characters for %d arrays",
-             ca_calling_method_name(), (int) strlen(fsync), n);
+  {
+    /* Copied: nothing may change it while the sweep reads it. */
+    const char *f = StringValueCStr(rfsync);
+    long len = (long) strlen(f);
+    if ( len != n ) {
+      rb_raise(rb_eArgError, "%s: fsync has %ld characters for %d arrays",
+               ca_calling_method_name(), len, n);
+    }
+    memcpy(fsync, f, (size_t) n);
+    fsync[n] = '\0';
   }
   for ( i = 0; i < n; i++ ) {
     if ( fsync[i] != '0' && fsync[i] != '1' ) {
@@ -1044,7 +1117,11 @@ address_basis_sweep (int argc, VALUE *argv, VALUE module)
              ca_calling_method_name());
   }
 
-  arrays = RARRAY_PTR(rarrays);
+  /* Copied onto the machine stack, which pins them: the list itself can be
+     changed by Ruby that runs during the sweep. */
+  for ( i = 0; i < n; i++ ) {
+    arrays[i] = RARRAY_AREF(rarrays, i);
+  }
   for ( i = 0; i < n; i++ ) {
     if ( ! rb_obj_is_kind_of(arrays[i], rb_cCArray) ) {
       rb_raise(rb_eTypeError, "%s: array %d is not a CArray",
@@ -1073,28 +1150,25 @@ address_basis_sweep (int argc, VALUE *argv, VALUE module)
     table[i] = RSTRING_PTR(parts[i]);
   }
 
-  switch ( n ) {
-  case 1: ca_call_cslab_1_r(function, fsync, arrays[0], table); break;
-  case 2: ca_call_cslab_2_r(function, fsync, arrays[0], arrays[1], table); break;
-  case 3: ca_call_cslab_3_r(function, fsync, arrays[0], arrays[1], arrays[2],
-                            table); break;
-  case 4: ca_call_cslab_4_r(function, fsync, arrays[0], arrays[1], arrays[2],
-                            arrays[3], table); break;
-  case 5: ca_call_cslab_5_r(function, fsync, arrays[0], arrays[1], arrays[2],
-                            arrays[3], arrays[4], table); break;
-  case 6: ca_call_cslab_6_r(function, fsync, arrays[0], arrays[1], arrays[2],
-                            arrays[3], arrays[4], arrays[5], table); break;
-  case 7: ca_call_cslab_7_r(function, fsync, arrays[0], arrays[1], arrays[2],
-                            arrays[3], arrays[4], arrays[5], arrays[6],
-                            table); break;
-  }
+  call.function = function;
+  call.fsync    = fsync;
+  call.n        = n;
+  call.arrays   = (const VALUE *) arrays;
+  call.table    = table;
+  call.parts    = parts;
+  call.nparts   = nparts;
+  call.nlocked  = 0;
+  rb_ensure(address_basis_sweep_body, (VALUE) &call,
+            address_basis_sweep_unlock, (VALUE) &call);
 
   ALLOCV_END(vholder);
   for ( i = 0; i < nparts; i++ ) {
     RB_GC_GUARD(parts[i]);
   }
+  for ( i = 0; i < n; i++ ) {
+    RB_GC_GUARD(arrays[i]);
+  }
   RB_GC_GUARD(rarrays);
-  RB_GC_GUARD(rfsync);
   return Qnil;
 }
 

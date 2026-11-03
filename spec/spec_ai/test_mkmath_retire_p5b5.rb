@@ -55,8 +55,6 @@ class TestMkmathRetireP5b5 < Test::Unit::TestCase
     assert_match(/rb_ca_ipower_bang\b/, content)
     assert_match(/rb_ca_pow\b/, content)
     assert_match(/Init_ca_op_ipower\b/, content)
-    # uses shared header
-    assert_match(/#include "ca_op_powi\.h"/, content)
   end
 
   def test_ca_op_powi_h_exists
@@ -65,8 +63,7 @@ class TestMkmathRetireP5b5 < Test::Unit::TestCase
            'ext/ca_op_powi.h should exist (P.5b.5 shared header)'
     content = File.read(path, encoding: 'UTF-8')
     assert_match(/op_powi\(int32_t\)/, content)
-    assert_match(/op_powi_fc\(float64_t\)/, content)
-    assert_match(/op_powi_fc\(cmplx128_t\)/, content)
+    assert_match(/op_powi_u\(uint64_t\)/, content)
   end
 
   # --- power kernel migration to mkkernel -------------------------------

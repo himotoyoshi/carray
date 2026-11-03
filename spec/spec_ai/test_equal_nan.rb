@@ -48,4 +48,24 @@ class TestEqualNaN < Test::Unit::TestCase
     assert_equal true, df == df.copy
     assert_equal true, CAFrame.from_csv(df.to_csv) == df
   end
+
+  # An object cell equals itself first, as in Array#== and Array#eql?, so an
+  # array holding a NaN object equals its copy and finds it as a Hash key.
+  def test_object_cells_equal_themselves
+    require "bigdecimal"
+    [Float::NAN, Complex(Float::NAN, 0), BigDecimal("NaN")].each do |nan|
+      x = CA_OBJECT([nan, 1])
+      assert_true x == x.copy, nan.inspect
+      assert_true x.eql?(x.copy), nan.inspect
+      assert_equal :found, { x => :found }[x.copy], nan.inspect
+    end
+  end
+
+  def test_distinct_objects_still_answer_for_themselves
+    assert_true  CA_OBJECT([Float::NAN]) == CA_OBJECT([0.0 / 0.0])
+    assert_false CA_OBJECT([Float::NAN]).eql?(CA_OBJECT([0.0 / 0.0]))
+    assert_false CA_OBJECT([Object.new]) == CA_OBJECT([Object.new])
+    assert_true  CA_OBJECT([1]) == CA_OBJECT([1.0])
+    assert_false CA_OBJECT([1]).eql?(CA_OBJECT([1.0]))
+  end
 end

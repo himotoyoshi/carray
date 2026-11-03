@@ -26,12 +26,35 @@ class CAFrame
   # rows), so the answer is about the type and not the data: a refusal
   # there means the operation does not apply, while an error in the verb
   # itself is left to raise. An object column is the exception: its type
-  # says nothing of what it holds, so one with no present value is left out
-  # of a verb run over every column. An N-D column (each row a profile) is
+  # says nothing of what it holds, so one with no present value, or whose
+  # cells do not answer, is left out of a verb run over every column. An N-D column (each row a profile) is
   # asked, and computed, along the rows.
   module ColumnVerbs
 
     private
+
+    # The row of each cell, UNDEF where the cell is masked: a first or last
+    # taken of it picks the row, and the row picks the value of a Face that
+    # cannot hold new values, as lag picks it.
+    def present_rows (col)
+      rows = CArray.int64(col.elements).seq
+      rows[col.is_masked] = UNDEF if col.has_mask?
+      rows
+    end
+
+    # A verb whose answers lie on the frame's rows, with no column to compute:
+    # a frame of no column would also have no row.
+    def refuse_no_column_on_rows (verb, out, nrow)
+      return unless out.is_a?(Hash) && out.empty? && nrow > 0
+      raise ArgumentError, "#{verb}: no column to compute (every column is a key or has no #{verb})"
+    end
+
+    def refuse_unknown_fill_columns (verb, fills)
+      return unless fills.is_a?(Hash)
+      unknown = fills.keys - @frame.column_names
+      return if unknown.empty?
+      raise ArgumentError, "#{verb}: fill_value names no column #{unknown.map(&:inspect).join(', ')}"
+    end
 
     def over_named_columns (verb, names, key_names, args = [], keywords = {})
       if names.empty?
@@ -41,7 +64,8 @@ class CAFrame
           col = @frame[name]
           next if valueless_object_column?(col, verb, args)
           next unless column_has?(col, verb, args, keywords)
-          cols[name] = yield(col, name)
+          cols[name] = answer_of_every_column(col, name) { |c, n| yield(c, n) }
+          cols.delete(name) if cols[name].equal?(NO_ANSWER)
         end
         return cols
       end
@@ -50,7 +74,7 @@ class CAFrame
                               names.map { |name| @frame.__send__(:column_key, name, verb) }, verb)
       results = keys.map do |key|
         name = key
-        col = @frame[key]
+        col = @frame.__send__(:named_column, key, verb)
         unless column_has?(col, verb, args, keywords)
           raise CArray::DataTypeError,
                 "#{verb}: column #{name.inspect} " \
@@ -61,11 +85,42 @@ class CAFrame
       results.size == 1 ? results.first : keys.zip(results).to_h
     end
 
+    NO_ANSWER = Object.new.freeze
+    private_constant :NO_ANSWER
+
+    # What an object column holds shows only in the verb itself: one whose
+    # cells do not answer is left out of a verb run over every column, as a
+    # column of a type without the operation is, wherever those cells sit.
+    # refuse_wrong_reduction_arguments has refused what no column would take.
+    def answer_of_every_column (col, name)
+      return yield(col, name) if col.face? || col.data_type != CA_OBJECT
+      begin
+        yield(col, name)
+      rescue TypeError, ArgumentError, NoMethodError, RangeError
+        NO_ANSWER
+      end
+    end
+
+    # The arguments of a reduction, asked of the core on a number before any
+    # column, so a wrong one is not taken for a column that does not answer.
+    # fill_value: is of each column's type, and stays out of this.
+    def refuse_wrong_reduction_arguments (verb, args, keywords)
+      return if verb == :count
+      CArray.float64(1).public_send(verb, *args, **keywords.reject { |k, _| k == :fill_value })
+    rescue CArray::DataTypeError, NoMethodError
+      nil
+    end
+
     # An object column with no present cell says nothing of what it holds,
     # so a verb run over every column leaves it out, as select leaves it out
-    # of every kind; counting the present cells applies to any column.
+    # of every kind; counting the present cells applies to any column. A
+    # Face kept in object cells (a CAString) with rows, every one masked, is
+    # the same: the type would be asked of masked cells only, which answer
+    # with the identity whatever the type. With no rows the type is asked of
+    # blank cells of its kind.
     def valueless_object_column? (col, verb, args)
-      return false if col.face? || col.data_type != CA_OBJECT
+      return false if col.data_type != CA_OBJECT
+      return false if col.face? && col.elements == 0
       return false if %i[count_not_masked count_masked].include?(verb)
       return false if verb == :count && args.empty?
       col.count_not_masked == 0

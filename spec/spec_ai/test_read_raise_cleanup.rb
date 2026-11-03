@@ -79,11 +79,11 @@ class TestReadRaiseCleanup < Test::Unit::TestCase
   RUBY
 
   def test_address_basis_read
-    assert_leaves_nothing "CArray::AddressBasis.open([input], [false]) { }", BASIS
+    assert_leaves_nothing "CArray::AddressBasis.open([input], [false]) { }", BASIS, calls: 1000
   end
 
   def test_address_basis_read_for_writing
-    assert_leaves_nothing "CArray::AddressBasis.open([input], [true]) { }", BASIS
+    assert_leaves_nothing "CArray::AddressBasis.open([input], [true]) { }", BASIS, calls: 1000
   end
 
   SLAB = "a = CArray.fixlen(4, 2, bytes: 1 << 17)"

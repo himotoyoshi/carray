@@ -175,7 +175,9 @@ A record is not exported when the format cannot describe it:
   format lays items out one after another
 - a complex member with a declared byte order (above)
 
-CArray does not import a record format.
+CArray does not rebuild a record from a format, since the format has no
+member names.  `CArray.from_memory_view` and `wrap_memory_view` take an item
+of several members as raw bytes, a `fixlen` array of the item's size.
 
 ---
 

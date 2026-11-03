@@ -531,11 +531,69 @@ ca_mask_standin_current (CArray *mask_view, CArray *reading, CArray *parent,
   return ( parent->mask != NULL ) ? parent->mask : reading;
 }
 
+/* The first view from ca up the parent chain whose mask is attached, or
+   NULL.  An attached mask may alias its root: whether it does is not asked,
+   as ca_attach_is_alias answers yes for any view that already has a pointer,
+   and the copy made for one that does is a no-op. */
+static CArray *
+ca_mask_buffer_holder (CArray *ca)
+{
+  while ( ca != NULL && ca_is_view(ca)
+          && ! ca_test_flag(ca, CA_FLAG_MULTI_PARENTS) ) {
+    if ( ca->mask != NULL && ca_is_view(ca->mask)
+         && ca_is_attached(ca->mask) ) {
+      return ca;
+    }
+    ca = CAVIEW(ca)->parent;
+  }
+  return NULL;
+}
+
+/* Marks the cells addrs of mask, the mask of a view at or below chain.  The
+   write goes past any buffer an attach window holds on the way to the root,
+   and the sync that closes that window sends the buffer: the cells this
+   write turned true are copied into it, read as the difference of two
+   gathers so that what the window has written there meanwhile stays. */
+static void
+ca_mask_fill_past_buffers (CArray *mask, CArray *chain, ca_size_t m,
+                           ca_size_t *addrs)
+{
+  volatile VALUE holder = 0, reader;
+  CArray     *owner = ca_mask_buffer_holder(chain);
+  CArray     *held, *rd;
+  boolean8_t *before, *after, *z;
+  boolean8_t  one = 1;
+  ca_size_t   i, n;
+
+  if ( owner == NULL ) {
+    ca_fill_addrs(mask, m, addrs, &one);
+    return;
+  }
+  held   = owner->mask;
+  n      = held->elements;
+  /* A view answers from its buffer while it has one: the clone has none. */
+  rd     = (CArray *) ca_clone(held);
+  reader = ca_wrap_struct(rd);
+  before = ALLOCV_N(boolean8_t, holder, 2 * n);
+  after  = before + n;
+  ca_xfer_all(rd, before, CA_XFER_GET);
+  ca_mask_fill_past_buffers(mask, CAVIEW(owner)->parent, m, addrs);
+  ca_xfer_all(rd, after, CA_XFER_GET);
+  z = (boolean8_t *) held->ptr;
+  for ( i = 0; i < n; i++ ) {
+    if ( after[i] && ! before[i] ) {
+      z[i] = 1;
+    }
+  }
+  ALLOCV_END(holder);
+  RB_GC_GUARD(reader);
+}
+
 void
 ca_mask_standin_settle (CArray *parent, CArray *standin)
 {
   volatile VALUE holder = 0;
-  boolean8_t    *z, one = 1;
+  boolean8_t    *z;
   ca_size_t     *addrs;
   ca_size_t      i, m = 0, n;
 
@@ -561,7 +619,7 @@ ca_mask_standin_settle (CArray *parent, CArray *standin)
   }
   MEMZERO(z, boolean8_t, n);
   ca_create_mask(parent);
-  ca_fill_addrs(parent->mask, m, addrs, &one);
+  ca_mask_fill_past_buffers(parent->mask, parent, m, addrs);
   ALLOCV_END(holder);
 }
 
@@ -628,19 +686,51 @@ ca_multi_parent_mask_adopt (CArray *mask, CArray **parents,
   CAVIEW(mask)->parent = mp->parents[0];
 }
 
+typedef struct {
+  CArray *parent;
+  CArray *standin;
+} ca_standin_settle_arg;
+
+static VALUE
+ca_standin_settle_body (VALUE arg)
+{
+  ca_standin_settle_arg *a = (ca_standin_settle_arg *) arg;
+  ca_mask_standin_settle(a->parent, a->standin);
+  return Qnil;
+}
+
+/* Every part is settled, past a parent that refuses a mask, so no part keeps
+   a true in its stand-in; then the first exception is raised. */
 void
 ca_multi_parent_mask_settle (CArray *mask, CArray **parents,
                              CArray **standins, int32_t n)
 {
   CAMultiParent *mp = (CAMultiParent *) mask;
+  volatile VALUE error = Qnil;
   int32_t k;
   if ( standins == NULL ) {
     return;
   }
   for ( k = 0; k < n; k++ ) {
     if ( standins[k] != NULL && mp->parents[k] == standins[k] ) {
-      ca_mask_standin_settle(parents[k], standins[k]);
+      ca_standin_settle_arg a = { parents[k], standins[k] };
+      int tag = 0;
+      /* protect: goes on to the other parts; nothing to give back */
+      rb_protect(ca_standin_settle_body, (VALUE) &a, &tag);
+      if ( tag ) {
+        VALUE err = rb_errinfo();
+        if ( ! RTEST(rb_obj_is_kind_of(err, rb_eException)) ) {
+          rb_jump_tag(tag);
+        }
+        if ( NIL_P(error) ) {
+          error = err;
+        }
+        rb_set_errinfo(Qnil);
+      }
     }
+  }
+  if ( ! NIL_P(error) ) {
+    rb_exc_raise(error);
   }
 }
 
@@ -1934,7 +2024,7 @@ rb_ca_inherit_mask_n (VALUE self, int n, VALUE *rothers)
 VALUE
 rb_ca_inherit_mask (VALUE self, int n, ...)
 {
-  VALUE other;
+  volatile VALUE other;
   CArray **slist;
   volatile VALUE holder;
   CArray *ca, *cs;
@@ -2017,7 +2107,7 @@ rb_ca_inherit_mask_replace_n (VALUE self, int n, VALUE *rothers)
 VALUE
 rb_ca_inherit_mask_replace (VALUE self, int n, ...)
 {
-  VALUE other;
+  volatile VALUE other;
   CArray **slist;
   volatile VALUE holder;
   CArray *ca, *cs;
@@ -2253,6 +2343,20 @@ ca_binop_bit_and_i_boolean8_fast (ca_size_t n, boolean8_t *m,
 }
 
 /* ----- bit_or_i (boolean8_t fast) ----- */
+/* Every cell gets 0 or 1, even beside a masked cell: its byte is not
+   defined (any value), and a cell Kleene resolves to true keeps the value
+   written here.  The word path folds each byte's eight bits into its low
+   bit; a shift by less than 8 moves bits of the next byte only into the
+   high bits, which the last mask drops. */
+static inline uint64_t
+ca_mask_word_nonzero_bytes (uint64_t w)
+{
+  w |= w >> 4;
+  w |= w >> 2;
+  w |= w >> 1;
+  return w & CA_MASK_WORD_LSB;
+}
+
 static void
 ca_binop_bit_or_i_boolean8_fast (ca_size_t n, boolean8_t *m,
                                  char *ptr1, ca_size_t i1,
@@ -2273,7 +2377,7 @@ ca_binop_bit_or_i_boolean8_fast (ca_size_t n, boolean8_t *m,
         p1 = q1 + k*i1;
         p2 = q2 + k*i2;
         p3 = q3 + k*i3;
-        (*p3) = (*p1) | (*p2);
+        (*p3) = ( (*p1) | (*p2) ) ? 1 : 0;
       }
     }
   }
@@ -2284,18 +2388,21 @@ ca_binop_bit_or_i_boolean8_fast (ca_size_t n, boolean8_t *m,
     ca_size_t       j;
     for (j = 0; j < nw; j++) {
       ca_mask_word_store(q3 + j*CA_MASK_WORD_BYTES,
-                         ca_mask_word_load(q1 + j*CA_MASK_WORD_BYTES) | ca_mask_word_load(q2 + j*CA_MASK_WORD_BYTES));
+                         ca_mask_word_nonzero_bytes(
+                           ca_mask_word_load(q1 + j*CA_MASK_WORD_BYTES) |
+                           ca_mask_word_load(q2 + j*CA_MASK_WORD_BYTES)));
     }
     for (j = nw * CA_MASK_WORD_BYTES; j < n; j++) {
-      q3[j] = q1[j] | q2[j];
+      q3[j] = ( q1[j] | q2[j] ) ? 1 : 0;
     }
   }
   else {
+    /* non-contig view: byte loop */
     for (k = 0; k < n; k++) {
       p1 = q1 + k*i1;
       p2 = q2 + k*i2;
       p3 = q3 + k*i3;
-      (*p3) = (*p1) | (*p2);
+      (*p3) = ( (*p1) | (*p2) ) ? 1 : 0;
     }
   }
 }
@@ -2407,8 +2514,8 @@ ca_inherit_mask_check_args (int argc, VALUE *argv, const char *name)
   for (i=0; i<RARRAY_LEN(rest); i++) {
     VALUE v = RARRAY_AREF(rest, i);
     if ( ! rb_obj_is_carray(v) ) {
-      rb_raise(rb_eTypeError, "%s: argument %ld must be a CArray (got %s)",
-               name, i, rb_obj_classname(v));
+      rb_raise(rb_eTypeError, "%s: argument %ld must be a CArray (got %"PRIsVALUE")",
+               name, i, rb_obj_class(v));
     }
   }
   return rest;

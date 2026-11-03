@@ -138,10 +138,11 @@ mp_keep_axis_full_f64 (VALUE self, double v, int is_undef)
 /* [shared] all-UNDEF reduced CA_FLOAT64 output for a zero-length reduction
    axis.  An order statistic of no elements has no value, so every reduced
    cell is masked -- matching mean / min (which return UNDEF cells), not a
-   raise.  keep_axis controls whether the reduced axis is dropped or kept
-   as a length-1 axis. */
+   raise, unless fill_value (nil for none) gives the cells a value, as it
+   does for a fiber with no present cell.  keep_axis controls whether the
+   reduced axis is dropped or kept as a length-1 axis. */
 static VALUE
-mp_axis_all_masked (VALUE self, long axis, int keep_axis)
+mp_axis_all_masked (VALUE self, long axis, VALUE fill_value, int keep_axis)
 {
   int8_t ax = (int8_t) axis;
   CArray *ca;
@@ -150,6 +151,10 @@ mp_axis_all_masked (VALUE self, long axis, int keep_axis)
                                 (ca->data_type == CA_OBJECT) ? CA_OBJECT
                                                              : CA_FLOAT64,
                                 keep_axis);
+  if ( ! NIL_P(fill_value) ) {
+    rb_ca_store_all(out, fill_value);
+    return out;
+  }
   CArray *co;
   GetCArray(out, co);
   ca_create_mask(co);
@@ -680,7 +685,7 @@ percentile_object_axis (VALUE self, VALUE pers, long axis, VALUE method)
        is applied by the entry (rb_ca_percentile_m), so build reduced. */
     VALUE res = rb_ary_new_capa(npers);
     for ( long i = 0; i < npers; i++ )
-      rb_ary_push(res, mp_axis_all_masked(self, axis, 0));
+      rb_ary_push(res, mp_axis_all_masked(self, axis, Qnil, 0));
     return res;
   }
 
@@ -774,7 +779,7 @@ percentile_object_axis_masked (VALUE self, VALUE pers, long axis, VALUE method,
   if ( M == 0 ) {
     VALUE res = rb_ary_new_capa(npers);
     for ( long i = 0; i < npers; i++ )
-      rb_ary_push(res, mp_axis_all_masked(self, axis, keep_axis));
+      rb_ary_push(res, mp_axis_all_masked(self, axis, fill_value, keep_axis));
     return res;
   }
 
@@ -904,7 +909,7 @@ rb_ca_median_m_body (int argc, VALUE *argv, VALUE self)
   if ( !NIL_P(raxis) ) {
     long axis = rb_ca_normalize_axis_value(self, raxis, "median");
     long n = (long) ca->dim[axis];
-    if ( n == 0 ) return mp_axis_all_masked(self, axis, keep_axis);
+    if ( n == 0 ) return mp_axis_all_masked(self, axis, fill_value, keep_axis);
     /* mask / min_count / fill_value require the per-fiber select (each fiber
        has its own n_present); the plain partition path assumes a uniform n.
        Switch      ca_fast_path(CA_SC_MEDIAN_PARTITION): off, the per-fiber select. */
@@ -1138,7 +1143,7 @@ pct_axis (VALUE self, VALUE pers_ary, long axis, VALUE method, int keep_axis)
     /* zero-length axis: every requested p reduces to an all-UNDEF cell. */
     VALUE res = rb_ary_new_capa(npers);
     for ( long i = 0; i < npers; i++ )
-      rb_ary_push(res, mp_axis_all_masked(self, axis, keep_axis));
+      rb_ary_push(res, mp_axis_all_masked(self, axis, Qnil, keep_axis));
     return res;
   }
 
@@ -1167,7 +1172,7 @@ pct_axis_masked (VALUE self, VALUE pers_ary, long axis, VALUE method,
   if ( M == 0 ) {
     VALUE res = rb_ary_new_capa(npers);
     for ( long i = 0; i < npers; i++ )
-      rb_ary_push(res, mp_axis_all_masked(self, axis, keep_axis));
+      rb_ary_push(res, mp_axis_all_masked(self, axis, fill_value, keep_axis));
     return res;
   }
 

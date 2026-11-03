@@ -30,4 +30,13 @@ class TestCArrayHash < Test::Unit::TestCase
     objs = CArray.object(6) { |i| "s#{i}" }
     assert_same_key objs[(0...6).step(2)], CA_OBJECT(["s0", "s2", "s4"])
   end
+
+  # The shape counts: arrays that differ only in length or shape spread.
+  def test_the_shape_is_mixed_in
+    assert_equal 300, (1..300).map { |n| CArray.int32(n).hash }.uniq.size
+    masked = (1..300).map { |n| CArray.int32(n).tap { |x| x[0] = UNDEF }.hash }
+    assert_equal 300, masked.uniq.size
+    assert_not_equal CArray.int32(2, 3).hash, CArray.int32(3, 2).hash
+    assert_not_equal CArray.int8(2, 2).hash, CArray.int16(2, 2).hash
+  end
 end

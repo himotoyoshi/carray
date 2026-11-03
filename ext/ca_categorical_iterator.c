@@ -46,7 +46,7 @@
   } while (0)
 
 static VALUE
-rb_ca_addresses_by_category (VALUE self, VALUE rcursor, VALUE rk, VALUE rnvalid)
+rb_ca_addresses_by_category (VALUE self, volatile VALUE rcursor, VALUE rk, VALUE rnvalid)
 {
   CArray     *codes, *cursor, *result;
   VALUE       rresult;
@@ -264,7 +264,7 @@ rb_ca_addresses_by_category (VALUE self, VALUE rcursor, VALUE rk, VALUE rnvalid)
 
 static VALUE
 rb_ca_reduceat_moments (VALUE self, VALUE roffsets, VALUE rcounts,
-                        VALUE rsums, VALUE rmins, VALUE rmaxs)
+                        VALUE rsums, volatile VALUE rmins, volatile VALUE rmaxs)
 {
   CArray     *grouped, *offsets, *counts, *sums, *mins, *maxs;
   int64_t     k, *offs, *countp;
@@ -397,7 +397,7 @@ ca_nth_element_double (double *a, ca_size_t n, ca_size_t kth)
   } while (0)
 
 static VALUE
-rb_ca_reduceat_percentile (VALUE self, VALUE roffsets, VALUE rp, VALUE rout)
+rb_ca_reduceat_percentile (VALUE self, volatile VALUE roffsets, VALUE rp, volatile VALUE rout)
 {
   CArray     *grouped, *offsets, *out;
   int64_t     k, *offs;
@@ -503,7 +503,7 @@ rb_ca_reduceat_percentile (VALUE self, VALUE roffsets, VALUE rp, VALUE rout)
 
 static VALUE
 rb_ca_reduceat_variance (VALUE self, VALUE roffsets, VALUE rmeans,
-                         VALUE rcounts, VALUE rout, VALUE rddof)
+                         VALUE rcounts, volatile VALUE rout, VALUE rddof)
 {
   int64_t     ddof = NUM2LL(rddof);
   CArray     *grouped, *offsets, *means, *counts, *out;
@@ -649,7 +649,7 @@ rb_ca_reduceat_prod (VALUE self, VALUE roffsets, VALUE rout)
   } while (0)
 
 static VALUE
-rb_ca_reduceat_argminmax (VALUE self, VALUE roffsets, VALUE rminidx, VALUE rmaxidx)
+rb_ca_reduceat_argminmax (VALUE self, VALUE roffsets, volatile VALUE rminidx, volatile VALUE rmaxidx)
 {
   CArray     *grouped, *offsets, *minidx, *maxidx;
   int64_t     k, *offs, *minp, *maxp;
@@ -871,8 +871,8 @@ rb_ca_reduceat_quantile (VALUE self, VALUE roffsets, VALUE rp0, VALUE rp25,
   } while (0)
 
 static VALUE
-rb_ca_reduceat_wsum_wmean (VALUE self, VALUE roffsets, VALUE rwg,
-                           VALUE rwsum, VALUE rwmean)
+rb_ca_reduceat_wsum_wmean (VALUE self, VALUE roffsets, volatile VALUE rwg,
+                           VALUE rwsum, volatile VALUE rwmean)
 {
   CArray     *grouped, *offsets, *wg, *wsum, *wmean;
   int64_t     k, *offs;

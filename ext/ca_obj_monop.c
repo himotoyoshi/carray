@@ -64,6 +64,7 @@ extern int8_t CA_OBJ_LAZY_MARKER;
 extern int8_t CA_OBJ_BINOP;
 extern int8_t CA_OBJ_BINCMP;
 extern int8_t CA_OBJ_MONCMP;
+extern int8_t CA_OBJ_TRIOP;
 
 typedef struct CAMonOp {
   int16_t   obj_type;
@@ -169,6 +170,7 @@ ca_monop_view_is_single_cast (CArray *view)
      (so `1/zero` zero-check works).  */
   return ( p->obj_type != CA_OBJ_MONOP
         && p->obj_type != CA_OBJ_BINOP
+        && p->obj_type != CA_OBJ_TRIOP
         && p->obj_type != CA_OBJ_BINCMP
         && p->obj_type != CA_OBJ_MONCMP
         && p->obj_type != CA_OBJ_LAZY_MARKER );
@@ -338,14 +340,17 @@ ca_size_t ca_monop_materialise_call_count = 0;
 #define CA_MAX_LAZY_DEPTH 256
 #endif
 
-/* Whether a cast from `from` to `to` raises on a NaN cell: a float or
-   complex value has no integer for NaN. */
+/* Whether a cast from `from` to `to` can raise on a cell, so that it has to
+   skip the masked ones, whose values are not defined: a float or complex
+   value has no integer for NaN, a boolean takes only 0 and 1, and an object
+   cell may hold anything. */
 static int
-ca_monop_cast_refuses_nan (int8_t from, int8_t to)
+ca_monop_cast_can_raise (int8_t from, int8_t to)
 {
   int from_float = ( from == CA_FLOAT32 || from == CA_FLOAT64 ||
                      from == CA_CMPLX64 || from == CA_CMPLX128 );
-  return from_float && to >= CA_INT8 && to <= CA_UINT64;
+  return from == CA_OBJECT || to == CA_BOOLEAN
+         || ( from_float && to >= CA_INT8 && to <= CA_UINT64 );
 }
 
 /* Apply a single op in-place on `data` (src == dst, unit element stride).
@@ -384,7 +389,8 @@ ca_data_type_stub (int8_t data_type)
   return stub;
 }
 
-/* Pull leaf into the output buffer.  Three paths:
+/* Pull leaf into the output buffer.  `mask` marks the cells a cast must
+   skip, or is NULL.  Three paths:
 
    1. No size change (leaf.bytes == out.bytes): pull directly into
       `data` using the caller's `strides` (= output byte layout).
@@ -411,7 +417,8 @@ ca_data_type_stub (int8_t data_type)
 static int8_t
 pull_leaf_with_optional_cast (CArray *leaf, uint16_t innermost_op,
                               int has_cast_at_leaf, int8_t out_bytes,
-                              const ca_lazy_req_t *req, void *data)
+                              const ca_lazy_req_t *req, void *data,
+                              boolean8_t *mask)
 {
   ca_size_t leaf_bytes = leaf->bytes;
   ca_size_t slab_n = req->n;
@@ -437,7 +444,9 @@ pull_leaf_with_optional_cast (CArray *leaf, uint16_t innermost_op,
     int8_t target_dt = (int8_t)(innermost_op - CA_MONOP_CAST_BASE);
     CArray src_stub = ca_data_type_stub(leaf->data_type);
     CArray dst_stub = ca_data_type_stub(target_dt);
-    ca_cast_block(slab_n, &src_stub, scratch, &dst_stub, data);
+    ca_cast_block_skip_masked(slab_n, &src_stub, scratch, &dst_stub, data,
+                              ca_monop_cast_can_raise(leaf->data_type, target_dt)
+                                ? mask : NULL);
     result_dt = target_dt;
   } else {
     /* Path 3: memcpy scratch → start of data.  Mid-chain cast will
@@ -465,7 +474,7 @@ ca_monop_eval_cells (void *node, const ca_lazy_req_t *req, void *data, int dir)
   int       has_cast_at_leaf = 0;
   int       chain_apply_count;
   boolean8_t *slab_mask = NULL;
-  int       mask_taken = 0;
+  int       may_raise = 0;
 
   /* Writable-view op_ids (cast / byte_swap) use CAFake-style xfer_stride
      for both GET and PUT.  This avoids the chain-materialise inline path
@@ -483,11 +492,10 @@ ca_monop_eval_cells (void *node, const ca_lazy_req_t *req, void *data, int dir)
     v = ALLOCV_N(char, holder, n * parent_bytes);
     if ( dir == CA_XFER_GET ) {
       ca_lazy_req_pull(mo->parent, req, v, CA_XFER_GET);
-      if ( is_cast && ca_monop_cast_refuses_nan(mo->parent->data_type,
+      if ( is_cast && ca_monop_cast_can_raise(mo->parent->data_type,
                                                 mo->data_type) ) {
-        /* The cast raises on a NaN cell it is asked to convert; a masked
-           cell (mask_invalid keeps the NaN under the mask) is skipped.
-           The mask is copied off the arena first so a raise leaves no
+        /* The cast raises on a cell it cannot convert; a masked cell
+           (mask_invalid keeps a NaN under the mask) is skipped.  The mask is copied off the arena first so a raise leaves no
            arena slot held. */
         CArray *parent = mo->parent;
         boolean8_t *arena_mask = ca_lazy_req_mask(req, 1, &parent);
@@ -498,7 +506,7 @@ ca_monop_eval_cells (void *node, const ca_lazy_req_t *req, void *data, int dir)
           memcpy(m, arena_mask, n);
           ca_lazy_arena_release(arena_mask);
         }
-        ca_cast_block_with_mask(n, mo->parent, v, (CArray *) mo, data, m);
+        ca_cast_block_skip_masked(n, mo->parent, v, (CArray *) mo, data, m);
         if ( m ) {
           ALLOCV_END(mholder);
         }
@@ -567,24 +575,38 @@ ca_monop_eval_cells (void *node, const ca_lazy_req_t *req, void *data, int dir)
      widest type along it: the leaf, or a step that widens before a later
      one narrows (cmplx128.lazy.abs pulls 16-byte cells and answers 8-byte
      ones).  When that is wider than the output, run in a scratch and copy
-     the answer into `data` at the end. */
+     the answer into `data` at the end.  The same walk finds whether a step
+     can raise on a cell, so that it has to skip the masked ones. */
   void   *out  = data;
   void   *work = NULL;
   {
     ca_size_t max_bytes = leaf->bytes;
     int8_t    dt        = leaf->data_type;
     for ( i = chain_len - 1; i >= 0; i-- ) {
-      dt = ca_monop_is_cast(op_chain[i])
-             ? (int8_t)(op_chain[i] - CA_MONOP_CAST_BASE)
-             : ca_lazy_promote_monop(op_chain[i], dt);
+      int8_t next = ca_monop_is_cast(op_chain[i])
+                      ? (int8_t)(op_chain[i] - CA_MONOP_CAST_BASE)
+                      : ca_lazy_promote_monop(op_chain[i], dt);
+      if ( ca_monop_is_cast(op_chain[i])
+             ? ca_monop_cast_can_raise(dt, next)
+             : ca_op_raises_on_cell(CA_OP_KIND_MONOP, op_chain[i], dt) ) {
+        may_raise = 1;
+      }
+      dt = next;
       if ( ca_sizeof[dt] > max_bytes ) max_bytes = ca_sizeof[dt];
     }
     if ( max_bytes > mo->bytes ) {
-      work = ( leaf->data_type == CA_OBJECT )
+      /* Object cells stay in the buffer until a cast takes them to numbers;
+         a cast at the leaf takes them before they reach it. */
+      work = ( leaf->data_type == CA_OBJECT && ! has_cast_at_leaf )
                ? ca_lazy_arena_acquire_object((slab_n * max_bytes + sizeof(VALUE) - 1) / sizeof(VALUE))
                : ca_lazy_arena_acquire(slab_n * max_bytes);
       data = work;
     }
+  }
+  /* raises: the walk above asks ca_op_raises_on_cell of each operation; a
+     cast, which is not one, has ca_monop_cast_can_raise */
+  if ( may_raise ) {
+    slab_mask = ca_lazy_req_mask(req, 1, &leaf);
   }
 
   /* === 2. pull leaf into output buffer (with optional cast) === */
@@ -593,7 +615,7 @@ ca_monop_eval_cells (void *node, const ca_lazy_req_t *req, void *data, int dir)
     has_cast_at_leaf ? op_chain[chain_len - 1] : 0,
     has_cast_at_leaf,
     (int8_t) mo->bytes,
-    req, data
+    req, data, slab_mask
   );
 
   /* === 3. apply remaining chain in reverse (leaf side → outermost) ===
@@ -620,14 +642,15 @@ ca_monop_eval_cells (void *node, const ca_lazy_req_t *req, void *data, int dir)
                   : ca_lazy_arena_acquire(total_bytes);
       ca_monop_scratch_acquire_count++;
       memcpy(scratch, data, total_bytes);
-      ca_cast_block(slab_n, &src_stub, scratch, &dst_stub, data);
+      if ( work ) {
+        ca_lazy_arena_untag_objects(work);
+      }
+      ca_cast_block_skip_masked(slab_n, &src_stub, scratch, &dst_stub, data,
+                                ca_monop_cast_can_raise(cur_dt, target_dt)
+                                  ? slab_mask : NULL);
       ca_lazy_arena_release(scratch);
       cur_dt = target_dt;
     } else {
-      if ( ! mask_taken && ca_op_raises_on_cell(CA_OP_KIND_MONOP, op_id, cur_dt) ) {
-        slab_mask  = ca_lazy_req_mask(req, 1, &leaf);
-        mask_taken = 1;
-      }
       apply_monop_in_place(op_id, cur_dt, slab_n, data,
                            ca_op_raises_on_cell(CA_OP_KIND_MONOP, op_id, cur_dt) ? slab_mask : NULL);
       cur_dt = ca_lazy_promote_monop(op_id, cur_dt);
@@ -645,16 +668,18 @@ ca_monop_eval_cells (void *node, const ca_lazy_req_t *req, void *data, int dir)
 /* A chain is evaluated from its leaf without evaluating the nodes under
    the top one, so those nodes are recorded with it: a cell that holds an
    expression over one of them is caught when it comes back, before a
-   longer chain over the same cells is built. */
+   longer chain over the same cells is built.  The walk stops where the
+   evaluation leaves the chain: a writable view evaluates its parent through
+   the transfer, as a leaf does, and that node records itself. */
 static void
 ca_monop_eval (CAMonOp *mo, const ca_lazy_req_t *req, void *data, int dir)
 {
   CArray *chain[CA_MAX_LAZY_DEPTH];
   CArray *leaf = mo->parent;
   int     nchain = 0;
-  while ( nchain < CA_MAX_LAZY_DEPTH &&
-          ( leaf->obj_type == CA_OBJ_MONOP ||
-            leaf->obj_type == CA_OBJ_LAZY_MARKER ) ) {
+  while ( ! ca_monop_is_writable_view(mo->op_id) &&
+          nchain < CA_MAX_LAZY_DEPTH &&
+          leaf->obj_type == CA_OBJ_MONOP ) {
     chain[nchain++] = leaf;
     leaf = ((CAView *) leaf)->parent;
   }
@@ -711,9 +736,11 @@ ca_monop_func_allocate (void *ap)
      count.  Total ca_attach(parent) calls per view lifecycle = 1.  CAFake
      uses this same pattern.  */
   if ( ca_monop_is_writable_view(ca->op_id) ) {
-    ca_attach(ca->parent);
+    ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
   }
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  else {
+    ca->ptr = ca_alloc_cells((CArray *) ca);
+  }
 }
 
 static void
@@ -741,20 +768,19 @@ ca_monop_func_attach (void *ap)
 
      Mirrors CAFake.attach.  */
   if ( ca_monop_is_writable_view(ca->op_id) ) {
-    ca_attach(ca->parent);
-    ca->ptr = ca_alloc_cells((CArray *) ca);
+    ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
     if ( ca_monop_is_cast(ca->op_id) ) {
       /* Cast parent.ptr (parent data_type) → ca.ptr (cast target data_type).
-         A cast that raises on NaN skips the masked cells; the parent's
+         A cast that can raise skips the masked cells; the parent's
          mask is attached with the parent.  A raise here is undone by
          ca_attach, which calls the detach slot once ca->ptr is set. */
       boolean8_t *m = NULL;
-      if ( ca_monop_cast_refuses_nan(ca->parent->data_type, ca->data_type)
+      if ( ca_monop_cast_can_raise(ca->parent->data_type, ca->data_type)
            && ca_has_mask(ca->parent) ) {
         m = (boolean8_t *) ca->parent->mask->ptr;
       }
-      ca_cast_block_with_mask(ca->elements, ca->parent, ca->parent->ptr,
-                              (CArray *) ca, ca->ptr, m);
+      ca_cast_block_skip_masked(ca->elements, ca->parent, ca->parent->ptr,
+                                (CArray *) ca, ca->ptr, m);
     }
     else {
       /* byte_swap: memcpy parent.ptr → ca.ptr (same data_type same bytes),
@@ -795,9 +821,9 @@ ca_monop_func_sync (void *ap)
     /* Cast view → parent: reverse-cast bulk.  */
     ca_update_mask(ca);
     if ( ca->mask ) {
-      ca_cast_block_with_mask(ca->elements, ca, ca->ptr,
-                              ca->parent, ca->parent->ptr,
-                              (boolean8_t *) ca->mask->ptr);
+      ca_cast_block_skip_masked(ca->elements, ca, ca->ptr,
+                                ca->parent, ca->parent->ptr,
+                                (boolean8_t *) ca->mask->ptr);
     }
     else {
       ca_cast_block(ca->elements, ca, ca->ptr, ca->parent, ca->parent->ptr);

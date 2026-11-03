@@ -4,7 +4,7 @@
 
 The core idea is that **time is an integer index on a tick grid**. Each stored value is the k-th tick of a chosen resolution, counted from the Unix epoch. The resolution — a tick of `"10 minutes"`, `"3 hours"`, `:D`, `:ns` — is a property of the array, so the same `int64` storage can hold a 10-minute grid, a daily grid, or a nanosecond grid.
 
-The time semantics are layered on plain `int64` storage: numerical kernels see a regular `int64` array, while you see a time-aware array that survives slicing, reshaping, masking, and every other view-creating method. A few fixed points frame everything below:
+The time semantics are layered on plain `int64` storage: numerical kernels see a regular `int64` array, while Ruby code sees a time-aware array that survives slicing, reshaping, masking, and every other view-creating method. A few fixed points frame everything below:
 
 - the epoch is **1970-01-01 UTC**, fixed;
 - the calendar is proleptic Gregorian;
@@ -49,7 +49,7 @@ CArray.time_series("2024-06-15", count: 144, unit: "10 minutes")
 
 `count:` is the number of elements; `unit:` is the resolution of the grid (and of the resulting array). The third example shows a *composite* resolution — a tick of ten minutes — described below.
 
-Spacing is one tick by default. When you want the elements further apart than the grid they sit on, say so with `step:`:
+Spacing is one tick by default. To place the elements further apart than their grid, use `step:`:
 
 ```ruby
 CArray.time_series("2024-06-15", count: 7, unit: :h, step: "1 day")
@@ -98,7 +98,7 @@ CArray.time(%w[2024-01-15 2024-02-15]).unit   # => D
 CArray.time("2024-01-15T10:00:00.5").unit     # => ms   (the half second is kept)
 ```
 
-Parsing uses Ruby's own date parser under the hood — the flexible `Date._parse` heuristic by default, or strict `strftime`-style pattern matching when you pass `format:`. Use `format:` when the day/month order is ambiguous or the layout is not ISO.
+Parsing uses Ruby's own date parser: the flexible `Date._parse` heuristic by default, or strict `strftime`-style pattern matching when `format:` is given. Use `format:` when the day/month order is ambiguous or the layout is not ISO.
 
 There are two departures from `Date._parse`. A year-month (`"2019-09"`) and a bare year (`"2019"`) are read as such, so the form a `:M` or `:Y` element prints comes back in; a missing finer field names the head of that period. And a field out of range raises instead of rolling over into another date — `"2019-02-31"` is refused rather than becoming 2019-03-03. Watch out for `"201909"`: to Ruby that is a valid YYMMDD (2020-19-09), so it is refused as well. Write `"2019-09"`, or name the layout with `format: "%Y%m"`.
 
@@ -114,7 +114,7 @@ x.is_masked.to_a    # => [false, true]
 
 ### Wrapping an existing integer array
 
-If you already have an `int64` CArray whose values are tick counts, put the time interpretation on it directly — this is zero-copy:
+An existing `int64` CArray whose values are tick counts can take the time interpretation directly, without copying:
 
 ```ruby
 raw = CArray.int64(5) { |i| i * 86400 }
@@ -210,7 +210,7 @@ CArray.time("2024-01-01 05:00", unit: :h).to_unit(:D)   # => 2024-01-01
 CArray.time("1969-03-05 12:00", unit: :h).to_unit(:D)   # => 1969-03-05
 ```
 
-Reach for `floor` / `ceil` / `round` (later in this chapter) when you want a different boundary; they move the values and leave the storage unit alone, so pair them with `to_unit` when the storage should change too.
+Use `floor` / `ceil` / `round` (later in this chapter) for a different boundary; they move the values and leave the storage unit alone, so pair them with `to_unit` when the storage should change too.
 
 Months and years are not a whole number of days, but a `:M` **time** is still a real instant — the month's first midnight — so `to_unit` crosses that boundary as well:
 
@@ -220,7 +220,7 @@ m.to_unit(:D)                                     # => 2024-03-01
 CArray.time("2024-03-05", unit: :D).to_unit(:M)   # => 2024-03   (floors)
 ```
 
-This is how you take a monthly or quarterly series into day-level work: walk the grid on `:M`, move the storage to `:D`, then add a day offset.
+This takes a monthly or quarterly series into day-level work: walk the grid on `:M`, move the storage to `:D`, then add a day offset.
 
 ```ruby
 q = CArray.time_range("2019-09-01", "2020-06-01", unit: :M, step: "3 months")
@@ -234,7 +234,7 @@ Weeks are the exception: a month head is not week-aligned, so `:M` → `:W` rais
 
 ## Storage and `ticks`
 
-A CATime's storage layout is identical to a plain `int64` array — the time interpretation adds no bytes. When you really do want the raw tick counts — to feed a routine that wants plain integers, or to search the storage space directly — the named accessor is `ticks`:
+A CATime's storage layout is identical to a plain `int64` array — the time interpretation adds no bytes. To get the raw tick counts, for example for a routine that wants plain integers or to search the storage space directly, use the named accessor `ticks`:
 
 ```ruby
 dt = CArray.int64(5) { |i| i * 86400 }.time(unit: :s)
@@ -381,7 +381,7 @@ dt.ajd       # Astronomical Julian Day (Float)
 dt.is_leap   # boolean CArray
 ```
 
-Each accessor returns a plain `Integer`, `Float`, or `bool` CArray — a year number is no longer a time, so the result does not carry the time type. The fields are computed by vectorized civil-date algebra directly on the `int64` storage — no per-cell `Time` object — so they are fast on large arrays and exact for every unit, including `:M` and `:Y`.
+Each accessor returns a plain `Integer`, `Float`, or `bool` CArray — a year number is no longer a time, so the result does not carry the time type. The fields are computed by vectorized civil-date algebra directly on the `int64` storage — with no `Time` object for each cell — so they are fast on large arrays and exact for every unit, including `:M` and `:Y`.
 
 ### Truncation to the unit
 
@@ -446,7 +446,7 @@ t.stddev                 # => 4 D    the exact spread is 3.594 days — about 11
 t.to_unit(:h).stddev     # => 86 h   0.3% off
 ```
 
-A calendar array (`:M`, `:Y`) stores month or year ordinals, so that is the space it reduces in: the mean of 2024-01 and 2024-03 is 2024-02, the middle month. Rebuild the array on the `:D` grid (`CArray.time(m.to_time, unit: :D)`) when the day-space answer is the one you want.
+A calendar array (`:M`, `:Y`) stores month or year ordinals, so that is the space it reduces in: the mean of 2024-01 and 2024-03 is 2024-02, the middle month. Rebuild the array on the `:D` grid (`CArray.time(m.to_time, unit: :D)`) to get the answer in day space.
 
 Durations reduce by the same rule and also have a well-defined `sum`: `td.sum`, `td.mean`, `td.median`, `td.stddev` and `td.percentile` all come back as `CATimedelta::Element` on `td.unit`. The exception is `td.variance` / `td.variancep`, which stay a plain `Float`: their value is in *squared* ticks, and no type represents squared time.
 
@@ -518,7 +518,7 @@ q_D    = CArray.time_series("2024-06-16", count: 2, unit: :D)   # daily
 axis_h.bsearch(q_D)   # => [24, 48]   (:D lifted to :h, ×24)
 ```
 
-A **bare number is rejected** — a raw integer would touch the hidden storage epoch, which the axis has no way to read as an instant. If you really want a storage-space search, be explicit:
+A **bare number is rejected** — a raw integer would touch the hidden storage epoch, which the axis has no way to read as an instant. A storage-space search must be explicit:
 
 ```ruby
 axis.bsearch(19538)         # => raises TypeError
@@ -541,13 +541,13 @@ Cross-unit observations are reconciled the same way as search.
 
 ## The step system: bucketing, matching, grouping
 
-A time axis is, underneath, an integer count since an epoch. The **step system** leans into that: it re-expresses each instant as the integer *index of the fixed-width bucket* it falls in, counted from a chosen origin. Once time is an integer index, bucketing, matching, and grouping all become plain integer arithmetic — fast, exact, and free of per-cell `Time` objects.
+A time axis is, underneath, an integer count since an epoch. The **step system** leans into that: it re-expresses each instant as the integer *index of the fixed-width bucket* it falls in, counted from a chosen origin. Once time is an integer index, bucketing, matching, and grouping all become plain integer arithmetic — fast, exact, and without a `Time` object for each cell.
 
 A step is "N of a unit", written the same way as a resolution: a String (`"3 hours"`, `"1 month"`, `"10 days"`) or a bare Symbol as the count-1 shorthand (`:h`, `:M`). The compact `"3h"` (no space) is rejected, and unknown words raise.
 
 ### The grid: a step and where it starts
 
-Every method below wants two things — how wide a bucket is, and where bucket 0 starts. `CATime::Grid` is that pair given a name, so you build it once and pass it as one value:
+Every method below wants two things — how wide a bucket is, and where bucket 0 starts. `CATime::Grid` is that pair given a name, so it is built once and passed as one value:
 
 ```ruby
 g = CATime::Grid.parse("12 hours since 2017-11-30 09:00")
@@ -644,7 +644,7 @@ back.strftime("%F").to_a       # => ["2024-06-10", "2024-06-10", "2024-06-17"]  
 
 ### Calendar steps — month and year
 
-Months and years are variable-length, but the step system handles them on day-or-finer storage through vectorized civil-date integer algebra — no per-cell `Time`, correct for pre-epoch dates too:
+Months and years are variable-length, but the step system handles them on day-or-finer storage through vectorized civil-date integer algebra , with no `Time` object for each cell, and correct for pre-epoch dates too:
 
 ```ruby
 d = CArray.time(
@@ -657,7 +657,7 @@ d.timesteps(unit: "1 month")   # months since 1970-01
 # => [648, 649, 649, 647]
 ```
 
-A calendar grid is addressed by month, so its buckets start on the 1st and nowhere else. The origin has to be a month head — the 1st at 00:00 — and anything else raises rather than quietly dropping the day. Which month is up to you, and that makes **fiscal years and quarters** a one-liner: point the origin at the fiscal start month.
+A calendar grid is addressed by month, so its buckets start on the 1st and nowhere else. The origin has to be a month head — the 1st at 00:00 — and anything else raises rather than quietly dropping the day. Any month can be the origin, so **fiscal years and quarters** take one line: set the origin to the fiscal start month.
 
 ```ruby
 fy = CArray.time(CA_OBJECT(["2024-03-01", "2024-08-01", "2025-01-01"]), unit: :D)
@@ -706,14 +706,14 @@ cat = d.floor(unit: "1 month").categorize(sort_labels: true)
 cat.labels.map { |s| s.to_time.strftime("%Y-%m") }
 # => ["2023-12", "2024-01", "2024-02"]
 
-temps.group_by_category(cat).mean   # => [4.0, 1.0, 2.5]  (per-month mean)
+temps.group_by_category(cat).mean   # => [4.0, 1.0, 2.5]  (mean of each month)
 ```
 
 The categorical's codes are `0..k-1` in label order — this is *not* the same as `timesteps` (the absolute bucket number). Use `categorize` for group labels, `timesteps` for matching and addressing.
 
 ### Matching two series
 
-Because `timesteps` is an **absolute** integer keyed to `(step, origin)`, two series projected onto the same `(step, origin)` share one integer index space. Matching, joining, and dense positional addressing then reduce to integer operations — no hash join, no per-cell comparison. Aligning observations to forecast valid-times is the canonical example:
+Because `timesteps` is an **absolute** integer keyed to `(step, origin)`, two series projected onto the same `(step, origin)` share one integer index space. Matching, joining, and dense positional addressing then reduce to integer operations , with no hash join and no comparison of each cell. Aligning observations to forecast valid-times is the canonical example:
 
 ```ruby
 oidx = obs_vt.timesteps(unit: "1 hour")    # absolute hour index of each obs
@@ -798,6 +798,6 @@ dt.strip_mask(0)     # => CATime with masked cells filled (0 = the epoch)
 - Cross-unit operands of a comparison or a search meet in the finer unit when one is off the other's grid; an assignment has to land on the array's grid and raises otherwise (and in `dt ± td` a finer duration truncates to the instant's grid).
 - Elements (`CATime::Element`) carry `(value, unit)`, print unit-aware, compare by instant, and convert via `to_time` / `to_date` / `to_datetime`.
 - Field accessors (`year` … `is_leap`) and `strftime` return plain arrays, computed by vectorized civil-date algebra.
-- Every reduction reports on the array's own unit — `min` / `max` exactly, `mean` / `median` / `percentile` / `stddev` rounded to the nearest tick, with `to_unit` first when you want a finer answer; `sum` / `variance` raise.
+- Every reduction reports on the array's own unit — `min` / `max` exactly, `mean` / `median` / `percentile` / `stddev` rounded to the nearest tick, with `to_unit` first for a finer answer; `sum` / `variance` raise.
 - The step system (`timesteps`, `floor` / `ceil` / `round`, `is_righttime`, `from_timesteps`) turns bucketing, calendar periods, fiscal years, weekly grids, grouping, and series matching into integer arithmetic — and raises loudly instead of being silently wrong.
 - `ticks` is the named escape to the raw integer storage; bare numbers are otherwise rejected at the time surface.

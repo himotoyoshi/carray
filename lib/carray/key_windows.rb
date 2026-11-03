@@ -76,7 +76,9 @@ class CAKeyWindowIterator < CAIterator
         raise ArgumentError, "windows: at: is a one-dimensional CArray of points"
       end
     end
-    @key      = on
+    # Taken as it is now, as the windows are: first_key, last_key and bounds
+    # read it later.
+    @key      = on.copy
     @n        = value.dim0
     # Taken as they are now, as the windows are: bounds reads them later.
     @points   = at&.copy
@@ -412,9 +414,13 @@ class CAKeyWindowIterator < CAIterator
     if sample.is_a?(Array)
       return sample.each_index.map { |k| lay_out(results.map { |r| r[k] }, sample[k], trail) }
     end
-    out = CArray.new(sample.data_type, [@nout, *trail], bytes: sample.bytes)
+    # A Face that holds no new value cannot be written cell by cell, so its
+    # values are held as the surface objects they are.
+    surface = sample.face? && !sample.__send__(:holds_new_values?)
+    shape = [@nout, *trail]
+    out = surface ? CArray.new(CA_OBJECT, shape) : sample.__send__(:blank_like, shape)
     flat = out.reshape(@nout, results.size)
-    results.each_with_index { |r, j| flat[nil, j] = r }
+    results.each_with_index { |r, j| flat[nil, j] = surface ? r.to_a : r }
     out
   end
 
@@ -548,7 +554,7 @@ class CAKeyWindowIterator < CAIterator
 
   def window_bound (width, op)
     key = @points || @key
-    return key if width.nil?
+    return key.copy if width.nil?
     if key.is_a?(CATime) || key.is_a?(CATimedelta)
       key = key.to_unit(CATimeUnitAlgebra.finer(key.unit, width.unit))
     end

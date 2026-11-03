@@ -311,13 +311,13 @@ ca_object_hook_release (VALUE varg)
 }
 
 static void
-ca_object_call_transient (VALUE recv, const char *mid,
+ca_object_call_transient (VALUE recv, ID mid,
                           int argc, const VALUE *argv,
                           int ntrans, const VALUE *trans)
 {
   ca_object_hook_t h;
   h.recv   = recv;
-  h.mid    = rb_intern(mid);
+  h.mid    = mid;
   h.argc   = argc;
   h.argv   = argv;
   h.ntrans = ntrans;
@@ -472,7 +472,7 @@ ca_objmask_get_cells (CAObjectMask *ca, ca_size_t n, ca_size_t *addrs,
       VALUE args[2];
       args[0] = raddrs;
       args[1] = rdata;
-      ca_object_call_transient(ca->array, "mask_copy_addrs", 2, args, 2, args);
+      ca_object_call_transient(ca->array, rb_intern("mask_copy_addrs"), 2, args, 2, args);
     }
     return;
   }
@@ -520,7 +520,7 @@ ca_objmask_put_cells (CAObjectMask *ca, ca_size_t n, ca_size_t *addrs,
       VALUE args[2];
       args[0] = raddrs;
       args[1] = rdata;
-      ca_object_call_transient(ca->array, "mask_sync_addrs", 2, args, 2, args);
+      ca_object_call_transient(ca->array, rb_intern("mask_sync_addrs"), 2, args, 2, args);
     }
     return;
   }
@@ -707,7 +707,7 @@ ca_objmask_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
         args[1] = rcounts;
         args[2] = rsteps;
         args[3] = rdata;
-        ca_object_call_transient(ca->array, rb_id2name(mid_block),
+        ca_object_call_transient(ca->array, mid_block,
                                  4, args, 1, args + 3);
       }
       return;
@@ -1320,7 +1320,7 @@ ca_object_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
       VALUE args[2];
       args[0] = raddrs;
       args[1] = rdata;
-      ca_object_call_transient(ca->self, rb_id2name(mid), 2, args, 2, args);
+      ca_object_call_transient(ca->self, mid, 2, args, 2, args);
     }
     return;
   }
@@ -1417,7 +1417,7 @@ ca_object_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
         args[1] = rcounts;
         args[2] = rsteps;
         args[3] = rdata;
-        ca_object_call_transient(ca->self, rb_id2name(mid_block),
+        ca_object_call_transient(ca->self, mid_block,
                                  4, args, 1, args + 3);
       }
       return;
@@ -1494,7 +1494,7 @@ ca_object_func_fill_addrs (void *ap, ca_size_t n, ca_size_t *addrs, void *ptr)
       VALUE args[2];
       args[0] = raddrs;
       args[1] = rval;
-      ca_object_call_transient(ca->self, rb_id2name(mid), 2, args, 1, args);
+      ca_object_call_transient(ca->self, mid, 2, args, 1, args);
     }
     return;
   }
@@ -1763,7 +1763,7 @@ rb_ca_object_initialize (int argc, VALUE *argv, VALUE self)
 
   ndim = RARRAY_LEN(rdim);
   for (i=0; i<ndim; i++) {
-    dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
+    dim[i] = ca_integer_arg(rb_ary_entry(rdim, i), "a dimension", NULL);
   }
 
   TypedData_Get_Struct(self, CAObject, &caobject_data_type, ca);

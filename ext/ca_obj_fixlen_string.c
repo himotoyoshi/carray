@@ -10,8 +10,9 @@
   fixlen bytes as a struct via the data_class encode/decode hooks); here
   the bytes are the string, fetched and stored by the native fixlen path.
 
-  The Face's only job is to carry the CAFixlenString class across the view
-  chain and to organise the String method surface onto a dedicated class.
+  The Face carries the CAFixlenString class and the encoding of the text
+  across the view chain, and organises the String method surface onto a
+  dedicated class.
   Because the storage is CA_FIXLEN (portable), the Face wrap can be carried
   across multi-parent constructions (CAStack / Marshal / MemoryView).
 
@@ -23,6 +24,7 @@
 #include "carray.h"
 #include "ca_obj_face.h"
 #include "carray_internal.h"
+#include <ruby/encoding.h>
 
 typedef struct {
   /* === CAView prefix === */
@@ -39,7 +41,8 @@ typedef struct {
   CArray    *parent;
   uint32_t   attach;
   uint8_t    nosync;
-  /* === Face tail === (none: CAFixlenString carries no per-instance state) */
+  /* === Face tail === */
+  int        encoding_id;      /* rb_enc_to_index() value of the cells' text */
 } CAFixlenString;
 
 static size_t
@@ -83,7 +86,7 @@ static VALUE rb_cCAFixlenString;
 /* ------------------------------------------------------------------- */
 
 int
-ca_fixlen_string_setup (CAFixlenString *ca, CArray *parent)
+ca_fixlen_string_setup (CAFixlenString *ca, CArray *parent, int encoding_id)
 {
   if ( parent->data_type != CA_FIXLEN ) {
     rb_raise(rb_eTypeError,
@@ -136,6 +139,7 @@ ca_fixlen_string_setup (CAFixlenString *ca, CArray *parent)
   ca->parent    = parent;
   ca->attach    = 0;
   ca->nosync    = 0;
+  ca->encoding_id = encoding_id;
 
 
   if ( ca_is_scalar(parent) ) {
@@ -150,12 +154,12 @@ ca_fixlen_string_setup (CAFixlenString *ca, CArray *parent)
 }
 
 CAFixlenString *
-ca_fixlen_string_new (CArray *parent)
+ca_fixlen_string_new (CArray *parent, int encoding_id)
 {
   CAFixlenString *ca;
-  ca_fixlen_string_setup(NULL, parent);
+  ca_fixlen_string_setup(NULL, parent, encoding_id);
   ca = (CAFixlenString *) ca_array_alloc(CA_OBJ_FIXLEN_STRING, parent->ndim);
-  ca_fixlen_string_setup(ca, parent);
+  ca_fixlen_string_setup(ca, parent, encoding_id);
   ca_fill_or_free((CArray *) ca, ca_view_inherit_mask, (VALUE) ca);
   return ca;
 }
@@ -182,7 +186,7 @@ static void *
 ca_fixlen_string_func_clone (void *ap)
 {
   CAFixlenString *ca = (CAFixlenString *) ap;
-  return ca_fixlen_string_new(ca->parent);
+  return ca_fixlen_string_new(ca->parent, ca->encoding_id);
 }
 
 static void
@@ -216,9 +220,10 @@ ca_operation_function_t ca_fixlen_string_func = {
 
 /* ------------------------------------------------------------------- */
 
-/* CAFixlenString.wrap(fixlen_array) — zero-copy Face wrap */
+/* CAFixlenString.wrap(fixlen_array, encoding: nil) — zero-copy Face wrap.
+   Without an encoding the cells are bytes that claim no text encoding. */
 VALUE
-rb_ca_fixlen_string_wrap (VALUE parent_val)
+rb_ca_fixlen_string_wrap (VALUE parent_val, int encoding_id)
 {
   volatile VALUE obj;
   CArray *parent;
@@ -227,17 +232,41 @@ rb_ca_fixlen_string_wrap (VALUE parent_val)
   rb_check_carray_object(parent_val);
   TypedData_Get_Struct(parent_val, CArray, &carray_data_type, parent);
 
-  ca  = ca_fixlen_string_new(parent);
+  ca  = ca_fixlen_string_new(parent, encoding_id);
   obj = ca_wrap_struct(ca);
   rb_ca_set_parent(obj, parent_val);
   return obj;
 }
 
 static VALUE
-rb_ca_fixlen_string_wrap_method (VALUE klass, VALUE raw)
+rb_ca_fixlen_string_wrap_method (int argc, VALUE *argv, VALUE klass)
 {
+  VALUE raw, ropt, renc = Qnil;
   (void) klass;
-  return rb_ca_fixlen_string_wrap(raw);
+  rb_scan_args(argc, argv, "1:", &raw, &ropt);
+  rb_scan_options(ropt, "encoding", &renc);
+  return rb_ca_fixlen_string_wrap(raw, NIL_P(renc) ? rb_ascii8bit_encindex()
+                                                   : rb_to_encoding_index(renc));
+}
+
+/* The encoding of the text in the cells; BINARY when the cells claim none. */
+static VALUE
+rb_ca_fixlen_string_encoding (VALUE self)
+{
+  CAFixlenString *ca;
+  TypedData_Get_Struct(self, CAFixlenString, &cafixlen_string_data_type, ca);
+  return rb_enc_from_encoding(rb_enc_from_index(ca->encoding_id));
+}
+
+/* Arrays of two text encodings cannot be read as one column; cells that
+   claim no encoding go with either. */
+static int
+ca_fixlen_string_state_compatible (CArray *a, CArray *b)
+{
+  int ea = ((CAFixlenString *) a)->encoding_id;
+  int eb = ((CAFixlenString *) b)->encoding_id;
+  int binary = rb_ascii8bit_encindex();
+  return ( ea == eb || ea == binary || eb == binary ) ? 1 : 0;
 }
 
 /* Per-cell scalar decode: strip trailing NUL padding from the raw K-byte
@@ -249,14 +278,15 @@ rb_ca_fixlen_string_wrap_method (VALUE klass, VALUE raw)
 static VALUE
 rb_ca_fixlen_string_storage_to_element (VALUE self, VALUE raw)
 {
-  (void) self;
   if ( TYPE(raw) == T_STRING ) {
+    CAFixlenString *ca;
     const char *p = RSTRING_PTR(raw);
     long n = RSTRING_LEN(raw);
     while ( n > 0 && p[n - 1] == '\0' ) {
       n--;
     }
-    return rb_str_new(p, n);
+    TypedData_Get_Struct(self, CAFixlenString, &cafixlen_string_data_type, ca);
+    return rb_enc_str_new(p, n, rb_enc_from_index(ca->encoding_id));
   }
   return raw;
 }
@@ -279,7 +309,7 @@ rb_ca_fixlen_string_initialize_copy (VALUE self, VALUE other)
   if ( ca_func[CA_OBJ_FIXLEN_STRING].pool_init ) {
     ca_array_pool_alloc(ca, CA_OBJ_FIXLEN_STRING, cs->parent->ndim);
   }
-  ca_fixlen_string_setup(ca, cs->parent);
+  ca_fixlen_string_setup(ca, cs->parent, cs->encoding_id);
   ca_view_inherit_mask((VALUE) ca);
   return self;
 }
@@ -304,7 +334,9 @@ Init_ca_obj_fixlen_string (void)
   rb_define_method(rb_cCAFixlenString, "initialize_copy",
                                        rb_ca_fixlen_string_initialize_copy, 1);
   rb_define_singleton_method(rb_cCAFixlenString, "wrap",
-                                       rb_ca_fixlen_string_wrap_method, 1);
+                                       rb_ca_fixlen_string_wrap_method, -1);
+  rb_define_method(rb_cCAFixlenString, "encoding",
+                                       rb_ca_fixlen_string_encoding, 0);
   rb_define_method(rb_cCAFixlenString, "storage_to_element",
                                        rb_ca_fixlen_string_storage_to_element, 1);
   ca_face_register_storage_to_element(CA_OBJ_FIXLEN_STRING,
@@ -314,6 +346,8 @@ Init_ca_obj_fixlen_string (void)
      or per-parent buffer), so the Face can be carried across multi-parent
      constructions like CAStack. */
   ca_face_register_state_portable(CA_OBJ_FIXLEN_STRING, 1);
+  ca_face_register_state_compatible(CA_OBJ_FIXLEN_STRING,
+                                    ca_fixlen_string_state_compatible);
 
   /* The bytes are the strings: a MemoryView consumer reads them as "Ns". */
   ca_face_register_memory_view(CA_OBJ_FIXLEN_STRING, 1);

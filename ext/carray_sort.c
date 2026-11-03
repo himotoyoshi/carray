@@ -621,7 +621,7 @@ axis2addr_body (void *user_data, void *ptr, ca_size_t n)
  * by rb_ca_take_along_axis_c / rb_ca_put_along_axis in
  * carray_order.c. */
 VALUE
-rb_ca_axis2addr_c (VALUE self, VALUE vindices, VALUE vaxis)
+rb_ca_axis2addr_c (VALUE self, volatile VALUE vindices, VALUE vaxis)
 {
   rb_check_carray_object(vindices);
 
@@ -958,6 +958,9 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
   CA_FOR_EACH_FIBER_INOUT(st_in, st_out, cat, cao, (int8_t) axis,
                           CA_KERNEL_NO_MASK, pi, po, n) {
     (void) fiber_n_for_check;
+    if ( n == 0 ) {             /* an empty array's one fiber has no buffer */
+      continue;
+    }
     memcpy(po, pi, (size_t) n * (size_t) bytes);
     if ( do_stable ) {
       switch ( cat->data_type ) {
@@ -970,12 +973,12 @@ rb_ca_sort_copy (int argc, VALUE *argv, VALUE self)
         case CA_INT64:   ca_sort_merge_i64((int64_t   *) po, (int64_t   *) aux, n); break;
         case CA_UINT64:  ca_sort_merge_u64((uint64_t  *) po, (uint64_t  *) aux, n); break;
         case CA_FLOAT32: {
-          ca_size_t fin = ca_partition_nan_f32((float32_t *) po, n);
+          ca_size_t fin = ca_partition_nan_stable_f32((float32_t *) po, n, (float32_t *) aux);
           ca_sort_merge_f32((float32_t *) po, (float32_t *) aux, fin);
           break;
         }
         case CA_FLOAT64: {
-          ca_size_t fin = ca_partition_nan_f64((double *) po, n);
+          ca_size_t fin = ca_partition_nan_stable_f64((double *) po, n, (double *) aux);
           ca_sort_merge_f64((double *) po, (double *) aux, fin);
           break;
         }

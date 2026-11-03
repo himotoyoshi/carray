@@ -2,10 +2,8 @@
  *
  *  ca_sweep_engine.h -- sweep (xfer_all) author surface engine, shared helper
  *
- *  Established in PROPOSAL_L0_AUTHOR_SURFACE L0.1 (2026-06-11).  Extracts
- *  the xfer_all-aware lifecycle template previously duplicated 7-times in
- *  ext/carray_call_cfunc.c (= one body per arity 1..7) into a single shared
- *  helper, also used by the chunked slab family (ca_call_cslab_*).
+ *  The xfer_all-aware lifecycle shared by ext/carray_call_cfunc.c (one body
+ *  per arity 1..7) and the chunked slab family (ca_call_cslab_*).
  *
  *  Lifecycle template:
  *    (1) per-operand acquire
@@ -14,7 +12,8 @@
  *          INPUT  (fsync=='0') non-alias  -> xmalloc + ca_xfer_all(GET)
  *    (2) operand pairing (scalar collapse; arrays must agree in shape)
  *    (3) mask OR across INPUT operands -> m0 (xmalloc, NULL if none)
- *    (4) mask propagate to OUTPUT operands (overwrite output->mask)
+ *    (4) mask propagate to OUTPUT operands (overwrite output->mask; cleared
+ *        when no INPUT is masked)
  *    (5) caller runs the per-cell loop using base[] + stride[]
  *    (6) per-operand release (reverse order):
  *          sync OUTPUTs, detach attached or xfree owned_buf, xfree m0
@@ -64,7 +63,7 @@ typedef struct ca_sweep_state {
   ca_size_t       n_kernel;
   const char     *src_label;
 
-  /* === chunked path fields (L0.1 chunk, PROPOSAL_L0_AUTHOR_SURFACE) === */
+  /* === chunked path fields === */
   /* Used by ca_sweep_acquire_chunked / ca_sweep_next_chunk / ca_sweep_release_chunked
    * (= the chunked slab family, ca_call_cslab_*).  Unused by the whole-materialise path
    * (ca_sweep_acquire / ca_sweep_release) — cfunc and other whole-buffer callers

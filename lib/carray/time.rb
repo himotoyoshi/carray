@@ -623,7 +623,56 @@ module CATimeOperandValues
     in_common_unit_with(lifted)
   end
 
+  # @overload pmax(other)
+  #   The later time, or the longer duration, of each cell and `other`, cell
+  #   by cell: `other` is an array of the same kind and shape, or one value
+  #   (for a time a {CATime::Element}, a `Time`, a `Date`, `"2024-01-02"`; for
+  #   a duration a {CATimedelta::Element}, `"3 days"`) for every cell.  The
+  #   two meet as a comparison does, so the result is in `self`'s unit when
+  #   `other` sits on its grid and in the finer unit the two share otherwise.
+  #   A masked cell on either side gives a masked cell.
+  #   @param other [CATime, CATimedelta, CATime::Element, CATimedelta::Element, Time, Date, String]
+  #   @return [CATime, CATimedelta]
+  #   @raise [TypeError] when `other` is not of this kind.
+  def pmax (other)
+    pick_by_order(other) { |a, b| a < b }
+  end
+
+  # @overload pmin(other)
+  #   The earlier time, or the shorter duration; see {#pmax}.
+  #   @param other [CATime, CATimedelta, CATime::Element, CATimedelta::Element, Time, Date, String]
+  #   @return [CATime, CATimedelta]
+  #   @raise [TypeError] when `other` is not of this kind.
+  def pmin (other)
+    pick_by_order(other) { |a, b| a > b }
+  end
+
+  # A time or a duration has no NaN, so maximum / minimum (which let a NaN
+  # win) are pmax / pmin, and fmax / fmin are their other names.
+  alias_method :maximum, :pmax
+  alias_method :minimum, :pmin
+  alias_method :fmax, :pmax
+  alias_method :fmin, :pmin
+
   private
+
+  # `other` where the block says self's cell loses to it, else self's cell.
+  def pick_by_order (other)
+    return copy.tap { |out| out[] = UNDEF } if UNDEF.equal?(other)
+    a, b = comparable_pair(other)
+    b = b[0] unless other.is_a?(CArray) || other.is_a?(Array)
+    yield(a, b).then_else(b, a)
+  end
+
+  # Both branches of a selection in the unit a comparison meets them in, so
+  # the finer unit wins whichever branch it is.
+  def branches_in_common (x, y)
+    other, base = y.is_a?(CArray) && !y.scalar? ? [x, y] : [y, x]
+    return [x, y] if other.nil? || UNDEF.equal?(other)
+    a, b = base.comparable_pair(other)
+    b = b[0] unless other.is_a?(CArray) && !other.scalar?
+    base.equal?(y) ? [b, a] : [a, b]
+  end
 
   # The operand as an array of this kind in its own unit: one value read as
   # it is written, an Array or an array of another kind read value by value
@@ -739,11 +788,17 @@ class CATime
     # @return [String]
     def to_s
       case unit.base
-      when :Y      then to_date.strftime("%Y")
-      when :M      then to_date.strftime("%Y-%m")
-      when :W, :D  then to_date.strftime("%Y-%m-%d")
-      else              to_time.iso8601(fractional_second_digits)  # :h .. :as (time shown)
+      when :Y      then signed_past_four_digits(to_date.strftime("%Y"))
+      when :M      then signed_past_four_digits(to_date.strftime("%Y-%m"))
+      when :W, :D  then signed_past_four_digits(to_date.strftime("%Y-%m-%d"))
+      else              signed_past_four_digits(to_time.iso8601(fractional_second_digits))  # :h .. :as (time shown)
       end
+    end
+
+    # A year past four digits carries its sign, which is what tells it from a
+    # date written without separators when the text is read back.
+    private def signed_past_four_digits (text)
+      text.start_with?("-") || to_date.year < 10000 ? text : "+#{text}"
     end
 
     # @return [String] the instant plus its storage unit.
@@ -810,7 +865,7 @@ class CATime
     #   @raise [TypeError, ArgumentError] on a non-timedelta operand, or a
     #     pair that has no answer on self's grid.
     def +(td)
-      shifted_by_duration(td, 1)
+      shifted_by_duration(one_step_of(td), 1)
     end
 
     # @overload -(other)
@@ -831,6 +886,10 @@ class CATime
         shifted_by_duration(other, -1)
       when CATime
         -(other - self)
+      when String, Time, Date
+        step = other.is_a?(String) ? one_step_of(other) : other
+        return shifted_by_duration(step, -1) unless step.equal?(other)
+        (CATime.wrap(CA_INT64([value]), unit: unit) - other)[0]
       else
         raise TypeError, "CATime::Element - #{other.class} is not allowed"
       end
@@ -851,6 +910,18 @@ class CATime
     # the duration is converted into it (truncated toward zero when finer; a
     # month or year duration on a fixed grid moves the date by months).
     # Mirrors the array CATime +/-.
+    # A String naming a duration ("3 days") as one step of it; anything else
+    # as it is.
+    def one_step_of(x)
+      return x unless x.is_a?(String)
+      res = begin
+              CATime::Resolution.parse(x)
+            rescue ArgumentError
+              return x
+            end
+      CATimedelta::Element.new(1, res)
+    end
+
     def shifted_by_duration(td, sign)
       # An array of durations gives an array of instants, anchored here.
       return sign > 0 ? td + self : (-td) + self if td.is_a?(CATimedelta)
@@ -1004,6 +1075,20 @@ class CATimedelta
     #   @param other [CATimedelta::Element]
     #   @return [CATimedelta::Element]
     def -(other) = combined_with_duration(other, -1)
+
+    # @return [CATimedelta::Element] this duration with its sign reversed.
+    def -@ = Element.new(-value, unit)
+
+    # @return [CATimedelta::Element] the magnitude of this duration.
+    def abs = Element.new(value.abs, unit)
+
+    # @overload coerce(number)
+    #   Lets a duration stand on the right of a number, so `2 * d` is `d * 2`.
+    #   @param number [Numeric]
+    #   @return [Array]
+    def coerce (number)
+      [LeftFactor.new(number), self]
+    end
 
     # @overload *(n)
     #   Returns this duration scaled by an Integer.
@@ -1203,6 +1288,13 @@ class CATime
     end
   end
 
+  # The word form of {#+}.
+  # @return [CATime]
+  alias_method :add, :+
+  # The word form of {#-}.
+  # @return [CATime, CATimedelta]
+  alias_method :sub, :-
+
   # Whether a duration moves this time by calendar months: a month or year
   # duration on a time whose grid is fixed-length.  A time on a month or year
   # grid adds it as months already, and a fixed duration on a calendar grid
@@ -1218,44 +1310,6 @@ class CATime
     months = td.parent.int64 * (sign * CATimeUnitAlgebra.months_per_tick(td.unit))
     months = months[0] if td.scalar?
     CATimeUnitAlgebra.shift_months(face_storage, unit, months).time(unit: unit)
-  end
-
-  # @overload pmax(other)
-  #   The later of each cell and `other`, cell by cell: `other` is a time
-  #   array of the same shape, or one time (a {CATime::Element}, a `Time`, a
-  #   `Date`, `"2024-01-02"`) for every cell.  The two meet as a comparison
-  #   does, so the result is in `self`'s unit when `other` sits on its grid
-  #   and in the finer unit the two share otherwise.  A masked cell on either
-  #   side gives a masked cell.
-  #   @param other [CATime, CATime::Element, Time, Date, String]
-  #   @return [CATime]
-  #   @raise [TypeError] when `other` is not a time.
-  def pmax (other)
-    pick_by_order(other) { |a, b| a < b }
-  end
-
-  # @overload pmin(other)
-  #   The earlier of each cell and `other`; see {#pmax}.
-  #   @param other [CATime, CATime::Element, Time, Date, String]
-  #   @return [CATime]
-  #   @raise [TypeError] when `other` is not a time.
-  def pmin (other)
-    pick_by_order(other) { |a, b| a > b }
-  end
-
-  # A time has no NaN, so maximum / minimum (which let a NaN win) are pmax /
-  # pmin, and fmax / fmin are their other names.
-  alias_method :maximum, :pmax
-  alias_method :minimum, :pmin
-  alias_method :fmax, :pmax
-  alias_method :fmin, :pmin
-
-  # `other` where the block says self's cell loses to it, else self's cell.
-  private def pick_by_order (other)
-    return copy.tap { |out| out[] = UNDEF } if UNDEF.equal?(other)
-    a, b = comparable_pair(other)
-    b = b[0] unless other.is_a?(CArray) || other.is_a?(Array)
-    yield(a, b).then_else(b, a)
   end
 
   # Element-wise comparison (< <= > >= <=>) rides the core comparison Face
@@ -1928,6 +1982,7 @@ class CATimedelta
   #   @raise [TypeError] on incompatible operands.
   def /(other)
     given, other = other, CATimeUnitAlgebra.operand(other)
+    other = CATimeUnitAlgebra.scalar_operand(other, unit) || other
     case other
     when Integer
       CATimeUnitAlgebra.trunc_divide(face_storage, other).timedelta(unit: unit)
@@ -1941,6 +1996,68 @@ class CATimedelta
     else raise TypeError, "CATimedelta / #{given.class} is not allowed"
     end
   end
+
+  # A number on the left of a duration: only `n * duration` has an answer.
+  class LeftFactor
+    def initialize (factor)
+      @factor = factor
+    end
+
+    def * (duration) = duration * @factor
+
+    def method_missing (op, duration, *)
+      raise TypeError, "#{@factor.class} #{op} #{duration.class} is not allowed"
+    end
+
+    def respond_to_missing? (*) = true
+  end
+  private_constant :LeftFactor
+
+  # @overload coerce(number)
+  #   Lets a duration stand on the right of a number, so `2 * td` is `td * 2`.
+  #   @param number [Numeric]
+  #   @return [Array]
+  def coerce (number)
+    number.is_a?(Numeric) ? [LeftFactor.new(number), self] : super
+  end
+
+  # @overload to_seconds
+  #   Each duration in seconds, exactly, as {Element#to_seconds} answers.
+  #   @return [CArray] an object array of Rational.
+  #   @raise [ArgumentError] for a :Y / :M unit, which has no exact seconds.
+  def to_seconds
+    unless CATimeUnitAlgebra::FIXED.key?(unit.base)
+      raise ArgumentError,
+            "CATimedelta #{unit} has no exact seconds (a :#{unit.base} is " \
+            "calendar-variable); use to_seconds_approx for an estimate"
+    end
+    ratio = unit.tick_ratio
+    face_storage.convert(:object) { |v| Rational(v) * ratio }
+  end
+
+  # @overload to_seconds_approx
+  #   Each duration in seconds by nominal lengths, as
+  #   {Element#to_seconds_approx} answers.
+  #   @return [CArray] float64.
+  def to_seconds_approx
+    face_storage.to_type(:float64) * (unit.count * (Element::UNIT_TO_SECONDS[unit.base] || 1))
+  end
+
+  # The word form of {#+}.
+  # @return [CATimedelta, CATime]
+  alias_method :add, :+
+  # The word form of {#-}.
+  # @return [CATimedelta]
+  alias_method :sub, :-
+  # The word form of {#*}.
+  # @return [CATimedelta]
+  alias_method :mul, :*
+  # The word form of {#/}.
+  # @return [CATimedelta, CArray]
+  alias_method :div, :/
+  # The word form of {#-@}.
+  # @return [CATimedelta]
+  alias_method :neg, :-@
 
   # Element-wise comparison (< <= > >= <=>) rides the core comparison Face
   # gate (ca_face_reconcile_comparison): the inherited CArray operators
@@ -2138,8 +2255,12 @@ class CATimedelta
 
   # One duration as a length-1 duration array in its own unit, or nil.
   private def lift_value (operand)
-    if operand.is_a?(CATimedelta::Element)
+    case operand
+    when CATimedelta::Element
       CATimedelta.wrap(CA_INT64([operand.value]), unit: operand.unit)
+    when String
+      res = CATime::Resolution.parse(operand)
+      CATimedelta.wrap(CA_INT64([res.count]), unit: res.base)
     end
   end
 
@@ -2152,6 +2273,8 @@ class CATimedelta
     when CATimedelta::Element
       lifted = CATimedelta.wrap(CA_INT64([operand.value]), unit: operand.unit)
       to_comparable(lifted)
+    when String
+      to_comparable(lift_value(operand))
     when Array, CArray
       # Durations written one by one, or an array that is not a duration
       # array (an object column of elements), read value by value.
@@ -2169,7 +2292,8 @@ class CATimedelta
   #   scalar store round-trips with a fetch.  A {Element} is reconciled to
   #   self's unit via {#to_comparable} (lossless discipline; a `Time` /
   #   `DateTime` is an absolute instant, not a duration, so it raises there).
-  #   A bare Integer (the `.parent` raw-storage escape) and a String pass
+  #   A String that names a duration (`"3 days"`) is read as one.  A bare
+  #   Integer (the `.parent` raw-storage escape) and any other String pass
   #   through unchanged.
   #   @param surface [Element, Integer, String]
   #   @return [Integer, Object] the storage-domain value, or `surface`
@@ -2177,8 +2301,15 @@ class CATimedelta
   #   @raise [TypeError, ArgumentError] on an unreconcilable surface / unit.
   def element_to_storage (surface)
     case surface
-    when Integer, String
+    when Integer
       surface
+    when String
+      begin
+        to_comparable(surface).parent[0]
+      rescue ArgumentError => e
+        raise unless e.message.start_with?("invalid unit spec")
+        surface
+      end
     else
       to_comparable(surface).parent[0]
     end
@@ -2266,11 +2397,24 @@ module CATimeLiteral
       sec: t.sec, sec_fraction: frac.zero? ? nil : Rational(frac), leftover: h[:leftover] }.compact
   end
 
+  # Date._parse drops the sign of a year on its own or before a month, a day
+  # of the year or a week, and reads a year below 100 as this century's, so
+  # those are read here.
+  def year_first_fields(spec)
+    case spec
+    when /\A([-+]\d{4,})\z/                then { year: $1.to_i }
+    when /\A([-+]\d{4,})-(\d{1,2})\z/       then { year: $1.to_i, mon: $2.to_i }
+    when /\A([-+]?\d{4,})-(\d{3})\z/        then { year: $1.to_i, yday: $2.to_i }
+    when /\A([-+]?\d{4,})-W(\d{2})-(\d)\z/  then { cwyear: $1.to_i, cweek: $2.to_i, cwday: $3.to_i }
+    end
+  end
+
   def parse_date_fields(spec, format)
     h =
       if format                             then epoch_fields(Date._strptime(spec, format))
       elsif spec =~ /\A(\d{4})-(\d{1,2})\z/ then { year: $1.to_i, mon: $2.to_i }
       elsif spec =~ /\A(\d{4})\z/           then { year: $1.to_i }
+      elsif (year_first = year_first_fields(spec)) then year_first
       elsif (hour = hour_only_fields(spec)) then hour
       else                                       Date._parse(spec)
       end

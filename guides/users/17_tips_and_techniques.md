@@ -1,6 +1,6 @@
 # Tips and techniques
 
-A cookbook of short idioms that come up often. Each one stands on its own; pick the ones you need. Cross-links point to the chapter that explains the underlying mechanism in full.
+A cookbook of short idioms that come up often. Each one stands on its own. Cross-links point to the chapter that explains the underlying mechanism in full.
 
 All examples assume `require "carray"`.
 
@@ -49,7 +49,7 @@ b - b.mean(axis: 0, keep_axis: true)
 
 ### Mark the largest element of each row
 
-A per-row reduction compared back against the row it came from.
+A reduction of each row, compared back against the row.
 
 ```ruby
 b = CA_DOUBLE([[1, 2, 3],
@@ -60,7 +60,7 @@ b.eq(b.max(axis: 1, keep_axis: true))
 #       [ 0, 0, 1 ] ]
 ```
 
-### Per-row z-score with broadcasting
+### Z-score of each row with broadcasting
 
 Subtract the row mean and divide by the row standard deviation. `keep_axis: true` on both reductions keeps the broadcast clean.
 
@@ -113,7 +113,7 @@ All three return a view, so writing through it updates `a`. See [Views](06_views
 
 ### Inserting axes programmatically with `insert_axis`
 
-When you write the index at the call site, the `:_` sigil is the natural way to add an axis. `insert_axis` is for the other case — library code that builds the axis list from data, where the positions and sizes are only known at run time.
+When the index is written at the call site, the `:_` sigil is the natural way to add an axis. `insert_axis` is for the other case — library code that builds the axis list from data, where the positions and sizes are only known at run time.
 
 Each position names the existing axis the new axis goes *before* (`ndim` appends at the end; negatives count from the end). Positions are in the source frame, so they do not shift as other axes are inserted, and the same position twice stacks two axes there. By default it inserts size-1 axes:
 
@@ -132,18 +132,18 @@ The `repeat:` keyword sizes the inserted axes. It mirrors the two ways an axis c
 # repeat: N (> 1) — a read-only view that repeats the data N times
 a.insert_axis(1, repeat: 4)        #  => shape (5, 4, 3), each slice == a
 
-# repeat: 1 (or omitted) — a size-1 axis, stretched when you assign into it
+# repeat: 1 (or omitted) — a size-1 axis, stretched on assignment
 row = CArray.int32(3, 4).seq
 t   = CArray.int32(5, 3, 4)
 t[] = row.insert_axis(0)               # row copied into every slab
 
-# per-position array, one value per position
+# an array with one value for each position
 a.insert_axis(0, 1, repeat: [2, 3])    #  => shape (2, 5, 3, 3)
 ```
 
 A scalar `repeat:` applies to every inserted axis; an array gives one value per position, so `insert_axis(0, 1, repeat: [1, 3])` leaves the axis before axis 0 at length 1 and repeats the one before axis 1 three times.
 
-This is the same machinery as the `:_` indexer (see [Indexing and slicing](02_indexing_and_slicing.md) for how a size-1 axis stretches on a store); `insert_axis` just lets you drive it from a computed list.
+This is the same machinery as the `:_` indexer (see [Indexing and slicing](02_indexing_and_slicing.md) for how a size-1 axis stretches on a store); `insert_axis` drives it from a computed list.
 
 ## Building arrays
 
@@ -180,7 +180,7 @@ CArray.int32(4, 4) { |i, j| (i + j) % 2 }        #  chess-board
 
 ### A vector of consecutive denominators with `seq`
 
-Sometimes you want `[1, 2, 3, …, N]` as a float array — typically as the denominator of a running mean. `seq(1)` does that in one call.
+Sometimes `[1, 2, 3, …, N]` is needed as a float array — typically as the denominator of a running mean. `seq(1)` does that in one call.
 
 ```ruby
 N = 5
@@ -216,7 +216,7 @@ Note: not every cast is allowed (`float64 → boolean` raises). Cast through an 
 
 ### Position of the smallest or largest element
 
-`min_index` and `max_index` give the *position*, not the value. With `axis:` you get one position per slice. Combine with `keep_axis: true` if you want the result shaped to broadcast back.
+`min_index` and `max_index` give the *position*, not the value. With `axis:`, the result has one position per slice. Add `keep_axis: true` to give the result a shape that broadcasts back.
 
 ```ruby
 m = CA_INT([[3, 1, 4],
@@ -244,7 +244,7 @@ v[top3]                       #  => [ 5, 6, 9 ]    the corresponding values
 
 ### Counting matches: `(a > 5).count(true)`
 
-A comparison gives a boolean array; `count(true)` tells you how many cells satisfy it.
+A comparison gives a boolean array; `count(true)` returns the number of cells that satisfy it.
 
 ```ruby
 a = CA_INT([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
@@ -253,7 +253,7 @@ a = CA_INT([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
 a.gt(5).count(true)     #  => 5      same thing
 ```
 
-For per-row counts, use `axis:`:
+To count in each row, use `axis:`:
 
 ```ruby
 m = CA_INT([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
@@ -313,7 +313,7 @@ labels.bincount               #  => [ 2, 3, 1 ]    label 0 appears 2 times, 1 ap
 labels.bincount(length: 5)    #  => [ 2, 3, 1, 0, 0 ]    pad with zeros
 ```
 
-The result's data type is `uint32` (or `uint64` if the result is huge). Convert with `.int64` or `.float64` if you need signed or floating-point arithmetic downstream.
+The result's data type is `uint32` (or `uint64` if the result is huge). Convert with `.int64` or `.float64` for signed or floating-point arithmetic.
 
 ### Weighted bincount — sum per group
 
@@ -396,7 +396,7 @@ See [Masks and missing values](05_masks.md).
 
 ### Replace missing with a default via `strip_mask`
 
-`strip_mask(default)` returns a copy with the mask removed and the missing cells filled with the value you supply.
+`strip_mask(default)` returns a copy with the mask removed and the missing cells filled with the given value.
 
 ```ruby
 a = CArray.float64(2, 3).seq
@@ -413,7 +413,7 @@ a.strip_mask(0)
 
 ### Fold several possibly-missing scalars
 
-A reduction that had nothing to work on answers `UNDEF`, and `UNDEF` is truthy, so an `if` will not catch it. For one call, ask for a fallback there: `a.mean(fill_value: 0.0)`. When you have to combine several such answers in Ruby code, `CArray.guard_undef` short-circuits: it yields the values to the block only when none of them is `UNDEF`, and otherwise returns its `fill_value:` (`UNDEF` by default).
+A reduction that had nothing to work on answers `UNDEF`, and `UNDEF` is truthy, so an `if` will not catch it. For one call, ask for a fallback there: `a.mean(fill_value: 0.0)`. To combine several such answers in Ruby code, `CArray.guard_undef` short-circuits: it yields the values to the block only when none of them is `UNDEF`, and otherwise returns its `fill_value:` (`UNDEF` by default).
 
 ```ruby
 a = CArray.float64(4).seq!
@@ -515,7 +515,7 @@ result.class            #  => CArray
 result.entity?          #  => true
 ```
 
-This is the canonical way to express a multi-step view transform that you actually want to keep: build the chain, then `.copy`. See [Views](06_views.md) and [Composition](10_composition.md).
+This is the canonical way to express a multi-step view transform that must be kept: build the chain, then `.copy`. See [Views](06_views.md) and [Composition](10_composition.md).
 
 ## Anti-patterns
 
@@ -535,11 +535,11 @@ a
 #       [   3, 4, 5 ] ]    a was modified!
 ```
 
-Use `copy` when you want an independent array. See [Views](06_views.md).
+Use `copy` to get an independent array. See [Views](06_views.md).
 
 ### Don't use `to_ca` to materialise a view
 
-`to_ca` means "give me this as a CArray". A view is already a CArray, so it is returned **unchanged**. It does not allocate, and it does not give you a writable buffer that is separate from the source.
+`to_ca` means "give me this as a CArray". A view is already a CArray, so it is returned **unchanged**. It does not allocate, and it does not return a writable buffer that is separate from the source.
 
 ```ruby
 a = CArray.int32(2, 3).seq
@@ -549,25 +549,25 @@ v.to_ca.equal?(v)    #  => true     same object — no copy
 v.copy.equal?(v)     #  => false    fresh, independent array
 ```
 
-If you intend to modify the result, or you need a contiguous, owned buffer, use `copy`. See [Views](06_views.md) and [Creating arrays](01_creating_arrays.md).
+To modify the result, or to get a contiguous, owned buffer, use `copy`. See [Views](06_views.md) and [Creating arrays](01_creating_arrays.md).
 
-### Don't stash the slab object across iterations
+### Copy a slab to use it after the block ends
 
-The 1-D CArray that `each_slab` hands to the block is **reused** on every iteration — same object, different data. If you save it into a container that outlives the block, every entry ends up pointing at the same object, showing the last iteration's data.
+The slab that `each_slab` passes to the block is **reused** on every iteration: the object stays the same and its data changes. If the slab is saved into a container that outlives the block, every entry points at the same object and shows the data of the last iteration.
 
 ```ruby
 m = CArray.int32(2, 3).seq
 
 #  WRONG — every entry aliases the same slab object
 refs = []
-m.each_slab(axis: 1) { |row| refs << row }
+m.each_slab(axis: 1) { |slab| refs << slab }
 
 #  RIGHT — take a snapshot
-rows = []
-m.each_slab(axis: 1) { |row| rows << row.copy }
+slabs = []
+m.each_slab(axis: 1) { |slab| slabs << slab.copy }
 ```
 
-See [Per-slab iteration](11_slab_iteration.md).
+See [Slab iteration](11_slab_iteration.md).
 
 ## Where to go next
 
@@ -578,9 +578,9 @@ Each tip above points to the chapter that explains the mechanism in full:
 * [Element-wise operations](03_elementwise.md) — operators, math functions, predicates like `is_invalid`.
 * [Reduction and statistics](04_reduction_and_statistics.md) — `axis:`, `keep_axis:`, and the position / counting reductions.
 * [Masks and missing values](05_masks.md) — `UNDEF`, `mask_invalid`, `strip_mask`, and how reductions skip masked cells.
-* [Views](06_views.md) — why `sort`, `reverse`, and slices are views, and why `dup` does not give you a copy.
+* [Views](06_views.md) — why `sort`, `reverse`, and slices are views, and why `dup` does not make a copy.
 * [Broadcasting](07_broadcasting.md) — the size-1 axis rule, `:_`, and the outer-product idiom.
 * [Composition](10_composition.md) — chaining view operations.
-* [Per-slab iteration](11_slab_iteration.md) — `each_slab`, `map_slab`, `reduce_slab`, and the slab-reuse rule.
+* [Slab iteration](11_slab_iteration.md) — `each_slab`, `map_slab`, `reduce_slab`, and the slab-reuse rule.
 * [Indexer reference](16_indexer_reference.md) — the predicate-key forms such as `a[:gt, 5] = 0` and `a[:is_invalid] = 0`.
 * [Sort, search, and interpolation](18_sort_search_interpolation.md) — the full treatment of `sort_index`, `bsearch`, `linear_section`, `locate_addr`, and more.

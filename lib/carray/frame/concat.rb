@@ -52,10 +52,13 @@ class CAFrame
     index_pieces(frames, verb: "meld")
     check_trailing_shapes(frames, names, verb: "meld")
     frames = frames_with_rows(frames)
+    if first.index
+      check_same_column_type(frames.map(&:index), first.axis_name, verb: "meld")
+    end
     cols = {}
     names.each do |name|
       check_same_column_type(frames.map { |f| f[name] }, name, verb: "meld")
-      cols[name] = CArray.meld(frames.map { |f| f[name] }, axis: 0)
+      cols[name] = welding_column(name, "meld") { CArray.meld(frames.map { |f| f[name] }, axis: 0) }
     end
     new(cols, axis_name: first.axis_name, index: meld_index(frames))
   end
@@ -85,7 +88,9 @@ class CAFrame
     frames = frames_with_rows(frames)
     cols = {}
     names.each do |name|
-      cols[name] = CArray.concatenate(frames.map { |f| f[name] })
+      pieces = face_pieces_in_one_state(frames.map { |f| f[name] })
+      refuse_rounded_pieces(pieces, "concatenate", "column #{name.inspect}")
+      cols[name] = welding_column(name, "concatenate") { CArray.concatenate(pieces) }
     end
     new(cols, axis_name: first.axis_name, index: concatenate_index(frames))
   end
@@ -135,7 +140,8 @@ class CAFrame
               "stack: axis #{axis} out of range for column #{name.inspect} " \
               "(a #{parts.first.ndim}-D column takes 1 to #{parts.first.ndim})"
       end
-      cols[name] = CArray.stack(parts, axis: axis)
+      refuse_rounded_pieces(parts, "stack", "column #{name.inspect}")
+      cols[name] = welding_column(name, "stack") { CArray.stack(parts, axis: axis) }
     end
     new(cols, axis_name: first.axis_name, index: first.index)
   end
@@ -193,6 +199,43 @@ class CAFrame
   private_class_method :check_layer_axis
 
   # ---- shared validators -------------------------------------------------
+
+  # Pieces of one Face in different states brought to one, as an outer join
+  # brings its two keys: times and durations to a common unit, categoricals
+  # to the labels of all, the first piece's first.
+  def self.face_pieces_in_one_state(pieces)
+    first = pieces.first
+    return pieces unless first.face? && pieces.all? { |p| p.class == first.class }
+    # names-check: units, not names
+    if first.respond_to?(:in_common_unit_with) && pieces.map(&:unit).uniq.size > 1
+      common = pieces.drop(1).reduce(first) { |acc, p| acc.in_common_unit_with(p).first }
+      return pieces.map { |p| p.unit == common.unit ? p : p.to_unit(common.unit) }
+    end
+    # names-check: label lists, not names
+    if first.is_a?(CACategorical) && pieces.map(&:labels).uniq.size > 1
+      labels = pieces.map(&:labels).reduce(:|)
+      return pieces.map { |p| CArray.object(*p.shape) { p.to_a }.categorize(labels: labels) }
+    end
+    pieces
+  end
+  private_class_method :face_pieces_in_one_state
+
+  # Pieces brought to a float: a value it rounds would be another value.
+  def self.refuse_rounded_pieces(pieces, verb, what)
+    return if pieces.size < 2 || pieces.any?(&:face?) || pieces.any? { |c| c.data_type == CA_FIXLEN }
+    refuse_rounded_integers(pieces, CArray.result_type(*pieces), verb, what)
+  end
+  private_class_method :refuse_rounded_pieces
+
+  # A refusal of the pieces reads as the verb the frames were given to, with
+  # the column it came from.
+  def self.welding_column(name, verb)
+    yield
+  rescue ArgumentError, CArray::DataTypeError => e
+    raise unless e.message.start_with?("#{verb}: ", "can't promote", "CAStack parents")
+    raise e.class, "#{verb}: column #{name.inspect}: #{e.message.delete_prefix("#{verb}: ")}"
+  end
+  private_class_method :welding_column
 
   def self.check_concat_inputs(frames, verb:)
     raise ArgumentError, "#{verb} requires at least one frame" if frames.empty?
@@ -267,8 +310,7 @@ class CAFrame
   def self.meld_index(frames)
     indexes, axis = index_pieces(frames, verb: "meld")
     return nil unless indexes
-    axis   # unused; kept for symmetry
-    CArray.meld(indexes, axis: 0)
+    welding_column(axis, "meld") { CArray.meld(indexes, axis: 0) }
   end
   private_class_method :meld_index
 
@@ -276,7 +318,9 @@ class CAFrame
   def self.concatenate_index(frames)
     indexes, _axis = index_pieces(frames, verb: "concatenate")
     return nil unless indexes
-    CArray.concatenate(indexes)
+    indexes = face_pieces_in_one_state(indexes)
+    refuse_rounded_pieces(indexes, "concatenate", "the index")
+    welding_column(frames.first.axis_name, "concatenate") { CArray.concatenate(indexes) }
   end
   private_class_method :concatenate_index
 

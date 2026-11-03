@@ -2,25 +2,25 @@
 
 CArray's numeric types all store one value per element in a fixed number of bytes. This chapter covers the corner of the library that reads *the bytes* themselves as something structured — a short label, a variable-length UTF-8 string, or a fixed-width record with named fields.
 
-Four representations of text arrays and one representation of struct arrays share the same shape / mask / view algebra as the numeric types; from your seat, choosing between them is a **storage trade-off**, not a different API. The uniform surface is worth stating up front:
+Four representations of text arrays and one representation of struct arrays share the same shape / mask / view algebra as the numeric types; choosing between them is a **storage trade-off**, not a different API. The uniform surface is worth stating up front:
 
 | type              | storage                                    | mutable | portable¹ | when to use                              |
 |-------------------|--------------------------------------------|---------|-----------|-------------------------------------------|
 | **`CAString`**    | one Ruby `String` per cell (`CA_OBJECT`)   | yes     | no        | general-purpose, arbitrary length / encoding |
 | **`CAFixlenString`** | K bytes per cell (`CA_FIXLEN`)          | yes     | **yes**   | bounded-width columns; interchange / on-disk / stacking |
-| **`CAConstString`** | int64 `(start, end)` pairs + one shared buffer | **no** | no    | large read-mostly label / key columns you sort, group, join on |
+| **`CAConstString`** | int64 `(start, end)` pairs + one shared buffer | **no** | no    | large read-mostly label / key columns that are sorted, grouped, or joined |
 | raw `CA_FIXLEN`   | K bytes per cell, no string interpretation | yes     | yes       | actual byte blobs (record bodies, binary payloads) — not "strings" |
 | **`CARecord`**    | K-byte record per cell (`CA_FIXLEN`) plus a struct schema | yes | **yes** | array of structs (named fields) |
 
-¹ *portable* means the type survives multi-parent constructions (`CArray.stack`, `Marshal`, MemoryView export as one block). Only fixed-width bytes are self-contained; a shared string buffer and a Ruby object payload are per-process.
+¹ *portable* means the type survives multi-parent constructions (`CArray.stack`, `Marshal`, MemoryView export as one block). Only fixed-width bytes are self-contained; a shared string buffer and a Ruby object payload belong to one process.
 
-The three string Faces are just different *readings* of underlying storage; you can convert freely between them. `CARecord` is the same idea one level up: it reads K bytes as a struct with named fields instead of as a string.
+The three string Faces are just different *readings* of underlying storage; they convert freely to each other. `CARecord` is the same idea one level up: it reads K bytes as a struct with named fields instead of as a string.
 
-## Which string type to reach for
+## Choosing a string type
 
-- **Just working with strings?** `CAString`. Ruby `String`s directly, any length, any encoding, fully mutable.
-- **Fixed-width column** (a database `CHAR(K)`, a fixed record field, a column you want to `Marshal` / stack / export zero-copy)? `CAFixlenString`.
-- **Big, read-mostly labels or keys** you sort / group / join on? `CAConstString` — one shared byte buffer plus `(start, end)` ranges, so slicing / gathering / sorting only rearranges the ranges.
+- **General string work?** `CAString`. Ruby `String`s directly, any length, any encoding, fully mutable.
+- **Fixed-width column** (a database `CHAR(K)`, a fixed record field, a column to `Marshal`, stack, or export without copying)? `CAFixlenString`.
+- **Big, read-mostly labels or keys** that are sorted, grouped, or joined? `CAConstString` — one shared byte buffer plus `(start, end)` ranges, so slicing / gathering / sorting only rearranges the ranges.
 - **A few distinct labels repeated many times** (a *category*)? Use the categorical type (see [Categories and grouping](24_categories_and_grouping.md)) — it stores each distinct value once plus a small code per element.
 - **Actual byte blobs**, not strings? Raw `CA_FIXLEN`.
 
@@ -46,19 +46,19 @@ CArray.new(CA_FIXLEN, [n], bytes: 3)            #  raw K-byte blobs (not a Face)
 Two shared conventions to know about:
 
 - **`nil` is a masked element; `""` is a valid empty string.** They are distinct: `nil` fetches as `UNDEF`, `""` is a real zero-length string.
-- **A block of arity 0 is evaluated once and broadcast** — the same fill shortcut as `CArray.float64(n) { 1.0 }`. Use `{ |i| ... }` for per-element values.
+- **A block of arity 0 is evaluated once and broadcast** — the same fill shortcut as `CArray.float64(n) { 1.0 }`. Use `{ |i| ... }` to compute a value for each element.
 
 Type-specific:
 
 - **`string`** — every cell of a `CAString` is a Ruby `String`. A value that is neither a String nor `nil` (a Symbol, a number, a nested Array) raises `TypeError`. The Array form makes a 1-D array; for more dimensions, build an object array first and pass it in: `CArray.string(CA_OBJECT([["a", "b"], ["c", "d"]]))`.
-- **`fixlen_string`** — `bytes:` is the slot width (default: the widest input). A value longer than the slot at construction time is governed by `truncate:`: `:error` (default) raises, `:silent` keeps the leading `bytes` bytes. Once the array exists, a per-cell `fix[i] = long` always truncates silently — the fixed-width store has no length check.
-- **`const_string`** — element encoding must match `:encoding` (default UTF-8); pure-ASCII passes regardless. Every element's bytes are stored once in logical order, with no offset-sharing dedup, so for a high-duplication column reach for `CACategorical` instead.
+- **`fixlen_string`** — `bytes:` is the slot width (default: the widest input). A value longer than the slot at construction time is governed by `truncate:`: `:error` (default) raises, `:silent` keeps the leading `bytes` bytes. Once the array exists, a store to one cell, `fix[i] = long`, always truncates silently — the fixed-width store has no length check.
+- **`const_string`** — element encoding must match `:encoding` (default UTF-8); pure-ASCII passes regardless. Every element's bytes are stored once in logical order, with no offset-sharing dedup, so for a high-duplication column use `CACategorical` instead.
 
 ## Fetch, encoding, and padding
 
 ```ruby
 CArray.string(["a"])[0]                      #  => "a"    (the stored Ruby String, its own encoding)
-CArray.fixlen_string(["a"], bytes: 3)[0]     #  => "a"    (trailing NUL stripped; ASCII-8BIT)
+CArray.fixlen_string(["a"], bytes: 3)[0]     #  => "a"    (trailing NUL stripped; UTF-8, the array's encoding)
 CArray.const_string(["a"])[0]                #  => "a"    (frozen, in the column encoding)
 CArray.new(CA_FIXLEN, [1], bytes: 3)
      .tap { |r| r[0] = "a" }[0]              #  => "a\x00\x00"   (raw bytes; no Face)
@@ -66,7 +66,7 @@ CArray.new(CA_FIXLEN, [1], bytes: 3)
 
 The important difference is that **`CAFixlenString` strips the trailing NUL on fetch.** A fixed slot pads shorter strings with NUL bytes, and that padding is *padding, not content*. `str_len`, `upcase`, and the other string operations see the logical string (`"a"`, length 1), not the padded `"a\x00\x00"`. The storage keeps the padding (so `bytes`, sorting, and MemoryView still see the raw K bytes, and a raw `CA_FIXLEN` array returns them intact), but the string reading hides it.
 
-Fetched fixlen strings are `ASCII-8BIT` (no encoding tag on the storage); `force_encoding` if you need one. `CAConstString` returns **frozen** strings in the column's encoding.
+Fetched fixlen strings are in the array's encoding, `a.encoding`: the encoding of the strings it was made from, UTF-8 if they were ASCII, `BINARY` if they disagreed. `to_const_string` keeps it. `CAConstString` returns **frozen** strings in the column's encoding.
 
 Views (`ct[1..3]`, `ct[mask]`, transpose, gather) return the same Face class. For `CAConstString` the view **shares the underlying buffer** — only the `(start, end)` ranges are rearranged, no bytes are copied — which is what makes a large read-mostly column cheap to slice.
 
@@ -95,9 +95,9 @@ s.match?(/^[A-Z]+$/)
 s.in?("bar", "BAZ")  #  => [0, 1, 1]
 
 # lengths / positions → :int
-s.str_len            #  per-cell character length
+s.str_len            #  character length of each cell
 s.bytesize
-CArray.string(["banana", "raspberry"]).str_index("a")   #  per-cell substring position
+CArray.string(["banana", "raspberry"]).str_index("a")   #  substring position in each cell
 CArray.string(["banana", "raspberry"]).rindex("a")
 
 # numeric parse
@@ -106,7 +106,7 @@ CArray.string(["12", "x", "34"]).to_i   #  => [12, 0, 34]     (also to_f)
 
 Two naming quirks are worth calling out. Methods use the plain Ruby `String` name where it does not collide with a CArray method (`upcase`, `strip`, `start_with?`, `to_i`, …). The few names that clash keep a `str_` prefix: `str_len` and `str_index`, because `#length` and `#index` already mean array-level things (element count, first-occurrence flat address).
 
-On a `CAString`, the operators work cell by cell as a `String`'s do, and give a `CAString`: `s + "!"`, `s + other`, `s * 2`, `s % args`, and `pmax` / `pmin` (also named `maximum` / `minimum`). `CAConstString` and `CAFixlenString` do not take operators; `to_string` gives a `CAString` that does.
+On a `CAString`, the operators work cell by cell as a `String`'s do, and give a `CAString`: `s + "!"`, `s + other`, `s * 2`, `s % args`, and `pmax` / `pmin` (also named `maximum` / `minimum`). `CAFixlenString` has `pmax` / `pmin` too, and gives a `CAFixlenString` as wide as the wider operand; it takes no other operator, nor does `CAConstString`. `to_string` gives a `CAString` that does.
 
 ```ruby
 s = CArray.string(["a", "b"])
@@ -115,7 +115,7 @@ s = CArray.string(["a", "b"])
 
 Choosing among Strings gives a `CAString` too: `cond.then_else("yes", "no")`, and `choose`, `CArray.select` and `conditional` when every choice is a String or a `CAString`. `CArray.select` counts its `default:` as a choice, and it is `0` unless given, so pass a String (`default: ""`) to get a `CAString`. A Symbol, or a String beside a value of another kind, gives an object array.
 
-In-place forms (`upcase!`, `strip!`, `gsub!`, …) exist on the **mutable** Faces only — `CAString` and `CAFixlenString`. `CAConstString` is read-only (that immutability is exactly what makes the shared buffer safe); the transforms return a fresh `CAString` instead, which you can chain into `.to_const_string` to re-compact.
+In-place forms (`upcase!`, `strip!`, `gsub!`, …) exist on the **mutable** Faces only — `CAString` and `CAFixlenString`. `CAConstString` is read-only (that immutability is exactly what makes the shared buffer safe); the transforms return a fresh `CAString` instead, which can be chained into `.to_const_string` to re-compact.
 
 ### Numbers → strings: explicit format
 
@@ -144,7 +144,7 @@ a.sort_index   #  ascending permutation → :int
 a.min / a.max  #  byte-extremum element (skips masked; nil / UNDEF if all-masked)
 ```
 
-`sort` on a `CAConstString` is cheap precisely because it is a view: the `(start, end)` pairs are gathered, the bytes never move. `sort_copy` gives an owned, compacted result when you want an independent column.
+`sort` on a `CAConstString` is cheap precisely because it is a view: the `(start, end)` pairs are gathered, the bytes never move. `sort_copy` gives an owned, compacted result as an independent column.
 
 The same three Faces support the search side:
 
@@ -165,7 +165,7 @@ a.include?("b").to_a         #  => [false, UNDEF, false]    (masked cell propaga
 a.include?("b").count(true)  #  => 0
 ```
 
-Assignment accepts `UNDEF`, which masks the cell. Assigning `nil` raises `TypeError`: `nil` stands for a masked cell only when an array is built from Ruby values.
+Assignment accepts `UNDEF`, which masks the cell. Assigning `nil` raises `TypeError`: `nil` stands for a masked cell only when a text or time array is built from Ruby values. The numeric constructors refuse it, and `CA_INT32([1, nil])` raises `TypeError`.
 
 ## Numeric gate
 
@@ -188,7 +188,7 @@ face.to_fixlen_string(bytes: K, truncate:)  #  → CAFixlenString
 face.to_const_string(encoding:)             #  → CAConstString
 ```
 
-For example `ct.upcase` returns a `CAString`; chain `.to_const_string` (or `.to_fixlen_string(bytes: K)`) to re-compact the transformed result into the storage shape you want.
+For example `ct.upcase` returns a `CAString`; chain `.to_const_string` (or `.to_fixlen_string(bytes: K)`) to re-compact the transformed result into the chosen storage.
 
 For a **non-Face** source — a raw `CA_FIXLEN` array or an object array of Strings — use the builders instead. They accept a CArray directly: a raw `CA_FIXLEN` reads as NUL-stripped strings; an object array of Strings wraps zero-copy, and every cell that is not masked must be a String (`nil` raises; mask it with `UNDEF` instead):
 
@@ -202,16 +202,16 @@ CArray.fixlen_string(raw_fixlen)  #  → CAFixlenString (zero-copy wrap)
 
 Portability is what usually decides the type at a boundary:
 
-- **`CAFixlenString`** is portable — its fixed-width bytes survive `CArray.stack`, `Marshal`, and MemoryView export. This is the type to reach for when the strings must cross a boundary as a single contiguous block.
-- **`CAString`** is per-process (Ruby `String`s on the heap), so it has no MemoryView of the strings. It stacks and concatenates with other `CAString`s; an object array of Strings joins them after `CArray.string(o)`.
-- **`CAConstString`** is per-process too (a shared buffer), and does not participate in multi-parent constructions: each array's cells point into its own buffer. `copy` gives an independent in-process column; `to_fixlen_string(bytes: K)` gives a portable one.
+- **`CAFixlenString`** is portable — its fixed-width bytes survive `CArray.stack`, `Marshal`, and MemoryView export. Use this type when the strings must cross a boundary as a single contiguous block.
+- **`CAString`** belongs to one process (Ruby `String`s on the heap), so it has no MemoryView of the strings. It stacks and concatenates with other `CAString`s; an object array of Strings joins them after `CArray.string(o)`.
+- **`CAConstString`** also belongs to one process (a shared buffer), and does not participate in multi-parent constructions: each array's cells point into its own buffer. `copy` gives an independent in-process column; `to_fixlen_string(bytes: K)` gives a portable one.
 - **Variable-length + MemoryView.** MemoryView is fixed-item-size and cannot represent a variable-length column in a single view. A `CAConstString`'s `(start, end)` pairs and byte buffer can be exported as two integer MemoryViews and reassembled out of band, but there is no single zero-copy MemoryView of "the strings".
 
 The `CAConstString` buffer is a pure concatenation of the element bytes (= the Apache Arrow values layout, no length prefix), so it can back an Arrow string array directly, and an Arrow `String` / `LargeString` column imports into a `CAConstString`.
 
 ## Raw `CA_FIXLEN`
 
-For binary blobs — record bodies, packed structs, images, anything where K bytes per cell is what you want and no string reading applies — reach for raw `CA_FIXLEN` with no Face on top:
+For binary blobs — record bodies, packed structs, images, anything stored as K bytes per cell with no string meaning — use raw `CA_FIXLEN` with no Face on top:
 
 ```ruby
 a = CArray.new(CA_FIXLEN, [3], bytes: 4)
@@ -236,7 +236,7 @@ A `CAFixlenString` over the same storage strips the padding automatically — th
 
 ## `CARecord` — array of structs
 
-A `CARecord` is the array-of-structs Face: an array whose elements are instances of a struct data class you defined, laid out as one fixed-width record per cell. The record bytes live in an ordinary `CA_FIXLEN` entity; the Face on top adds only the knowledge of *which struct class* those bytes decode to.
+A `CARecord` is the array-of-structs Face: an array whose elements are instances of a user-defined struct data class, laid out as one fixed-width record per cell. The record bytes live in an ordinary `CA_FIXLEN` entity; the Face on top adds only the knowledge of *which struct class* those bytes decode to.
 
 ### Defining the struct type
 
@@ -285,7 +285,7 @@ g = CAGeoCoord.new(100)                #  no more data_class argument needed
 
 ### Field access
 
-Indexing a `CARecord` by **field name** projects a column view onto the underlying bytes. The result is an ordinary numeric array you can compute on — the Face is stripped, because a `lat` column of floats is no longer a `GeoCoord`:
+Indexing a `CARecord` by **field name** projects a column view onto the underlying bytes. The result is an ordinary numeric array that can be used in calculations — the Face is stripped, because a `lat` column of floats is no longer a `GeoCoord`:
 
 ```ruby
 a = CARecord.new(GeoCoord, 3)
@@ -329,7 +329,7 @@ a.count_masked               #  => 1
 a.mask.to_a                  #  => [false, false, true, false, false]
 ```
 
-### Ordering — by the members you name
+### Ordering — by the named members
 
 A record's bytes are no order of its values, so a record array has an order only when its struct names one with `order_by:`. The members are compared in the order given, NaN after every number:
 
@@ -366,7 +366,7 @@ a + a     #  => CArray::DataTypeError
 
 ### Portability
 
-The record bytes travel: `CArray.save` / `CArray.load` (see [Input and output](19_input_output.md)) round-trip a `CARecord` as raw bytes, and MemoryView export works. The binary format carries the bytes only — the `data_class` identity is not embedded, so on load you re-supply it by loading into a `CARecord` of the right type.
+The record bytes travel: `CArray.save` / `CArray.load` (see [Input and output](19_input_output.md)) round-trip a `CARecord` as raw bytes, and MemoryView export works. The binary format carries the bytes only — the `data_class` identity is not embedded, so a load must name it again, by loading into a `CARecord` of the right type.
 
 ## Quick recap
 
@@ -374,4 +374,4 @@ The record bytes travel: `CArray.save` / `CArray.load` (see [Input and output](1
 - `CAString` for general-purpose Ruby strings, `CAFixlenString` for bounded-width portable columns, `CAConstString` for large read-mostly label / key columns, raw `CA_FIXLEN` for actual byte blobs.
 - The three Faces share one string-operation surface (transforms / predicates / lengths / positions), converting freely between them with `to_string` / `to_fixlen_string` / `to_const_string`.
 - Ordering is by bytes (`memcmp`); numeric kernels are gated off; numbers → strings is always the explicit `#format`.
-- `CARecord` reads K bytes as a struct with named fields; `a["field"]` is a live projection you can compute on, `a[i]` decodes to a struct instance, and a record array sorts by the members its struct names in `order_by:` (or through a field projection when it names none).
+- `CARecord` reads K bytes as a struct with named fields; `a["field"]` is a live projection that can be used in calculations, `a[i]` decodes to a struct instance, and a record array sorts by the members its struct names in `order_by:` (or through a field projection when it names none).

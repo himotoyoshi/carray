@@ -41,8 +41,8 @@ class TestCountObject < Test::Unit::TestCase
     assert_equal 1, a.count(false)
   end
 
-  def test_a_numeric_array_still_refuses_true
-    assert_raise(TypeError) { CA_INT32([1, 2]).count(true) }
+  def test_a_numeric_array_counts_true_as_one
+    assert_equal 1, CA_INT32([1, 2]).count(true)
   end
 
   def test_along_an_axis

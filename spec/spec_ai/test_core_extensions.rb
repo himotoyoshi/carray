@@ -444,3 +444,58 @@ class TestCoreExtensionsPresent < Test::Unit::TestCase
   end
 
 end
+
+# A real scalar answers as a float64 array of that one value.
+class TestCoreExtensionsAnswerAsTheArray < Test::Unit::TestCase
+  using CArray::CoreExtensions
+
+  VALUES = [0.0, -0.0, 0.5, -0.5, 1.0, -1.0, 2.0, 1e-20, -1e-20, 1e300, 180.0, -180.0].freeze
+
+  def same (a, b)
+    a == b || (a.respond_to?(:nan?) && a.nan? && b.nan?)
+  end
+
+  def test_each_function_for_a_float
+    { sqrt: ->(v) { v.sqrt }, exp: ->(v) { v.exp }, log: ->(v) { v.log }, log10: ->(v) { v.log10 },
+      sin: ->(v) { v.sin }, cos: ->(v) { v.cos }, tan: ->(v) { v.tan },
+      sinh: ->(v) { v.sinh }, cosh: ->(v) { v.cosh }, tanh: ->(v) { v.tanh },
+      asin: ->(v) { v.asin }, acos: ->(v) { v.acos }, atan: ->(v) { v.atan },
+      asinh: ->(v) { v.asinh }, acosh: ->(v) { v.acosh }, atanh: ->(v) { v.atanh },
+      expm1: ->(v) { v.expm1 }, log1p: ->(v) { v.log1p }, rsqrt: ->(v) { v.rsqrt },
+      signbit: ->(v) { v.signbit },
+      deg_360: ->(v) { v.deg_360 }, deg_180: ->(v) { v.deg_180 },
+      rad_2pi: ->(v) { v.rad_2pi }, rad_pi: ->(v) { v.rad_pi } }.each { |m, f|
+      VALUES.each { |v|
+        assert_true same(CA_FLOAT64([v]).public_send(m)[0], f[v]), "#{m}(#{v})"
+      }
+    }
+  end
+
+  def test_outside_the_domain_is_nan
+    assert_true (-1.0).sqrt.nan?
+    assert_true (-1).sqrt.nan?
+    assert_true Rational(-1).log.nan?
+    assert_true 2.0.asin.nan?
+    assert_true 0.5.acosh.nan?
+  end
+
+  def test_the_sign_of_a_zero_and_small_values
+    assert_equal true, (-0.0).signbit
+    assert_equal false, 0.0.signbit
+    assert_equal(-Float::INFINITY, (-0.0).rsqrt)
+    assert_equal 1e-20, 1e-20.expm1
+    assert_equal 1e-20, 1e-20.log1p
+  end
+
+  def test_integer_and_rational_take_the_float_kernel
+    assert_equal 2.0, 4.sqrt
+    assert_equal 0.5, Rational(1, 4).sqrt
+    assert_equal 2 ** 35, (2 ** 70).sqrt
+    assert_equal 9, 3.square
+    assert_equal Rational(1, 9), Rational(1, 3).square
+  end
+
+  def test_a_complex_with_no_real_value_refuses_the_angle_forms
+    assert_raise(RangeError) { Complex(1, 2).deg_360 }
+  end
+end

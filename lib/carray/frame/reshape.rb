@@ -210,6 +210,24 @@ class CAFrame
   Ractor.make_shareable(SIGNIFICAND_BITS)
   private_constant :INTEGER_BITS, :SIGNIFICAND_BITS
 
+  # Integers past what +type+'s significand holds would meet as one value
+  # once read in it, so they are refused; the verb reads every other integer
+  # exactly. +type+ is the float the columns meet at, or anything else, which
+  # rounds nothing.
+  def self.refuse_rounded_integers (cols, type, verb, what)
+    digits = SIGNIFICAND_BITS[CArray.data_type_name(type)]
+    return if digits.nil?
+    cols.each do |col|
+      next if col.face? || !col.integer? || col.count_not_masked == 0
+      big = [col.min.abs, col.max.abs].max
+      next if big <= 2**digits
+      raise ArgumentError,
+            "#{verb}: #{what} holds #{big}, past 2**#{digits}, beyond which " \
+            "#{CArray.data_type_name(type)} does not hold every integer; cast them to one type first"
+    end
+  end
+  private_class_method :refuse_rounded_integers
+
   # Whether every value of data type +from+ is exactly a value of +to+, for
   # numbers and booleans: a boolean in any number, an integer in a wide
   # enough integer (a signed one never in an unsigned) or in a float whose
@@ -269,9 +287,11 @@ class CAFrame
   # melted columns and each id column is +CArray.meld+ of itself, so a write
   # to the result lands in +self+.  Number columns of different types meet
   # at a type that holds every value of each column's type (int8 and uint8
-  # at int16, int32 and float64 at float64), so a value written later reads
-  # back unchanged; a mixture no type holds (int64 and float64) raises, and
-  # so do other mixtures of types. The value columns share one trailing
+  # at int16, int32 and float64 at float64), so a value written to one of
+  # the columns later reads back unchanged. A value written to the result
+  # lands in the column's own type, as an array stored into it does: outside
+  # that type it wraps. A mixture no type holds (int64 and float64) raises,
+  # and so do other mixtures of types. The value columns share one trailing
   # shape; cast first when they do not.
   #
   # @param id [String, Array<String>] columns repeated alongside each value.
@@ -332,11 +352,11 @@ class CAFrame
     begin
       out[value_name] = CArray.meld(pieces)
     rescue ArgumentError => e
-      raise unless e.message.start_with?("promote_list:")
+      raise unless e.message.start_with?("meld:", "CAMeld parents")
       labels = vars.zip(pieces.map { |c| CArray::Inspector.type_label(c) }).to_h
       raise ArgumentError,
             "melt: value columns #{labels} do not meet as one column " \
-            "(#{e.message.delete_prefix("promote_list: ")}); cast them to one type first"
+            "(#{e.message.delete_prefix("meld: ")}); cast them to one type first"
     end
     CAFrame.new(out)
   end

@@ -231,7 +231,7 @@ class CAFrame
     map = types == :infer ? { default: :infer } : types
     return types unless map.is_a?(Hash)
     frame.column_names.each do |name|
-      given = [name, name.to_sym].find { |k| map.key?(k) }
+      given = map.keys.find { |k| k == name || k == name.to_sym || (k.is_a?(Array) && k.include?(name)) }
       next unless (given ? map[given] : map[:default]) == :infer
       map = map.merge(name => :string) if blank_value_in?(frame[name])
     end
@@ -454,6 +454,7 @@ class CAFrame
     unless precision.nil? || (precision.is_a?(Integer) && precision >= 0)
       raise ArgumentError, "to_csv: precision: is a number of decimal places, 0 or more (got #{precision.inspect})"
     end
+    CSVParser::Tokenizer.check_delimiters(sep, quote)
     default, per_column = CAFrame.send(:split_missing, missing, "to_csv")
     [default, *per_column.values].each do |text|
       next if text.nil? || text.is_a?(String)
@@ -510,7 +511,11 @@ class CAFrame
     formatted.each_with_index do |fcol, j|
       token = per_column.fetch(names[j], default)
       next if token.nil? || token.empty?        # the empty field, as without missing:
-      i = fcol.index(token)
+      # A cell in another encoding is the token too once transcoded.
+      i = fcol.index(token) || fcol.index do |text|
+        text && text.encoding != token.encoding &&
+          text.encode(token.encoding, invalid: :replace, undef: :replace) == token
+      end
       if i
         raise ArgumentError,
               "to_csv: row #{i} of #{names[j].inspect} is written as " \
@@ -757,8 +762,8 @@ class CAFrame
         # Still a float, so precision: 0 writes 3.0 and the column reads
         # back as floats.
         csv_rounded(e, precision).to_s
-      elsif precision && e.is_a?(Complex) && e.real.is_a?(Float)
-        Complex(*[e.real, e.imaginary].map { |x| csv_rounded(x, precision) }).to_s
+      elsif precision && e.is_a?(Complex) && (e.real.is_a?(Float) || e.imaginary.is_a?(Float))
+        Complex(*[e.real, e.imaginary].map { |x| x.is_a?(Float) ? csv_rounded(x, precision) : x }).to_s
       else
         e.to_s
       end
@@ -866,7 +871,7 @@ class CAFrame
     if text.empty? || text.include?(sep) || text.include?(quote) ||
        text.include?("\n") || text.include?("\r") || text.each_byte.all? { |b| b == 0x20 || b == 0x09 } ||
        (sep.size > 1 && (text + sep).index(sep) != text.size)
-      quote + text.gsub(quote, quote * 2) + quote
+      quote + text.gsub(quote) { quote * 2 } + quote
     else
       text
     end

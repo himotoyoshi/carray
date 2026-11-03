@@ -818,7 +818,7 @@ static VALUE
 fz_factorize_appearance_body (VALUE arg)
 {
   fz_frame *fr = (fz_frame *) arg;
-  VALUE self = fr->self;
+  volatile VALUE self = fr->self;
   CArray *ca;
   volatile VALUE face;
   fr->self = self = fz_face_descend(self, &face, "categorize");
@@ -843,7 +843,7 @@ fz_factorize_appearance_body (VALUE arg)
   ca_size_t N = ca->elements;
 
   /* uint32 code scratch, same shape as self; narrowed once k is known. */
-  VALUE vu32 = rb_carray_new(CA_UINT32, ca->ndim, ca->dim, 0, NULL);
+  volatile VALUE vu32 = rb_carray_new(CA_UINT32, ca->ndim, ca->dim, 0, NULL);
   CArray *cu32;
   TypedData_Get_Struct(vu32, CArray, &carray_data_type, cu32);
 
@@ -1028,7 +1028,7 @@ static VALUE
 fz_mask_duplicates_body (VALUE arg)
 {
   fz_frame *fr = (fz_frame *) arg;
-  VALUE self = fr->self;
+  volatile VALUE self = fr->self;
   VALUE vaxis = fr->a;
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
@@ -1189,7 +1189,7 @@ static VALUE
 fz_unique_flat_body (VALUE arg)
 {
   fz_frame *fr = (fz_frame *) arg;
-  VALUE self = fr->self;
+  volatile VALUE self = fr->self;
   CArray *ca;
   volatile VALUE face;
   fr->self = self = fz_face_descend(self, &face, "unique");
@@ -1429,7 +1429,7 @@ static VALUE
 fz_is_in_body (VALUE arg)
 {
   fz_frame *fr = (fz_frame *) arg;
-  VALUE self = fr->self;
+  volatile VALUE self = fr->self;
   VALUE rvalues = fr->a;
   CArray *ca, *cv;
   volatile VALUE face;
@@ -1592,7 +1592,7 @@ static VALUE
 fz_locate_addr_body (VALUE arg)
 {
   fz_frame *fr = (fz_frame *) arg;
-  VALUE self = fr->self;
+  volatile VALUE self = fr->self;
   VALUE rref = fr->a;
   CArray *ca, *cr;
   /* Here the *reference* is the argument (self is the query being placed on
@@ -1859,7 +1859,7 @@ static VALUE
 fz_set_relation_body (VALUE arg)
 {
   fz_frame *fr = (fz_frame *) arg;
-  VALUE self = fr->self;
+  volatile VALUE self = fr->self;
   VALUE rother = fr->a;
   int keep_when_hit = fr->i;
   CArray *ca, *co;
@@ -2055,7 +2055,7 @@ static VALUE
 fz_set_union_body (VALUE arg)
 {
   fz_frame *fr = (fz_frame *) arg;
-  VALUE self = fr->self;
+  volatile VALUE self = fr->self;
   VALUE rother = fr->a;
   CArray *ca, *co;
   volatile VALUE face;
@@ -2149,7 +2149,7 @@ static VALUE
 fz_value_counts_flat_body (VALUE arg)
 {
   fz_frame *fr = (fz_frame *) arg;
-  VALUE self = fr->self;
+  volatile VALUE self = fr->self;
   CArray *ca;
   volatile VALUE face;
   fr->self = self = fz_face_descend(self, &face, "value_counts");
@@ -2325,7 +2325,7 @@ static VALUE
 fz_nunique_body (VALUE arg)
 {
   fz_frame *fr = (fz_frame *) arg;
-  VALUE self = fr->self;
+  volatile VALUE self = fr->self;
   VALUE vaxis = fr->a;
   VALUE vkeep = fr->b;
   CArray *ca;
@@ -2472,7 +2472,7 @@ static VALUE
 fz_is_mode_body (VALUE arg)
 {
   fz_frame *fr = (fz_frame *) arg;
-  VALUE self = fr->self;
+  volatile VALUE self = fr->self;
   VALUE vaxis = fr->a;
   CArray *ca;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);

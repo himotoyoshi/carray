@@ -462,16 +462,14 @@ static void
 ca_byte_swap_func_allocate (void *ap)
 {
   CAByteSwap *ca = (CAByteSwap *) ap;
-  ca_attach(ca->parent);
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
 }
 
 static void
 ca_byte_swap_func_attach (void *ap)
 {
   CAByteSwap *ca = (CAByteSwap *) ap;
-  ca_attach(ca->parent);
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
   memcpy(ca->ptr, ca->parent->ptr, ca_length(ca));
   ca_byte_swap_apply(ca, ca->ptr);
 }

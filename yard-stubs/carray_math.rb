@@ -784,6 +784,11 @@ class CArray
   #   point equality is exact here; for a tolerant comparison see
   #   {#is_close} (absolute) or {#is_equiv} (relative). Integers compare
   #   by value, as for {#<}.
+  #
+  #   `eq(UNDEF)` asks the mask, as {#is_masked} does. `nil`, a String, a
+  #   Symbol or another value that is not a number is no value of a numeric
+  #   or boolean array, so `eq` is false in every cell there; an `:object`
+  #   or `:fixlen` array compares it like any other value.
   #   @param other [CArray, Numeric, Object] comparand, broadcast to
   #     `self.shape`.
   #   @return [CArray] `:boolean`, same shape as `self`.

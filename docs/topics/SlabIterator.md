@@ -2,36 +2,28 @@
 
 CArray provides three `CArray` instance methods — `map_slab`,
 `reduce_slab`, and `each_slab` — that iterate over an array one
-**slab** (a 1-D slice along a chosen axis) at a time and hand each
+**slab** (a sub-array cut out by `axis:`) at a time and hand each
 slab to a Ruby block. They let you run per-axis kernels in a few
 lines of Ruby without writing C.
-
-The name *slab* is used in preference to *along axis*: it makes clear
-that the block sees a fiber, not the array reduced along the axis,
-and avoids the ambiguity of "iterate along axis k" (which can read
-as either "walk along k" or "walk over the slices perpendicular to
-k").
 
 | method | semantics | output shape |
 |---|---|---|
 | `map_slab(axis:, data_type:) { \|slab\| ... }` | Per-axis element-wise vectorise | same as self |
-| `reduce_slab(axis:, [init:, data_type:]) { ... }` | Per-axis reduction (dual surface) | self.shape minus axis |
+| `reduce_slab(axis:, [init:, data_type:]) { ... }` | Per-axis reduction (dual surface) | self.shape minus the named axes |
 | `each_slab(axis:) { \|slab\| ... }` | Side-effect iteration | self (= return self) |
 
-The block always receives a **1-D CArray** representing one fiber along
-`axis:`. Standard CArray operations (`sum`, `mean`, indexing, arithmetic,
+If `axis:` names one axis, the slab is a **1-D CArray**. If `axis:`
+names several axes, the slab is a CArray with the shape of those axes.
+Standard CArray operations (`sum`, `mean`, indexing, arithmetic,
 `.copy`) work directly on the slab.
 
 ## When to reach for the slab iterator
 
-Three situations where this surface is the right tool:
+Two situations where this surface is the right tool:
 
 1. **Ergonomics** — a few lines of Ruby instead of a C kernel and a
    recompile.
-2. **`CA_OBJECT` / `CA_FIXLEN` per-axis paths** — the C kernel
-   facilities are numeric-only at compile time; the slab iterator
-   gives object / fixlen sources a per-axis path.
-3. **Ad-hoc prototyping** — useful before committing to a C kernel.
+2. **Ad-hoc prototyping** — useful before committing to a C kernel.
 
 What the slab iterator is **not** designed for:
 
@@ -47,7 +39,7 @@ What the slab iterator is **not** designed for:
 
 `numpy.apply_along_axis` analogue. The block returns either:
 
-- a **same-length CArray** → scattered into the output slab, or
+- a **CArray of the same shape as the slab** → scattered into the output slab, or
 - a **scalar** (Ruby Numeric / Boolean / `nil`, or any VALUE when the
   output data_type is `:object`) → broadcast to fill the output slab.
 
@@ -79,7 +71,7 @@ ca.reduce_slab(axis: -1) { |slab| slab.median }
 ca.reduce_slab(axis: 0, init: 0.0) { |acc, x| acc + x }
 ```
 
-Output shape is `self.shape` with the slab axis removed. A 1-D self
+Output shape is `self.shape` with the slab axes removed. A 1-D self
 reducing axis 0 returns a 1-D length-1 result.
 
 The per-slab block form requires a **scalar** return — even a
@@ -106,8 +98,8 @@ substrate is cleaned up before the non-local exit.
 ## Axis convention
 
 `axis:` is the **operation's target axis**, not the axis that survives
-in the output. `map_slab` / `each_slab` give the block a fiber along
-`axis:`; `reduce_slab` collapses that axis. The visibility difference
+in the output. `map_slab` / `each_slab` give the block a slab with the
+axes in `axis:`; `reduce_slab` collapses those axes. The visibility difference
 flows from operation semantics; the axis itself is the same.
 
 ```ruby
@@ -193,24 +185,6 @@ t.reduce_slab(axis: 1) { |row| row.max }   # a CATime, one per row
 A read-only Face (`CAConstString`, `CACategorical`) has nothing to write
 into, so its results come back in `:object` cells holding the values the
 block returned. A `data_type:` you pass is used as given.
-
-## Internal use — `CA_OBJECT` per-axis paths
-
-Several pre-existing API surfaces — which used to raise on
-`CA_OBJECT` axis paths — are routed through the slab iterator
-internally. User-facing call sites do not change:
-
-| method                                       | previous behaviour            | current behaviour                                |
-|----------------------------------------------|-------------------------------|--------------------------------------------------|
-| `mask_duplicates(axis: k)` on `CA_OBJECT` / `CA_FIXLEN` | `NotImplementedError`         | `map_slab` per-fiber Ruby Hash de-dup            |
-| `sort(axis: k)` on `CA_OBJECT`               | `CArray::DataTypeError`       | `map_slab` per-fiber `to_a.sort`                 |
-| `median(axis: k)` on `CA_OBJECT`             | `CArray::DataTypeError`       | `reduce_slab` per-fiber Ruby sort + pick         |
-| `percentile(p, axis: k)` on `CA_OBJECT`      | `CArray::DataTypeError`       | `reduce_slab` per-fiber Ruby sort + interp       |
-
-Performance for these `CA_OBJECT` axis paths sits at the slab
-iterator's floor (`rb_yield` plus a Ruby Array conversion per fiber);
-numeric data_type paths continue to use their dedicated C kernels and
-are unaffected.
 
 ## Base mechanism — short tour
 

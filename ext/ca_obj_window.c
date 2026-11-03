@@ -275,10 +275,11 @@ static int
 ca_window_func_fold_stride (void *ap, ca_fold_t *f, void **next_parent)
 {
   CAWindow *w = (CAWindow *) ap;
-  ca_window_mask_current(w);
-  /* A write folded through to a stand-in would bypass the settle in this
-     window's write slots. */
-  if ( ca_window_mask_reads_standin(w) ) {
+  /* A mask window never folds.  A write folded through to a stand-in would
+     bypass the settle in this window's write slots, and answering by what
+     the window reads now would change when a write settles: a view attached
+     over this window would detach a root it never attached. */
+  if ( w->mask_owner ) {
     return 0;
   }
   ca_size_t synth_strides[CA_RANK_MAX];
@@ -701,7 +702,8 @@ ca_window_setup (CAWindow *ca, CArray *parent,
   /* Under "ruby" or "strict" an index outside the parent raises.  The
      parent's shape is fixed, so a window that reaches outside it would raise
      on every whole read or write, and a write would have changed the cells
-     before the one that raised.  It is refused here instead. */
+     before the one that raised.  It is refused here instead.  Under
+     "nearest" an axis with no cells has no edge to replicate. */
   for (i=0; i<ndim; i++) {
     ca_size_t lo, hi, size = dim[i];
     if ( count[i] == 0 ) {
@@ -716,6 +718,9 @@ ca_window_setup (CAWindow *ca, CArray *parent,
     else if ( bounds[i] == CA_BOUNDS_RUBY ) {
       if ( lo < -size ) ca_index_out_of_range(lo, size, "index");
       if ( hi >= size ) ca_index_out_of_range(hi, size, "index");
+    }
+    else if ( bounds[i] == CA_BOUNDS_NEAREST && size == 0 ) {
+      ca_index_out_of_range(lo, size, "index");
     }
   }
 
@@ -1114,12 +1119,12 @@ ca_window_func_allocate (void *ap)
     ca->ptr = ca_alloc_cells((CArray *) ca);
     return;
   }
-  ca_attach(ca->parent);
   if ( ca->embed_alias_eligible ) {
+    ca_attach(ca->parent);
     ca->ptr = ca_window_alias_ptr(ca);
     return;
   }
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
 }
 
 /* The engine paths below emit a per-axis descriptor (ca_window_describe_axes)
@@ -1139,7 +1144,6 @@ ca_window_func_attach (void *ap)
     ca_axis_view_attach_owned(ca);
     return;
   }
-  ca_attach(ca->parent);
   if ( ca->embed_alias_eligible ) {
     /* Alias path: inner axes full + interior, so the embedded region is a
        contiguous run of parent storage.  Skip malloc/memcpy and point
@@ -1147,10 +1151,13 @@ ca_window_func_attach (void *ap)
        CAREFUL: sync and detach must agree with this — sync has nothing to
        scatter back (the writes already landed in the parent) and detach must
        not xfree a pointer it does not own. */
+    ca_attach(ca->parent);
     ca->ptr = ca_window_alias_ptr(ca);
-  } else if ( ca->embed_eligible ) {
-    /* Embed path: allocate, then 1 fill + 1 strided memcpy. */
-    ca->ptr = ca_alloc_cells((CArray *) ca);
+    return;
+  }
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
+  if ( ca->embed_eligible ) {
+    /* Embed path: 1 fill + 1 strided memcpy. */
     ca_window_attach_embed(ca, ca->ptr);
   } else {
     /* Fallback: PERIODIC / REFLECT / NEAREST / RUBY / STRICT go through
@@ -1158,8 +1165,8 @@ ca_window_func_attach (void *ap)
     ca_axis_desc_t desc[CA_RANK_MAX];
     ca_size_t      pdims[CA_RANK_MAX];
     ca_window_describe_axes(ca, desc, pdims);
-    ca->ptr = ca_axis_dispatch_attach(ca->parent, pdims, desc, ca->ndim,
-                                      ca->bytes, ca->elements, ca->fill);
+    ca_axis_dispatch_gather(ca->parent, pdims, desc, ca->ndim,
+                            ca->bytes, ca->elements, ca->fill, ca->ptr);
   }
 }
 
@@ -1700,8 +1707,8 @@ rb_ca_window (int argc, VALUE *argv, VALUE self)
     }
     if ( ! RB_TYPE_P(rbounds, T_STRING) ) {
       rb_raise(rb_eTypeError,
-               "window: bounds: must be a Symbol or a String (got %s)",
-               rb_obj_classname(rbounds));
+               "window: bounds: must be a Symbol or a String (got %"PRIsVALUE")",
+               rb_obj_class(rbounds));
     }
     cbounds = StringValueCStr(rbounds);
     if ( ! strcmp(cbounds, "ruby") ) {

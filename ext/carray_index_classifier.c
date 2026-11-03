@@ -322,15 +322,15 @@ ca_classifier_check_reserved_symbol (VALUE sym)
 {
   const char *name;
   if ( ! SYMBOL_P(sym) ) return;
-  name = rb_id2name(SYM2ID(sym));
+  name = rb_id2name(SYM2ID(sym));   /* name: its first two bytes are read at once */
   if ( name != NULL
        && name[0] != '\0' && name[1] == '\0'
        && ( ( name[0] >= 'a' && name[0] <= 'z' )
             || ( name[0] >= 'A' && name[0] <= 'Z' ) )
        && name[0] != '_' /* :_ is iterator marker, handled separately */ ) {
     rb_raise(rb_eIndexError,
-             "symbol :%s is reserved",
-             name);
+             "symbol :%"PRIsVALUE" is reserved",
+             rb_sym2str(sym));
   }
 }
 
@@ -1005,7 +1005,7 @@ rb_ca_scan_index_v2 (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
      also fall through here and are raised later by the per-axis
      dispatcher's SYMBOL_P branch. */
   if ( SYMBOL_P(argv[0]) ) {
-    const char *name = rb_id2name(SYM2ID(argv[0]));
+    const char *name = rb_id2name(SYM2ID(argv[0]));   /* name: read at once by strlen */
     if ( name != NULL && strlen(name) > 1 ) {
       info->type   = CA_REG_METHOD_CALL;
       info->symbol = argv[0];
@@ -1069,7 +1069,7 @@ rb_ca_scan_index_v2 (int ca_ndim, ca_size_t *ca_dim, ca_size_t ca_elements,
    downstream introspection. */
 
 static VALUE
-rb_ca_s_scan_index_v2 (VALUE self, VALUE rdim, VALUE ridx)
+rb_ca_s_scan_index_v2 (VALUE self, VALUE rdim, volatile VALUE ridx)
 {
   CAIndexInfo info;
   ca_size_t   dim[CA_RANK_MAX];
@@ -1079,6 +1079,8 @@ rb_ca_s_scan_index_v2 (VALUE self, VALUE rdim, VALUE ridx)
 
   Check_Type(rdim, T_ARRAY);
   Check_Type(ridx, T_ARRAY);
+  /* Converting an entry can run Ruby that changes the Array: read a copy. */
+  ridx = rb_ary_dup(ridx);
 
   ndim = (int) RARRAY_LEN(rdim);
   elements = 1;

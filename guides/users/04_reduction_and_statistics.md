@@ -351,7 +351,7 @@ CA_FLOAT64([]).min(fill_value: -1.0)   #  => -1.0
 
 A masked cell is one that was not taken; a `NaN` is a value that takes part
 in the arithmetic and poisons it. A sum containing one `NaN` is `NaN`, and so
-is the mean and the median.
+is the mean.
 
 `min` and `max` are the exception. They are built on a comparison, and a
 comparison against `NaN` is false, so a `NaN` loses every contest and the
@@ -387,6 +387,20 @@ minimum:
 
 ```ruby
 CA_FLOAT64([Float::NAN, Float::NAN]).min_index  #  => UNDEF
+```
+
+The median and the percentiles are taken by order, and in order a `NaN`
+comes after every number, as it does in `sort`. It is still counted, so it
+pushes the middle up by one place, and the answer is `NaN` only when the
+place it asks for holds one:
+
+```ruby
+a = CA_FLOAT64([1.0, Float::NAN, 3.0])
+a.sort.to_a                               #  => [1.0, 3.0, NaN]
+a.median                                  #  => 3.0
+a.percentile(100)                         #  => NaN
+CA_FLOAT64([1.0, Float::NAN, Float::NAN]).median   #  => NaN
+a.mask_invalid.median                     #  => 2.0
 ```
 
 Neither `min_count:` nor `fill_value:` reaches these cases: both count

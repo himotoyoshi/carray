@@ -108,7 +108,7 @@ CArray.new(CA_FIXLEN, [n], bytes: 3)   # K-byte blobs, NOT a string Face
 ```ruby
 CArray.const_string(["a"])[0]     # => "a"      (frozen, UTF-8, column encoding)
 CArray.string(["a"])[0]           # => "a"      (the stored Ruby String, its own encoding)
-CArray.fixlen_string(["a"], bytes: 3)[0]   # => "a"   (trailing NUL stripped; ASCII-8BIT)
+CArray.fixlen_string(["a"], bytes: 3)[0]   # => "a"   (trailing NUL stripped; UTF-8, the array's encoding)
 CArray.new(CA_FIXLEN, [1], bytes: 3).tap { |r| r[0] = "a" }[0]  # => "a\x00\x00" (raw bytes)
 ```
 
@@ -119,8 +119,10 @@ CArray.new(CA_FIXLEN, [1], bytes: 3).tap { |r| r[0] = "a" }[0]  # => "a\x00\x00"
   the padding, so `bytes`, sorting, and MemoryView still see the raw K bytes,
   and a **raw** `CA_FIXLEN` array (no Face) returns the padding.  Genuine
   trailing NULs can't survive this — use a raw fixlen array for binary blobs.
-  (Fetched strings are `ASCII-8BIT`; `CAFixlenString` has no encoding tag —
-  `force_encoding` if you need one.)
+  Fetched strings are in the array's encoding, `a.encoding`: what the strings
+  it was made from were in, UTF-8 if they were ASCII, and `BINARY` if they
+  disagreed.  `to_const_string` keeps it.  An array made with
+  `CAFixlenString.wrap(raw)` is `BINARY` unless `encoding:` is given.
 - **`CAConstString`** returns **frozen** strings in the column encoding.
 - **`CAString`** returns the stored Ruby `String` as-is.
 
@@ -171,9 +173,10 @@ CArray.string(["12", "x", "34"]).to_i   # => [12, 0, 34]     (also to_f)
   `#index` already mean array-level things.
 - **Operators** on a `CAString` work cell by cell as a `String`'s do and give
   a `CAString`: `s + "x"`, `s + other`, `s * 2`, `s % args`, and `pmax` /
-  `pmin` (also named `maximum` / `minimum`).  `CAConstString` and
-  `CAFixlenString` do not take operators; `to_string` gives a `CAString` that
-  does.
+  `pmin` (also named `maximum` / `minimum`).  `CAFixlenString` has `pmax` /
+  `pmin` too, and gives a `CAFixlenString` as wide as the wider operand; it
+  takes no other operator, nor does `CAConstString`.  `to_string` gives a
+  `CAString` that does.
 - **Choosing among Strings** gives a `CAString`: `cond.then_else("yes", "no")`,
   and `choose` / `CArray.select` / `conditional` when every choice is a String
   or a `CAString`.  `CArray.select` counts its `default:` as a choice, and it

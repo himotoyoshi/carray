@@ -44,6 +44,8 @@ class CArray
     if excluded.count(true) > 0
       codes.mask = codes.has_mask? ? (codes.mask | excluded) : excluded
     end
+    # A const string's discovery reads its bytes and gives Ruby Strings.
+    levels = CArray.const_string(levels, encoding: encoding) if is_a?(CAConstString)
     [codes, levels]
   end
 

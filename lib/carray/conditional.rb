@@ -130,6 +130,13 @@ class CArray
     CATriOp.__build__(self, branch.(x), branch.(y), CATriOp::OP_SELECT)
   end
 
+  # The two branches of a selection, in a form that holds the cells of both.
+  # A Face whose cells differ by more than their values (a time's unit, a
+  # fixed string's width) brings them to one here, whichever branch is which.
+  private def branches_in_common (x, y)
+    [x, y]
+  end
+
   private def face_then_else (x, y, face)
     # A Face branch decides the result: the other branch is written into a
     # copy of it through the Face's own store, so an instant stays an instant.
@@ -141,10 +148,11 @@ class CArray
       sy = y.is_a?(CAConstString) ? y.to_string : y
       return CArray.const_string(then_else(sx, sy), encoding: face.encoding)
     end
+    x, y   = face.__send__(:branches_in_common, x, y)
     x_full = x.is_a?(CArray) && !x.scalar?
     y_full = y.is_a?(CArray) && !y.scalar?
     base   = y_full ? y : x
-    if base.read_only?
+    unless base.__send__(:holds_new_values?)
       # No store to write through (a CACategorical's codes): select among
       # the values themselves.
       result = CArray.object(*shape)
@@ -180,7 +188,8 @@ class CArray
             "replace_where: cond must be a boolean CArray (data_type == CA_BOOLEAN)"
     end
     result = self.copy
-    result[cond] = b.is_a?(CArray) ? b[cond] : b
+    # A CScalar takes no index: like a number, it is the value for every cell.
+    result[cond] = b.is_a?(CArray) && !b.scalar? ? b[cond] : b
     result
   end
 
@@ -265,6 +274,8 @@ class CArray
   #   @param condlist [Array<CArray>] boolean selectors.
   #   @param choicelist [Array<CArray, Numeric, Object>] values, one
   #     per condition (same length as `condlist`).
+  #   When a choice is a Face the result is that Face (the choices meet as
+  #   in {#then_else}), and `default` is UNDEF unless it is given.
   #   @param default [CArray, Numeric, Object] value written where no
   #     condition holds.
   #   @param data_type [Symbol, Integer, nil] override for the result
@@ -278,7 +289,7 @@ class CArray
   #                   [-x,    x * 10],
   #                   default: 999)
   #     # => [5.0, 3.0, -10.0, 0.0, 10.0, 999.0]
-  def self.select (condlist, choicelist, default: 0, data_type: nil)
+  def self.select (condlist, choicelist, default: (no_default = true; 0), data_type: nil)
     unless condlist.is_a?(Array) && choicelist.is_a?(Array)
       raise ArgumentError, "select: condlist and choicelist must be Arrays"
     end
@@ -295,6 +306,14 @@ class CArray
       raise ArgumentError, "select: condlist[0] must be a boolean CArray"
     end
     shape = first.shape
+
+    if data_type.nil?
+      face = choicelist.find { |v| v.is_a?(CArray) && !v.scalar? && v.face? }
+      if face
+        fallback = no_default ? UNDEF : default
+        return select_among_faces(condlist, choicelist, fallback, face, shape)
+      end
+    end
 
     dt = data_type || selection_type(choicelist + [default])
     # `default` can be either a same-shape CArray (per-cell fallback) or a
@@ -317,7 +336,7 @@ class CArray
               "select: condlist[#{k}] must be a same-shape boolean CArray"
       end
       v = choicelist[k]
-      out[c] = v.is_a?(CArray) ? v[c] : v
+      out[c] = v.is_a?(CArray) && !v.scalar? ? v[c] : v
     end
     if !data_type && selection_text?(choicelist + [default])
       out = CAString.wrap(out)
@@ -331,6 +350,35 @@ class CArray
   # some type, so it leaves the type to the others.  A String or Symbol is a
   # value, which CArray.result_type would read as the name of a data type
   # ("int32"), so it makes the result object.
+  # select over Face choices.  Each condition is a then_else on the choices
+  # below it, so the Faces meet as they do there; a Face that cannot be
+  # written selects among its values.
+  def self.select_among_faces (condlist, choicelist, fallback, face, shape)
+    if face.is_a?(CAConstString)
+      choices = choicelist.map { |v| v.is_a?(CAConstString) ? v.to_string : v }
+      text    = select(condlist, choices, default: fallback)
+      return CArray.const_string(text, encoding: face.encoding)
+    end
+    unless face.__send__(:holds_new_values?)
+      choices = choicelist.map { |v| v.is_a?(CArray) && v.face? ? v.to_type(CA_OBJECT) : v }
+      return select(condlist, choices, default: fallback)
+    end
+    unless face.shape == shape
+      raise ArgumentError, "select: choicelist shape #{face.shape} differs from condlist shape #{shape}"
+    end
+    out = CArray.boolean(*shape).zero.then_else(face, fallback)
+    (condlist.size - 1).downto(0) do |k|
+      c = condlist[k]
+      unless c.is_a?(CArray) && c.boolean? && c.shape == shape
+        raise ArgumentError,
+              "select: condlist[#{k}] must be a same-shape boolean CArray"
+      end
+      out = c.then_else(choicelist[k], out)
+    end
+    out
+  end
+  private_class_method :select_among_faces
+
   def self.selection_type (values)
     typed = values.reject { |v| v.equal?(UNDEF) }
     if typed.empty? || typed.any? { |v| v.is_a?(String) || v.is_a?(Symbol) }

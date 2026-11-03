@@ -1792,10 +1792,12 @@ ca_slab_is_flat (const ca_iter_state *st, const ca_size_t *strides,
  * producing the value to reduce (typically `((ACC_T)(x))`), so the
  * caller controls the per-src cast without embedding it in a REDUCE
  * statement.  Reassoc across the 8 lanes is the same ε-close license
- * as _MIN_EX / _MAX_EX / _STAR_EX (bit-exact not guaranteed; min/max
- * are strictly associative + commutative so the 8-way tree gives the
- * same result modulo NaN handling which stays identical to the
- * single-accumulator case).
+ * as _MIN_EX / _MAX_EX / _STAR_EX (bit-exact not guaranteed).  min / max
+ * pick the same value as the single-accumulator walk, and handle NaN
+ * alike, but of two values equal under `<` (0.0 and -0.0) the one kept
+ * depends on the lane it fell in: the sign of a zero answer can differ
+ * from the single-accumulator walk and between a contiguous and a
+ * strided fiber.  Which of the two min / max answers is not specified.
  */
 #define CA_SLAB_REDUCE_MIN8_EX(T, ACC_T, st, p, m, acc, INIT, EXPR, masked_cnt) do { \
     typedef T __ca_u_T CA_UNALIGNED;                                         \

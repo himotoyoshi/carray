@@ -59,4 +59,12 @@ class TestUnknownKeywordRefused < Test::Unit::TestCase
     assert_raise(ArgumentError) { @f.count(CA_FLOAT64([]), axis: 0, min_cont: 2) }
   end
 
+  def test_a_string_key_is_not_the_keyword_of_that_name
+    a = CArray.int32(2, 3).seq!
+    assert_raise(ArgumentError) { a.sum("axis" => 0) }
+    assert_raise(ArgumentError) { a.sort_index("axis" => 0) }
+    assert_raise(ArgumentError) { a.mean("min_count" => 100) }
+    assert_raise(ArgumentError) { a.median("fill_value" => 1) }
+    assert_equal [3, 5, 7], a.sum(axis: 0).to_a
+  end
 end

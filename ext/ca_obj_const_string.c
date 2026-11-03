@@ -372,7 +372,7 @@ rb_ca_const_string_wrap_method (int argc, VALUE *argv, VALUE klass)
    per-element Ruby build loop -- no `String#b` copy, no `pack`, no per-row
    method dispatch.  `renc` is the target Encoding (nil = UTF-8). */
 static VALUE
-rb_ca_const_string_build (VALUE klass, VALUE values, VALUE renc)
+rb_ca_const_string_build (VALUE klass, volatile VALUE values, VALUE renc)
 {
   long i, n;
   int encoding_id;
@@ -385,6 +385,8 @@ rb_ca_const_string_build (VALUE klass, VALUE values, VALUE renc)
   long hint = 0;
 
   Check_Type(values, T_ARRAY);
+  /* A to_s below can change the caller's Array; read a copy of it. */
+  values = rb_ary_dup(values);
   n = RARRAY_LEN(values);
   encoding_id = NIL_P(renc) ? rb_utf8_encindex() : rb_to_encoding_index(renc);
   enc = rb_enc_from_index(encoding_id);
@@ -403,7 +405,7 @@ rb_ca_const_string_build (VALUE klass, VALUE values, VALUE renc)
   pair = (int64_t *) pe->ptr;
 
   for ( i = 0; i < n; i++ ) {
-    VALUE s = RARRAY_AREF(values, i);
+    volatile VALUE s = RARRAY_AREF(values, i);
     if ( NIL_P(s) ) {
       if ( ! mask ) {
         ca_create_mask(pe);
@@ -506,6 +508,76 @@ rb_ca_const_string_to_string (VALUE self)
                     rb_intern("wrap"), 1, out);
 }
 
+/* A scan reads the (start,end) pairs and the bytes of a column. */
+typedef struct {
+  CAConstString     *ca;
+  int64_t    *off;
+  boolean8_t *m;
+  const char *buf;
+  long        buflen;
+  ca_size_t   n;
+} ca_const_string_scan_t;
+
+/* What a scan's body runs with the window open.  s holds one scan, or two
+   for an operation on a pair of arrays. */
+typedef VALUE (*ca_const_string_scan_body_t) (ca_const_string_scan_t *s, void *arg);
+
+typedef struct {
+  int32_t                     n;
+  ca_const_string_scan_t     *s;
+  ca_const_string_scan_body_t body;
+  void                       *arg;
+} ca_const_string_run_t;
+
+static VALUE
+ca_const_string_run_body (VALUE varg)
+{
+  ca_const_string_run_t *r = (ca_const_string_run_t *) varg;
+  int32_t k;
+  for ( k = 0; k < r->n; k++ ) {
+    ca_const_string_scan_t *s = &r->s[k];
+    s->off    = (int64_t *) s->ca->ptr;
+    s->m      = s->ca->mask ? (boolean8_t *) s->ca->mask->ptr : NULL;
+    s->buf    = RSTRING_PTR(s->ca->buffer);
+    s->buflen = RSTRING_LEN(s->ca->buffer);
+    s->n      = s->ca->elements;
+  }
+  return r->body(r->s, r->arg);
+}
+
+/* Runs body(s, arg) with the offsets of the n (1 or 2) columns in cols
+   attached, s[k] scanning cols[k], and closes the window however body
+   leaves: what body allocates can fail, and body may raise. */
+static VALUE
+ca_const_string_scan_cols (int32_t n, const VALUE *cols,
+                           ca_const_string_scan_t *s,
+                           ca_const_string_scan_body_t body, void *arg)
+{
+  ca_const_string_run_t r;
+  CArray *list[2];
+  int32_t k;
+
+  r.n    = n;
+  r.s    = s;
+  r.body = body;
+  r.arg  = arg;
+  for ( k = 0; k < n; k++ ) {
+    TypedData_Get_Struct(cols[k], CAConstString, &catext_data_type, s[k].ca);
+    ca_update_mask((CArray *) s[k].ca);
+    list[k] = (CArray *) s[k].ca;
+  }
+  return ca_attach_window(n, list, n == 2 ? "rr" : "r",
+                          ca_const_string_run_body, (VALUE) &r);
+}
+
+/* The scan of one column. */
+static VALUE
+ca_const_string_scan_run (VALUE self, ca_const_string_scan_t *s,
+                          ca_const_string_scan_body_t body, void *arg)
+{
+  return ca_const_string_scan_cols(1, &self, s, body, arg);
+}
+
 /* copy = compacting deep copy — the only chain-descent point in
    CAConstString.  Produces a standalone CAConstString:
      - a fresh contiguous fixlen-16 (start,end) pair entity
@@ -515,73 +587,76 @@ rb_ca_const_string_to_string (VALUE self)
      - fully detached from the original buffer / pair-source
    Cost is O(live bytes); a near-full copy is a near-full rebuild (accepted).
    Done at the byte level (no per-element Ruby String boxing). */
+typedef struct {
+  volatile VALUE pairs;    /* the new (start,end) pair entity */
+  volatile VALUE buffer;   /* the compacted bytes */
+} ca_const_string_copy_t;
+
+/* Repacks each live record's bytes into a new buffer in the view's order,
+   writing the new pairs and carrying the mask. */
 static VALUE
-rb_ca_const_string_copy (VALUE self)
+ca_const_string_copy_body (ca_const_string_scan_t *scan, void *arg)
 {
-  volatile VALUE vout, newbuf;
-  CAConstString *ca;
+  ca_const_string_scan_t s0 = *scan, *s = &s0;   /* a local copy: the writes below cannot alias it */
+  ca_const_string_copy_t *c = (ca_const_string_copy_t *) arg;
   CArray *co;
-  ca_size_t i, n;
-  int64_t *src_pair, *dst_pair;
-  boolean8_t *m = NULL;
-  const char *oldbuf;
-  long oldbuflen;
-
-  TypedData_Get_Struct(self, CAConstString, &catext_data_type, ca);
-
-  /* materialize logical-order (start,end) pairs + mask */
-  ca_update_mask((CArray *) ca);
-  ca_attach((CArray *) ca);   /* window: detached before its one raise */
-
-  n          = ca->elements;
-  src_pair   = (int64_t *) ca->ptr;
-  m          = ca->mask ? (boolean8_t *) ca->mask->ptr : NULL;
-  oldbuf     = RSTRING_PTR(ca->buffer);
-  oldbuflen  = RSTRING_LEN(ca->buffer);
+  ca_size_t i;
+  int64_t *dst_pair;
 
   /* fresh fixlen-16 pair entity, same shape (N-D preserved) */
-  vout = rb_carray_new(CA_FIXLEN, ca->ndim, ca->dim, 2 * sizeof(int64_t), NULL);
-  TypedData_Get_Struct(vout, CArray, &carray_data_type, co);
+  c->pairs = rb_carray_new(CA_FIXLEN, s->ca->ndim, s->ca->dim,
+                           2 * sizeof(int64_t), NULL);
+  TypedData_Get_Struct(c->pairs, CArray, &carray_data_type, co);
   dst_pair = (int64_t *) co->ptr;
 
   /* growable compacted buffer (BINARY) */
-  newbuf = rb_str_buf_new(oldbuflen);
-  rb_enc_associate_index(newbuf, rb_ascii8bit_encindex());
+  c->buffer = rb_str_buf_new(s->buflen);
+  rb_enc_associate_index(c->buffer, rb_ascii8bit_encindex());
 
-  for ( i = 0; i < n; i++ ) {
+  for ( i = 0; i < s->n; i++ ) {
     int64_t start, end, len;
-    if ( m && m[i] ) {
+    if ( s->m && s->m[i] ) {
       dst_pair[2 * i] = 0;
       dst_pair[2 * i + 1] = 0;
       continue;
     }
-    start = src_pair[2 * i];
-    end   = src_pair[2 * i + 1];
+    start = s->off[2 * i];
+    end   = s->off[2 * i + 1];
     len   = end - start;
-    if ( start < 0 || len < 0 || end > (int64_t) oldbuflen ) {
-      ca_detach((CArray *) ca);
+    if ( start < 0 || len < 0 || end > (int64_t) s->buflen ) {
       rb_raise(rb_eIndexError,
                "CAConstString#copy: record [%lld,%lld) out of buffer range",
                (long long) start, (long long) end);
     }
-    dst_pair[2 * i] = (int64_t) RSTRING_LEN(newbuf);
-    rb_str_cat(newbuf, oldbuf + start, (long) len);
-    dst_pair[2 * i + 1] = (int64_t) RSTRING_LEN(newbuf);
+    dst_pair[2 * i] = (int64_t) RSTRING_LEN(c->buffer);
+    rb_str_cat(c->buffer, s->buf + start, (long) len);
+    dst_pair[2 * i + 1] = (int64_t) RSTRING_LEN(c->buffer);
   }
 
   /* carry mask onto the new pair entity */
-  if ( m ) {
+  if ( s->m ) {
     boolean8_t *nm;
     ca_create_mask(co);
     nm = (boolean8_t *) co->mask->ptr;
-    for ( i = 0; i < n; i++ ) {
-      nm[i] = m[i] ? 1 : 0;
+    for ( i = 0; i < s->n; i++ ) {
+      nm[i] = s->m[i] ? 1 : 0;
     }
   }
+  return Qnil;
+}
 
-  ca_detach((CArray *) ca);
+static VALUE
+rb_ca_const_string_copy (VALUE self)
+{
+  ca_const_string_scan_t s;
+  ca_const_string_copy_t c;
+  volatile VALUE vout;
 
-  vout = rb_ca_const_string_wrap(vout, rb_str_freeze(newbuf), ca->encoding_id);
+  c.pairs  = Qnil;
+  c.buffer = Qnil;
+  ca_const_string_scan_run(self, &s, ca_const_string_copy_body, &c);
+  vout = rb_ca_const_string_wrap(c.pairs, rb_str_freeze(c.buffer),
+                                 s.ca->encoding_id);
   rb_ca_inherit_attr(vout, self);
   return vout;
 }
@@ -604,67 +679,6 @@ rb_ca_const_string_to_ca (int argc, VALUE *argv, VALUE self)
    the layer where CAConstString outperforms `to_object` followed by
    per-cell Ruby String work. */
 
-typedef struct {
-  CAConstString     *ca;
-  int64_t    *off;
-  boolean8_t *m;
-  const char *buf;
-  long        buflen;
-  ca_size_t   n;
-} ca_const_string_scan_t;
-
-/* Opens the scan's window; ca_const_string_scan_end closes it.  What runs
-   between them in this file reads bytes and raises only after closing. */
-static void
-ca_const_string_scan_begin (VALUE self, ca_const_string_scan_t *s)
-{
-  TypedData_Get_Struct(self, CAConstString, &catext_data_type, s->ca);
-  ca_update_mask((CArray *) s->ca);
-  ca_attach((CArray *) s->ca);   /* window: closed by ca_const_string_scan_end */
-  s->off    = (int64_t *) s->ca->ptr;
-  s->m      = s->ca->mask ? (boolean8_t *) s->ca->mask->ptr : NULL;
-  s->buf    = RSTRING_PTR(s->ca->buffer);
-  s->buflen = RSTRING_LEN(s->ca->buffer);
-  s->n      = s->ca->elements;
-}
-
-static void
-ca_const_string_scan_end (ca_const_string_scan_t *s)
-{
-  ca_detach((CArray *) s->ca);
-}
-
-typedef struct {
-  VALUE                   self;
-  ca_const_string_scan_t *s;
-} ca_const_string_scan_arg_t;
-
-static VALUE
-ca_const_string_scan_begin_body (VALUE arg)
-{
-  ca_const_string_scan_arg_t *x = (ca_const_string_scan_arg_t *) arg;
-  ca_const_string_scan_begin(x->self, x->s);
-  return Qnil;
-}
-
-/* Begins the scans of two arrays, both or neither: when the second one's
-   attach raises, the first is closed before the raise goes on. */
-static void
-ca_const_string_scan_begin_pair (VALUE va, ca_const_string_scan_t *a,
-                                 VALUE vb, ca_const_string_scan_t *b)
-{
-  ca_const_string_scan_arg_t x;
-  int tag = 0;
-  ca_const_string_scan_begin(va, a);
-  x.self = vb;
-  x.s    = b;
-  /* protect: ends the first scan, which is not an array */
-  rb_protect(ca_const_string_scan_begin_body, (VALUE) &x, &tag);
-  if ( tag ) {
-    ca_const_string_scan_end(a);
-    rb_jump_tag(tag);
-  }
-}
 
 /* Resolve element i to its record bytes; returns 0 if masked.
    Storage is (start,end) int64 pairs: s->off holds 2 int64 per element,
@@ -720,35 +734,41 @@ ca_const_string_memmem (const char *hay, long hlen, const char *need, long nlen)
   return NULL;
 }
 
-/* CAConstString#byte_length → int64 CArray of per-element byte lengths. */
 static VALUE
-rb_ca_const_string_byte_length (VALUE self)
+ca_const_string_byte_length_body (ca_const_string_scan_t *scan, void *arg)
 {
-  ca_const_string_scan_t s;
-  VALUE vout;
+  ca_const_string_scan_t s0 = *scan, *s = &s0;   /* a local copy: the writes below cannot alias it */
+  volatile VALUE vout;
   CArray *co;
   int64_t *op;
   const char *p;
   int64_t len;
   ca_size_t i;
 
-  ca_const_string_scan_begin(self, &s);
-  vout = rb_carray_new(CA_INT64, s.ca->ndim, s.ca->dim, 0, NULL);
+  vout = rb_carray_new(CA_INT64, s->ca->ndim, s->ca->dim, 0, NULL);
   TypedData_Get_Struct(vout, CArray, &carray_data_type, co);
   op = (int64_t *) co->ptr;
-  for ( i = 0; i < s.n; i++ ) {
-    op[i] = ca_const_string_record(&s, i, &p, &len) ? (int64_t) len : 0;
+  for ( i = 0; i < s->n; i++ ) {
+    op[i] = ca_const_string_record(s, i, &p, &len) ? (int64_t) len : 0;
   }
-  if ( s.m ) {
+  if ( s->m ) {
     boolean8_t *nm;
     ca_create_mask(co);
     nm = (boolean8_t *) co->mask->ptr;
-    for ( i = 0; i < s.n; i++ ) {
-      nm[i] = s.m[i] ? 1 : 0;
+    for ( i = 0; i < s->n; i++ ) {
+      nm[i] = s->m[i] ? 1 : 0;
     }
   }
-  ca_const_string_scan_end(&s);
   return vout;
+}
+
+/* CAConstString#byte_length → int64 CArray of per-element byte lengths. */
+static VALUE
+rb_ca_const_string_byte_length (VALUE self)
+{
+  ca_const_string_scan_t s;
+  return ca_const_string_scan_run(self, &s,
+                                  ca_const_string_byte_length_body, NULL);
 }
 
 /* op codes for the shared predicate scan. */
@@ -756,29 +776,30 @@ enum { CA_TEXT_EQ, CA_TEXT_START, CA_TEXT_END, CA_TEXT_INCLUDE };
 
 /* CAConstString#eq / start_with? / end_with? / include? — boolean mask vs a scalar
    String query, byte-native. */
+typedef struct {
+  const char *qp;
+  long        qlen;
+  int         op;
+} ca_const_string_query_t;
+
 static VALUE
-ca_const_string_predicate (VALUE self, VALUE query, int op)
+ca_const_string_predicate_body (ca_const_string_scan_t *scan, void *arg)
 {
-  ca_const_string_scan_t s;
-  VALUE vout;
+  ca_const_string_scan_t s0 = *scan, *s = &s0;   /* a local copy: the writes below cannot alias it */
+  ca_const_string_query_t *q = (ca_const_string_query_t *) arg;
+  const char *qp = q->qp, *p;
+  long qlen = q->qlen;
+  int op = q->op;
+  volatile VALUE vout;
   boolean8_t *out;
-  const char *qp, *p;
-  long qlen;
   int64_t len;
   ca_size_t i;
 
-  if ( TYPE(query) != T_STRING ) {
-    query = rb_obj_as_string(query);
-  }
-  qp   = RSTRING_PTR(query);
-  qlen = RSTRING_LEN(query);
+  vout = ca_const_string_bool_out(scan, &out);
 
-  ca_const_string_scan_begin(self, &s);
-  vout = ca_const_string_bool_out(&s, &out);
-
-  for ( i = 0; i < s.n; i++ ) {
+  for ( i = 0; i < s->n; i++ ) {
     boolean8_t r = 0;
-    if ( ca_const_string_record(&s, i, &p, &len) ) {
+    if ( ca_const_string_record(s, i, &p, &len) ) {
       switch ( op ) {
         case CA_TEXT_EQ:
           r = ( len == qlen && memcmp(p, qp, qlen) == 0 );
@@ -796,13 +817,91 @@ ca_const_string_predicate (VALUE self, VALUE query, int op)
     }
     out[i] = r;
   }
-  ca_const_string_scan_end(&s);
   return vout;
 }
 
-static VALUE rb_ca_const_string_start_with (VALUE self, VALUE q) { return ca_const_string_predicate(self, q, CA_TEXT_START); }
-static VALUE rb_ca_const_string_end_with   (VALUE self, VALUE q) { return ca_const_string_predicate(self, q, CA_TEXT_END); }
-static VALUE rb_ca_const_string_include    (VALUE self, VALUE q) { return ca_const_string_predicate(self, q, CA_TEXT_INCLUDE); }
+static VALUE
+ca_const_string_predicate (VALUE self, VALUE query, int op)
+{
+  ca_const_string_scan_t s;
+  ca_const_string_query_t q;
+  volatile VALUE vquery = query;
+
+  if ( TYPE(vquery) != T_STRING ) {
+    vquery = rb_obj_as_string(vquery);
+  }
+  q.qp   = RSTRING_PTR(vquery);
+  q.qlen = RSTRING_LEN(vquery);
+  q.op   = op;
+  {
+    VALUE out = ca_const_string_scan_run(self, &s,
+                                         ca_const_string_predicate_body, &q);
+    RB_GC_GUARD(vquery);
+    return out;
+  }
+}
+
+/* The native scans read one String.  Anything else (a Regexp, several
+   prefixes, a value that is no String) is asked of the Strings themselves. */
+static VALUE
+ca_const_string_ask_strings (VALUE self, const char *name, int argc, VALUE *argv)
+{
+  return rb_funcallv(rb_funcall(self, rb_intern("to_string"), 0),
+                     rb_intern(name), argc, argv);
+}
+
+static VALUE
+rb_ca_const_string_start_with (int argc, VALUE *argv, VALUE self)
+{
+  if ( argc == 1 && RB_TYPE_P(argv[0], T_STRING) ) {
+    return ca_const_string_predicate(self, argv[0], CA_TEXT_START);
+  }
+  return ca_const_string_ask_strings(self, "start_with?", argc, argv);
+}
+
+static VALUE
+rb_ca_const_string_end_with (int argc, VALUE *argv, VALUE self)
+{
+  if ( argc == 1 && RB_TYPE_P(argv[0], T_STRING) ) {
+    return ca_const_string_predicate(self, argv[0], CA_TEXT_END);
+  }
+  return ca_const_string_ask_strings(self, "end_with?", argc, argv);
+}
+
+static VALUE
+rb_ca_const_string_include (VALUE self, VALUE q)
+{
+  if ( RB_TYPE_P(q, T_STRING) ) {
+    return ca_const_string_predicate(self, q, CA_TEXT_INCLUDE);
+  }
+  return ca_const_string_ask_strings(self, "include?", 1, &q);
+}
+
+static VALUE
+ca_const_string_eq_pair_body (ca_const_string_scan_t *scan, void *arg)
+{
+  ca_const_string_scan_t a0 = scan[0], b0 = scan[1], *a = &a0, *b = &b0;   /* local copies: the writes below cannot alias them */
+  volatile VALUE vout;
+  boolean8_t *out;
+  /* record() leaves these unset for masked cells; short-circuit eval means
+     they are read only when both records are valid, but GCC cannot prove
+     that -- initialize to keep -Wmaybe-uninitialized quiet and defensive. */
+  const char *pa = NULL, *pb = NULL;
+  int64_t la = 0, lb = 0;
+  ca_size_t i;
+
+  if ( a->n != b->n ) {
+    rb_raise(rb_eArgError, "CAConstString#eq: element count mismatch (%lld vs %lld)",
+             (long long) a->n, (long long) b->n);
+  }
+  vout = ca_const_string_bool_out(&scan[0], &out);   /* mask carried from self */
+  for ( i = 0; i < a->n; i++ ) {
+    int va = ca_const_string_record(a, i, &pa, &la);
+    int vb = ca_const_string_record(b, i, &pb, &lb);
+    out[i] = ( va && vb && la == lb && memcmp(pa, pb, la) == 0 );
+  }
+  return vout;
+}
 
 /* CAConstString#eq(value): value is a scalar String (broadcast) or a CAConstString
    (element-wise).  Returns a boolean CArray. */
@@ -810,38 +909,21 @@ static VALUE
 rb_ca_const_string_eq (VALUE self, VALUE other)
 {
   if ( rb_obj_is_kind_of(other, rb_cCAConstString) ) {
-    ca_const_string_scan_t a, b;
-    VALUE vout;
-    boolean8_t *out;
-    /* record() leaves these unset for masked cells; short-circuit eval means
-       they are read only when both records are valid, but GCC cannot prove
-       that -- initialize to keep -Wmaybe-uninitialized quiet and defensive. */
-    const char *pa = NULL, *pb = NULL;
-    int64_t la = 0, lb = 0;
-    ca_size_t i;
-
-    ca_const_string_scan_begin_pair(self, &a, other, &b);
-    if ( a.n != b.n ) {
-      ca_const_string_scan_end(&a);
-      ca_const_string_scan_end(&b);
-      rb_raise(rb_eArgError, "CAConstString#eq: element count mismatch (%lld vs %lld)",
-               (long long) a.n, (long long) b.n);
-    }
-    vout = ca_const_string_bool_out(&a, &out);   /* mask carried from self */
-    for ( i = 0; i < a.n; i++ ) {
-      int va = ca_const_string_record(&a, i, &pa, &la);
-      int vb = ca_const_string_record(&b, i, &pb, &lb);
-      out[i] = ( va && vb && la == lb && memcmp(pa, pb, la) == 0 );
-    }
-    ca_const_string_scan_end(&a);
-    ca_const_string_scan_end(&b);
-    return vout;
+    ca_const_string_scan_t s[2];
+    VALUE cols[2];
+    cols[0] = self;
+    cols[1] = other;
+    return ca_const_string_scan_cols(2, cols, s,
+                                     ca_const_string_eq_pair_body, NULL);
   }
   /* Another array is compared cell by cell as Strings, where a CAString
      reconciles it (an object array of Strings, a fixlen or a CAString). */
   if ( rb_obj_is_carray(other) ) {
     return rb_funcall(rb_ca_const_string_to_string(self), rb_intern("eq"), 1,
                       other);
+  }
+  if ( ! RB_TYPE_P(other, T_STRING) ) {
+    return ca_const_string_ask_strings(self, "eq", 1, &other);
   }
   return ca_const_string_predicate(self, other, CA_TEXT_EQ);
 }
@@ -850,32 +932,78 @@ rb_ca_const_string_eq (VALUE self, VALUE other)
    value.  With no value, the number of non-masked elements, as CArray#count
    answers. */
 static VALUE
-rb_ca_const_string_count (int argc, VALUE *argv, VALUE self)
+ca_const_string_count_body (ca_const_string_scan_t *scan, void *arg)
 {
-  ca_const_string_scan_t s;
-  const char *qp, *p;
-  long qlen;
+  ca_const_string_scan_t s0 = *scan, *s = &s0;   /* a local copy: the writes below cannot alias it */
+  ca_const_string_query_t *q = (ca_const_string_query_t *) arg;
+  const char *p;
   int64_t len;
   ca_size_t i, c = 0;
-  VALUE query;
-
-  if ( rb_scan_args(argc, argv, "01", &query) == 0 ) {
-    return rb_funcall(self, rb_intern("count_not_masked"), 0);
-  }
-  if ( TYPE(query) != T_STRING ) {
-    query = rb_obj_as_string(query);
-  }
-  qp   = RSTRING_PTR(query);
-  qlen = RSTRING_LEN(query);
-
-  ca_const_string_scan_begin(self, &s);
-  for ( i = 0; i < s.n; i++ ) {
-    if ( ca_const_string_record(&s, i, &p, &len) && len == qlen && memcmp(p, qp, qlen) == 0 ) {
+  for ( i = 0; i < s->n; i++ ) {
+    if ( ca_const_string_record(s, i, &p, &len) && len == q->qlen &&
+         memcmp(p, q->qp, q->qlen) == 0 ) {
       c++;
     }
   }
-  ca_const_string_scan_end(&s);
   return SIZET2NUM(c);
+}
+
+/* The first (non-masked) cell byte-equal to the query, as a flat index, or
+   nil when none matches. */
+static VALUE
+ca_const_string_search_body (ca_const_string_scan_t *scan, void *arg)
+{
+  ca_const_string_scan_t s0 = *scan, *s = &s0;   /* a local copy: the writes below cannot alias it */
+  ca_const_string_query_t *q = (ca_const_string_query_t *) arg;
+  const char *p;
+  int64_t len;
+  ca_size_t i;
+  for ( i = 0; i < s->n; i++ ) {
+    if ( ca_const_string_record(s, i, &p, &len) && len == q->qlen &&
+         memcmp(p, q->qp, (size_t) q->qlen) == 0 ) {
+      return SIZET2NUM(i);
+    }
+  }
+  return Qnil;
+}
+
+/* Runs a scan that compares each cell with a query String. */
+static VALUE
+ca_const_string_query_run (VALUE self, VALUE query,
+                           ca_const_string_scan_body_t body)
+{
+  ca_const_string_scan_t s;
+  ca_const_string_query_t q;
+  volatile VALUE vquery = query;
+  VALUE out;
+
+  if ( TYPE(vquery) != T_STRING ) {
+    vquery = rb_obj_as_string(vquery);
+  }
+  q.qp   = RSTRING_PTR(vquery);
+  q.qlen = RSTRING_LEN(vquery);
+  q.op   = CA_TEXT_EQ;
+  out = ca_const_string_scan_run(self, &s, body, &q);
+  RB_GC_GUARD(vquery);
+  return out;
+}
+
+static VALUE
+rb_ca_const_string_count (int argc, VALUE *argv, VALUE self)
+{
+  VALUE query;
+  if ( rb_keyword_given_p() ) {
+    /* axis: and the other reduction keywords: the scan below is flat */
+    return rb_funcallv_kw(rb_funcall(self, rb_intern("to_string"), 0),
+                          rb_intern("count"), argc, argv, RB_PASS_KEYWORDS);
+  }
+  if ( rb_scan_args(argc, argv, "01", &query) == 0 ) {
+    return rb_funcall(self, rb_intern("count_not_masked"), 0);
+  }
+  if ( ! RB_TYPE_P(query, T_STRING) ) {
+    return ca_const_string_ask_strings(self, "count", 1, &query);
+  }
+  return ca_const_string_query_run(self, query, ca_const_string_count_body);
 }
 
 /* CAConstString#search(query) / #find_value_index(query): flat index of the
@@ -884,30 +1012,25 @@ rb_ca_const_string_count (int argc, VALUE *argv, VALUE self)
    offset entity, not the string content), so this is a native memcmp scan --
    the exact-lookup counterpart of the native sort / min / max below. */
 static VALUE
-rb_ca_const_string_search (VALUE self, VALUE query)
+rb_ca_const_string_find_value_index (VALUE self, VALUE query)
 {
-  ca_const_string_scan_t s;
-  const char *qp, *p;
-  long qlen;
-  int64_t len;
-  ca_size_t i;
-  VALUE result = Qnil;
-
-  if ( TYPE(query) != T_STRING ) {
-    query = rb_obj_as_string(query);
+  if ( ! RB_TYPE_P(query, T_STRING) ) {
+    return Qnil;
   }
-  qp   = RSTRING_PTR(query);
-  qlen = RSTRING_LEN(query);
+  return ca_const_string_query_run(self, query, ca_const_string_search_body);
+}
 
-  ca_const_string_scan_begin(self, &s);
-  for ( i = 0; i < s.n; i++ ) {
-    if ( ca_const_string_record(&s, i, &p, &len) && len == qlen && memcmp(p, qp, (size_t) qlen) == 0 ) {
-      result = SIZET2NUM(i);
-      break;
-    }
+static VALUE
+rb_ca_const_string_search (int argc, VALUE *argv, VALUE self)
+{
+  if ( rb_keyword_given_p() ) {
+    return rb_funcallv_kw(rb_funcall(self, rb_intern("to_string"), 0),
+                          rb_intern("search"), argc, argv, RB_PASS_KEYWORDS);
   }
-  ca_const_string_scan_end(&s);
-  return result;
+  if ( argc == 1 && RB_TYPE_P(argv[0], T_STRING) ) {
+    return rb_ca_const_string_find_value_index(self, argv[0]);
+  }
+  return ca_const_string_ask_strings(self, "search", argc, argv);
 }
 
 /* ------------------------------------------------------------------- */
@@ -944,18 +1067,20 @@ ca_const_string_index_cmp (const void *a, const void *b)
   return (ia > ib) - (ia < ib);
 }
 
-/* compute the ascending sort permutation; raises on masked input (matches
-   base CArray#sort).  caller xfree()s the returned index array. */
-static ca_size_t *
-ca_const_string_sort_perm (ca_const_string_scan_t *s)
+/* raises on masked input (matches base CArray#sort) */
+static void
+ca_const_string_refuse_masked_sort (ca_const_string_scan_t *s)
 {
-  ca_size_t *idx;
-  ca_size_t i;
   if ( s->m ) {
-    ca_const_string_scan_end(s);
     rb_raise(rb_eArgError, "CAConstString#sort: cannot sort an array with masked elements");
   }
-  idx = ALLOC_N(ca_size_t, s->n);
+}
+
+/* computes the ascending sort permutation into idx[0..n-1] */
+static void
+ca_const_string_sort_perm (ca_const_string_scan_t *s, ca_size_t *idx)
+{
+  ca_size_t i;
   for ( i = 0; i < s->n; i++ ) idx[i] = i;
   ruby_qsort(idx, (size_t) s->n, sizeof(ca_size_t), ca_const_string_byte_cmp, s);
   /* qsort is not stable.  Equal strings keep their order, as CArray's own
@@ -970,29 +1095,36 @@ ca_const_string_sort_perm (ca_const_string_scan_t *s)
     }
     i = j;
   }
-  return idx;
 }
 
 /* CAConstString#sort_index → int64 CArray of the ascending sort permutation. */
 static VALUE
-rb_ca_const_string_sort_index (VALUE self)
+ca_const_string_sort_index_body (ca_const_string_scan_t *s, void *arg)
 {
-  ca_const_string_scan_t s;
+  volatile VALUE holder = 0;   /* 0, not Qnil: ALLOCV_END reads a non-zero holder */
+  volatile VALUE vout;
   ca_size_t *idx;
-  VALUE vout;
   CArray *co;
   int64_t *op;
   ca_size_t i;
 
-  ca_const_string_scan_begin(self, &s);
-  idx = ca_const_string_sort_perm(&s);
-  vout = rb_carray_new(CA_INT64, s.ca->ndim, s.ca->dim, 0, NULL);
+  ca_const_string_refuse_masked_sort(s);
+  idx = ALLOCV_N(ca_size_t, holder, s->n > 0 ? s->n : 1);
+  ca_const_string_sort_perm(s, idx);
+  vout = rb_carray_new(CA_INT64, s->ca->ndim, s->ca->dim, 0, NULL);
   TypedData_Get_Struct(vout, CArray, &carray_data_type, co);
   op = (int64_t *) co->ptr;
-  for ( i = 0; i < s.n; i++ ) op[i] = (int64_t) idx[i];
-  xfree(idx);
-  ca_const_string_scan_end(&s);
+  for ( i = 0; i < s->n; i++ ) op[i] = (int64_t) idx[i];
+  ALLOCV_END(holder);
   return vout;
+}
+
+static VALUE
+rb_ca_const_string_sort_index (VALUE self)
+{
+  ca_const_string_scan_t s;
+  return ca_const_string_scan_run(self, &s,
+                                  ca_const_string_sort_index_body, NULL);
 }
 
 /* The ordering surface is defined in Ruby (lib/carray/const_string.rb) on
@@ -1008,18 +1140,18 @@ rb_ca_const_string_sort_index (VALUE self)
 /* CAConstString#min / #max → the byte-min / byte-max element as a frozen String,
    skipping masked elements; nil if empty or all masked. */
 static VALUE
-ca_const_string_extremum (VALUE self, int want_max)
+ca_const_string_extremum_body (ca_const_string_scan_t *scan, void *arg)
 {
-  ca_const_string_scan_t s;
+  ca_const_string_scan_t s0 = *scan, *s = &s0;   /* a local copy: the writes below cannot alias it */
+  int want_max = *(int *) arg;
   const char *p, *bestp = NULL;
   int64_t len, bestlen = 0;
   ca_size_t i;
   int found = 0;
 
-  ca_const_string_scan_begin(self, &s);
-  for ( i = 0; i < s.n; i++ ) {
+  for ( i = 0; i < s->n; i++ ) {
     int c;
-    if ( ! ca_const_string_record(&s, i, &p, &len) ) continue;
+    if ( ! ca_const_string_record(s, i, &p, &len) ) continue;
     if ( ! found ) {
       bestp = p; bestlen = len; found = 1;
       continue;
@@ -1031,14 +1163,18 @@ ca_const_string_extremum (VALUE self, int want_max)
     }
   }
   if ( ! found ) {
-    ca_const_string_scan_end(&s);
     return Qnil;
   }
-  {
-    VALUE str = rb_enc_str_new(bestp, bestlen, rb_enc_from_index(s.ca->encoding_id));
-    ca_const_string_scan_end(&s);
-    return rb_str_freeze(str);
-  }
+  return rb_str_freeze(rb_enc_str_new(bestp, bestlen,
+                                      rb_enc_from_index(s->ca->encoding_id)));
+}
+
+static VALUE
+ca_const_string_extremum (VALUE self, int want_max)
+{
+  ca_const_string_scan_t s;
+  return ca_const_string_scan_run(self, &s,
+                                  ca_const_string_extremum_body, &want_max);
 }
 
 static VALUE rb_ca_const_string_min (VALUE self) { return ca_const_string_extremum(self, 0); }
@@ -1060,6 +1196,52 @@ ca_const_string_hash_bytes (const char *p, int64_t len)
     h *= 1099511628211ULL;
   }
   return h;
+}
+
+typedef struct {
+  uint32_t  *codes, *slot;
+  int64_t   *lev_start, *lev_len;
+  size_t     mask_bits;
+  ca_size_t  k;
+} ca_const_string_factorize_t;
+
+/* Codes the cells by first appearance into an open-addressing table of
+   (start, length) records.  Reads bytes only. */
+static VALUE
+ca_const_string_factorize_body (ca_const_string_scan_t *scan, void *arg)
+{
+  ca_const_string_scan_t s0 = *scan, *s = &s0;   /* a local copy: the writes below cannot alias it */
+  ca_const_string_factorize_t *f = (ca_const_string_factorize_t *) arg;
+  ca_size_t i, k = f->k;
+  for ( i = 0; i < s->n; i++ ) {
+    const char *p;
+    int64_t len;
+    size_t j;
+    if ( ! ca_const_string_record(s, i, &p, &len) ) {
+      f->codes[i] = 0xFFFFFFFFu;
+      continue;
+    }
+    j = (size_t) ca_const_string_hash_bytes(p, len) & f->mask_bits;
+    for (;;) {
+      uint32_t c = f->slot[j];
+      if ( c == 0 ) {
+        f->lev_start[k] = (int64_t) (p - s->buf);
+        f->lev_len[k]   = len;
+        f->slot[j]      = (uint32_t) (k + 1);
+        f->codes[i]     = (uint32_t) k;
+        k++;
+        break;
+      }
+      if ( f->lev_len[c - 1] == len &&
+           memcmp(s->buf + f->lev_start[c - 1], p, (size_t) len) == 0 ) {
+        f->codes[i] = c - 1;
+        break;
+      }
+      j = (j + 1) & f->mask_bits;
+    }
+  }
+  f->k = k;
+  return Qnil;
 }
 
 /* CAConstString#__factorize_appearance__ -> [codes, levels], as the CArray
@@ -1100,34 +1282,17 @@ rb_ca_const_string_factorize_appearance (VALUE self)
   lev_start = ALLOCV_N(int64_t, start_holder, n > 0 ? n : 1);
   lev_len   = ALLOCV_N(int64_t, len_holder, n > 0 ? n : 1);
 
-  ca_const_string_scan_begin(self, &s);
-  for ( i = 0; i < s.n; i++ ) {
-    const char *p;
-    int64_t len;
-    size_t j;
-    if ( ! ca_const_string_record(&s, i, &p, &len) ) {
-      codes[i] = 0xFFFFFFFFu;
-      continue;
-    }
-    j = (size_t) ca_const_string_hash_bytes(p, len) & mask_bits;
-    for (;;) {
-      uint32_t c = slot[j];
-      if ( c == 0 ) {
-        lev_start[k] = (int64_t) (p - s.buf);
-        lev_len[k]   = len;
-        slot[j]      = (uint32_t) (k + 1);
-        codes[i]     = (uint32_t) k;
-        k++;
-        break;
-      }
-      if ( lev_len[c - 1] == len && memcmp(s.buf + lev_start[c - 1], p, (size_t) len) == 0 ) {
-        codes[i] = c - 1;
-        break;
-      }
-      j = (j + 1) & mask_bits;
-    }
+  {
+    ca_const_string_factorize_t f;
+    f.codes     = codes;
+    f.slot      = slot;
+    f.lev_start = lev_start;
+    f.lev_len   = lev_len;
+    f.mask_bits = mask_bits;
+    f.k         = 0;
+    ca_const_string_scan_run(self, &s, ca_const_string_factorize_body, &f);
+    k = f.k;
   }
-  ca_const_string_scan_end(&s);
   ALLOCV_END(slot_holder);
 
   /* The buffer is the column's frozen String, alive past the window. */
@@ -1229,15 +1394,15 @@ Init_ca_obj_const_string (void)
   rb_define_method(rb_cCAConstString, "byte_length", rb_ca_const_string_byte_length, 0);
   rb_define_method(rb_cCAConstString, "eq",          rb_ca_const_string_eq, 1);
   rb_define_method(rb_cCAConstString, "count",       rb_ca_const_string_count, -1);
-  rb_define_method(rb_cCAConstString, "start_with?", rb_ca_const_string_start_with, 1);
-  rb_define_method(rb_cCAConstString, "end_with?",   rb_ca_const_string_end_with, 1);
+  rb_define_method(rb_cCAConstString, "start_with?", rb_ca_const_string_start_with, -1);
+  rb_define_method(rb_cCAConstString, "end_with?",   rb_ca_const_string_end_with, -1);
   rb_define_method(rb_cCAConstString, "include?",    rb_ca_const_string_include, 1);
 
   /* native exact-lookup search: flat index of the first byte-equal element,
      or nil.  `search` is what str_matches consumes; find_value_index is the
      *_index-named surface (both exact, mask-skipping). */
-  rb_define_method(rb_cCAConstString, "search",           rb_ca_const_string_search, 1);
-  rb_define_method(rb_cCAConstString, "find_value_index",  rb_ca_const_string_search, 1);
+  rb_define_method(rb_cCAConstString, "search",           rb_ca_const_string_search, -1);
+  rb_define_method(rb_cCAConstString, "find_value_index",  rb_ca_const_string_find_value_index, 1);
 
   /* Native flat sort permutation / min / max (§3.7), byte-memcmp
      comparator.  The public ordering surface is built on these in

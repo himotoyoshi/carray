@@ -465,9 +465,11 @@ ca_select_func_allocate (void *ap)
 {
   CASelect *ca = (CASelect *) ap;
   if ( ! ca_parent_lends_no_memory(ca->parent) ) {
-    ca_attach(ca->parent);
+    ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
   }
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  else {
+    ca->ptr = ca_alloc_cells((CArray *) ca);
+  }
 }
 
 static void
@@ -482,10 +484,10 @@ ca_select_func_attach (void *ap)
     return;
   }
 
-  ca_attach(ca->parent);
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
   ca_select_describe_axes(ca, desc, pdims);
-  ca->ptr = ca_axis_dispatch_attach(ca->parent, pdims, desc, ca->ndim,
-                                    ca->bytes, ca->elements, NULL);
+  ca_axis_dispatch_gather(ca->parent, pdims, desc, ca->ndim,
+                          ca->bytes, ca->elements, NULL, ca->ptr);
 }
 
 static void
@@ -600,7 +602,7 @@ ca_operation_function_t ca_select_func = {
 /* ------------------------------------------------------------------- */
 
 VALUE
-rb_ca_select_new (VALUE cary, VALUE select)
+rb_ca_select_new (VALUE cary, volatile VALUE select)
 {
   volatile VALUE obj;
   CArray *parent, *cselect;

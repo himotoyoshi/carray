@@ -99,14 +99,16 @@ class TestCF2CountDispatch < Test::Unit::TestCase
 
   # ---- Q3 strict dispatch (TypeError) ---------------------------------
 
-  def test_q3_numeric_rejects_true
+  # true and false are the numbers 1 and 0 to a numeric array, as they are
+  # to eq and to the operators.
+  def test_q3_numeric_counts_true_as_one
     a = CArray.int32(5).seq
-    assert_raise(TypeError) { a.count(true) }
+    assert_equal 1, a.count(true)
   end
 
-  def test_q3_numeric_rejects_false
+  def test_q3_numeric_counts_false_as_zero
     a = CArray.int32(5).seq
-    assert_raise(TypeError) { a.count(false) }
+    assert_equal 1, a.count(false)
   end
 
   def test_q3_bool_accepts_1_and_0

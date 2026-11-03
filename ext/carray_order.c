@@ -169,7 +169,7 @@ ca_project (CArray *ca, CArray *ci, char *lfill, char *ufill)
   else             CA_COUNT_BELOW_LOOP(T, <)
 
 static VALUE
-rb_ca_count_below (VALUE self, VALUE vq, VALUE vinclusive)
+rb_ca_count_below (VALUE self, volatile VALUE vq, VALUE vinclusive)
 {
   volatile VALUE vout;
   CArray *cr, *cq, *co;
@@ -387,7 +387,7 @@ extern VALUE rb_ca_rank_index_ki_kind_dense (VALUE self, VALUE vaxis, int stable
  * search_kw / search_nearest_kw and their _addr siblings) on the
  * no-axis path. */
 static VALUE
-ca_reshape_search_result (VALUE query, VALUE rraw)
+ca_reshape_search_result (volatile VALUE query, VALUE rraw)
 {
   CArray *cq;
   GetCArray(query, cq);
@@ -441,6 +441,28 @@ rb_ca_bsearch_addr_kw (int argc, VALUE *argv, VALUE self)
   return rb_ca_bsearch_addr_ki(self, argv[0], raxis);
 }
 
+/* The query of search as the array reads it.  true and false are 1 and 0
+   to a numeric array.  A value the array can not hold (nil, a String)
+   finds nothing, as an Integer outside the array's type does.  The query is asked of the
+   cells that matched (none), in the type that holds the answer.  A Face that
+   can not be searched is refused as for any query, and a complex array,
+   which search does not take, goes on to its refusal. */
+static void
+ca_search_query_read (VALUE *pself, VALUE *pquery)
+{
+  CArray *ca;
+  GetCArray(*pself, ca);
+  *pquery = ca_truth_as_number(ca, *pquery);
+  if ( ! ca_query_matches_nothing(ca, *pquery) || ca_is_complex_type(ca) ) {
+    return;
+  }
+  if ( ca_is_face(ca) ) {
+    ca_face_require_orderable(*pself, "search", "search");
+  }
+  *pself  = rb_funcall(*pself, rb_intern("eq"), 1, *pquery);
+  *pquery = Qtrue;
+}
+
 static VALUE
 rb_ca_search_kw (int argc, VALUE *argv, VALUE self)
 {
@@ -448,10 +470,12 @@ rb_ca_search_kw (int argc, VALUE *argv, VALUE self)
   VALUE raxis = Qnil;
   rb_scan_options(ropt, "axis", &raxis);
   rb_check_arity(argc, 1, 2);
+  VALUE rquery = argv[0];
+  ca_search_query_read(&self, &rquery);
 
   if ( NIL_P(raxis) ) {
     VALUE flat = rb_ca_flatten(self);
-    VALUE q    = rb_obj_is_carray(argv[0]) ? rb_ca_flatten(argv[0]) : argv[0];
+    VALUE q    = rb_obj_is_carray(rquery) ? rb_ca_flatten(rquery) : rquery;
     VALUE r;
     VALUE ki_argv[3] = { q, INT2FIX(0), argv[1] };
     if ( argc >= 2 ) {
@@ -460,10 +484,10 @@ rb_ca_search_kw (int argc, VALUE *argv, VALUE self)
     else {
       r = rb_ca_search_ki(2, ki_argv, flat);
     }
-    return rb_obj_is_carray(argv[0]) ? ca_reshape_search_result(argv[0], r) : r;
+    return rb_obj_is_carray(rquery) ? ca_reshape_search_result(rquery, r) : r;
   }
   /* search_ki(val, axis, eps) -- argc=2 (val,axis) or 3 (val,axis,eps) */
-  VALUE ki_argv[3] = { argv[0], raxis, argv[1] };
+  VALUE ki_argv[3] = { rquery, raxis, argv[1] };
   if ( argc >= 2 ) {
     return rb_ca_search_ki(3, ki_argv, self);
   }
@@ -477,11 +501,13 @@ rb_ca_search_addr_kw (int argc, VALUE *argv, VALUE self)
   VALUE raxis = Qnil;
   rb_scan_options(ropt, "axis", &raxis);
   rb_check_arity(argc, 1, 2);
+  VALUE rquery = argv[0];
+  ca_search_query_read(&self, &rquery);
 
   if ( NIL_P(raxis) ) {
     /* 1-D self: addr == index reuses _ki (not _addr_ki). */
     VALUE flat = rb_ca_flatten(self);
-    VALUE q    = rb_obj_is_carray(argv[0]) ? rb_ca_flatten(argv[0]) : argv[0];
+    VALUE q    = rb_obj_is_carray(rquery) ? rb_ca_flatten(rquery) : rquery;
     VALUE r;
     VALUE ki_argv[3] = { q, INT2FIX(0), argv[1] };
     if ( argc >= 2 ) {
@@ -490,9 +516,9 @@ rb_ca_search_addr_kw (int argc, VALUE *argv, VALUE self)
     else {
       r = rb_ca_search_ki(2, ki_argv, flat);
     }
-    return rb_obj_is_carray(argv[0]) ? ca_reshape_search_result(argv[0], r) : r;
+    return rb_obj_is_carray(rquery) ? ca_reshape_search_result(rquery, r) : r;
   }
-  VALUE ki_argv[3] = { argv[0], raxis, argv[1] };
+  VALUE ki_argv[3] = { rquery, raxis, argv[1] };
   if ( argc >= 2 ) {
     return rb_ca_search_addr_ki(3, ki_argv, self);
   }
@@ -597,6 +623,21 @@ rb_ca_sort_by_key (int argc, VALUE *argv, VALUE self)
   return rb_ca_fetch(self, addrs);
 }
 
+/* The extreme kernels have no fixlen lane: a fixlen key is read through the
+   rank of its cells, which keeps ties and masked cells. */
+static VALUE
+ca_by_key_comparable (VALUE key)
+{
+  CArray *ca;
+  TypedData_Get_Struct(key, CArray, &carray_data_type, ca);
+  if ( ca->data_type == CA_FIXLEN ) {
+    VALUE opts = rb_hash_new();
+    rb_hash_aset(opts, ID2SYM(rb_intern("method")), ID2SYM(rb_intern("dense")));
+    return rb_funcallv_kw(key, rb_intern("order"), 1, &opts, RB_PASS_KEYWORDS);
+  }
+  return key;
+}
+
 /* max_by_key(key, axis: nil) -- self[key.max_addr(axis:)] (or UNDEF if empty). */
 static VALUE
 rb_ca_max_by_key (int argc, VALUE *argv, VALUE self)
@@ -609,6 +650,7 @@ rb_ca_max_by_key (int argc, VALUE *argv, VALUE self)
     return CA_UNDEF;
   }
   rkey = ca_order_key(rkey, "max_by_key");
+  rkey = ca_by_key_comparable(rkey);
 
   VALUE addrs;
 
@@ -636,6 +678,7 @@ rb_ca_min_by_key (int argc, VALUE *argv, VALUE self)
     return CA_UNDEF;
   }
   rkey = ca_order_key(rkey, "min_by_key");
+  rkey = ca_by_key_comparable(rkey);
 
   VALUE addrs;
 
@@ -1100,7 +1143,7 @@ ca_topk_buf_fiber (const ca_topk_fiber_t *f, ca_size_t len, ca_size_t cap,
    filled with the axis last and moved into place at the end (cap cells
    per fiber). */
 static VALUE
-ca_topk_buffered_positions (VALUE key, long cap, long axis, int desc)
+ca_topk_buffered_positions (volatile VALUE key, long cap, long axis, int desc)
 {
   volatile VALUE holder = 0, out;
   VALUE perm[CA_RANK_MAX];

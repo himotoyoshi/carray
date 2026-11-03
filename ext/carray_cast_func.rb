@@ -371,7 +371,29 @@ puts
       lo_cmp = ( type2 == CA_INT64 ) ? ">=" : ">"
       fits = "( v #{lo_cmp} #{lo} && v < #{hi} )"
       fits = "( #{fits} && ! isnan(cimag(q1[k])) )" if complex
-      nan_check = <<-END_CHECK.gsub(/^ {6}/, '')
+      # The cells of a bit field view keep a float's integer part modulo
+      # 2 ** bits, as a Float stored on its own does (ca_obj2integer_store).
+      unless complex
+        num = [CA_UINT8, CA_UINT16, CA_UINT32, CA_UINT64].include?(type2) ? "rb_num2ull" : "NUM2LL"
+        nan_check << <<-END_FIELD.gsub(/^ {8}/, '')
+           if ( a2 && ca_bitfield_beneath(a2) ) {
+             for (k=0; k<n; k++) {
+               double v = (double) q1[k];
+               if ( m && m[k] ) {
+                 continue;
+               }
+               if ( ! isfinite(v) ) {
+                 rb_raise(rb_eFloatDomainError, "%s: %s cannot be converted to %s",
+                          ca_calling_method_name(), isinf(v) ? "an infinity" : "NaN",
+                          ca_type_name[#{type_const[type2]}]);
+               }
+               q2[k] = (#{ctype2}) #{num}(ca_obj2integer_store(a2, rb_float_new(v), #{type_const[type2]}));
+             }
+             return;
+           }
+        END_FIELD
+      end
+      nan_check << <<-END_CHECK.gsub(/^ {6}/, '')
          for (k=0; k<n; k++) {
            double v = (double) #{real};
            if ( ( ! m || ! m[k] ) && ! #{fits} ) {
@@ -537,18 +559,28 @@ OBJECT.each do |type1|
       # Ruby literal. Complex keeps its own reader.
       if (INTEGER+FLOAT).include?(type2)
         type_name = "CA_" + ctype2.sub(/_t\z/, "").upcase
+        # A number other than an Integer that does not fit an integer type
+        # is read as missing (ca_obj_number_fits_integer); an Integer keeps
+        # its low bytes.
+        fits      = INTEGER.include?(type2) ?
+                      "ca_obj_number_fits_integer(*p1, #{type_name}) && " : ""
         read_ok   = "( RB_TYPE_P(*p1, T_STRING) ? " \
                     "ca_decimal_string_to(*p1, #{type_name}, p2) : " \
-                    "( #{conv_ok}(*p1, &tmp) ? ( *p2 = (#{ctype2}) tmp, 1 ) : 0 ) )"
+                    "( #{fits}#{conv_ok}(*p1, &tmp) ? ( *p2 = (#{ctype2}) tmp, 1 ) : 0 ) )"
         # A store refuses an integer the cell cannot hold
-        # (ca_obj2integer_fitting); to_type, above, keeps the C conversion.
+        # (ca_obj2integer_store); to_type, above, keeps the C conversion.
         store_conv = if INTEGER.include?(type2)
                        num = [CA_UINT8, CA_UINT16, CA_UINT32, CA_UINT64].include?(type2) ? "rb_num2ull" : "NUM2LL"
-                       "#{num}(ca_obj2integer_fitting(*p1, #{type_name}))"
+                       "#{num}(ca_obj2integer_store(a2, *p1, #{type_name}))"
                      else
                        "#{conv}(*p1)"
                      end
-        read      = "if ( RB_TYPE_P(*p1, T_STRING) ) { " \
+        # The cells of a bit field view read a String through
+        # ca_obj2integer_store too (it keeps the value modulo 2 ** bits).
+        str_test  = INTEGER.include?(type2) ?
+                      "RB_TYPE_P(*p1, T_STRING) && ! ( a2 && ca_bitfield_beneath(a2) )" :
+                      "RB_TYPE_P(*p1, T_STRING)"
+        read      = "if ( #{str_test} ) { " \
                     "ca_decimal_string_store(*p1, #{type_name}, p2); } " \
                     "else { *p2 = (#{ctype2}) #{store_conv}; }"
       else

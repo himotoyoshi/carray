@@ -38,22 +38,28 @@ elem_index_value (VALUE v)
   }
 }
 
+ca_size_t
+ca_index_key_value (VALUE v)
+{
+  return elem_index_value(v);
+}
+
 /* T_ARRAY index parser.  ridx is assumed already known to be T_ARRAY.
    Direct VALUE * access + FIXNUM_P fast path eliminates rb_ary_entry
    bounds check and NUM2SIZE Bignum branching for the common case. */
 static inline void
 elem_parse_idx_array (CArray *ca, VALUE rary, ca_size_t *idx)
 {
-  const VALUE *iarr;
   int8_t ndim = ca->ndim;
   int8_t i;
   if ( RARRAY_LEN(rary) != ndim ) {
     rb_raise(rb_eIndexError, "%ld indices given for a carray of ndim %i",
              (long) RARRAY_LEN(rary), (int) ndim);
   }
-  iarr = RARRAY_CONST_PTR(rary);
   for (i=0; i<ndim; i++) {
-    ca_size_t k = elem_index_value(iarr[i]);
+    /* Read each entry afresh: converting one can run Ruby that changes the
+       Array (an entry gone reads as nil, which is refused). */
+    ca_size_t k = elem_index_value(rb_ary_entry(rary, i));
     CA_CHECK_INDEX(k, ca->dim[i]);
     idx[i] = k;
   }

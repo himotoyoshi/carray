@@ -256,6 +256,14 @@ class CAIterator
     end))
   end
 
+  # CArray#count over a view: CABlock / CAWindow shadow #count with a geometry
+  # accessor, so it is dispatched explicitly, while a Face keeps a #count of
+  # its own (CAConstString reads its cells as Strings).
+  private def count_cells (view, *args, **kw)
+    return view.count(*args, **kw) if view.face?
+    CArray.instance_method(:count).bind_call(view, *args, **kw)
+  end
+
   # Recommended (should) surface -- template methods.  These are well-defined
   # for some members and structurally impossible for others, so they are not
   # required: `map` is a per-piece element-wise transform scattered back to the

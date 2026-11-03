@@ -446,6 +446,30 @@ struct ca_partition_nan_##SUFFIX##_eat_semicolon
 DEFINE_PARTITION_NAN(float32_t, f32);
 DEFINE_PARTITION_NAN(double,    f64);
 
+/* Stable variant for a stable value sort: the finite values, then the
+   NaNs, each in their original order.  scratch holds n values, taken by
+   the caller before it opens its walks. */
+#define DEFINE_PARTITION_NAN_STABLE(TYPE, SUFFIX)                          \
+ca_size_t                                                                  \
+ca_partition_nan_stable_##SUFFIX (TYPE *a, ca_size_t n, TYPE *scratch)     \
+{                                                                          \
+  ca_size_t fin = 0, k;                                                    \
+  for ( k = 0; k < n; k++ ) {                                              \
+    if ( !isnan(a[k]) ) scratch[fin++] = a[k];                             \
+  }                                                                        \
+  if ( fin == n ) return n;                                                \
+  ca_size_t m = fin;                                                       \
+  for ( k = 0; k < n; k++ ) {                                              \
+    if ( isnan(a[k]) ) scratch[m++] = a[k];                                \
+  }                                                                        \
+  memcpy(a, scratch, (size_t) n * sizeof(TYPE));                           \
+  return fin;                                                              \
+}                                                                          \
+struct ca_partition_nan_stable_##SUFFIX##_eat_semicolon
+
+DEFINE_PARTITION_NAN_STABLE(float32_t, f32);
+DEFINE_PARTITION_NAN_STABLE(double,    f64);
+
 /* Pair variant for argsort: separates ca_pair_<type> by
    isnan(v.value).  Returns the finite count.
 

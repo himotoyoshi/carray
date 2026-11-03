@@ -39,21 +39,20 @@ rb_ca_store_index (VALUE self, ca_size_t *idx, VALUE rval)
     ca_create_mask(ca);
     ca_store_index(ca->mask, idx, &one);
   }
-  else {                   /* unset mask and set value of the element at the index 'idx' */
+  else {                   /* set value of the element at the index 'idx' and unset its mask */
 
-    /* unset mask */
-    ca_update_mask(ca);
-    if ( ca->mask ) {
-      ca_store_index(ca->mask, idx, &zero);
-    }
-
-    /* store value */
+    /* A value that can not be stored leaves the cell masked. */
     {
       volatile VALUE holder;
       char *v = ALLOCV_N(char, holder, ca->bytes);
       rb_ca_obj2ptr(self, rval, v);
       ca_store_index(ca, idx, v);
       ALLOCV_END(holder);
+    }
+
+    ca_update_mask(ca);
+    if ( ca->mask ) {
+      ca_store_index(ca->mask, idx, &zero);
     }
   }
 
@@ -123,19 +122,20 @@ rb_ca_store_addr (VALUE self, ca_size_t addr, VALUE rval)
     ca_create_mask(ca);
     ca_store_addr(ca->mask, addr, &one);
   }
-  else {                   /* set value at the element */
-    ca_update_mask(ca);
-    if ( ca->mask ) {
-      ca_store_addr(ca->mask, addr, &zero); /* unset mask */
-    }
+  else {                   /* set value at the element and unset its mask */
 
-    /* store value */
+    /* A value that can not be stored leaves the cell masked. */
     {
       volatile VALUE holder;
       char *v = ALLOCV_N(char, holder, ca->bytes);
       rb_ca_obj2ptr(self, rval, v);
       ca_store_addr(ca, addr, v);
       ALLOCV_END(holder);
+    }
+
+    ca_update_mask(ca);
+    if ( ca->mask ) {
+      ca_store_addr(ca->mask, addr, &zero);
     }
   }
 
@@ -426,14 +426,38 @@ rb_ca_ref_address (VALUE self, CAIndexInfo *info)
   return rb_ca_fetch_addr(self, addr);
 }
 
+/* What a store to one cell takes from an array: its one cell.  A cell of an
+   object array holds any value, the array itself included, so only a
+   CScalar is opened there. */
+static VALUE
+ca_cell_of_store_value (VALUE self, VALUE rval)
+{
+  CArray *ca, *cv;
+  if ( rb_obj_is_cscalar(rval) ) {
+    return rb_ca_fetch_addr(rval, 0);
+  }
+  if ( ! rb_obj_is_carray(rval) ) {
+    return rval;
+  }
+  TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  if ( ca->data_type == CA_OBJECT ) {
+    return rval;
+  }
+  TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
+  if ( cv->elements != 1 ) {
+    rb_raise(rb_eArgError,
+             "%s: shape mismatch writing to one cell (<- %" PRIi64 " cells)",
+             ca_calling_method_name(), (int64_t) cv->elements);
+  }
+  return rb_ca_fetch_addr(rval, 0);
+}
+
 static VALUE
 rb_ca_store_address (VALUE self, CAIndexInfo *info, volatile VALUE rval)
 {
   ca_size_t addr;
   addr = info->index[0].scalar;
-  if ( rb_obj_is_cscalar(rval) ) {
-    rval = rb_ca_fetch_addr(rval, 0);
-  }
+  rval = ca_cell_of_store_value(self, rval);
   rb_ca_store_addr(self, addr, rval);
   return rval;
 }
@@ -461,9 +485,7 @@ rb_ca_store_point (VALUE self, CAIndexInfo *info, volatile VALUE val)
   for (i=0; i<ca->ndim; i++) {
     idx[i] = info->index[i].scalar;
   }
-  if ( rb_obj_is_cscalar(val) ) {
-    val = rb_ca_fetch_addr(val, 0);
-  }
+  val = ca_cell_of_store_value(self, val);
   rb_ca_store_index(self, idx, val);
   return val;
 }
@@ -522,8 +544,8 @@ ca_store_all_cast_body (VALUE arg)
     memset(ca->mask->ptr, 0, ca->elements);
   }
   if ( ca->mask ) {
-    ca_cast_block_with_mask(ca->elements, c->cv, c->scratch, ca, ca->ptr,
-                            (boolean8_t*)ca->mask->ptr);
+    ca_cast_block_skip_masked(ca->elements, c->cv, c->scratch, ca, ca->ptr,
+                              (boolean8_t*)ca->mask->ptr);
   }
   else {
     ca_cast_block(ca->elements, c->cv, c->scratch, ca, ca->ptr);
@@ -567,9 +589,9 @@ ca_store_all_list_body (VALUE arg)
       }
       m++;
     }
-    ca_cast_block_with_mask(ca->elements, c->ico, (VALUE *)RARRAY_CONST_PTR(list),
-                            cast_target, ca->ptr,
-                            (boolean8_t*)ca->mask->ptr);
+    ca_cast_block_skip_masked(ca->elements, c->ico, (VALUE *)RARRAY_CONST_PTR(list),
+                              cast_target, ca->ptr,
+                              (boolean8_t*)ca->mask->ptr);
   }
   else {
     /* Every cell gets a value, so none stays masked. */
@@ -617,8 +639,8 @@ ca_face_source_for_store (VALUE self, CArray *ca, VALUE rval)
                rb_ca_data_class(rval), rb_ca_data_class(self));
     }
     rb_raise(rb_eTypeError,
-             "can not store a %s array into a record array of %"PRIsVALUE,
-             rb_obj_classname(rval), rb_ca_data_class(self));
+             "can not store a %"PRIsVALUE" array into a record array of %"PRIsVALUE,
+             rb_obj_class(rval), rb_ca_data_class(self));
   }
   if ( ca_is_face(ca) ) {
     if ( rb_obj_class(self) == rb_obj_class(rval)
@@ -637,9 +659,9 @@ ca_face_source_for_store (VALUE self, CArray *ca, VALUE rval)
       return rval;
     }
     rb_raise(rb_eTypeError,
-             "can not store a %s array into %s array "
+             "can not store a %"PRIsVALUE" array into %s array "
              "(to_type(:object) gives its values)",
-             rb_obj_classname(rval), ca_type_name[ca->data_type]);
+             rb_obj_class(rval), ca_type_name[ca->data_type]);
   }
   return rb_funcall(rval, rb_intern("to_type"), 1, INT2NUM(CA_OBJECT));
 }
@@ -647,6 +669,20 @@ ca_face_source_for_store (VALUE self, CArray *ca, VALUE rval)
 /* A store into no cells writes nothing, but the value is checked as it
    would be for any cells: the same statement does not raise or pass
    depending on how many cells the index picks. */
+/* Writing complex cells into real ones would drop the imaginary parts
+   without a word, where a Complex scalar is refused. */
+void
+ca_refuse_complex_into_real (CArray *ca, CArray *cv)
+{
+  if ( ca_is_complex_type(cv) && ! ca_is_complex_type(ca)
+       && ca->data_type != CA_OBJECT ) {
+    rb_raise(rb_eCADataTypeError,
+             "%s: cannot store %s cells in %s (#real and #to_type take the part wanted)",
+             ca_calling_method_name(), ca_type_name[cv->data_type],
+             ca_type_name[ca->data_type]);
+  }
+}
+
 static void
 ca_store_all_check_empty (VALUE self, VALUE rval)
 {
@@ -661,7 +697,10 @@ ca_store_all_check_empty (VALUE self, VALUE rval)
     rval = rb_funcall(rval, id_to_ca, 0);
   }
   if ( rb_obj_is_carray(rval) ) {
+    CArray *cv;
     ca_broadcast_to_destination(self, (volatile VALUE *) &rval);
+    TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
+    ca_refuse_complex_into_real(ca, cv);
   }
   else if ( TYPE(rval) == T_ARRAY ) {
     if ( NIL_P(rb_ary_flatten_for_elements(rval, ca->elements, ca)) ) {
@@ -733,6 +772,7 @@ rb_ca_store_all (VALUE self, VALUE rval)
     /* The destination owns the shape; see ca_broadcast_to_destination. */
     ca_broadcast_to_destination(self, &rval);
     TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);
+    ca_refuse_complex_into_real(ca, cv);
 
     /* Fixlen cells of another width are fitted cell by cell, padded with
        NUL or cut to the destination's width, as a String or an Array of
@@ -1053,7 +1093,7 @@ extern VALUE rb_ca_remap_new (VALUE cary, VALUE rmapper);
    reads as masked (a CAGrid hole); the same-shape fast path is left to a
    mapper with no masked cell. */
 static VALUE
-rb_ca_fancy_index_chain (VALUE self, VALUE rmapper)
+rb_ca_fancy_index_chain (VALUE self, volatile VALUE rmapper)
 {
   CArray *ca, *cm;
   volatile VALUE flat_self, flat_mapper, gridded, result;
@@ -1144,7 +1184,7 @@ ca_argv_is_method_call (int argc, VALUE *argv)
 {
   const char *name;
   if ( argc < 1 || ! SYMBOL_P(argv[0]) ) return 0;
-  name = rb_id2name(SYM2ID(argv[0]));
+  name = rb_id2name(SYM2ID(argv[0]));   /* name: read at once by strlen */
   return ( name != NULL && strlen(name) > 1 );
 }
 
@@ -1660,14 +1700,14 @@ ca_face_convert_store_rval (VALUE self, CArray *ca, VALUE val)
         const char *method = ca_face_storage_method(self);
         if ( method ) {
           rb_raise(rb_eTypeError,
-                   "%s cannot store a bare %s array as raw storage "
+                   "%"PRIsVALUE" cannot store a bare %s array as raw storage "
                    "(write the %s storage, which #%s gives, directly)",
-                   rb_obj_classname(self), ca_type_name[cval->data_type],
+                   rb_obj_class(self), ca_type_name[cval->data_type],
                    ca_type_name[storage->data_type], method);
         }
         rb_raise(rb_eTypeError,
-                 "%s cannot store a bare %s array as raw storage",
-                 rb_obj_classname(self), ca_type_name[cval->data_type]);
+                 "%"PRIsVALUE" cannot store a bare %s array as raw storage",
+                 rb_obj_class(self), ca_type_name[cval->data_type]);
       }
     }
     return val;
@@ -1888,7 +1928,7 @@ rb_ca_store2 (VALUE self, int n, VALUE *rindex, VALUE rval)
 }
 
 static VALUE
-rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
+rb_ca_s_scan_index (VALUE self, VALUE rdim, volatile VALUE ridx)
 {
   volatile VALUE rtype, rindex;
   CAIndexInfo info;
@@ -1899,11 +1939,13 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
 
   Check_Type(rdim, T_ARRAY);
   Check_Type(ridx, T_ARRAY);
+  /* Converting an entry can run Ruby that changes the Array: read a copy. */
+  ridx = rb_ary_dup(ridx);
 
   ndim = (int) RARRAY_LEN(rdim);
   CA_CHECK_RANK_GIVEN(ndim);
   for (i=0; i<ndim; i++) {
-    dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
+    dim[i] = ca_integer_arg(rb_ary_entry(rdim, i), "a dimension", NULL);
   }
   CA_CHECK_DIM_GIVEN(ndim, dim);
   elements = ca_shape_elements(ndim, dim, 1);
@@ -1988,7 +2030,7 @@ rb_ca_s_scan_index (VALUE self, VALUE rdim, VALUE ridx)
 }
 
 static VALUE
-rb_ca_normalize_index (VALUE self, VALUE ridx)
+rb_ca_normalize_index (VALUE self, volatile VALUE ridx)
 {
   volatile VALUE rindex;
   CArray *ca;
@@ -1997,6 +2039,8 @@ rb_ca_normalize_index (VALUE self, VALUE ridx)
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
   Check_Type(ridx, T_ARRAY);
+  /* Converting an entry can run Ruby that changes the Array: read a copy. */
+  ridx = rb_ary_dup(ridx);
 
   info.range_check = 1;
   rb_ca_scan_index(ca->ndim, ca->dim, ca->elements,
@@ -2080,7 +2124,7 @@ parse_shape_kwarg (VALUE rshape, int *out_ndim, ca_size_t *dim,
   }
   ca_check_rank_fits(ndim, NULL);
   for (i = 0; i < ndim; i++) {
-    dim[i] = NUM2SIZE(rb_ary_entry(rshape, i));
+    dim[i] = ca_integer_arg(rb_ary_entry(rshape, i), "a dimension", NULL);
     if ( dim[i] < 0 ) {
       rb_raise(rb_eArgError, "negative dim %" PRId64 " at axis %d",
                (ca_size_t) dim[i], i);
@@ -2091,12 +2135,21 @@ parse_shape_kwarg (VALUE rshape, int *out_ndim, ca_size_t *dim,
   *out_elements = elements;
 }
 
+/* A scalar key of index2addr / addr2index, by the rule of `[]`: a Float that
+   is a whole number is that position, any other is no position at all. */
+static VALUE
+ca_scalar_position_key (VALUE v)
+{
+  return RB_FLOAT_TYPE_P(v) ? SIZE2NUM(ca_index_key_value(v)) : v;
+}
+
 static VALUE
 addr2index_do (int ndim, ca_size_t *dim, ca_size_t elements, VALUE raddr)
 {
   volatile VALUE out;
   int i;
 
+  raddr = ca_scalar_position_key(raddr);
   /* Scalar path (Integer input): returns Ruby Array of N Integers.
    * Preserves legacy shape for callers like `i, j = ca.addr2index(k)`. */
   if ( rb_obj_is_kind_of(raddr, rb_cInteger) ) {
@@ -2253,11 +2306,17 @@ index2addr_do (int ndim, ca_size_t *dim, int argc, VALUE *argv)
   ca_size_t out_dim[CA_RANK_MAX];
   ca_size_t out_elements = 1;
   int shape_from = -1;
+  VALUE keys[CA_RANK_MAX];
 
   if ( argc != ndim ) {
     rb_raise(rb_eArgError,
              "wrong number of indices (%d for %d)", argc, ndim);
   }
+
+  for (i = 0; i < ndim; i++) {
+    keys[i] = ca_scalar_position_key(argv[i]);
+  }
+  argv = keys;
 
   for (i = 0; i < ndim; i++) {
     if ( ! rb_obj_is_kind_of(argv[i], rb_cInteger) ) {

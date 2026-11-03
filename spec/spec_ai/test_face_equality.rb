@@ -55,4 +55,17 @@ class TestFaceEquality < Test::Unit::TestCase
     assert b == c && b.eql?(c)
     assert !(a == b)
   end
+
+  def test_fixed_length_strings_of_different_widths
+    a = CArray.fixlen_string(%w[ab cd])
+    b = CArray.fixlen_string(%w[ab cd], bytes: 4)
+    assert_true  a == b
+    assert_true  b == a
+    assert_false a.eql?(b)
+    assert_false a == CArray.fixlen_string(%w[ab ce], bytes: 4)
+    a[1] = UNDEF
+    assert_false a == b
+    b[1] = UNDEF
+    assert_true  a == b
+  end
 end

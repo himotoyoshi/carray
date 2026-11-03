@@ -883,8 +883,8 @@ ca_meld_func_allocate (void *ap)
 {
   CAMeld *ca = (CAMeld *) ap;
   ca_meld_mask_refresh(ca);
-  ca_attach_all(ca->parents, ca->n_parents);
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, ca->n_parents,
+                                       ca->parents);
 }
 
 static VALUE
@@ -1129,7 +1129,7 @@ rb_ca_meld_new (VALUE parents_ary, int8_t meld_axis)
   }
   parents = ALLOCV_N(CArray *, holder, n);
   for ( i = 0; i < n; i++ ) {
-    VALUE p = rb_ary_entry(parents_ary, i);
+    volatile VALUE p = rb_ary_entry(parents_ary, i);
     rb_check_carray_object(p);
     TypedData_Get_Struct(p, CArray, &carray_data_type, parents[i]);
     ca_multi_parent_check_part(parents[i], "meld");
@@ -1185,7 +1185,7 @@ rb_ca_meld_initialize (int argc, VALUE *argv, VALUE self)
   }
   if ( ! NIL_P(axis_val) ) {
     CArray *ref;
-    VALUE first = rb_ary_entry(list, 0);
+    volatile VALUE first = rb_ary_entry(list, 0);
     rb_check_carray_object(first);
     TypedData_Get_Struct(first, CArray, &carray_data_type, ref);
     meld_axis = (int8_t) ca_normalize_axis_arg(
@@ -1195,7 +1195,7 @@ rb_ca_meld_initialize (int argc, VALUE *argv, VALUE self)
   ca_check_uninitialized(ca);
   parents = ALLOCV_N(CArray *, holder, n);
   for ( i = 0; i < n; i++ ) {
-    VALUE p = rb_ary_entry(list, i);
+    volatile VALUE p = rb_ary_entry(list, i);
     rb_check_carray_object(p);
     TypedData_Get_Struct(p, CArray, &carray_data_type, parents[i]);
     ca_multi_parent_check_part(parents[i], "meld");

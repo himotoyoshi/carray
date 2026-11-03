@@ -150,6 +150,31 @@ t.mask = false         #  clear the whole mask
 t.count_masked         #  => 0
 ```
 
+### Asking for `UNDEF` or `nil`
+
+A query can be handed `UNDEF` or `nil` as its value. `eq`, `ne` and `count` read `UNDEF` as a question about the mask. The search and set methods read it as a value that is not there, and find nothing:
+
+```ruby
+m = CA_DOUBLE([1.0, 2.0, 3.0])
+m[1] = UNDEF
+
+m.eq(UNDEF).to_a        #  => [false, true, false]    the same as is_masked
+m.count(UNDEF)          #  => 1                       the same as count_masked
+m.search(UNDEF)         #  => nil                     finds nothing
+m.is_in([UNDEF]).to_a   #  => [false, UNDEF, false]   finds nothing
+```
+
+`nil` is no value of a numeric array, so it matches no cell. The same holds for a String, a Symbol or any other value that is not a number:
+
+```ruby
+m.eq(nil).to_a          #  => [false, UNDEF, false]
+m.count(nil)            #  => 0
+m.search(nil)           #  => nil
+m.is_in([nil]).to_a     #  => [false, UNDEF, false]
+```
+
+This holds for every data type except `object`, where `nil` is a value like any other. An order comparison has no answer for either of them: `m < UNDEF` and `m < nil` raise `ArgumentError`, and an operator such as `m + nil` raises `TypeError`.
+
 `mask=` replaces the whole mask with the array it is given. A masked cell of that array makes the cell masked, as a masked value does in any store. To mask the cells where a condition holds, prefer the indexer form `self[cond] = UNDEF`. There a masked cell of `cond` selects nothing, as it does in any index:
 
 ```ruby

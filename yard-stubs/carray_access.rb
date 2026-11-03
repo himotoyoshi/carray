@@ -90,7 +90,8 @@ class CArray
   #     or a CArray of such addresses (arbitrary shape).  A negative
   #     address counts from the end.
   #   @return [Array<Integer>, Array<CArray>] one entry per axis.
-  #   @raise [IndexError] when any `addr` is out of range.
+  #   @raise [IndexError] when any `addr` is out of range, or when `addr` is
+  #     float, complex, object or boolean.
   def addr2index(addr); end
 
   # @overload index2addr(*index)
@@ -101,7 +102,8 @@ class CArray
   #   must match that shape).  Mask propagates from the inputs.
   #   @param index [Array<Integer, CArray>] one entry per axis.
   #   @return [Integer, CArray] the flat address(es).
-  #   @raise [IndexError] on an out-of-range index.
+  #   @raise [IndexError] on an out-of-range index, or an index array that
+  #     is float, complex, object or boolean.
   #   @raise [ArgumentError] on shape mismatch between non-scalar inputs.
   def index2addr(*index); end
 

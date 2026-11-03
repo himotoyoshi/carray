@@ -15,6 +15,7 @@
 
 #include "carray.h"
 #include "carray_internal.h"   /* ca_attach_window */
+#include "ca_obj_face.h"       /* CA_WRAPPER_LIFT */
 
 /* Per-axis tagged kind.  Each axis is either STRIDE (start/step/count,
    no allocation) or INDEX (an owned ca_size_t index snapshot).  A Range
@@ -1087,9 +1088,11 @@ ca_grid_func_allocate (void *ap)
 {
   CAGrid *ca = (CAGrid *) ap;
   if ( ! cag_owns_buffer(ca) ) {
-    ca_attach(ca->parent);
+    ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
   }
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  else {
+    ca->ptr = ca_alloc_cells((CArray *) ca);
+  }
 }
 
 static void
@@ -1104,10 +1107,10 @@ ca_grid_func_attach (void *ap)
     return;
   }
 
-  ca_attach(ca->parent);
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
   ca_grid_describe_axes(ca, desc, pdims);
-  ca->ptr = ca_axis_dispatch_attach(ca->parent, pdims, desc, ca->ndim,
-                                    ca->bytes, ca->elements, NULL);
+  ca_axis_dispatch_gather(ca->parent, pdims, desc, ca->ndim,
+                          ca->bytes, ca->elements, NULL, ca->ptr);
 }
 
 static void
@@ -1422,8 +1425,9 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
   extern int ca_csa_dispatch_bypass;
   if ( ! ca_csa_dispatch_bypass && argc > 0 && TYPE(argv[0]) == T_DATA ) {
     if ( rb_ca_select_axis_eligible_p(argc, argv, self) ) {
-      return ca_grid_drop_scalar_axes(rb_ca_select_axis(argc, argv, self),
-                                      argc, argv);
+      obj = rb_ca_select_axis(argc, argv, self);
+      CA_WRAPPER_LIFT(obj, self, ca);
+      return ca_grid_drop_scalar_axes(obj, argc, argv);
     }
   }
 
@@ -1492,6 +1496,7 @@ rb_ca_grid (int argc, VALUE *argv, VALUE self)
                            (VALUE) &c);
   }
 
+  CA_WRAPPER_LIFT(obj, self, ca);
   return ca_grid_drop_scalar_axes(obj, argc, argv);
 }
 

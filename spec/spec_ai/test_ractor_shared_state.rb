@@ -119,6 +119,24 @@ class TestRactorSharedState < Test::Unit::TestCase
     BODY
   end
 
+  # Two fuse blocks on a line are told apart by dumping their instruction
+  # sequences, which every Ractor shares.  Dumping one for the first time from
+  # two Ractors at once crashes Ruby before 4.1; the race is narrow, so this
+  # catches it in about one run in a hundred rather than every time.
+  def test_ractors_read_the_same_fuse_blocks
+    sites = (1..40).map { |k|
+      "bad += 1 unless CArray.fuse { a * b + #{k} }.copy[3] + " \
+      "CArray.fuse { a + #{k} }.copy[3] == #{9 + 2 * k}.0"
+    }.join("\n")
+    assert_ractors_agree <<~BODY
+      a = CArray.float64(30).seq!
+      b = CArray.float64(30) { 2.0 }
+      bad = 0
+      #{sites}
+      bad
+    BODY
+  end
+
   # What the main Ractor computes, a Ractor computes: operators, the lazy
   # builders, comparisons, reductions, a frame, a struct and fuse.
   def test_the_surface_answers_in_a_ractor

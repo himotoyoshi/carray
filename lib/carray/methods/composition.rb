@@ -140,7 +140,7 @@ class CArray
   # consistency required across rows / columns).
   def self.__ragged_paste (list, tdim, axis, data_type, name)
     shared_attrs = attrs_shared_by(list)
-    list = CArray.promote_list(list, data_type: data_type)
+    list = promote_list_for(name, list, data_type: data_type)
     # promote_list has already enforced homogeneity (= common data_type, and
     # for Face elements: same Face class + portable + state-compatible).  So,
     # mirroring CArray.stack, paste at the storage level and re-wrap the

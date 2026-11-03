@@ -139,8 +139,8 @@ ca_triop_setup (CATriOp *ca, CArray *op1, CArray *op2, CArray *op3,
   ca->op2       = op2;
   ca->op3       = op3;
   ca->op_id     = op_id;
-  ca->op2_is_scalar = ( op2->elements == 1 && op1->elements > 1 ) ? 1 : 0;
-  ca->op3_is_scalar = ( op3->elements == 1 && op1->elements > 1 ) ? 1 : 0;
+  ca->op2_is_scalar = ( op2->elements == 1 ) ? 1 : 0;
+  ca->op3_is_scalar = ( op3->elements == 1 ) ? 1 : 0;
   ca->operands[0] = op1;
   ca->operands[1] = op2;
   ca->operands[2] = op3;
@@ -503,8 +503,9 @@ insert_cast (VALUE cary, int8_t target_dt, CArray **ca_out)
    data_type differs from the common data_type, then resolves
    same-ndim size-1 broadcast pairwise against op1 (the walk anchor).
 
-   Broadcast: each of op2 / op3 is aligned against op1 via
-   ca_broadcast_pair.  After alignment, each must have either the
+   Broadcast: the three are aligned pairwise via ca_broadcast_pair
+   (op1 / op2 again last, as two of them can meet at a shape smaller than
+   the third's).  After alignment, op2 / op3 must each have either the
    same elements as op1 or be a 1-element CScalar (walked with
    element_step = 0 by the kernel).  If op1 itself is a 1-element
    CScalar and any of op2 / op3 is an array, op1 is lifted via
@@ -535,17 +536,16 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
   /* Scalar operands (clip's Numeric bounds, a CScalar) are wrapped and
      promoted pairwise in the order the eager triop uses. */
   else if ( ! rb_obj_is_carray(r1) || ! rb_obj_is_carray(r2) || ! rb_obj_is_carray(r3) ||
-       rb_obj_is_cscalar(r2) || rb_obj_is_cscalar(r3) ) {
+       rb_obj_is_cscalar(r1) || rb_obj_is_cscalar(r2) || rb_obj_is_cscalar(r3) ) {
     if ( ! rb_obj_is_carray(r1) ) {
       rb_raise(rb_eArgError,
                "CATriOp: the first operand must be a CArray");
     }
+    int r1_scalar = rb_obj_is_cscalar(r1);
     int r2_scalar = ! rb_obj_is_carray(r2) || rb_obj_is_cscalar(r2);
     int r3_scalar = ! rb_obj_is_carray(r3) || rb_obj_is_cscalar(r3);
-    rb_ca_cast_self_or_other(&r1, &r2);
-    rb_ca_cast_self_or_other(&r1, &r3);
-    rb_ca_cast_self_or_other(&r2, &r3);
-    rb_ca_cast_self_or_other(&r1, &r2);
+    rb_ca_cast_three(&r1, &r2, &r3);
+    r1 = ca_lazy_settle_scalar(r1, r1_scalar);
     r2 = ca_lazy_settle_scalar(r2, r2_scalar);
     r3 = ca_lazy_settle_scalar(r3, r3_scalar);
   }
@@ -609,12 +609,15 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
     }
   }
 
-  /* Now align op2 / op3 against op1 for size-1 broadcast. */
+  /* Now bring the three to one shape for size-1 broadcast.  Every pair is
+     aligned, and the first again after the others: op1 and op2 may meet
+     at a shape smaller than op3's ([1,4] [1,4] [3,4]). */
+  ca_broadcast_pair(&r1, &r2);
+  ca_broadcast_pair(&r1, &r3);
+  ca_broadcast_pair(&r2, &r3);
   ca_broadcast_pair(&r1, &r2);
   TypedData_Get_Struct(r1, CArray, &carray_data_type, op1);
   TypedData_Get_Struct(r2, CArray, &carray_data_type, op2);
-  ca_broadcast_pair(&r1, &r3);
-  TypedData_Get_Struct(r1, CArray, &carray_data_type, op1);
   TypedData_Get_Struct(r3, CArray, &carray_data_type, op3);
 
   /* Step 3: each of op2 / op3 must match op1's element count OR be a

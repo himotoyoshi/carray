@@ -87,7 +87,7 @@ class CArray
     values.each_with_index do |s, i|
       entity[i] = s.nil? ? UNDEF : s.to_s
     end
-    CAFixlenString.wrap(entity)
+    CAFixlenString.wrap(entity, encoding: CAFixlenString.__send__(:encoding_of_strings, values))
   end
 
 end
@@ -95,6 +95,88 @@ end
 # Mutable fixed-width String Face: L1 ops + in-place variants.  In-place
 # transforms re-store through the native fixlen path (silent truncate).
 class CAFixlenString
+
+  # The greater String of each cell and `other`, cell by cell: `other` is a
+  # CAFixlenString of the same shape or one String.  The result is as wide as
+  # the wider of the two.
+  # @return [CAFixlenString]
+  def pmax (other)
+    refuse_unordered_operands(__callee__, other)
+    pick_by_order(other) { |a, b| a.lt(b) }
+  end
+
+  # The lesser String of each cell and `other`; see {#pmax}.
+  # @return [CAFixlenString]
+  def pmin (other)
+    refuse_unordered_operands(__callee__, other)
+    pick_by_order(other) { |a, b| a.gt(b) }
+  end
+
+  # A String has no NaN to let win, so these are other names of pmax / pmin.
+  alias_method :maximum, :pmax
+  alias_method :minimum, :pmin
+  alias_method :fmax, :pmax
+  alias_method :fmin, :pmin
+
+  # @overload min_addr(axis: nil)
+  #   @return [Integer, CArray] the flat address of the smallest String.
+  def min_addr (*args, **kw)
+    to_string.min_addr(*args, **kw)
+  end
+
+  # @overload max_addr(axis: nil)
+  #   @return [Integer, CArray] the flat address of the largest String.
+  def max_addr (*args, **kw)
+    to_string.max_addr(*args, **kw)
+  end
+
+  # A value that is no String is in no cell, and the kernels below take only
+  # bytes: these ask the Strings, which answer it as any other value.
+  CArray.send(:define_named_methods, self,
+              [:eq, :ne, :count, :search, :search_addr, :is_in, :union, :difference, :intersection],
+              :through_strings_unless_text, super_block: true)
+
+  private def through_strings_unless_text (op, args, kw)
+    v = args[0]
+    return yield(*args, **kw) if args.empty? || v.is_a?(String) || v.is_a?(CArray) ||
+                                 v.is_a?(Array) || UNDEF.equal?(v)
+    to_string.public_send(op, *args, **kw)
+  end
+
+  # `other` where the block says self's cell loses to it, else self's cell.
+  # Another array of Strings (a CAString, a CAConstString, an object array)
+  # is taken as fixed-length strings, so the result is one.
+  private def pick_by_order (other)
+    return copy.tap { |out| out[] = UNDEF } if UNDEF.equal?(other)
+    if other.is_a?(CArray) && !other.is_a?(CAFixlenString)
+      other = CArray.string(other) if other.data_type == CA_OBJECT && !other.face?
+      other = other.to_fixlen_string if other.respond_to?(:to_fixlen_string)
+    end
+    yield(self, other).then_else(other, self)
+  end
+
+  # Both branches of a selection at the width of the wider one.
+  private def branches_in_common (x, y)
+    width = [x, y].map { |v|
+      case v
+      when CArray then v.bytes
+      when String then v.bytesize
+      else 1
+      end
+    }.max
+    [x, y].map { |v|
+      v.is_a?(CAFixlenString) && !v.scalar? ? v.to_fixlen_string(bytes: width) : v
+    }
+  end
+
+  # The encoding a column of these strings holds its text in: that of the
+  # strings beyond ASCII, UTF-8 if none is, and BINARY if they disagree,
+  # since the column cannot read them all back.
+  private_class_method def self.encoding_of_strings (values)
+    text = values.compact.map(&:to_s).reject(&:ascii_only?).map(&:encoding).uniq
+    text.size > 1 ? Encoding::BINARY : (text.first || Encoding::UTF_8)
+  end
+
   # inspect's name for the array: the class and the cell width, which is the
   # longest string a cell holds.
   private def inspect_label

@@ -60,7 +60,7 @@ class CArray
   def self.stack (list, axis: 0, data_type: nil)
     raise ArgumentError, "stack: list must not be empty" if list.empty?
     axis = 0 if axis.nil?
-    list = CArray.promote_list(list, data_type: data_type)
+    list = promote_list_for("stack", list, data_type: data_type)
     axis = CArray.normalize_axis(axis, list[0].ndim + 1, "stack")
     CAStack.new(list, axis: axis)                # CAStack.new does Face lift internally
   end
@@ -101,7 +101,7 @@ class CArray
       raise ArgumentError, "meld: entries must be CArray (got #{first.class})"
     end
     axis_norm = CArray.normalize_axis(axis, first.ndim, "meld")
-    arrays = CArray.promote_list(arrays, data_type: data_type)
+    arrays = promote_list_for("meld", arrays, data_type: data_type)
     # Flatten nested CAMeld inputs that share our meld axis: they already
     # describe a segment sequence, so absorbing their parents keeps chain
     # depth at 1 (avoids 2-level xfer_all / reduce chains through the
@@ -183,7 +183,7 @@ class CArray
             "montage: tdim product (#{expected}) must equal list size (#{list.size})"
     end
 
-    list = CArray.promote_list(list, data_type: data_type)
+    list = promote_list_for("montage", list, data_type: data_type)
     parent_shape = list[0].shape
     ntile = tdim.size
     nparent = parent_shape.size

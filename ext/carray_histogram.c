@@ -437,7 +437,7 @@ rb_ca_histogram_scatter_ki (VALUE self, VALUE rcounts, VALUE redges,
   }
 
   for ( k = 0; k < M; k++ ) {
-    VALUE e = RARRAY_AREF(redges, k);
+    volatile VALUE e = RARRAY_AREF(redges, k);
     GetCArray(e, edge_ca[k]);
     histbin_check_edge_mask(edge_ca[k], "histogram");
   }
@@ -528,7 +528,7 @@ bincount_nd_label_u64 (uint64_t x)
   } while (0)
 
 static VALUE
-rb_ca_bincount_nd_count_ki (VALUE self, VALUE rcounts, VALUE rweights)
+rb_ca_bincount_nd_count_ki (VALUE self, VALUE rcounts, volatile VALUE rweights)
 {
   CArray   *ca, *cc, *cw = NULL;
   long      M, nf, k;

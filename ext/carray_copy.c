@@ -61,6 +61,30 @@ ca_fill_or_detach (int n, CArray **list, VALUE (*fill)(VALUE), VALUE arg)
   }
 }
 
+typedef struct {
+  CArray **list;
+  int32_t  n;
+} ca_attach_list_arg;
+
+static VALUE
+ca_attach_list_fill (VALUE arg)
+{
+  ca_attach_list_arg *a = (ca_attach_list_arg *) arg;
+  ca_attach_all(a->list, a->n);
+  return Qnil;
+}
+
+char *
+ca_alloc_cells_then_attach (CArray *ca, int32_t n, CArray **parents)
+{
+  char *buf = ca_alloc_cells(ca);
+  ca_attach_list_arg a;
+  a.list = parents;
+  a.n    = n;
+  ca_fill_or_xfree(buf, ca_attach_list_fill, (VALUE) &a);
+  return buf;
+}
+
 VALUE
 ca_view_inherit_mask (VALUE view)
 {

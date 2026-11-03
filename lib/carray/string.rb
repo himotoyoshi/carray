@@ -115,22 +115,22 @@ class CAString
   def mod (other) ; as_text(super) ; end
   # The later String of each cell and `other`, cell by cell.
   # @return [CAString]
-  def pmax (other) ; as_text(super) ; end
+  def pmax (other) ; refuse_unordered_operands("pmax", other) ; as_text(super) ; end
   # The earlier String of each cell and `other`, cell by cell.
   # @return [CAString]
-  def pmin (other) ; as_text(super) ; end
+  def pmin (other) ; refuse_unordered_operands("pmin", other) ; as_text(super) ; end
   # Another name of {#pmax} (a String has no NaN to let win).
   # @return [CAString]
-  def maximum (other) ; as_text(super) ; end
+  def maximum (other) ; refuse_unordered_operands("maximum", other) ; as_text(super) ; end
   # Another name of {#pmin}.
   # @return [CAString]
-  def minimum (other) ; as_text(super) ; end
+  def minimum (other) ; refuse_unordered_operands("minimum", other) ; as_text(super) ; end
   # Another name of {#pmax}.
   # @return [CAString]
-  def fmax (other) ; as_text(super) ; end
+  def fmax (other) ; refuse_unordered_operands("fmax", other) ; as_text(super) ; end
   # Another name of {#pmin}.
   # @return [CAString]
-  def fmin (other) ; as_text(super) ; end
+  def fmin (other) ; refuse_unordered_operands("fmin", other) ; as_text(super) ; end
 
   # The String a blank cell holds: the cell a fresh {#template} gives and
   # the one {#shift} fills by default.  Frozen, because every blank cell

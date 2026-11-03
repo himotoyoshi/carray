@@ -1,10 +1,10 @@
 # Input and output
 
-This chapter covers getting data into a CArray and back out again. CArray's built-in I/O surface is deliberately small — for anything beyond plain Ruby values and in-process exchange with other array libraries, you reach for a dedicated gem — so this is a short chapter.
+This chapter covers getting data into a CArray and back out again. CArray's built-in I/O surface is deliberately small — for anything beyond plain Ruby values and in-process exchange with other array libraries, use a dedicated gem — so this is a short chapter.
 
 ## From and to Ruby values
 
-The most common exchange is with ordinary Ruby `Array`s. To build a CArray from values you already have, use a `CA_*` constructor (see [Creating arrays](01_creating_arrays.md)); the nesting of the Ruby array determines the shape.
+The most common exchange is with ordinary Ruby `Array`s. To build a CArray from existing values, use a `CA_*` constructor (see [Creating arrays](01_creating_arrays.md)); the nesting of the Ruby array determines the shape.
 
 ```ruby
 CA_INT([[1, 2, 3],
@@ -31,7 +31,7 @@ CA_INT(a.to_a).to_a == a.to_a    #  => true
 
 ## Exchange with other array libraries
 
-To move a whole buffer between CArray and another library — `Numo::NArray`, Apache Arrow, a PyCall NumPy array, a `Fiddle`-backed region — without going through Ruby `Array`s, use the **MemoryView** protocol. It exchanges the raw bytes plus shape and data_type directly, with no per-element Ruby crossing, and can be zero-copy.
+To move a whole buffer between CArray and another library — `Numo::NArray`, Apache Arrow, a PyCall NumPy array, a `Fiddle`-backed region — without going through Ruby `Array`s, use the **MemoryView** protocol. It exchanges the raw bytes plus shape and data_type directly, without crossing into Ruby for each element, and can be zero-copy.
 
 ```ruby
 ca = CArray.from_memory_view(some_numo_array)   #  copy import
@@ -52,7 +52,7 @@ b = CArray.load("result.ca")
 b == a       #  => true
 ```
 
-Both take a filename or an open IO, so you can also stream through a pipe or a `StringIO`. `CArray.dump` returns the same bytes as a String without touching the filesystem, and `CArray.load` accepts such a String directly:
+Both take a filename or an open IO, so data can also be streamed through a pipe or a `StringIO`. `CArray.dump` returns the same bytes as a String without touching the filesystem, and `CArray.load` accepts such a String directly:
 
 ```ruby
 blob = CArray.dump(a)        #  => a binary String
@@ -89,7 +89,7 @@ A record array (a [Face](12_faces.md) over a `data_class`) round-trips as well: 
 
 By default a writer emits the host's native byte order and never swaps on write; a reader detects the file's order from a marker in the header and swaps into the host order automatically. A file written on one architecture therefore reads correctly on another with no action from the caller.
 
-Pass `endian:` to force a specific order — useful when you want a fixed on-disk representation regardless of where the writer is running:
+Pass `endian:` to force a specific order — useful for a fixed on-disk representation that does not depend on the machine that writes it:
 
 ```ruby
 CArray.save(a, "big_endian.ca", endian: CA_BIG_ENDIAN)
@@ -112,7 +112,7 @@ An [object array](13_object_arrays.md) (arbitrary Ruby objects per cell) has no 
 
 The on-disk layout puts the raw numeric payload at a **fixed byte offset in a single, file-wide byte order**, so a program in C, FORTRAN, or any language with raw file access can reach the data with one seek — no Ruby needed on the other end. This is the point of the format: hand a computation result to the next process, whatever language it is written in. CArray-native concepts — the attribute map, the record schema, the mask — ride in a small text trailer at the tail of the file that a non-Ruby reader can safely skip. The file itself carries the offsets that say where the payload, the mask, and the trailer begin, so a reader never has to compute them by hand.
 
-The format is meant for **temporary workflow handoff** — dump a result, hand it to the next process, consume, discard. For long-term archival, export to a mature format designed for it (NetCDF, HDF5, Parquet).
+The format is meant for **temporary workflow handoff** — dump a result, pass it to the next process, consume, discard. For long-term archival, export to a mature format designed for it (NetCDF, HDF5, Parquet).
 
 ## Object arrays: `Marshal`
 

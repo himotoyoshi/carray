@@ -94,4 +94,23 @@ class TestSortCopyParity < Test::Unit::TestCase
     assert_equal [1, 2, 3], CA_OBJECT([3, 1, 2]).sort_copy(kind: :stable).to_a
   end
 
+  # The stable sort keeps the order of equal values (0.0 and -0.0, NaNs
+  # with different payloads) when NaNs are moved to the end.
+  def test_stable_sort_with_nan_keeps_equal_values_in_order
+    bits = ->(c, f) { c.to_a.flatten.map { [_1].pack(f) } }
+    x = CA_DOUBLE([Float::NAN, 0.0, 1.0, -0.0])
+    assert_equal bits.(CA_DOUBLE([0.0, -0.0, 1.0, Float::NAN]), "E"),
+                 bits.(x.sort_copy(kind: :stable), "E")
+    r = Random.new(3)
+    nan2 = [0x7ff8000000000001].pack("Q").unpack1("E")
+    200.times do |s|
+      t, f = [[:float32, "e"], [:float64, "E"]][s % 2]
+      n = r.rand(1..30)
+      a = CArray.new(t, [n])
+      n.times { |i| a[i] = [Float::NAN, nan2, 0.0, -0.0, 1.0, (r.rand * 4).round(1)].sample(random: r) }
+      b = a.reshape(1, n)
+      assert_equal bits.(a.sort(kind: :stable).copy, f), bits.(a.sort_copy(kind: :stable), f)
+      assert_equal bits.(b.sort(axis: 1, kind: :stable).copy, f), bits.(b.sort_copy(axis: 1, kind: :stable), f)
+    end
+  end
 end

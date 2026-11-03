@@ -30,7 +30,10 @@ class CArray
   # narrowest unsigned type that holds the field is used: 1 bit →
   # `:boolean`, 2..8 → `:uint8`, 9..16 → `:uint16`, 17..32 → `:uint32`,
   # 33..64 → `:uint64`.  A write keeps the low bits of the value that
-  # fit the field, signed or not (-3 into a 3-bit field is `0b101`).
+  # fit the field, signed or not, for an Integer of any size (-3 into a
+  # 3-bit field is `0b101`, 300 is `0b100`).  The same holds for a view
+  # taken of the field (a slice, an index, a mask selection).  A String
+  # is read as a decimal integer, a Float through `Integer()`.
   #
   # @overload bitfield(range, type = nil)
   #   @param range [Integer, Range] bit position (single bit) or bit

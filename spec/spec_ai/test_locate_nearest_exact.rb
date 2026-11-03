@@ -116,4 +116,15 @@ class TestLocateNearestExact < Test::Unit::TestCase
     t = CArray.time(["2024-01-01", "2024-01-02"], unit: :D)
     assert_equal [0, 1], t.locate_nearest_addr(t).to_a
   end
+
+  def test_round_measures_neighbours_farther_apart_than_int64_holds
+    r = CA_INT64([-2**63, 2**63 - 1])
+    assert_equal [1, 0, 1], CA_INT64([2**62, -2**62, 0]).locate_nearest_addr(r, direction: :round).to_a
+    t = CArray.time(["1700-01-01", "2200-01-01"], unit: :ns)
+    assert_equal [1], CArray.time(["2100-01-01"], unit: :ns).locate_nearest_addr(t, direction: :round).to_a
+    l = CAFrame.new("t" => CA_INT64([2**62, -2**62]), "g" => CA_INT32([1, 1]))
+    f = CAFrame.new("t" => r, "g" => CA_INT32([1, 1]), "v" => CA_INT32([10, 20]))
+    assert_equal [20, 10], l.join_asof(f, on: "t", direction: :round)["v"].to_a
+    assert_equal [20, 10], l.join_asof(f, on: "t", by: "g", direction: :round)["v"].to_a
+  end
 end

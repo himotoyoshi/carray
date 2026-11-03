@@ -846,16 +846,19 @@ class CAGroupIterator
     place   = Array.new(gslots.size, 1)                 # place value per slot
     (gslots.size - 2).downto(0) { |i| place[i] = place[i + 1] * gslots[i + 1][:k] }
     comp = nil
+    groups = kdims.inject(1, :*)
     gslots.each_with_index do |m, i|
       target = Array.new(gb_rank, 1)
       m[:axes].each { |a| target[gaxes.index(a)] = shape[a] }
       term = m[:codes].reshape(*target)
+      # The composite code has to reach the last group in the codes' type.
+      term = term.int64 if groups > CACategorical::MAX_LABELS[term.data_type]
       term = term * place[i] if place[i] != 1
       comp = comp.nil? ? term : comp + term
     end
     gb_size = gaxes.map { |a| shape[a] }.inject(1, :*)
     ccat = CACategorical.from_codes(comp.reshape(gb_size),
-                                    CArray.int32(kdims.inject(1, :*)).seq!)
+                                    CArray.int32(groups).seq!)
     [ccat, kdims, gslots, bslots, gaxes]
   end
 
@@ -940,7 +943,7 @@ class CAGroupIterator
   # and cumcount in int64 -- not the core's answer for a boolean's running sum.
   def kernel_scans? (op)
     return false unless CArray.__fast_paths_enabled__(:axis_group_scan_kernel)
-    return false if value.face? || value.complex?
+    return false if value.face? || value.complex? || value.data_type == CA_FIXLEN
     return true if value.object? || op == :cumcount
     core = CAIterator.core_probe(value).public_send(op).data_type
     kernel = [:cumsum, :cumprod].include?(op) ? CA_FLOAT64 : value.data_type
@@ -977,10 +980,10 @@ class CAGroupIterator
   end
 
   # An array of +shape+ of the same kind as +model+ -- its data type, or its
-  # Face -- with every cell UNDEF. A read-only Face cannot be written cell by
-  # cell, so its values are held in an object array.
+  # Face -- with every cell UNDEF. A Face that holds no new value cannot be
+  # written cell by cell, so its values are held in an object array.
   def blank_of (model, shape)
-    out = if model.face? && model.read_only?
+    out = if model.face? && !model.__send__(:holds_new_values?)
             CArray.new(CA_OBJECT, shape)
           else
             model.__send__(:blank_like, shape)
@@ -1058,7 +1061,7 @@ class CAGroupIterator
     gb_rank  = gaxes.size
     gb_shape = gaxes.map { |a| shape[a] }
     gb_size  = gb_shape.inject(1, :*)
-    nvalid   = ccat.category_sizes.int64.sum
+    nvalid   = ccat.category_sizes.int64.sum.to_i
     nband    = bslots.map { |m| m[:len] }.inject(1, :*)
     out = CArray.int64(nband * nvalid)
     cursor = 0

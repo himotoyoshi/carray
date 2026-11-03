@@ -154,6 +154,71 @@ ca_fake_func_clone (void *ap)
   return ca_fake_new(ca->parent, ca->data_type, ca->bytes);
 }
 
+/* A read does not raise for a masked cell (ca_fake_cast_get), as attach
+   does not: the value under a mask is not defined, and converting it can
+   raise (NaN to an integer type).  The view's cells are its parent's at the same
+   addresses, so the parent's mask is read for the same cells.  The view's
+   own mask is not made here: once it exists, sync leaves masked cells
+   alone, and a read must not change what a later write does. */
+static CArray *
+ca_fake_read_mask (CAFake *ca)
+{
+  if ( ca->mask ) {
+    return ca->mask;
+  }
+  if ( ca_has_mask(ca->parent) ) {
+    return ca->parent->mask;
+  }
+  return NULL;
+}
+
+/* Convert n cells read from the parent.  A masked cell is converted as
+   well, so that the cell holds what the parent holds (a walk that sends
+   back only the cells a kernel changed compares against it), but a value
+   that cannot be converted (NaN to an integer) leaves zero bytes instead
+   of raising: the value under a mask is not defined. */
+typedef struct {
+  CArray *src_ca, *dst_ca;
+  char   *src, *dst;
+} ca_fake_cell_ctx_t;
+
+static VALUE
+ca_fake_cast_cell (VALUE arg)
+{
+  ca_fake_cell_ctx_t *c = (ca_fake_cell_ctx_t *) arg;
+  ca_ptr2ptr(c->src_ca, c->src, c->dst_ca, c->dst);
+  return Qnil;
+}
+
+static void
+ca_fake_cast_get (CAFake *ca, ca_size_t n, char *src, char *dst, boolean8_t *m)
+{
+  CArray *parent = ca->parent;
+  ca_size_t i;
+  if ( ! m ) {
+    ca_cast_block(n, parent, src, (CArray *) ca, dst);
+    return;
+  }
+  ca_cast_block_skip_masked(n, parent, src, (CArray *) ca, dst, m);
+  for ( i = 0; i < n; i++ ) {
+    if ( m[i] ) {
+      ca_fake_cell_ctx_t c;
+      int state = 0;
+      c.src_ca = parent;
+      c.dst_ca = (CArray *) ca;
+      c.src    = src + i * parent->bytes;
+      c.dst    = dst + i * ca->bytes;
+      /* A masked cell that cannot be converted reads as zero bytes. */
+      /* protect: converts a masked cell; nothing is held */
+      rb_protect(ca_fake_cast_cell, (VALUE) &c, &state);
+      if ( state ) {
+        rb_set_errinfo(Qnil);
+        memset(c.dst, 0, ca->bytes);
+      }
+    }
+  }
+}
+
 /* Per-cell GET/PUT via a parent-sized scratch cell — same code services
    both directions, casting through the parent data_type. */
 static void
@@ -161,10 +226,16 @@ ca_fake_func_xfer_index (void *ap, ca_size_t *idx, void *data, int dir)
 {
   CAFake *ca = (CAFake *) ap;
   volatile VALUE holder;
-  char *v = ALLOCV_N(char, holder, ca->parent->bytes);
+  char *v;
+  v = ALLOCV_N(char, holder, ca->parent->bytes);
   if ( dir == CA_XFER_GET ) {
+    CArray *mask = ca_fake_read_mask(ca);
+    boolean8_t masked = 0;
+    if ( mask ) {
+      ca_fetch_index(mask, idx, &masked);
+    }
     ca_fetch_index(ca->parent, idx, v);
-    ca_ptr2ptr(ca->parent, v, ca, data);
+    ca_fake_cast_get(ca, 1, v, (char *) data, mask ? &masked : NULL);
   }
   else {
     ca_ptr2ptr(ca, data, ca->parent, v);
@@ -184,9 +255,21 @@ ca_fake_func_xfer_addrs (void *ap, ca_size_t n, ca_size_t *addrs,
   CAFake *ca = (CAFake *) ap;
   CArray *parent = ca->parent;
   CArray *eff;
+  CArray *mask = ( dir == CA_XFER_GET ) ? ca_fake_read_mask(ca) : NULL;
   ca_size_t base;
   char   *v;
   volatile VALUE holder;
+
+  if ( mask ) {
+    volatile VALUE mholder;
+    boolean8_t *m = ALLOCV_N(boolean8_t, mholder, n + n * parent->bytes);
+    v = (char *) (m + n);
+    ca_xfer_addrs(mask, n, addrs, m, CA_XFER_GET);
+    ca_xfer_addrs(parent, n, addrs, v, CA_XFER_GET);
+    ca_fake_cast_get(ca, n, v, (char *) data, m);
+    ALLOCV_END(mholder);
+    return;
+  }
 
   /* Sequential-run + live-ptr fast path: cast directly from
      parent->ptr + base*pbytes to data, no intermediate scratch. */
@@ -251,6 +334,24 @@ ca_fake_func_xfer_stride (void *ap, ca_size_t *starts, ca_size_t *counts,
   int8_t    k;
   char     *v;
   volatile VALUE holder;
+  CArray   *mask = ( dir == CA_XFER_GET ) ? ca_fake_read_mask(ca) : NULL;
+
+  if ( mask ) {
+    ca_size_t mstrides[CA_RANK_MAX];
+    boolean8_t *m;
+    for ( k = 0; k < ndim; k++ ) {
+      n *= counts[k];
+      pstrides[k] = strides[k] / ca->bytes * ca->parent->bytes;
+      mstrides[k] = strides[k] / ca->bytes;
+    }
+    m = ALLOCV_N(boolean8_t, holder, n + n * ca->parent->bytes);
+    v = (char *) (m + n);
+    ca_xfer_stride(mask, starts, counts, mstrides, m, CA_XFER_GET);
+    ca_xfer_stride(ca->parent, starts, counts, pstrides, v, CA_XFER_GET);
+    ca_fake_cast_get(ca, n, v, (char *) data, m);
+    ALLOCV_END(holder);
+    return;
+  }
 
   /* Fast path: fused walk + cast for GET/PUT */
   if ( ca_xfer_stride_transform_fused((CArray *)ca, ca->parent,
@@ -282,21 +383,19 @@ static void
 ca_fake_func_allocate (void *ap)
 {
   CAFake *ca = (CAFake *) ap;
-  ca_attach(ca->parent);
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
 }
 
 static void
 ca_fake_func_attach (void *ap)
 {
   CAFake *ca = (CAFake *) ap;
-  ca_attach(ca->parent);
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
 
   if ( ca->parent->mask ) {
-    ca_cast_block_with_mask(ca->elements, ca->parent, ca->parent->ptr, 
-                            ca, ca->ptr, 
-                            (boolean8_t*)ca->parent->mask->ptr);
+    ca_cast_block_skip_masked(ca->elements, ca->parent, ca->parent->ptr,
+                              ca, ca->ptr,
+                              (boolean8_t*)ca->parent->mask->ptr);
   }
   else {
     ca_cast_block(ca->elements, ca->parent, ca->parent->ptr, ca, ca->ptr);
@@ -309,8 +408,8 @@ ca_fake_func_sync (void *ap)
   CAFake *ca = (CAFake *) ap;
   ca_update_mask(ca);
   if ( ca->mask ) {
-    ca_cast_block_with_mask(ca->elements, ca, ca->ptr, ca->parent, ca->parent->ptr, 
-                            (boolean8_t *)ca->mask->ptr);
+    ca_cast_block_skip_masked(ca->elements, ca, ca->ptr, ca->parent, ca->parent->ptr,
+                              (boolean8_t *)ca->mask->ptr);
   }
   else {
     ca_cast_block(ca->elements, ca, ca->ptr, ca->parent, ca->parent->ptr);
@@ -426,9 +525,9 @@ rb_ca_fake_new (VALUE cary, int8_t data_type, ca_size_t bytes)
        Both ways down stay open and say which one they are.  A Numeric Face
        is not one of these: its surface is its storage. */
     rb_raise(rb_eTypeError,
-             "%s has no view of its values in another data_type: "
+             "%"PRIsVALUE" has no view of its values in another data_type: "
              "#to_type gives the values, #parent.fake the raw storage",
-             rb_obj_classname(cary));
+             rb_obj_class(cary));
   }
   ca  = ca_fake_new(parent, data_type, bytes);
   obj = ca_wrap_struct(ca);

@@ -201,6 +201,23 @@ rb_ca_is_type (VALUE arg, int type)
    live in ca_obj_record.c; signatures stay in carray.h for cross-file
    extern use. */
 
+/* Whether v, an index along a length of n, names a position: a negative one
+ * counts from the end.  An Integer too large for ca_size_t is out of any
+ * range; what is not an Integer is not an index. */
+static int
+ca_index_arg_in_range (VALUE v, ca_size_t n, const char *arg)
+{
+  ca_size_t idx;
+  if ( RB_TYPE_P(v, T_BIGNUM) ) {
+    return 0;
+  }
+  idx = ca_integer_arg(v, arg, NULL);
+  if ( idx < 0 ) {
+    idx += n;
+  }
+  return idx >= 0 && idx < n;
+}
+
 /* CArray#valid_index?(*idx) -- whether self[*idx] names a cell: a negative
  * index counts from the end of its axis, as it does at every door.  The
  * number of indices must equal ndim (raises otherwise). */
@@ -208,7 +225,6 @@ static VALUE
 rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
 {
   CArray *ca;
-  ca_size_t idx;
   int i;
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
@@ -218,11 +234,7 @@ rb_ca_is_valid_index (int argc, VALUE *argv, VALUE self)
              "invalid # of arguments (%i for %i)", argc, ca->ndim);
   }
   for (i=0; i<ca->ndim; i++) {
-    idx = NUM2SIZE(argv[i]);
-    if ( idx < 0 ) {
-      idx += ca->dim[i];
-    }
-    if ( idx < 0 || idx >= ca->dim[i] ) {
+    if ( ! ca_index_arg_in_range(argv[i], ca->dim[i], "an index") ) {
       return Qfalse;
     }
   }
@@ -236,30 +248,26 @@ static VALUE
 rb_ca_is_valid_addr (VALUE self, VALUE raddr)
 {
   CArray *ca;
-  ca_size_t addr;
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  addr = NUM2SIZE(raddr);
-  if ( addr < 0 ) {
-    addr += ca->elements;
-  }
-  if ( addr < 0 || addr >= ca->elements ) {
-    return Qfalse;
-  }
-  else {
-    return Qtrue;
-  }
+  return ca_index_arg_in_range(raddr, ca->elements, "an address") ? Qtrue : Qfalse;
 }
 
-/* CArray#same_shape?(other) — 1 if self and other share ndim and dim[].
- * Scalars compare true against any array (see ca_has_same_shape). */
+/* CArray#same_shape?(other) — whether self and other share ndim and dim[].
+ * Scalars compare true against any array (see ca_has_same_shape).  Only the
+ * shape is compared, so no value is converted: other that is not a CArray
+ * takes the shape it has as an object array. */
 static VALUE
 rb_ca_has_same_shape (VALUE self, VALUE other)
 {
   CArray *ca, *cb;
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
-  /* coerce: only the shape is compared */
-  cb = ca_wrap_readonly(other, ca->data_type);
+  if ( rb_obj_is_carray(other) ) {
+    TypedData_Get_Struct(other, CArray, &carray_data_type, cb);
+  }
+  else {
+    cb = ca_wrap_readonly(other, CA_OBJECT);
+  }
   return ca_has_same_shape(ca, cb) ? Qtrue : Qfalse;
 }
 
@@ -276,15 +284,34 @@ eql_## type (const char *a, const char *b, ca_size_t bytes) \
 
 /* == compares contents: a NaN equals a NaN (whatever its payload), as the
    same array read back or copied holds the same NaN; -0.0 equals 0.0 as
-   values do.  eql? stays bitwise. */
+   values do.  eql? stays bitwise.  An object cell equals itself first, as
+   in Array#== and Array#eql?, so a copy of an array holding any NaN object
+   equals it.  A cell holding a CArray is asked all the same, so an array
+   that holds itself is refused as cyclic. */
+static int
+ca_object_cells_identical (VALUE x, VALUE y)
+{
+  return x == y && ! rb_obj_is_carray(x);
+}
+
 static int
 ca_object_cells_equal (VALUE x, VALUE y)
 {
+  if ( ca_object_cells_identical(x, y) ) {
+    return 1;
+  }
   if ( RB_FLOAT_TYPE_P(x) && RB_FLOAT_TYPE_P(y) &&
        isnan(RFLOAT_VALUE(x)) && isnan(RFLOAT_VALUE(y)) ) {
     return 1;
   }
   return RTEST(rb_funcall(x, id_equal, 1, y)) ? 1 : 0;
+}
+
+static int
+ca_object_cells_eql (VALUE x, VALUE y)
+{
+  return ca_object_cells_identical(x, y)
+         || RTEST(rb_funcall(x, id_eql, 1, y));
 }
 
 static int
@@ -416,8 +443,7 @@ ca_compare_body (VALUE arg)
       for (i=0; i<ca->elements; i++) {
         volatile VALUE x = va[i];
         volatile VALUE y = vb[i];
-        int eq = strict ? RTEST(rb_funcall(x, id_eql, 1, y))
-                        : ca_object_cells_equal(x, y);
+        int eq = strict ? ca_object_cells_eql(x, y) : ca_object_cells_equal(x, y);
         if ( ! eq ) {
           flag = 0;
           break;
@@ -459,8 +485,7 @@ ca_compare_body (VALUE arg)
         if ( is_object ) {
           volatile VALUE x = *(VALUE *) pa;
           volatile VALUE y = *(VALUE *) pb;
-          eq = strict ? RTEST(rb_funcall(x, id_eql, 1, y))
-                      : ca_object_cells_equal(x, y);
+          eq = strict ? ca_object_cells_eql(x, y) : ca_object_cells_equal(x, y);
         }
         else if ( strict
                   || ca->data_type <= CA_UINT64
@@ -507,7 +532,7 @@ ca_compare_run (VALUE arg)
  *
  * The only difference is the per-element comparator:
  *   == : ca_eql[data_type] (by value: NaN equals NaN, -0.0 equals 0.0)
- *   eql?: memcmp for numeric, rb_funcall(:eql?) for CA_OBJECT
+ *   eql?: memcmp for numeric, ca_object_cells_eql for CA_OBJECT
  *
  * The unmasked-unmasked branch takes a bulk memcmp or per-cell
  * shortcut to amortise per-element function pointer dispatch. */
@@ -659,6 +684,24 @@ rb_ca_eql (VALUE self, VALUE other)
 
 #define CA_HASH_SAMPLE_BYTES 64
 
+typedef struct {
+  st_index_t   h;
+  ca_size_t    n;
+  const VALUE *cells;
+} ca_hash_cells_t;
+
+static VALUE
+ca_hash_cells (VALUE arg)
+{
+  ca_hash_cells_t *hc = (ca_hash_cells_t *) arg;
+  ca_size_t i;
+
+  for (i = 0; i < hc->n; i++) {
+    hc->h = rb_hash_uint(hc->h, (st_index_t) NUM2LONG(rb_hash(hc->cells[i])));
+  }
+  return Qnil;
+}
+
 static st_index_t
 ca_hash (CArray *ca)
 {
@@ -668,19 +711,21 @@ ca_hash (CArray *ca)
   ca_size_t data_len = ca_length(ca);
   ca_size_t sample = (data_len < CA_HASH_SAMPLE_BYTES) ? data_len : CA_HASH_SAMPLE_BYTES;
 
-  h  = rb_memhash(&ca->data_type, sizeof(ca->data_type));
-  h ^= rb_memhash(&ca->ndim,      sizeof(ca->ndim));
-  h ^= rb_memhash(&ca->bytes,     sizeof(ca->bytes));
-  h ^= rb_memhash(&ca->elements,  sizeof(ca->elements));
-  h ^= rb_memhash(&scalar_flag,   sizeof(scalar_flag));
+  /* Mixed in order: XOR would cancel equal fields, as a 1-D array's dim
+     and elements are. */
+  h = rb_hash_start(ca->data_type);
+  h = rb_hash_uint(h, (st_index_t) ca->ndim);
+  h = rb_hash_uint(h, (st_index_t) ca->bytes);
+  h = rb_hash_uint(h, (st_index_t) ca->elements);
+  h = rb_hash_uint(h, (st_index_t) scalar_flag);
   if ( ca->ndim > 0 ) {
-    h ^= rb_memhash(ca->dim, sizeof(ca_size_t) * ca->ndim);
+    h = rb_hash_uint(h, rb_memhash(ca->dim, sizeof(ca_size_t) * ca->ndim));
   }
 
   /* ca_is_any_masked() attaches/detaches the mask internally and returns
      only a boolean, so we never touch ca->mask->ptr here. */
   masked_flag = ca_is_any_masked(ca) ? 1 : 0;
-  h ^= rb_memhash(&masked_flag, sizeof(masked_flag));
+  h = rb_hash_uint(h, (st_index_t) masked_flag);
 
   if ( ! masked_flag && sample > 0 ) {
     ca_size_t addrs[CA_HASH_SAMPLE_BYTES];
@@ -700,22 +745,23 @@ ca_hash (CArray *ca)
          #hash, not the VALUE bits.  The cells sit on the stack, where the
          GC sees them while #hash runs. */
       VALUE cells[CA_HASH_SAMPLE_BYTES / sizeof(VALUE)];
+      ca_hash_cells_t hc;
       ca_xfer_addrs(ca, ncell, addrs, cells, CA_XFER_GET);
-      for (i = 0; i < ncell; i++) {
-        h = rb_hash_uint(h, (st_index_t) NUM2LONG(rb_hash(cells[i])));
-      }
+      hc.h = h; hc.n = ncell; hc.cells = cells;
+      ca_cell_walk_run(ca_hash_cells, (VALUE) &hc);
+      h = hc.h;
       RB_GC_GUARD(cells[0]);
     }
     else {
       volatile VALUE holder;
       char *buf = ALLOCV_N(char, holder, ncell * ca->bytes);
       ca_xfer_addrs(ca, ncell, addrs, buf, CA_XFER_GET);
-      h ^= rb_memhash(buf, ncell * ca->bytes);
+      h = rb_hash_uint(h, rb_memhash(buf, ncell * ca->bytes));
       ALLOCV_END(holder);
     }
   }
 
-  return h;
+  return rb_hash_end(h);
 }
 
 /* CArray#hash — Hash key value; wraps ca_hash into a Ruby Integer. */

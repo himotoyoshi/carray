@@ -339,16 +339,75 @@ ca_keep_chain_flags (CArray *view, CArray *src)
 }
 
 /* The sources of folded views (CA_FLAG_FOLDED), keyed by the view.  Views are
-   made and freed in any Ractor, so the table is taken under a lock. */
+   made and freed in any Ractor, so the table is taken under a lock.
+
+   st_insert can grow the table through ruby_xmalloc, which can run a GC, and
+   the GC frees folded views through ca_fold_forget.  ca_fold_forget therefore
+   never waits for the lock: when it is held (by the inserting thread itself,
+   or by a Ractor stopped for this GC) the view is put on a list instead, and
+   whoever takes the lock next removes the listed views first.  A freed view's
+   address can be reused by a new view only once that view is recorded, which
+   takes the lock and so empties the list first. */
 static st_table *ca_fold_sources;
 static rb_nativethread_lock_t ca_fold_lock;
 
+typedef struct ca_fold_gone {
+  struct ca_fold_gone *next;
+  st_data_t            key;
+} ca_fold_gone_t;
+
+static ca_fold_gone_t *ca_fold_gone_list = NULL;
+
+/* With the lock held: remove the views freed while it was held elsewhere.
+   The list is allocated with malloc, not xmalloc: it is grown inside a GC. */
+static void
+ca_fold_forget_gone (void)
+{
+  ca_fold_gone_t *g = __atomic_exchange_n(&ca_fold_gone_list, NULL, __ATOMIC_ACQ_REL);
+  while ( g ) {
+    ca_fold_gone_t *next = g->next;
+    st_data_t key = g->key;
+    st_delete(ca_fold_sources, &key, NULL);
+    free(g);
+    g = next;
+  }
+}
+
+static void
+ca_fold_lock_table (void)
+{
+  ca_native_lock_without_gvl(&ca_fold_lock);
+  ca_fold_forget_gone();
+}
+
+typedef struct {
+  CArray *view;
+  CArray *src;
+} ca_fold_note_arg_t;
+
+static VALUE
+ca_fold_insert (VALUE varg)
+{
+  ca_fold_note_arg_t *a = (ca_fold_note_arg_t *) varg;
+  st_insert(ca_fold_sources, (st_data_t) a->view, (st_data_t) a->src);
+  return Qnil;
+}
+
+/* The growth of the table can raise NoMemoryError; the lock is released
+   before that raise goes on. */
 void
 ca_fold_note_source (CArray *view, CArray *src)
 {
-  rb_native_mutex_lock(&ca_fold_lock);
-  st_insert(ca_fold_sources, (st_data_t) view, (st_data_t) src);
+  ca_fold_note_arg_t arg = { view, src };
+  int state = 0;
+  /* lock: st_insert can run a GC; a view it frees is listed, not waited for */
+  ca_fold_lock_table();
+  /* protect: releases a native lock; no array is held */
+  rb_protect(ca_fold_insert, (VALUE) &arg, &state);
   rb_native_mutex_unlock(&ca_fold_lock);
+  if ( state ) {
+    rb_jump_tag(state);
+  }
   ca_set_flag(view, CA_FLAG_FOLDED);
 }
 
@@ -356,7 +415,7 @@ CArray *
 ca_fold_source (CArray *view)
 {
   st_data_t src = 0;
-  rb_native_mutex_lock(&ca_fold_lock);
+  ca_fold_lock_table();
   st_lookup(ca_fold_sources, (st_data_t) view, &src);
   rb_native_mutex_unlock(&ca_fold_lock);
   return (CArray *) src;
@@ -366,9 +425,30 @@ void
 ca_fold_forget (CArray *view)
 {
   st_data_t key = (st_data_t) view;
-  rb_native_mutex_lock(&ca_fold_lock);
-  st_delete(ca_fold_sources, &key, NULL);
-  rb_native_mutex_unlock(&ca_fold_lock);
+  ca_fold_gone_t *g;
+  if ( rb_native_mutex_trylock(&ca_fold_lock) == 0 ) {
+    ca_fold_forget_gone();
+    st_delete(ca_fold_sources, &key, NULL);
+    rb_native_mutex_unlock(&ca_fold_lock);
+    return;
+  }
+  g = (ca_fold_gone_t *) malloc(sizeof(*g));
+  if ( g == NULL ) {
+    /* No memory for the list: wait for the lock, as there is no other way
+       to drop the record. */
+    /* lock: only with no memory for the list; the wait may block the GC */
+    rb_native_mutex_lock(&ca_fold_lock);
+    ca_fold_forget_gone();
+    st_delete(ca_fold_sources, &key, NULL);
+    rb_native_mutex_unlock(&ca_fold_lock);
+    return;
+  }
+  g->key  = key;
+  g->next = __atomic_load_n(&ca_fold_gone_list, __ATOMIC_ACQUIRE);
+  while ( ! __atomic_compare_exchange_n(&ca_fold_gone_list, &g->next, g, 0,
+                                        __ATOMIC_RELEASE, __ATOMIC_ACQUIRE) ) {
+    /* g->next now holds the head that won; try again on top of it */
+  }
 }
 
 /* Builds the folded view of `ca` for reshape / flatten: a CAStride over
@@ -557,11 +637,25 @@ rb_ca_refer_kw (int argc, VALUE *argv, VALUE ropt, VALUE self)
         rdim = rb_ca_dim(self);
       }
     }
+    if ( ca_is_face(ca) && ! rb_obj_is_data_class(rtype)
+         && ( data_type == CA_OBJECT || ca->data_type == CA_FIXLEN ) ) {
+      /* A Face's cells do not mean their storage bytes, and the view below
+         would be lifted back to a Face reading cells of the wrong width. */
+      CArray *storage = ca_strip_face(ca);
+      if ( ! ( data_type == ca->data_type && bytes == ca->bytes )
+           && ! ( data_type == storage->data_type
+                  && bytes == storage->bytes ) ) {
+        rb_raise(rb_eTypeError,
+                 "%"PRIsVALUE" has no view of its values in another data_type: "
+                 "#to_type gives the values, #parent.refer the raw storage",
+                 rb_obj_class(self));
+      }
+    }
     Check_Type(rdim, T_ARRAY);
     CA_CHECK_RANK_GIVEN(RARRAY_LEN(rdim));   /* before dim[] is filled */
     ndim = RARRAY_LEN(rdim);
-    for (i = 0; i < ndim; i++) dim[i] = NUM2SIZE(rb_ary_entry(rdim, i));
-    if (! NIL_P(roffset)) offset = NUM2SIZE(roffset);
+    for (i = 0; i < ndim; i++) dim[i] = ca_integer_arg(rb_ary_entry(rdim, i), "a dimension", NULL);
+    if (! NIL_P(roffset)) offset = ca_integer_arg(roffset, "the offset", NULL);
     /* When rtype is a data_class the result is a record array.  It is
        built on the storage, never on a Face, so that a Face stays on top
        of the chain: re-reading a record array as its own data_class lifts
@@ -723,7 +817,7 @@ rb_ca_reshape (int argc, VALUE *argv, VALUE self)
       new_dim[i] = ca->dim[src];
     }
     else {
-      new_dim[i] = NUM2SIZE(argv[i]);
+      new_dim[i] = ca_integer_arg(argv[i], "a dimension", "reshape");
     }
     /* A product too large to count cannot equal the element count; an
        extent of zero anywhere makes it zero whatever it overflowed to. */

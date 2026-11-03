@@ -19,11 +19,9 @@
  *  file-static / global plumbing.
  *
  *  Attach-safe: INPUT-only operands (= fsync[k] == '0') never call
- *  ca_attach on the operand or its mask (= alias check + ALLOCV +
+ *  ca_attach on the operand or its mask (= alias check + xmalloc +
  *  ca_xfer_all for non-alias).  OUTPUT operands (= fsync[k] == '1')
- *  use ca_attach + ca_sync (= legitimate per the refined input-only-
- *  operand invariant established in PROPOSAL_EAGER_ELEMENTWISE_NO_ATTACH
- *  and extended in PROPOSAL_EAGER_SLOWPATH_CHUNKING_ARENA).
+ *  use ca_attach + ca_sync.
  *
  *  Slab variants `ca_call_cslab_N` / `ca_call_cslab_N_r` take the chunked
  *  path instead (ca_sweep_acquire_chunked / ca_sweep_next_chunk /
@@ -37,10 +35,9 @@
  *  function to wrap); use cslab when the operand is large, virtual, or the
  *  body is worth vectorising.
  *
- *  L0.1 (PROPOSAL_L0_AUTHOR_SURFACE, 2026-06-11): the per-operand acquire
- *  + broadcast check + mask OR + release lifecycle is now factored out
- *  into ext/ca_sweep_engine.{c,h} (ca_sweep_acquire / ca_sweep_release).  This
- *  file keeps the arity-dependent inner loop only.  ABI unchanged.
+ *  The per-operand acquire + broadcast check + mask OR + release lifecycle
+ *  lives in ext/ca_sweep_engine.{c,h} (ca_sweep_acquire / ca_sweep_release).
+ *  This file keeps the arity-dependent inner loop only.
  *
  *  --------------------------------------------------------------------------- */
 

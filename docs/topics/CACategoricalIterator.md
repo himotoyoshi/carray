@@ -375,7 +375,7 @@ with all three named.
 
 `sum`, `mean`, `min`, `max`, `minmax`, `prod`, `accumulate`, `count`,
 `count_not_masked`, `variance`, `stddev`, `variancep`, `stddevp`, `median`,
-`percentile(p)`, and `wsum(w)` / `wmean(w)`.
+`percentile(p)`, `all`, `any`, and `wsum(w)` / `wmean(w)`.
 
 `median` and `percentile` with `axis:` take each group's cells and ask the core
 for its order statistic along the axis, one call per group, so the answer is

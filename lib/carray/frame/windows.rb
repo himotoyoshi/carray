@@ -61,7 +61,7 @@ class WindowedFrame
   #   Returns the CAKeyWindowIterator of one column.
   #   @return [CAKeyWindowIterator]
   def [] (name)
-    @plan.for_value(@frame[@frame.__send__(:column_key, name, "windows")])
+    @plan.for_value(@frame.__send__(:named_column, @frame.__send__(:column_key, name, "windows"), "windows"))
   end
 
   # What each window covered, one value per row: see CAKeyWindowIterator.
@@ -113,13 +113,14 @@ class WindowedFrame
   # @param names [Array<String>] the columns; default every column that has
   #   a quantile.
   # @return [CAFrame]
-  def quantile (*names)
+  def quantile (*names, **keywords)
+    refuse_keywords(keywords)
     named = {}
     over_named_columns(:quantile, names, @key_names) do |col, name|
       named[name] = @plan.for_value(col).quantile
     end
     cols = CAFrame.__send__(:quantile_columns, named)
-    return CAFrame.new(cols, axis_name: @frame.axis_name, index: @frame.index) unless @at
+    return CAFrame.new(cols, axis_name: @frame.axis_name, index: @frame.index&.copy) unless @at
     key = @frame.__send__(:key_column, @key_names.first, "windows")
     CAFrame.new(cols, axis_name: @key_names.first, index: CAFrame.__send__(:key_labels, key, @at.copy))
   end
@@ -130,17 +131,40 @@ class WindowedFrame
     window_reduce(reduction, names, min_count: min_count, fill_value: fill_value)
   end
 
-  def window_value (reduction, *names)
+  def window_value (reduction, *names, **keywords)
+    refuse_keywords(keywords)
     window_reduce(reduction, names)
+  end
+
+  # These reductions take no keyword. Without the **keywords above, Ruby
+  # would hand a keyword in as a column name.
+  def refuse_keywords (keywords)
+    return if keywords.empty?
+    list = keywords.keys.map(&:inspect).join(", ")
+    raise ArgumentError, "unknown keyword#{keywords.size > 1 ? "s" : ""}: #{list}"
   end
 
   # An N-D column (each row a profile) is reduced along the rows, each
   # window keeping the trailing shape, as a group reduces it.
   def window_reduce (reduction, names, args = [], **keywords)
     keywords = keywords.compact
+    if @at && names.include?(@key_names.first)
+      raise ArgumentError, "#{reduction}: #{@key_names.first.inspect} is the key, already the result's index"
+    end
+    fills = keywords.delete(:fill_value)
+    refuse_unknown_fill_columns(reduction, fills)
+    refuse_wrong_reduction_arguments(reduction, args, keywords)
     named = {}
     out = over_named_columns(reduction, names, @key_names, args) do |col, name|
-      named[name] = @plan.for_value(col).public_send(reduction, *args, **keywords)
+      fill = fills.is_a?(Hash) ? fills[name] : fills
+      kw = fill.nil? ? keywords : keywords.merge(fill_value: fill)
+      named[name] =
+        if %i[first last].include?(reduction) && col.ndim == 1 && args.empty? && kw.empty? &&
+           col.face? && !col.__send__(:holds_new_values?)
+          col[@plan.for_value(present_rows(col)).public_send(reduction)].copy
+        else
+          @plan.for_value(col).public_send(reduction, *args, **kw)
+        end
     end
     out = named if @at && !names.empty?
     return out if out.is_a?(CArray) && !@at
@@ -149,7 +173,7 @@ class WindowedFrame
       key = @frame.__send__(:key_column, @key_names.first, "windows")
       CAFrame.new(out, axis_name: @key_names.first, index: CAFrame.__send__(:key_labels, key, @at.copy))
     else
-      CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index)
+      CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index&.copy)
     end
   end
 end

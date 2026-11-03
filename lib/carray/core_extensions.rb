@@ -9,7 +9,8 @@
 #  Provides:
 #    - Postfix math on Float/Integer/Rational (sqrt, exp, log, sin, ...)
 #      enabling scalar/CArray polymorphism: the same expression
-#      `(0.0415*(t-218.8)).tanh` works whether t is a Float or a CArray.
+#      `(0.0415*(t-218.8)).tanh` works whether t is a Float or a CArray,
+#      and answers as the array does (`(-1.0).sqrt` is NaN, not an exception).
 #    - The same postfix math on Complex, so an expression written for a
 #      complex CArray still reads for a single cell taken out of it.
 #    - Angle normalisation on Numeric (deg_360 / deg_180 / rad_2pi / rad_pi).
@@ -43,11 +44,18 @@ class CArray
   # lexically scoped: nothing changes for code that does not opt in.
   module CoreExtensions
 
+    # What a real scalar answers through the float64 kernel of the array form.
+    # The refinement exists so that one expression reads for a scalar and for
+    # an array, so it answers as the array does: NaN outside a function's
+    # domain where Ruby's Math raises, the sign of a zero, and the accuracy of
+    # expm1 and log1p near zero.  The cost is one CScalar per call.
+    #
     # @!visibility private
     MATH_METHODS = %i[
       sqrt exp log log10
       sin cos tan sinh cosh tanh
       asin acos atan asinh acosh atanh
+      expm1 log1p rsqrt signbit
     ].freeze
 
     [Float, Integer, Rational].each do |klass|
@@ -55,7 +63,7 @@ class CArray
         MATH_METHODS.each do |m|
           module_eval <<~RUBY, __FILE__, __LINE__ + 1
             def #{m}
-              Math.#{m}(self)
+              CA_FLOAT64(self).#{m}[0]
             end
           RUBY
         end
@@ -68,25 +76,11 @@ class CArray
         def distance(other)
           (self.to_f - other.to_f).abs
         end
-        # M.1 (PyTorch alignment) scalar polymorphism additions.
         # `trunc` is left to Ruby's built-in semantics (Float#truncate
         # returns Integer when arg=0) — its CArray counterpart preserves
         # data type, so scalar-side use should call .to_f.trunc explicitly.
-        # Math.expm1 / Math.log1p don't exist in stdlib; hand-roll.
-        def expm1
-          Math.exp(self) - 1.0
-        end
-        def log1p
-          Math.log(1.0 + self)
-        end
-        def rsqrt
-          1.0 / Math.sqrt(self)
-        end
         def square
           self * self
-        end
-        def signbit
-          self.negative?
         end
       end
     end
@@ -109,14 +103,9 @@ class CArray
       square rsqrt
     ].freeze
 
-    # Complex is not handled the way Float / Integer / Rational are.
-    # Math.tanh(Complex(1,2)) raises RangeError -- of the stdlib Math
-    # methods only Math.sqrt accepts a Complex -- so the complex forms
-    # need their own implementation.
-    #
-    # Each one runs the value through a one-element cmplx128 CScalar, so
-    # the answer comes from the very kernel the array form would have
-    # used.  That is the point: the branch cuts of csqrt / clog / casin /
+    # Complex goes the same way, through a one-element cmplx128 CScalar, so
+    # the answer comes from the very kernel the array form would have used.
+    # That is the point: the branch cuts of csqrt / clog / casin /
     # cacosh / catanh, and the sign of a zero on either side of them, are
     # whatever the platform's C99 complex.h says they are, and they are
     # not the same everywhere.  On this machine, for instance,
@@ -143,50 +132,12 @@ class CArray
     end
 
     refine Numeric do
-      def deg_360
-        a = self.to_f
-        fa = a / 360.0
-        if a >= 0
-          (fa - fa.floor) * 360.0
-        else
-          (fa - fa.ceil + 1) * 360.0
-        end
-      end
-
-      def deg_180
-        a = self.to_f
-        fa = (a + 180.0) / 360.0
-        b = if a >= 0
-              (fa - fa.floor) * 360.0 - 180.0
-            else
-              (fa - fa.ceil) * 360.0 - 180.0
-            end
-        b += 360.0 if b <= -180.0
-        b
-      end
-
-      def rad_2pi
-        a = self.to_f
-        two_pi = 2 * Math::PI
-        fa = a / two_pi
-        if a >= 0
-          (fa - fa.floor) * two_pi
-        else
-          (fa - fa.ceil + 1) * two_pi
-        end
-      end
-
-      def rad_pi
-        a = self.to_f
-        two_pi = 2 * Math::PI
-        fa = (a + Math::PI) / two_pi
-        b = if a >= 0
-              (fa - fa.floor) * two_pi - Math::PI
-            else
-              (fa - fa.ceil) * two_pi - Math::PI
-            end
-        b += two_pi if b <= -Math::PI
-        b
+      %i[deg_360 deg_180 rad_2pi rad_pi].each do |m|
+        module_eval <<~RUBY, __FILE__, __LINE__ + 1
+          def #{m}
+            CA_FLOAT64(self.to_f).#{m}[0]
+          end
+        RUBY
       end
 
       def eq(other)

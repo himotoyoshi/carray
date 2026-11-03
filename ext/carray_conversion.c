@@ -195,6 +195,23 @@ ca_to_a_universal (VALUE arg)
   return Qnil;
 }
 
+/* An array with no cells still has the nesting of its axes up to the first
+   zero-length one: (3, 0) is three empty rows, (2, 0, 4) two empty rows. */
+static VALUE
+ca_to_a_empty_nesting (CArray *ca, int32_t level)
+{
+  volatile VALUE ary;
+  ca_size_t i;
+
+  ary = rb_ary_new2(ca->dim[level]);
+  if ( level < ca->ndim - 1 ) {
+    for (i=0; i<ca->dim[level]; i++) {
+      rb_ary_store(ary, i, ca_to_a_empty_nesting(ca, level + 1));
+    }
+  }
+  return ary;
+}
+
 VALUE
 rb_ca_to_a (VALUE self)
 {
@@ -203,6 +220,9 @@ rb_ca_to_a (VALUE self)
   int data_type, fast_eligible;
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca);
+  if ( ca->elements == 0 && ca->ndim > 0 ) {
+    return ca_to_a_empty_nesting(ca, 0);
+  }
   ary = rb_ca_is_empty(self) ? rb_ary_new() : rb_ary_new2(ca->dim[0]);
 
   /* Once attached, ca->ptr is a contig row-major buffer (alias for
@@ -375,6 +395,28 @@ rb_ca_convert (int argc, VALUE *argv, VALUE self)
   return obj;
 }
 
+/* The transfer of dump_binary into a String.  The String is locked while
+   the bytes go in: a view that runs Ruby to make its cells (a CAObject)
+   could otherwise resize it under the pointer being written. */
+typedef struct {
+  CArray *ca;
+  VALUE   io;
+} ca_dump_into_string_t;
+
+static VALUE
+ca_dump_into_string_body (VALUE arg)
+{
+  ca_dump_into_string_t *d = (ca_dump_into_string_t *) arg;
+  ca_copy_data(d->ca, RSTRING_PTR(d->io));
+  return Qnil;
+}
+
+static VALUE
+ca_dump_into_string_unlock (VALUE io)
+{
+  return rb_str_unlocktmp(io);
+}
+
 /* CArray#dump_binary([io]) — write self's raw element bytes to io in
  * row-major order.
  *
@@ -411,7 +453,17 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
     if ( ca_length(ca) != RSTRING_LEN(io) ) {
       rb_str_resize(io, ca_length(ca));
     }
-    ca_copy_data(ca, RSTRING_PTR(io));
+    /* the bytes are written behind Ruby's back: drop the cached code
+       range, or the string keeps answering 7-bit for any contents */
+    rb_str_modify(io);
+    {
+      ca_dump_into_string_t d;
+      d.ca = ca;
+      d.io = io;
+      rb_str_locktmp(io);
+      rb_ensure(ca_dump_into_string_body, (VALUE) &d,
+                ca_dump_into_string_unlock, io);
+    }
     break;
   case T_FILE: {
     rb_io_t *iop;
@@ -487,8 +539,10 @@ rb_ca_load_binary (VALUE self, VALUE io)
                "%s: data size mismatch (got %" PRId64 " bytes, expected %" PRId64 ")",
                ca_calling_method_name(), (ca_size_t) RSTRING_LEN(io), (ca_size_t) ca_length(ca));
     }
+    /* A copy shares the bytes until either side changes: a view that runs
+       Ruby while it stores (a CAObject) cannot then move them. */
+    io = rb_str_dup(io);
     if ( ca->data_type == CA_BOOLEAN ) {
-      io = rb_str_dup(io);
       rb_str_modify(io);
       ca_boolean_normalize_bytes(RSTRING_PTR(io), ca->elements);
     }

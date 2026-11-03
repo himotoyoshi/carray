@@ -154,6 +154,10 @@ refinement, which puts the same postfix math on `Float` / `Integer` /
 `Rational` as on a CArray, and the lazy views, which give the array path its
 fusion.
 
+A real scalar answers through the same float64 kernel as an array, so the formula
+gives one answer for both: `(-1.0).sqrt` is `NaN` rather than a
+`Math::DomainError`, and `(-0.0).signbit` is `true`.
+
 ### The operands are read-only
 
 Inside the block the arrays are read through a marker, so writing raises:

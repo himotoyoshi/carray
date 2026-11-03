@@ -283,14 +283,15 @@ class TestFusionPlan < Test::Unit::TestCase
     assert_equal [[:add, false]],  ops.(i.lazy + i.lazy)
   end
 
-  # A Float array to an Integer power is its own node (ipow); its body calls
-  # op_powi_<type>, which CArray hands over as the helpers text.
+  # A Float array to an Integer power is its own node (ipow); its body is
+  # the power kernel's, with the int64 exponent converted to the base's type.
   def test_an_integer_power_is_planned
     x = CArray.float64(3).seq!
     plan = CArray::Fusion.plan(x.lazy ** 2)
     op = plan.nodes.last
     assert_equal :ipow, op.name
-    assert_equal "(#3) = op_powi_<type>((#1), (#2));", op.body
+    assert_equal CArray.__kernel_body__("binop", "power", "float64")
+                   .sub("pow((#1), (#2))", "pow((#1), (double)(#2))"), op.body
     assert_equal :int64, plan.nodes[1].data_type
     assert_not_nil CArray::Fusion.plan(x.to_type(:float32).lazy ** -3)
   end
@@ -299,7 +300,7 @@ class TestFusionPlan < Test::Unit::TestCase
     header = File.read(File.expand_path("../../ext/ca_op_powi.h", __dir__))
     region = header[%r{/\* BEGIN kernel helpers \*/\n(.*)/\* END kernel helpers \*/}m, 1]
     assert_equal region, CArray.__kernel_helpers__
-    assert_match(/^op_powi_fc\(float64_t\)$/, CArray.__kernel_helpers__)
+    assert_match(/^op_powi\(int64_t\)$/, CArray.__kernel_helpers__)
   end
 
 

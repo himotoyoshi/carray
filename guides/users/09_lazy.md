@@ -1,10 +1,10 @@
 # Lazy evaluation
 
-The element-wise operations in [Element-wise operations](03_elementwise.md) are *eager*: every `+`, every `sqrt`, every comparison builds a full result array as soon as it runs. That is the right default — it is simple, the operations are fast, and the result is just another CArray you can do anything with.
+The element-wise operations in [Element-wise operations](03_elementwise.md) are *eager*: every `+`, every `sqrt`, every comparison builds a full result array as soon as it runs. That is the right default — it is simple, the operations are fast, and the result is an ordinary CArray.
 
-But eager evaluation has a cost when you chain many operations together. Each intermediate array is allocated, filled, and then thrown away as soon as the next operation consumes it. For a deep chain over large arrays, that is a lot of memory traffic just to compute a single final answer.
+But eager evaluation has a cost when many operations are chained together. Each intermediate array is allocated, filled, and then thrown away as soon as the next operation consumes it. For a deep chain over large arrays, that is a lot of memory traffic just to compute a single final answer.
 
-*Lazy* evaluation gives you a way to describe the same chain without building those intermediates. You assemble a small expression tree, and the whole tree is evaluated in one pass when you finally ask for a concrete result.
+*Lazy* evaluation describes the same chain without building those intermediates. The code builds a small expression tree, and the whole tree is evaluated in one pass when a concrete result is requested.
 
 ## The eager picture, first
 
@@ -16,7 +16,7 @@ b = CArray.float64(4).seq + 1.0         #  => [ 1.0, 2.0, 3.0, 4.0 ]
 #  => [ 2.0, 6.0, 10.0, 14.0 ]
 ```
 
-Two arrays were allocated under the hood: one for `a + b`, and one for the multiplication. With four elements this is fine. With a few million, the intermediate is real memory.
+Two arrays were allocated: one for `a + b`, and one for the multiplication. With four elements this is fine. With a few million, the intermediate is real memory.
 
 ## Turning a chain lazy
 
@@ -34,7 +34,7 @@ expr
 #  => <CABinOp ...>      a description of the tree, not a result
 ```
 
-Nothing has been computed yet. `expr` is just a structure that knows: "add these two arrays, then multiply by 2". The arithmetic happens when you ask for a concrete answer.
+Nothing has been computed yet. `expr` is just a structure that knows: "add these two arrays, then multiply by 2". The arithmetic happens when a concrete answer is requested.
 
 ## Materialising the result
 
@@ -48,7 +48,7 @@ expr.copy                   #  => [ 2.0, 6.0, 10.0, 14.0 ]   independent array
 
 - `to_ca` evaluates the whole tree in a single streamed pass and returns the values as a CArray.
 - A reduction such as `sum`, `mean`, `min`, `max` evaluates the tree *and* reduces in the same pass — there is no intermediate full-size array at all.
-- `copy` is what you reach for when you want an independent, writable entity. (See [Vocabulary](08_vocabulary.md) for the distinction between `to_ca` and `copy`.)
+- `copy` gives an independent, writable entity. (See [Vocabulary](08_vocabulary.md) for the distinction between `to_ca` and `copy`.)
 
 The expression tree itself is read-only:
 
@@ -57,7 +57,7 @@ expr[0] = 99
 #  => RuntimeError: can not modify read-only array
 ```
 
-This is by design. The tree is a recipe, not a buffer; if you need to write into the result, materialise first with `copy` and assign into that.
+This is by design. The tree is a recipe, not a buffer; to write into the result, materialise it first with `copy` and assign into that.
 
 ## Why this saves memory
 
@@ -67,7 +67,7 @@ The shape and the type rules are unchanged — the lazy result has the same shap
 
 ## `CArray.fuse` — writing the expression
 
-Marking each operand with `.lazy` gets repetitive once there is more than one of them. `CArray.fuse` lets you write the expression itself:
+Marking each operand with `.lazy` gets repetitive once there is more than one of them. With `CArray.fuse`, the code contains the expression itself:
 
 ```ruby
 a = CArray.float64(4).seq
@@ -100,7 +100,7 @@ laplacian.to_ca.class
 
 Five operands, one pass. Written eagerly the same expression allocates four intermediate arrays and walks each of them twice more; fused, the shifts are read once and the result written once. On a 2000x2000 float64 array that is about **2.2 times faster**, and the margin grows with the number of terms — a twelve-term sum is closer to **3.5 times**.
 
-Note where `.lazy` is *not* needed. Views built inside the block — `shift` here, but equally `[]`, `transpose`, `reshape`, `flip`, `roll`, `window`, `diagonal`, `tile` — stay part of the expression on their own. You do not have to think about the order you build them in.
+Note where `.lazy` is *not* needed. Views built inside the block — `shift` here, but equally `[]`, `transpose`, `reshape`, `flip`, `roll`, `window`, `diagonal`, `tile` — stay part of the expression on their own. The order in which they are built does not matter.
 
 A polymorphic helper falls out of this naturally. Only names holding an array are marked; a `Float` or an `Integer` is left alone, so the same formula reads either way:
 
@@ -128,11 +128,11 @@ A block written at an `irb` prompt, or inside `eval`, has no source file to read
 a.lazy + b.lazy
 ```
 
-That always works — it is what `fuse` writes for you.
+That always works, and it is the code that `fuse` generates.
 
 ## Compute a repeated subexpression before the block
 
-Inside the block, a name that you assign does not hold a result. It holds a calculation.
+Inside the block, an assigned name does not hold a result. It holds a calculation.
 
 ```ruby
 CArray.fuse {
@@ -141,7 +141,7 @@ CArray.fuse {
 }
 ```
 
-Naming it does not compute it, and using it twice does not reuse anything. This is the reverse of eager code, where assigning to a variable is exactly how you avoid repeating work.
+Naming it does not compute it, and using it twice does not reuse anything. This is the reverse of eager code, where assigning to a variable is the way to avoid repeating work.
 
 Names from *outside* the block are different. Whatever they hold has already been calculated, so using one several times just reads the value several times.
 
@@ -159,7 +159,7 @@ The cost of getting this wrong is easy to measure. Here one expensive calculatio
 | 3 | 0.0036 | 0.0059 | 0.61 |
 | 4 | 0.0042 | 0.0078 | 0.54 |
 
-Eager is flat — it computes once and reuses. Fused grows in proportion to how often you write it. Past two uses, fusion is losing.
+Eager is flat — it computes once and reuses. Fused grows in proportion to how often the name is used. Past two uses, fusion is losing.
 
 ### Example: Goff-Gratch
 
@@ -257,7 +257,7 @@ expr.to_ca
 #  => [ -1.2649, -0.6325, 0.0, 0.6325, 1.2649 ]
 ```
 
-This is what lets you reuse the same expression on many datasets, let the caller pick the form to materialise into (`to_ca`, `sum`, `mean(axis: 0)`), or build a parametric expression once and evaluate it many times in a loop.
+This makes three things possible: reusing the same expression on many datasets, letting the caller pick the form to materialise into (`to_ca`, `sum`, `mean(axis: 0)`), and building a parametric expression once and evaluating it many times in a loop.
 
 ## Masks pass through
 
@@ -275,7 +275,7 @@ a.lazy.sqrt.to_ca
 #  => [ 0.0, _, 1.4142, 1.7321 ]
 ```
 
-You do not have to do anything special — missingness carries through the tree, and only valid positions are evaluated.
+No special handling is needed: missingness carries through the tree, and only valid positions are evaluated.
 
 ## Lazy comparisons
 
@@ -310,24 +310,24 @@ Chaining k operations over a 1000x1000 float64 array:
 Two readings:
 
 - **More terms, more gain.** Each extra term is one more intermediate that eager has to allocate, fill and re-read.
-- **Cheaper arithmetic, more gain.** With `exp10` the per-cell work dwarfs the traffic, so removing the traffic barely shows.
+- **Cheaper arithmetic, more gain.** With `exp10` the work for each cell is much larger than the traffic, so removing the traffic has little effect.
 
-That is the opposite of the intuition "heavy per-cell work is what fusion is for". Heavy work is what makes fusion *irrelevant*; it is cheap work over large arrays that fusion helps.
+That is the opposite of the intuition "fusion is for heavy work on each cell". Heavy work is what makes fusion *irrelevant*; it is cheap work over large arrays that fusion helps.
 
-Reach for fusion when:
+Use fusion when:
 
 - the chain is several operations long;
 - the arithmetic is cheap (add, multiply, compare) relative to a memory read;
 - the arrays are large enough that intermediates spill out of cache;
 - no subexpression is used more than once (or the shared ones are computed before the block);
-- you want a single helper that works for both scalars and arrays.
+- a single helper must work for both scalars and arrays.
 
 Stay eager when:
 
 - the chain is one or two operations;
 - the expression is dominated by transcendental calls;
-- you want to keep an intermediate for inspection or reuse;
-- you want to write into the result (eager results are mutable entities).
+- an intermediate must be kept for inspection or reuse;
+- the code writes into the result (eager results are mutable entities).
 
 Finite-difference stencils sit squarely in the good case: the arithmetic is addition, the terms read different neighbours so nothing is shared, and the arrays are large. That is why the Laplacian above gains 2.2x while a thermodynamic formula gains nothing.
 
@@ -353,7 +353,7 @@ Measured over 30 steps of a 1000x1000 diffusion problem, the fused loop runs **1
 
 ## Going back to eager
 
-A lazy expression turns into a regular CArray the moment you call `to_ca`, `copy`, or any reduction. From there, everything works as in earlier chapters — you can index it, mutate it, mask it, pass it to a view method, hand it to MemoryView consumers. The lazy substrate is just a way to defer the work; once it is done, the result is an ordinary array.
+A lazy expression turns into a regular CArray as soon as `to_ca`, `copy`, or any reduction is called. From there, everything works as in earlier chapters: the array can be indexed, modified, masked, passed to a view method, or passed to a MemoryView consumer. The lazy substrate is just a way to defer the work; once it is done, the result is an ordinary array.
 
 ```ruby
 result = CArray.fuse { (a.sqrt + b) * 2 }.to_ca
@@ -361,4 +361,4 @@ result[0] = 0.0                   #  ordinary entity, writable
 result + 1                        #  ordinary eager arithmetic
 ```
 
-You can mix freely. A lazy view added to an eager array produces a lazy node; an eager operation on a materialised result produces another eager result. There is no mode to enter and leave — the wrapper is the lazy marker, and removing it (by materialising) is enough.
+Lazy and eager code mix freely. A lazy view added to an eager array produces a lazy node; an eager operation on a materialised result produces another eager result. There is no mode to enter and leave — the wrapper is the lazy marker, and removing it (by materialising) is enough.

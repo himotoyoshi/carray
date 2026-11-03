@@ -82,7 +82,7 @@ ca_count_each_body (VALUE arg)
     /* Extract vk as a scalar VALUE via flat addr.  rb_ca_fetch_addr
        takes a ca_size_t addr (not a Ruby VALUE). */
     VALUE vk = rb_ca_fetch_addr(c->rval, k);
-    VALUE sub;
+    volatile VALUE sub;
     /* A masked query cell asks nothing: its count is masked.  Passing it
        on would ask count(UNDEF), the count of self's masked cells. */
     if ( vk == CA_UNDEF ) {
@@ -154,12 +154,30 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     }
   }
 
-  volatile VALUE rval = argv[0];
+  /* true and false count the cells holding 1 and 0 of a numeric array */
+  volatile VALUE rval = ca_truth_as_number(src, argv[0]);
+  if ( rval != argv[0] ) {
+    VALUE *nargv = ALLOCA_N(VALUE, argc);
+    MEMCPY(nargv, argv, VALUE, argc);
+    nargv[0] = rval;
+    argv = nargv;
+  }
 
   /* count(UNDEF) == count_masked: UNDEF is mask-state vocabulary, not a
      value to compare against.  Forward, dropping the UNDEF from argv. */
   if ( rval == CA_UNDEF ) {
     return rb_ca_count_masked(argc - 1, argv + 1, self);
+  }
+
+  /* An array that can not hold the value (nil, a String) counts no cell
+     for it: the cells that matched, none, are counted the way count(true)
+     counts a mask. */
+  if ( ca_query_matches_nothing(src, rval) && ! ca_is_complex_type(src) ) {
+    VALUE *nargv = ALLOCA_N(VALUE, argc);
+    MEMCPY(nargv, argv, VALUE, argc);
+    nargv[0] = Qtrue;
+    return rb_ca_count(argc, nargv,
+                       rb_funcall(self, rb_intern("eq"), 1, rval));
   }
 
   /* Face gate, mirroring the search / linear family (ext/carray_order.c):
@@ -284,7 +302,7 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     }
 
     /* Allocate output i64 CArray. */
-    VALUE vout = rb_funcall(rb_cCArray, rb_intern("new"), 2,
+    volatile VALUE vout = rb_funcall(rb_cCArray, rb_intern("new"), 2,
                             INT2NUM(CA_INT64),
                             rb_ary_new4(out_ndim,
                                         ({ VALUE *tmp = ALLOCA_N(VALUE, out_ndim);
@@ -348,16 +366,17 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
                iv);
     } else {
       rb_raise(rb_eTypeError,
-               "count(v) on boolean array: v must be true / false / 1 / 0, got %s",
-               rb_obj_classname(rval));
+               "count(v) on boolean array: v must be true / false / 1 / 0, got %"PRIsVALUE"",
+               rb_obj_class(rval));
     }
   } else {
-    /* true / false are the boolean array's own domain, not a number --
-       except in an object array, where they are ordinary stored values. */
+    /* An integer, float or complex array has read true / false as 1 / 0
+       above (ca_truth_as_number); an object array stores them as values.
+       Any other array that reaches here can not count them. */
     if ( ( rval == Qtrue || rval == Qfalse ) && src->data_type != CA_OBJECT ) {
       rb_raise(rb_eTypeError,
-               "count(v) on numeric array: v must be numeric, got %s",
-               rb_obj_classname(rval));
+               "count(v) on numeric array: v must be numeric, got %"PRIsVALUE"",
+               rb_obj_class(rval));
     }
     /* The query is compared in the type it and the array match in, as `eq`
        compares (ca_query_match_type): 1.5 does not match 1, and an Integer

@@ -189,6 +189,17 @@ module MkKernel
     }
   end
 
+  # A power body: the exponents -2 .. 4 take at most two roundings
+  # (x * x, x * x * x, (x * x) * (x * x), 1 / x, 1 / (x * x)), the rest go
+  # to `general`.  The Integer exponent kernel (ext/ca_op_ipower.c) takes
+  # the same ones, so an exponent answers alike as a scalar and as an array.
+  def self.pow_short(general)
+    "(#3) = (#2) == 2 ? (#1) * (#1) : (#2) == 3 ? (#1) * (#1) * (#1) : " \
+    "(#2) == 4 ? ((#1) * (#1)) * ((#1) * (#1)) : (#2) == 1 ? (#1) : " \
+    "(#2) == 0 ? 1 : (#2) == -1 ? 1 / (#1) : (#2) == -2 ? 1 / ((#1) * (#1)) : " \
+    "#{general};"
+  end
+
   # Substitute the width markers in a kernel body.
   def self.at_width(body, suffix, real_type)
     body.gsub("<f>", suffix).gsub("<t>", real_type)
@@ -6799,11 +6810,14 @@ module MkKernel
 
   # Kernels written outside this generator that a lazy expression can still
   # hold.  A Float or Complex array to an Integer power is CABinOp's ipow
-  # (ext/ca_op_ipower.c, which applies op_powi_<type> cell by cell); its
-  # body is that call.
-  EXTRA_BODY_ROWS = %w[float32 float64 cmplx64 cmplx128].map { |t|
-    ["binop", "ipow", t, "(#3) = op_powi_<type>((#1), (#2));"]
-  }.freeze
+  # (ext/ca_op_ipower.c, ca_ipow_<type>): #2 is an int64, converted as an
+  # int64 cell is converted to the base's type, then the power body.
+  EXTRA_BODY_ROWS = [
+    ["binop", "ipow", "float32",  pow_short("powf((#1), (float)(double)(#2))")],
+    ["binop", "ipow", "float64",  pow_short("pow((#1), (double)(#2))")],
+    ["binop", "ipow", "cmplx64",  pow_short("cpow((#1), (float)(double)(#2))")],
+    ["binop", "ipow", "cmplx128", pow_short("cpow((#1), (double)(#2))")],
+  ].freeze
 
   # The helpers the bodies call that are not in the C standard library:
   # the part of ca_op_powi.h between its markers, as it stands.
@@ -9068,21 +9082,18 @@ MkKernel.monfunc :deg_360,
   expr:   {
     float:  <<~C,
       {
-        double _a = (double)(#1);
-        double _fa = _a / 360.0;
-        (#2) = (_a >= 0)
-                 ? (_fa - floor(_fa)) * 360.0
-                 : (_fa - ceil(_fa) + 1.0) * 360.0;
+        double _fa = (double)(#1) / 360.0;
+        (#2) = (_fa - floor(_fa)) * 360.0;
+        if ( (#2) >= 360.0 ) (#2) = 0.0;     /* a tiny negative rounds to the top */
       }
     C
     object: <<~SNIPPET,
       {
         VALUE _obj_arg = (#1);
         if (RB_FLOAT_TYPE_P(_obj_arg) || RB_INTEGER_TYPE_P(_obj_arg) || RB_TYPE_P(_obj_arg, T_RATIONAL)) {
-          double _a = NUM2DBL(_obj_arg);
-          double _fa = _a / 360.0;
-          (#2) = DBL2NUM((_a >= 0) ? (_fa - floor(_fa)) * 360.0
-                                    : (_fa - ceil(_fa) + 1.0) * 360.0);
+          double _fa = NUM2DBL(_obj_arg) / 360.0;
+          double _r = (_fa - floor(_fa)) * 360.0;
+          (#2) = DBL2NUM(_r >= 360.0 ? 0.0 : _r);
         } else {
           (#2) = rb_funcall(_obj_arg, rb_intern("deg_360"), 0);
         }
@@ -9090,7 +9101,7 @@ MkKernel.monfunc :deg_360,
     SNIPPET
   }
 
-# deg_180: fold into [-180, 180).  Preserves trailing `if (b <= -180)
+# deg_180: fold into (-180, 180].  Preserves trailing `if (b <= -180)
 # b += 360` guard from the legacy implementation.
 MkKernel.monfunc :deg_180,
   source: MkKernel::FLOAT_DTYPES + [:object],
@@ -9130,11 +9141,9 @@ MkKernel.monfunc :rad_2pi,
     float:  <<~C,
       {
         double _two_pi = 2.0 * M_PI;
-        double _a = (double)(#1);
-        double _fa = _a / _two_pi;
-        (#2) = (_a >= 0)
-                 ? (_fa - floor(_fa)) * _two_pi
-                 : (_fa - ceil(_fa) + 1.0) * _two_pi;
+        double _fa = (double)(#1) / _two_pi;
+        (#2) = (_fa - floor(_fa)) * _two_pi;
+        if ( (#2) >= _two_pi ) (#2) = 0.0;   /* a tiny negative rounds to the top */
       }
     C
     object: <<~SNIPPET,
@@ -9142,10 +9151,9 @@ MkKernel.monfunc :rad_2pi,
         VALUE _obj_arg = (#1);
         if (RB_FLOAT_TYPE_P(_obj_arg) || RB_INTEGER_TYPE_P(_obj_arg) || RB_TYPE_P(_obj_arg, T_RATIONAL)) {
           double _two_pi = 2.0 * M_PI;
-          double _a = NUM2DBL(_obj_arg);
-          double _fa = _a / _two_pi;
-          (#2) = DBL2NUM((_a >= 0) ? (_fa - floor(_fa)) * _two_pi
-                                    : (_fa - ceil(_fa) + 1.0) * _two_pi);
+          double _fa = NUM2DBL(_obj_arg) / _two_pi;
+          double _r = (_fa - floor(_fa)) * _two_pi;
+          (#2) = DBL2NUM(_r >= _two_pi ? 0.0 : _r);
         } else {
           (#2) = rb_funcall(_obj_arg, rb_intern("rad_2pi"), 0);
         }
@@ -9404,7 +9412,9 @@ MkKernel.binop :bit_or_i,
   kleene: :or,
   source: MkKernel::INT_DTYPES + [:bool, :object],
   expr:   {
-    bool:   "(#3) = (#1) | (#2);",
+    # 0 / 1 even when a side is a masked cell: its byte is not defined, and
+    # an OR that Kleene resolves to true keeps the value written here.
+    bool:   "(#3) = ((#1) | (#2)) ? 1 : 0;",
     int:    "(#3) = (#1) | (#2);",
     object: '(#3) = rb_funcall((#1), rb_intern("|"), 1, (#2));',
   }
@@ -9607,9 +9617,9 @@ MkKernel.binop :power,
   source: MkKernel::MATH_NUMERIC + [:object],
   expr:   {
     int:     "(#3) = op_powi_<type>((#1), (#2));",
-    complex: "(#3) = cpow((#1), (#2));",   # see exp2 on why cpow stays wide
+    complex: MkKernel.pow_short("cpow((#1), (#2))"),   # see exp2 on why cpow stays wide
     object:  '(#3) = rb_funcall((#1), rb_intern("**"), 1, (#2));',
-  }.merge(MkKernel.float_widths("(#3) = pow<f>((#1), (#2));"))
+  }.merge(MkKernel.float_widths(MkKernel.pow_short("pow<f>((#1), (#2))")))
 
 # ---- M.2 + M.3 (PyTorch alignment): float-only binop family --------------
 #

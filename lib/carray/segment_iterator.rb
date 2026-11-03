@@ -125,8 +125,7 @@ class CASegmentIterator < CAIterator
     # CABlock, whose own #count is the block geometry accessor, so dispatch
     # CArray#count explicitly. (Not fused: a value-equality reduceat would have
     # to reproduce core's cross-type / out-of-range equality exactly.)
-    cnt = CArray.instance_method(:count)
-    per_segment(CA_INT64) { |s| cnt.bind_call(s, *args) }
+    per_segment(CA_INT64) { |s| count_cells(s, *args) }
   end
 
   # @overload count_masked
@@ -233,8 +232,10 @@ class CASegmentIterator < CAIterator
   #   as five length-k float64 CArrays (matching `CArray#quantile`): the
   #   percentiles at 0 / 25 / 50 / 75 / 100. Empty / all-masked segments are
   #   MASKED. For a single fraction q in 0..1 use `percentile(q * 100)`.
+  #   @param axis [Integer, nil] as for {#percentile}.
   #   @return [Array<CArray>]
-  def quantile
+  def quantile (axis: nil)
+    return CArray.__name_errors_after_method__(:quantile) { [0, 25, 50, 75, 100].map { |p| percentile(p, axis: axis) } } if axis
     unless kernel_reads?
       return CArray.__name_errors_after_method__(:quantile) { [0, 25, 50, 75, 100].map { |p| percentile(p) } }
     end
@@ -297,7 +298,8 @@ class CASegmentIterator < CAIterator
   #   iff every present value is truthy (empty segment -> true, vacuously).
   #   The value data type must be boolean, as for `CArray#all`.
   #   @return [CArray]
-  def all
+  def all (axis: nil)
+    return axis_by_core(axis, :all) if axis
     aa = all_any
     aa ? aa[:all] : per_segment(CA_BOOLEAN) { |s| s.all }
   end
@@ -307,7 +309,8 @@ class CASegmentIterator < CAIterator
   #   iff some present value is truthy (empty segment -> false). The value
   #   data type must be boolean, as for `CArray#any`.
   #   @return [CArray]
-  def any
+  def any (axis: nil)
+    return axis_by_core(axis, :any) if axis
     aa = all_any
     aa ? aa[:any] : per_segment(CA_BOOLEAN) { |s| s.any }
   end
@@ -731,7 +734,9 @@ class CASegmentIterator < CAIterator
 
   def scan_answered (op)
     # An empty Face has no cell to ask the core about, and nothing to scan.
-    return blank_output(@src_shape) if @value.face? && @value.elements.zero?
+    if @value.face? && @value.elements.zero?
+      return op == :cumcount ? CArray.int64(*@src_shape) : blank_output(@src_shape)
+    end
     answer = core_scan_answer(op)
     unless kernel_scans?(op, answer)
       return scatter_segments(->(shape) { blank_like(answer, shape) }) { |s| s.public_send(op) }
@@ -757,7 +762,7 @@ class CASegmentIterator < CAIterator
   # (the core counts a boolean's running sum in uint64).
   def kernel_scans? (op, answer)
     return false unless CArray.__fast_paths_enabled__(:segment_scan_kernel)
-    return false if @value.face? || answer.face? || @value.complex?
+    return false if @value.face? || answer.face? || @value.complex? || @value.data_type == CA_FIXLEN
     kernel_type =
       case op
       when :cumcount         then CA_INT64
@@ -798,10 +803,10 @@ class CASegmentIterator < CAIterator
   end
 
   # A blank array of +shape+ of the same kind as +model+: its data type, or its
-  # Face. A read-only Face cannot be written cell by cell, so its values are
-  # held as the surface objects they are.
+  # Face. A Face that holds no new value cannot be written cell by cell, so its
+  # values are held as the surface objects they are.
   def blank_like (model, shape)
-    if model.face? && model.read_only?
+    if model.face? && !model.__send__(:holds_new_values?)
       CArray.new(CA_OBJECT, shape)
     else
       model.__send__(:blank_like, shape)
@@ -1042,10 +1047,10 @@ class CASegmentIterator < CAIterator
 
   # Whether an output can be built by lifting one. A Face is filled by writing
   # surface values into storage, so this needs a Face that can be written
-  # into; a read-only one -- a const string's records index a shared pool, a
+  # into; another -- a const string's records index a shared pool, a
   # categorical's codes index a vocabulary -- has no blank form to fill.
   def face_output?
-    @value.face? && ! @value.read_only?
+    @value.face? && @value.__send__(:holds_new_values?)
   end
 
   # Build a length-k typed output by folding each segment's members with the
@@ -1056,8 +1061,6 @@ class CASegmentIterator < CAIterator
   # for free (an all-masked segment reduces like an empty one; identity-bearing
   # reductions return their identity, ratios return UNDEF).
   def per_segment (kind)
-    # a data type the values' own Face answers in names that Face
-    kind = @value if ! kind.is_a?(CArray) && @value.face? && kind == @value.data_type
     data_type = kind.is_a?(CArray) ? kind.data_type : kind
     out = if kind.nil?
             CArray.new(CA_OBJECT, [@k])
@@ -1066,13 +1069,13 @@ class CASegmentIterator < CAIterator
                     elsif data_type == @value.data_type then @value.bytes
                     else 0 end
             CArray.new(data_type, [@k], bytes: bytes)
-          elsif ! kind.read_only?
+          elsif kind.__send__(:holds_new_values?)
             # the core answered in a Face, so the output is one too:
             # CATime#min hands back a CATime::Element, which only a CATime
             # has anywhere to put
             kind.__send__(:blank_like, [@k])
           else
-            # a read-only Face cannot be filled, so its answers are collected
+            # a Face that holds no new value cannot be filled, so its answers are collected
             # as the surface objects they already are
             CArray.new(CA_OBJECT, [@k])
           end

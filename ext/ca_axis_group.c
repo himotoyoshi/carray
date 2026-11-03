@@ -377,8 +377,8 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
     ca_size_t k  = (ca_size_t) NUM2LONG(RARRAY_AREF(bundle, 1));
     VALUE vbaxes = RARRAY_AREF(bundle, 2);
     Check_Type(vbaxes, T_ARRAY);
-    if ( k <= 0 ) {
-      rb_raise(rb_eArgError, "axis_group_reduce: bundle k must be positive");
+    if ( k < 0 ) {
+      rb_raise(rb_eArgError, "axis_group_reduce: bundle k must not be negative");
     }
 
     /* The code table is copied out and the source let go of at once, rather
@@ -390,7 +390,7 @@ rb_ca_axis_group_reduce (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
        that the unwind collects. Not a String: a String held only by `keep`
        can be moved by compaction, taking the bytes under bundle_codes with
        it. */
-    VALUE v32 = rb_ca_wrap_readonly(vcodes, INT2NUM(CA_INT32));
+    volatile VALUE v32 = rb_ca_wrap_readonly(vcodes, INT2NUM(CA_INT32));
     rb_ary_push((VALUE) keep, v32);
     GetCArray(v32, bundle_ca[bi]);
     h_codes[bi] = 0;
@@ -1212,8 +1212,8 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
     ca_size_t k  = (ca_size_t) NUM2LONG(RARRAY_AREF(bundle, 1));
     VALUE vbaxes = RARRAY_AREF(bundle, 2);
     Check_Type(vbaxes, T_ARRAY);
-    if ( k <= 0 ) {
-      rb_raise(rb_eArgError, "axis_group_scan: bundle k must be positive");
+    if ( k < 0 ) {
+      rb_raise(rb_eArgError, "axis_group_scan: bundle k must not be negative");
     }
 
     /* The code table is copied out and the source let go of at once, rather
@@ -1225,7 +1225,7 @@ rb_ca_axis_group_scan (VALUE self, VALUE vgaxes, VALUE vbundles, VALUE vop)
        that the unwind collects. Not a String: a String held only by `keep`
        can be moved by compaction, taking the bytes under bundle_codes with
        it. */
-    VALUE v32 = rb_ca_wrap_readonly(vcodes, INT2NUM(CA_INT32));
+    volatile VALUE v32 = rb_ca_wrap_readonly(vcodes, INT2NUM(CA_INT32));
     rb_ary_push((VALUE) keep, v32);
     GetCArray(v32, bundle_ca[bi]);
     h_codes[bi] = 0;

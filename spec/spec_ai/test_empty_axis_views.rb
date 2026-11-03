@@ -28,11 +28,11 @@ class TestEmptyAxisViews < Test::Unit::TestCase
       sources.each do |kind, a|
         v = make.(a)
         assert_equal shape, v.shape, "#{name} #{kind}"
-        assert_equal [], v.to_a
+        assert_equal Array.new(shape[0]) { [] }, v.to_a
         assert_equal shape, v.copy.shape
         assert_equal shape, v.dup.shape
         assert_equal 0.0, v.sum
-        assert_equal [], v.is_masked.to_a
+        assert_equal Array.new(shape[0]) { [] }, v.is_masked.to_a
         assert_nothing_raised { v[] = 1 }
       end
     end

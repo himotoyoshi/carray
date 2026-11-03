@@ -99,9 +99,13 @@ class CAFrame
     class Tokenizer
       attr_reader :sep, :quote, :strip
 
-      def initialize(sep, quote, strip)
+      # What a separator and a quote have to be, for reading and for writing.
+      def self.check_delimiters(sep, quote)
         unless sep.is_a?(String) && !sep.empty?
           raise ArgumentError, "sep: must be a non-empty String (got #{sep.inspect})"
+        end
+        if sep.match?(/[\r\n]/)
+          raise ArgumentError, "sep: cannot hold a line end (got #{sep.inspect})"
         end
         unless quote.is_a?(String) && quote.size == 1
           raise ArgumentError, "quote: must be one character (got #{quote.inspect})"
@@ -109,6 +113,10 @@ class CAFrame
         if sep.include?(quote)
           raise ArgumentError, "sep: #{sep.inspect} cannot contain the quote character"
         end
+      end
+
+      def initialize(sep, quote, strip)
+        Tokenizer.check_delimiters(sep, quote)
         @sep      = sep
         @quote    = quote
         @strip    = strip
@@ -239,7 +247,7 @@ class CAFrame
               part = part + @sep + parts[i]
             end
             inner = part[1...-1]
-            fields << (inner.include?(@quote) ? inner.gsub(@qq, @quote) : inner)
+            fields << (inner.include?(@quote) ? inner.gsub(@qq) { @quote } : inner)
           elsif part.include?(@quote)
             return nil
           else
@@ -438,7 +446,7 @@ class CAFrame
         CAFrame.__send__(:column_key, c, "read_csv", "columns: a column name") if c.is_a?(Symbol)
         next if c.is_a?(Integer) && c >= 0
         next if c.is_a?(Range) && (c.begin.nil? || (c.begin.is_a?(Integer) && c.begin >= 0)) &&
-                (c.end.nil? || c.end.is_a?(Integer))
+                (c.end.nil? || (c.end.is_a?(Integer) && c.end >= 0))
         raise ArgumentError, "read_csv: columns: takes column names, or indexes from 0 " \
                              "and Ranges of them (got #{c.inspect})"
       end
@@ -485,6 +493,7 @@ class CAFrame
           return nil if last.nil? && ncol.nil?
           last = ncol - 1 if last.nil?
           last -= 1 if c.end && c.exclude_end?
+          raise ArgumentError, "read_csv: columns: #{c.inspect} selects no column" if last < first
           (first..last).to_a
         end
       end
@@ -653,7 +662,7 @@ class CAFrame
 
     private def body_in_c(last = nil, chunk_bytes = CHUNK_BYTES)
       return read_body_into_const_string_columns if last.nil? && @read_text_as_const_string
-      chunked = last.nil? && @names && @io.respond_to?(:external_encoding) &&
+      chunked = last.nil? && @names && @io.respond_to?(:internal_encoding) &&
                 @io.internal_encoding.nil?
       # Names that have to agree with the first record leave its column
       # count to C, to be checked against them.

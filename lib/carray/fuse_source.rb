@@ -185,7 +185,9 @@ class CArray
     # block that starts on the sequence's first line is found in the file's
     # syntax tree.  Only when two start on that line is the sequence itself
     # dumped: InstructionSequence#to_a reads the instructions while another
-    # Ractor may be running them, and that can crash the process.
+    # Ractor may be running them, and that can crash the process.  Two Ractors
+    # dumping one sequence for the first time crash Ruby before 4.1, so the
+    # dump goes through a lock.
     def self.code_location (sequence, path)
       line = sequence.first_lineno
       found = []
@@ -206,7 +208,7 @@ class CArray
         start, whole = found.first
         [start.start_line, start.start_column, whole.end_line, whole.end_column]
       else
-        sequence.to_a[4][:code_location]
+        CArray.send(:instruction_sequence_to_a, sequence)[4][:code_location]
       end
     end
 

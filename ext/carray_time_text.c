@@ -602,6 +602,12 @@ rb_ca_s_time_ticks_from_fields (VALUE klass,
    other than Z, UTC and GMT, an offset written another way) is deferred to
    Date._strptime for that cell.
 
+   Three inputs read differently from Date._strptime.  A format with both
+   a two-digit year and a four-digit year takes the four-digit year, where
+   Date._strptime adds the century to it.  %Z ends at the zone's name, so
+   digits directly after it go to the next directive.  A NUL in the text
+   is text, so it is left over.
+
    Strict reading, used to find the format a column is written in, holds
    the text to the shape of the format: %Y is four digits and %y two, %N
    one to nine digits, the other numbers one or two digits (two when a

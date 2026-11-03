@@ -111,7 +111,7 @@ class CAFrame
   #
   # What the block returns becomes the column as it is: a view stays a view
   # of what it was made from, so a write to a cell reaches it (+copy+ cuts
-  # that).
+  # that). A lazy expression is evaluated, as a column holds its values.
   #
   # @param names [Array<String, Range, Regexp>] the columns; default all.
   # @yieldparam col [CArray] a column.
@@ -190,6 +190,9 @@ class CAFrame
     pieces.each { |p| p[] = UNDEF }
     time_text_of(col).to_a.each_with_index do |cell, i|
       next if UNDEF.equal?(cell) || cell.nil?
+      unless cell.is_a?(String)
+        raise ArgumentError, "split_column: row #{i} of #{key.inspect} holds #{cell.inspect}, which is not text"
+      end
       cell.split(sep, n).each_with_index { |part, k| pieces[k][i] = part }
     end
     rebuilt = {}
@@ -327,7 +330,15 @@ class CAFrame
       raise ArgumentError,
             "stack_columns: shape: #{layer.inspect} does not hold the #{names.size} columns"
     end
-    col = CArray.stack(parts, axis: 1)
+    CAFrame.__send__(:refuse_rounded_pieces, parts, "stack_columns", "column #{names.first.inspect}")
+    begin
+      col = CArray.stack(parts, axis: 1)
+    rescue ArgumentError => e
+      raise unless e.message.start_with?("stack: ")
+      raise ArgumentError,
+            "stack_columns: the columns do not meet as one column " \
+            "(#{e.message.delete_prefix("stack: ")}); cast them to one type first"
+    end
     col = col.reshape(nrow, *layer, *trailing) if layer.size > 1
     rebuilt = {}
     @columns.each do |k, v|
@@ -548,7 +559,7 @@ class CAFrame
         end
         resolve_cast_map(name_or_map, label)
       else
-        { column_key(name_or_map, label) => type }
+        resolve_cast_map({ column_key(name_or_map, label) => type }, label)
       end
     # Read every column before rebinding any, so a raise leaves the frame as
     # it was.
@@ -579,13 +590,15 @@ class CAFrame
     named.each_key do |name|
       refuse_missing_column(name, label.chomp(":")) unless @columns.key?(name)
     end
-    rest = @columns.keys - named.keys
+    inferred, named = named.partition { |_, t| t == :infer }.map(&:to_h)
+    rest = @columns.keys - named.keys - inferred.keys
     types =
       case default
       when nil    then {}
       when :infer then rest.empty? ? {} : select(*rest).infer_types
       else             rest.to_h { |name| [name, default] }
       end
+    types.merge!(select(*inferred.keys).infer_types) unless inferred.empty?
     types.merge!(named.compact)
   end
   
@@ -610,11 +623,13 @@ class CAFrame
   # none present is not listed.
   #
   # A number with a leading zero ("007") is a code and keeps its column as
-  # text, and so does an integer too long for int64 (an identifier), which a
-  # float would round. A day-first or month-first date ("01/02/2024") is not
-  # read as time, since which one it is cannot be told. Only text columns
-  # are looked at -- an object column or a string Face (CAString,
-  # CAConstString); columns that already have a type are not listed.
+  # text, and so does an integer too long for int64 (an identifier), or one
+  # past 2**53 among decimals, which a float would round. A day-first or
+  # month-first date ("01/02/2024") is not read as time, since which one it
+  # is cannot be told. Only text columns are looked at -- an object column
+  # or a string Face (CAString, CAConstString); columns that already have a
+  # type are not listed. An object column's cells are read as their text,
+  # so Ruby numbers there are typed as that text would be.
   #
   #   df.cast(df.infer_types)                            # what cast(:infer) does
   #   df.cast(df.infer_types.merge("code" => :int32))    # as cast(default: :infer, "code" => :int32)
@@ -622,18 +637,30 @@ class CAFrame
     @columns.each_with_object({}) do |(key, col), types|
       next unless string_column?(col)
       type = text_for_decimal_reading(col).__infer_number_type_of_text__
+      next if type == :float64 && integer_text_past_float?(col)
       type ||= :boolean if boolean_word_column?(col)
       type ||= :time if first_present_cell_can_be_time_text?(col) && time_text_column?(time_text_of(col))
       types[key] = type if type
     end
   end
 
+  # Whether a cell is an integer a float64 would round. Fewer than 16 digits
+  # cannot be, which leaves a const string column's other cells unread.
+  private def integer_text_past_float?(col)
+    long = col.is_a?(CAConstString) ? col[col.byte_length.ge(16).strip_mask(false)].to_a : time_text_of(col).to_a
+    long.any? do |text|
+      next text.abs > 2**53 if text.is_a?(Integer)   # an object cell read as its text
+      text.is_a?(String) && text.match?(/\A\s*[-+]?\d{16,}\s*\z/) && Integer(text.strip, 10).abs > 2**53
+    end
+  end
+
   # Bring every column to one common data type and rebind them (memo §11.4).
   # The frame-level counterpart of +CArray.promote_list+: where +cast+ forces
   # named columns to a type, +promote+ widens the whole table until it has a
-  # single type. Returns a new frame; like +cast+ it allocates fresh columns,
-  # so this frame keeps its own. The index is not a column and is left
-  # alone.
+  # single type. Returns a new frame; a column that changes type is a fresh
+  # one, and one that has the type already is shared with this frame, as
+  # +promote+ with no argument leaves it. The index is not a column and is
+  # left alone.
   #
   #   df.promote             # the common type CArray.result_type would pick
   #   df.promote(:object)    # force the widest type: anything fits
@@ -829,6 +856,9 @@ class CAFrame
   # A constant fill, in place, naming the column when the value does not go
   # into it, as strip_mask names it.
   private def fill_constant (key, col, value)
+    if col.read_only?
+      raise "fill: column #{key.inspect} (#{CArray::Inspector.type_label(col)}) can not modify read-only array"
+    end
     col.unmask(value)
   rescue ArgumentError, TypeError, RangeError, FloatDomainError => e
     raise e.exception("fill: column #{key.inspect} (#{CArray::Inspector.type_label(col)}) " \
@@ -962,6 +992,7 @@ class CAFrame
               "fill: give a method or value after the column #{how.inspect}; " \
               "a String alone is a column name"
       end
+      refuse_unknown_fill_method(how, "fill")
       map = @columns.select { |key, col| !key_names.include?(key) && col.any_masked? }
                     .keys.to_h { |key| [key, how] }
       return map.empty? ? nil : map
@@ -970,16 +1001,18 @@ class CAFrame
     return names_selected(names, "fill").to_h { |key| [key, how] }
   end
 
+  private def refuse_unknown_fill_method (how, verb)
+    return unless how.is_a?(Symbol) && !%i[ffill bfill linear].include?(how)
+    raise ArgumentError,
+          "#{verb}: unknown method #{how.inspect} (:ffill | :bfill | :linear, or a constant fill value)"
+  end
+
   private def fill_by_map (map, verb)
     raise ArgumentError, "#{verb}: the Hash names no column" if map.empty?
     refuse_if_frozen
     keys = column_keys(map.keys, verb)
     keys.each { |key| refuse_missing_column(key) unless @columns.key?(key) }
-    map.each_value do |how|
-      next unless how.is_a?(Symbol) && !%i[ffill bfill linear].include?(how)
-      raise ArgumentError,
-            "#{verb}: unknown method #{how.inspect} (:ffill | :bfill | :linear, or a constant fill value)"
-    end
+    map.each_value { |how| refuse_unknown_fill_method(how, verb) }
     pairs = keys.zip(map.values)
     pairs.each { |key, how| yield self, key, how if @columns[key].read_only? }
     filled = pairs.map do |key, how|
@@ -988,8 +1021,16 @@ class CAFrame
       yield probe, key, how
       [key, probe[key]]
     end
-    filled.compact.each { |key, col| @columns[key][] = col }
+    filled.compact.each { |key, col| write_filled_cells(@columns[key], col) }
     return self
+  end
+
+  # Only the cells a fill gave a value: a view may show one stored cell
+  # twice, and writing a copy that stayed masked would mask it again.
+  private def write_filled_cells(col, filled)
+    return unless col.has_mask?
+    target = col.is_masked & filled.is_not_masked
+    col[target] = filled[target] if target.any
   end
 
   private def fill_linear_column(key, col, verb = "fill")
@@ -1021,7 +1062,7 @@ class CAFrame
       return
     end
     # The same fill as the core, with the index as x.
-    col[] = col.send(:linear_fill_along, @index)   # write-through
+    write_filled_cells(col, col.send(:linear_fill_along, @index))
   end
 
   # Text cells are data, not Ruby literals: an object column cast to a
@@ -1038,7 +1079,7 @@ class CAFrame
     if type == :string
       return col if col.is_a?(CArray::StringOperationMixin)
       begin
-        return CArray.string(col)
+        return CArray.string(col).copy
       rescue CArray::DataTypeError, TypeError => e
         raise e.class, "column #{key.inspect} cannot be cast to :string: #{e.message}"
       end
@@ -1154,9 +1195,11 @@ class CAFrame
       next unless present[addr]
       text = cells[addr]
       m = text.is_a?(String) && TIMEDELTA_TEXT.match(text)
-      if m
-        values[addr] = Integer(m[1], 10)
-        units[addr] = CATime::Resolution.new(m[2] ? Integer(m[2], 10) : 1, m[3].to_sym)
+      value = m && Integer(m[1], 10)
+      count = m && (m[2] ? Integer(m[2], 10) : 1)
+      if m && value.bit_length < 64 && count.positive? && count.bit_length < 64
+        values[addr] = value
+        units[addr] = CATime::Resolution.new(count, m[3].to_sym)
       elsif !text.nil? && !(text.is_a?(String) && text.strip.empty?)
         bad << addr
       end
@@ -1175,7 +1218,11 @@ class CAFrame
     ticks[nil] = UNDEF
     distinct.each do |u|
       addrs = units.each_index.select { |i| units[i] == u }
-      scaled = CATimeUnitAlgebra.convert_scale!(CA_INT64(addrs.map { |i| values[i] }), u, unit)
+      begin
+        scaled = CATimeUnitAlgebra.convert_scale!(CA_INT64(addrs.map { |i| values[i] }), u, unit)
+      rescue RangeError
+        raise RangeError, "cast: column #{key.inspect} holds durations too long for their finest unit, #{unit}"
+      end
       ticks[CA_INT64(addrs)] = scaled
     end
     ticks.reshape(*col.shape).timedelta(unit: unit)
@@ -1421,7 +1468,13 @@ class CAFrame
     # to say about a surface it cannot read, so the widening check -- which
     # is about primitive promotion -- applies to plain columns only.
     @columns.each { |key, col| refuse_narrowing(key, col, type) unless col.face? }
-    @columns.each_key { |key| @columns[key] = @columns[key].to_type(type) }
+    # A column that has the type already stays as it is, as promote leaves it
+    # with no target.
+    name = CArray.data_type_name(type)
+    @columns.each_key do |key|
+      col = @columns[key]
+      @columns[key] = col.to_type(type) unless !col.face? && col.data_type_name == name
+    end
   end
 
   private def refuse_narrowing(key, col, type)

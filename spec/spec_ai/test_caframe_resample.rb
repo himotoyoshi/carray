@@ -229,4 +229,13 @@ class TestCAFrameResampleBy < Test::Unit::TestCase
     err = assert_raise(ArgumentError) { frame.resample("time", "1 day", by: "time") }
     assert_match(/by: names the time column "time"/, err.message)
   end
+
+  def test_fill_steps_a_fixed_unit_finer_than_the_key
+    d = CAFrame.new("t" => CArray.time(["2024-01-01", "2024-01-03"], unit: :D), "v" => CA_FLOAT64([1, 2]))
+    r = d.resample("t", "6 hours", fill: true).sum
+    assert_equal %w[2024-01-01 2024-01-02 2024-01-03], r.index.to_a.map(&:to_s)
+    assert_equal [1.0, 0.0, 2.0], r["v"].to_a
+    h = CAFrame.new("t" => CArray.time(["2024-01-01T05", "2024-01-01T08"], unit: :h), "v" => CA_FLOAT64([1, 2]))
+    assert_equal 4, h.resample("t", "30 minutes", fill: true).sum.nrow
+  end
 end

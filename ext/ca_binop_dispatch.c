@@ -79,6 +79,14 @@ ca_binop_op_id_of_table (ca_binop_func_t table[])
   return -1;
 }
 
+/* pmax, pmin, maximum and minimum pick one operand by order. */
+int
+ca_binop_picks_by_order (int op_id)
+{
+  return op_id == CA_BINOP_PMAX    || op_id == CA_BINOP_PMIN ||
+         op_id == CA_BINOP_MAXIMUM || op_id == CA_BINOP_MINIMUM;
+}
+
 /* ------------------------------------------------------------------- */
 /* output data_type rule                                                    */
 /* ------------------------------------------------------------------- */

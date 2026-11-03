@@ -181,7 +181,8 @@ class CAFrame
   # :cmplx128 when Complex values join them, otherwise nil (keep object).
   # Other Numerics (Rational, BigDecimal) stay object: a float column would
   # round them, and a Complex one has room for them only as floats too.  So
-  # does an Integer an int64 cannot hold: it is kept as it is, not refused.
+  # does an Integer an int64 cannot hold, and one past 2**53 beside a Float:
+  # it is kept as it is, not refused.
   INT64_RANGE = (-2**63..2**63 - 1)
   private_constant :INT64_RANGE
 
@@ -198,9 +199,10 @@ class CAFrame
 
   def self.numeric_leaf_type(values)
     return nil if values.any? { |v| v.is_a?(Integer) && !INT64_RANGE.cover?(v) }
-    if values.all? { |v| v.is_a?(Integer) }
-      :int64
-    elsif values.all? { |v| v.is_a?(Integer) || v.is_a?(Float) }
+    return :int64 if values.all? { |v| v.is_a?(Integer) }
+    # Beside a float an integer is read as one, which rounds past 2**53.
+    return nil if values.any? { |v| v.is_a?(Integer) && v.abs > 2**53 }
+    if values.all? { |v| v.is_a?(Integer) || v.is_a?(Float) }
       :float64
     elsif values.all? { |v| v.is_a?(Integer) || v.is_a?(Float) || v.is_a?(Complex) }
       :cmplx128

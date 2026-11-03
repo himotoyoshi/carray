@@ -165,6 +165,11 @@ task :view_setup_mask_check do
   ruby "utils/check_view_setup_mask.rb" or exit($?.exitstatus)
 end
 
+desc "Check that no view attach / allocate slot allocates after attaching its parent"
+task :attach_then_alloc_check do
+  ruby "utils/check_attach_then_alloc.rb" or exit($?.exitstatus)
+end
+
 desc "Report memory a raise leaves behind across every public method (macOS, slow)"
 task :leak_matrix do
   ruby "-Iext", "-Ilib", "utils/leak_matrix.rb" or exit($?.exitstatus)
@@ -198,6 +203,21 @@ end
 desc "Check that a buffer for an array's cells is valid before it is published"
 task :cell_buffer_check do
   ruby "utils/check_cell_buffers.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a native lock is waited for without the GVL, and what runs under it says why"
+task :native_lock_check do
+  ruby "utils/check_native_locks.rb" or exit($?.exitstatus)
+end
+
+desc "Check that no pointer into a movable name or String is kept past its expression"
+task :name_pointer_check do
+  ruby "utils/check_name_pointers.rb" or exit($?.exitstatus)
+end
+
+desc "Check that a VALUE read into a CArray * is held while the pointer is used"
+task :gc_hold_check do
+  ruby "utils/check_gc_holds.rb" or exit($?.exitstatus)
 end
 
 desc "Check that every attach window opened by hand says why it is safe"
@@ -475,8 +495,8 @@ end
 
 desc "Run spec_ai tests (ruby -I ext -I lib, SPEC_JOBS processes at once)"
 task :spec_ai => [:kernel_surface_check, :attach_window_check, :face_parts_check,
-                  :runtime_error_check, :index_error_check, :axis_normalize_check, :rank_limit_check, :method_naming_check, :define_method_check, :unnamed_raise_check, :read_only_refusal_check, :frame_column_verbs_check, :frame_repeated_names_check, :frame_keys_check, :frame_column_names_check, :frame_key_labels_check, :distance_limit_check, :type_label_check, :cell_buffer_check,
-                  :view_setup_mask_check, :protect_parts_check,
+                  :runtime_error_check, :index_error_check, :axis_normalize_check, :rank_limit_check, :method_naming_check, :define_method_check, :unnamed_raise_check, :read_only_refusal_check, :frame_column_verbs_check, :frame_repeated_names_check, :frame_keys_check, :frame_column_names_check, :frame_key_labels_check, :distance_limit_check, :type_label_check, :cell_buffer_check, :gc_hold_check, :name_pointer_check, :native_lock_check,
+                  :view_setup_mask_check, :protect_parts_check, :attach_then_alloc_check,
                   :setup_before_alloc_check, :integer_store_check, :one_sided_cast_check,
                   :empty_walk_check, :mask_standin_check, :nan_order_check, :query_match_check, :key_codes_check, :cell_raise_check,
                   :build_ext, :dunder_method_check,

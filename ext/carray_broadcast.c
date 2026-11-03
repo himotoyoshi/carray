@@ -184,7 +184,7 @@ NORETURN(static void ca_broadcast_refuse (VALUE self, VALUE other));
    element counts are equal, .flatten pairs the values in the order
    they lie. */
 static void
-ca_broadcast_refuse (VALUE self, VALUE other)
+ca_broadcast_refuse (VALUE self, volatile VALUE other)
 {
   CArray *ca, *cb;
   volatile VALUE self_s  = rb_inspect(rb_funcall(self,  rb_intern("shape"), 0));
@@ -311,7 +311,7 @@ rb_ca_broadcast_to (int argc, VALUE *argv, VALUE self)
   }
 
   for (i = 0; i < target_ndim; i++) {
-    target_dim[i] = NUM2SIZE(argv[i]);
+    target_dim[i] = ca_integer_arg(argv[i], "a dimension", "broadcast_to");
     if (target_dim[i] < 0) {
       rb_raise(rb_eArgError,
                "broadcast_to: negative dim at axis %d", i);

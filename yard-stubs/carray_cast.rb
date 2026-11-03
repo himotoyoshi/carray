@@ -490,6 +490,12 @@ class CArray
   #   that does not fit an integer type takes `:int64`. With no array or
   #   data_type representation, every argument promotes by its own type.
   #
+  #   This is the type an operator computes in: `int32_array + float32_array`
+  #   is `:float32`. Arrays joined value for value ({CArray.stack},
+  #   {CArray.meld}, {CArray.concatenate}) take the type {.promote_list}
+  #   gives, which is `:float64` for that pair, since `float32` does not
+  #   hold every `int32` exactly.
+  #
   #   Integer args are interpreted as *values*, not as data_type codes:
   #   `result_type(8)` returns `:int64` because the value 8 is an Integer,
   #   not because a data_type code equals 8. Use `result_type(:int64)` or

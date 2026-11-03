@@ -52,20 +52,20 @@ class CARecord
     define_method(op, &Ractor.make_shareable(proc { |*args, **kw| record_rank.public_send(op, *args, **kw) }))
   end
 
-  # @overload min(axis: nil, keep_axis: false)
+  # @overload min(axis: nil, keep_axis: false, min_count: nil, fill_value: nil)
   #   Returns the smallest record by the declared order, skipping masked
   #   records; UNDEF when every record is masked.  With `axis:` a
   #   {CARecord} of the smallest along that axis.
   #   @return [CAStruct, CARecord]
-  def min (axis: nil, keep_axis: false)
-    record_extreme(:min_index, axis, keep_axis)
+  def min (axis: nil, keep_axis: false, min_count: nil, fill_value: nil)
+    record_extreme_kept(:min_index, axis, keep_axis, min_count, fill_value)
   end
 
-  # @overload max(axis: nil, keep_axis: false)
+  # @overload max(axis: nil, keep_axis: false, min_count: nil, fill_value: nil)
   #   The largest record; see {#min}.
   #   @return [CAStruct, CARecord]
-  def max (axis: nil, keep_axis: false)
-    record_extreme(:max_index, axis, keep_axis)
+  def max (axis: nil, keep_axis: false, min_count: nil, fill_value: nil)
+    record_extreme_kept(:max_index, axis, keep_axis, min_count, fill_value)
   end
 
   # @overload minmax(axis: nil, keep_axis: false)
@@ -162,6 +162,28 @@ class CARecord
   end
 
   # The record at each min_index / max_index, gathered from self.
+  # An extreme under the reduction keywords every extreme takes: UNDEF where
+  # fewer than `min_count` cells are present, then `fill_value` for UNDEF.
+  def record_extreme_kept (index_op, axis, keep_axis, min_count, fill_value)
+    out  = record_extreme(index_op, axis, keep_axis)
+    name = index_op.to_s.sub("_index", "").to_sym
+    need = CArray.__present_cells_needed_per_result_cell__(name, min_count, 0)
+    if need > 0
+      if axis.nil?
+        out = UNDEF if count_not_masked < need
+      else
+        counts = count_not_masked(axis: axis, keep_axis: keep_axis)
+        if counts.is_a?(CArray)
+          few = counts.lt(need)
+          out[few] = UNDEF if few.any
+        elsif counts < need
+          out = UNDEF
+        end
+      end
+    end
+    CArray.__fill_undefined_result_cells__(out, fill_value)
+  end
+
   def record_extreme (index_op, axis, keep_axis)
     rank = record_rank
     if axis.nil?
@@ -175,6 +197,13 @@ class CARecord
       return record_extreme_over(index_op, axes, keep_axis)
     end
     axis = normalize_axis(axis, name)
+    if ndim == 1
+      r = record_extreme(index_op, nil, false)
+      return r unless keep_axis
+      out = flatten[0..0].copy
+      out[0] = r
+      return out
+    end
     idx   = rank.public_send(index_op, axis: axis)
     empty = idx.is_masked
     picked_shape = shape.dup

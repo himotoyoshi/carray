@@ -11,12 +11,14 @@
 ---------------------------------------------------------------------------- */
 
 #include <stdarg.h>
+#include <time.h>
 #include "ruby.h"
 #include "carray.h"
 #include "carray_internal.h"   /* ca_calling_method_name */
 
 #include "ruby/st.h"
 #include "ruby/thread_native.h"
+#include "ruby/thread.h"       /* rb_thread_call_without_gvl */
 #include "ruby/ractor.h"
 #include "ruby/debug.h"     /* rb_profile_frames: the method the user called */
 
@@ -103,6 +105,14 @@ ca_get_loop_count (int n, ...)
   return elements;
 }
 
+/* A bound of a range that is not a key of `[]`: a window or a bit range says
+   how many cells, so a Float is refused rather than cut down. */
+static ca_size_t
+ca_range_bound (VALUE v)
+{
+  return ca_integer_arg(v, "a range bound", NULL);
+}
+
 /*
   ca_parse_range and ca_parse_range_without_check parse the following
   types of range specifications
@@ -138,7 +148,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
   }
   else if ( rb_obj_is_kind_of(arg, rb_cInteger) ) {
                                      /* i */
-    start = NUM2SIZE(arg);
+    start = ca_range_bound(arg);
     CA_CHECK_INDEX(start, size);
     *poffset = start;
     *pcount  = 1;
@@ -146,8 +156,8 @@ ca_parse_range (VALUE arg, ca_size_t size,
   }
   else if ( rb_obj_is_kind_of(arg, rb_cRange) ) {
                                      /* i..j */
-    start = NUM2SIZE(RANGE_BEG(arg));
-    last  = NUM2SIZE(RANGE_END(arg));
+    start = ca_range_bound(RANGE_BEG(arg));
+    last  = ca_range_bound(RANGE_END(arg));
     excl  = RTEST(RANGE_EXCL(arg));
     CA_CHECK_INDEX(start, size);
     if ( last < 0 ) {
@@ -168,10 +178,10 @@ ca_parse_range (VALUE arg, ca_size_t size,
     rb_arithmetic_sequence_components_t x;
     rb_arithmetic_sequence_extract(arg, &x);
 
-    start = NUM2SIZE(x.begin);
-    last  = NUM2SIZE(x.end);
+    start = ca_range_bound(x.begin);
+    last  = ca_range_bound(x.end);
     excl  = RTEST(x.exclude_end);
-    step  = NUM2SIZE(x.step);
+    step  = ca_range_bound(x.step);
     if ( step == 0 ) {
       rb_raise(rb_eArgError, "step should not be 0");
     }
@@ -209,7 +219,7 @@ ca_parse_range (VALUE arg, ca_size_t size,
       VALUE arg0 = rb_ary_entry(arg, 0);
       VALUE arg1 = rb_ary_entry(arg, 1);
       if ( NIL_P(arg0) ) {              /* [nil,k] */
-        step  = NUM2SIZE(arg1);
+        step  = ca_range_bound(arg1);
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "step should not be 0");
         }
@@ -224,10 +234,10 @@ ca_parse_range (VALUE arg, ca_size_t size,
         *pstep   = step;
       }
       else if ( rb_obj_is_kind_of(arg0, rb_cRange) ) { /* [i..j,k] */
-        start = NUM2SIZE(RANGE_BEG(arg0));
-        last  = NUM2SIZE(RANGE_END(arg0));
+        start = ca_range_bound(RANGE_BEG(arg0));
+        last  = ca_range_bound(RANGE_END(arg0));
         excl  = RTEST(RANGE_EXCL(arg0));
-        step  = NUM2SIZE(arg1);
+        step  = ca_range_bound(arg1);
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "step should not be 0");
         }
@@ -260,10 +270,10 @@ ca_parse_range (VALUE arg, ca_size_t size,
         rb_arithmetic_sequence_components_t x;
         rb_arithmetic_sequence_extract(arg0, &x);
 
-        start = NUM2SIZE(x.begin);
-        last  = NUM2SIZE(x.end);
+        start = ca_range_bound(x.begin);
+        last  = ca_range_bound(x.end);
         excl  = RTEST(x.exclude_end);
-        step  = NUM2SIZE(x.step);
+        step  = ca_range_bound(x.step);
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "step should not be 0");
         }
@@ -293,8 +303,8 @@ ca_parse_range (VALUE arg, ca_size_t size,
       }
 #endif      
       else {                            /* [i,n] */
-        start = NUM2SIZE(arg0);
-        count = NUM2SIZE(arg1);
+        start = ca_range_bound(arg0);
+        count = ca_range_bound(arg1);
         CA_CHECK_INDEX(start, size);
         bound = start + (count - 1);
         if ( count > 0 && ( bound < 0 || bound >= size ) ) {
@@ -306,9 +316,9 @@ ca_parse_range (VALUE arg, ca_size_t size,
       }
     }
     else if ( RARRAY_LEN(arg) == 3 ) { /* [i,n,k] */
-      start = NUM2SIZE(rb_ary_entry(arg, 0));
-      count = NUM2SIZE(rb_ary_entry(arg, 1));
-      step  = NUM2SIZE(rb_ary_entry(arg, 2));
+      start = ca_range_bound(rb_ary_entry(arg, 0));
+      count = ca_range_bound(rb_ary_entry(arg, 1));
+      step  = ca_range_bound(rb_ary_entry(arg, 2));
       if ( step == 0 ) {
         rb_raise(rb_eArgError, "step should not be 0");
       }
@@ -345,18 +355,18 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
   }
   else if ( rb_obj_is_kind_of(arg, rb_cInteger) ) {
                                      /* i */
-    start = NUM2SIZE(arg);
+    start = ca_range_bound(arg);
     *poffset = start;
     *pcount  = 1;
     *pstep   = 1;
   }
   else if ( rb_obj_is_kind_of(arg, rb_cRange) ) {
                                      /* i..j */
-    start = NUM2SIZE(RANGE_BEG(arg));
-    last  = NUM2SIZE(RANGE_END(arg));
+    start = ca_range_bound(RANGE_BEG(arg));
+    last  = ca_range_bound(RANGE_END(arg));
     excl  = RTEST(RANGE_EXCL(arg));
     if ( excl ) {
-      last += ( (last>=start) ? -1 : 1 );
+      last -= 1;
     }
     *poffset = start;
     *pcount  = last - start + 1;
@@ -367,16 +377,16 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
     rb_arithmetic_sequence_components_t x;
     rb_arithmetic_sequence_extract(arg, &x);
 
-    start = NUM2SIZE(x.begin);
-    last  = NUM2SIZE(x.end);
+    start = ca_range_bound(x.begin);
+    last  = ca_range_bound(x.end);
     excl  = RTEST(x.exclude_end);
-    step  = NUM2SIZE(x.step);
+    step  = ca_range_bound(x.step);
     if ( step == 0 ) {
       rb_raise(rb_eArgError, "%s: step should not be 0",
                ca_calling_method_name());
     }
     if ( excl ) {
-      last += ( (last>=start) ? -1 : 1 );
+      last += ( (step>0) ? -1 : 1 );
     }
     count = (last - start)/llabs(step) + 1;
     *poffset = start;
@@ -394,7 +404,7 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
       VALUE arg1 = rb_ary_entry(arg, 1);
       if ( NIL_P(arg0) ) {              /* [nil,k] */
         start = 0;
-        step  = NUM2SIZE(arg1);
+        step  = ca_range_bound(arg1);
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "%s: step should not be 0",
                    ca_calling_method_name());
@@ -405,10 +415,10 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
         *pstep   = step;
       }
       else if ( rb_obj_is_kind_of(arg0, rb_cRange) ) { /* [i..j,k] */
-        start = NUM2SIZE(RANGE_BEG(arg0));
-        last  = NUM2SIZE(RANGE_END(arg0));
+        start = ca_range_bound(RANGE_BEG(arg0));
+        last  = ca_range_bound(RANGE_END(arg0));
         excl  = RTEST(RANGE_EXCL(arg0));
-        step  = NUM2SIZE(arg1);
+        step  = ca_range_bound(arg1);
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "%s: step should not be 0",
                    ca_calling_method_name());
@@ -426,10 +436,10 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
         rb_arithmetic_sequence_components_t x;
         rb_arithmetic_sequence_extract(arg0, &x);
 
-        start = NUM2SIZE(x.begin);
-        last  = NUM2SIZE(x.end);
+        start = ca_range_bound(x.begin);
+        last  = ca_range_bound(x.end);
         excl  = RTEST(x.exclude_end);
-        step  = NUM2SIZE(x.step);
+        step  = ca_range_bound(x.step);
         if ( step == 0 ) {
           rb_raise(rb_eArgError, "%s: step should not be 0",
                    ca_calling_method_name());
@@ -444,17 +454,17 @@ ca_parse_range_without_check (VALUE arg, ca_size_t size,
       }
 #endif
       else {                            /* [i,n] */
-        start = NUM2SIZE(arg0);
-        count = NUM2SIZE(arg1);
+        start = ca_range_bound(arg0);
+        count = ca_range_bound(arg1);
         *poffset = start;
         *pcount  = count;
         *pstep    = 1;
       }
     }
     else if ( RARRAY_LEN(arg) == 3 ) { /* [i,n,k] */
-      start = NUM2SIZE(rb_ary_entry(arg, 0));
-      count = NUM2SIZE(rb_ary_entry(arg, 1));
-      step  = NUM2SIZE(rb_ary_entry(arg, 2));
+      start = ca_range_bound(rb_ary_entry(arg, 0));
+      count = ca_range_bound(rb_ary_entry(arg, 1));
+      step  = ca_range_bound(rb_ary_entry(arg, 2));
       *poffset = start;
       *pcount  = count;
       *pstep   = step;
@@ -528,7 +538,7 @@ ca_stable_id_name (ID id)
 {
   st_data_t   found;
   const char *name = NULL;
-  rb_nativethread_lock_lock(&ca_id_names_lock);
+  ca_native_lock_without_gvl(&ca_id_names_lock);
   if ( st_lookup(ca_id_names, (st_data_t) id, &found) ) {
     name = (const char *) found;
   }
@@ -548,7 +558,8 @@ ca_stable_id_name (ID id)
     memcpy(copy, RSTRING_PTR(str), len);
     copy[len] = '\0';
     RB_GC_GUARD(str);
-    rb_nativethread_lock_lock(&ca_id_names_lock);
+    /* lock: st_insert can run a GC, which does not take this lock */
+    ca_native_lock_without_gvl(&ca_id_names_lock);
     if ( st_lookup(ca_id_names, (st_data_t) id, &found) ) {
       xfree(copy);
       name = (const char *) found;
@@ -786,17 +797,18 @@ ca_shape_elements (int8_t ndim, const ca_size_t *dim, ca_size_t bytes)
 }
 
 /* An index array is read as ca_size_t.  A float or complex one would be
-   cut to an integer on the way, so it is refused, as the indexer refuses
-   it.  A uint64 one holding 2**63 or more would turn negative and count
-   from the end of the axis, so it is refused as the out-of-range index it
-   is. */
+   cut to an integer on the way, as an object one would, and a boolean one
+   selects cells rather than naming addresses, so these are refused.  A
+   uint64 one holding 2**63 or more would turn negative and count from the
+   end of the axis, so it is refused as the out-of-range index it is. */
 void
 ca_check_index_array (VALUE v)
 {
   CArray *ca;
   if ( ! rb_obj_is_carray(v) ) return;
   GetCArray(v, ca);
-  if ( ca_is_float_type(ca) || ca_is_complex_type(ca) ) {
+  if ( ca_is_float_type(ca) || ca_is_complex_type(ca)
+       || ca->data_type == CA_OBJECT || ca->data_type == CA_BOOLEAN ) {
     rb_raise(rb_eIndexError,
              "data_type %s is invalid for an index (should be integer)",
              ca_type_name[ca->data_type]);
@@ -1156,12 +1168,12 @@ rb_ca_guess_type (VALUE obj)
   }
   else if ( TYPE(obj) == T_STRING ) {
     const char *name0;
-    char *name = StringValuePtr(obj);
+    const char *name = StringValueCStr(obj);
     int i;
     i = 0;
     while ( ( name0 = ca_name_to_type[i].name ) ) {
       name0 = ca_name_to_type[i].name;
-      if ( ! strncmp(name, name0, strlen(name0)) ) {
+      if ( ! strcmp(name, name0) ) {
         return ca_name_to_type[i].data_type;
       }
       i++;
@@ -1196,7 +1208,7 @@ rb_ca_guess_type_and_bytes (VALUE rtype, VALUE rbytes,
         *bytes = 0;
       }
       else {
-        *bytes = NUM2SIZE(rbytes);
+        *bytes = ca_integer_arg(rbytes, "bytes", NULL);
       }
     }
   }
@@ -1345,13 +1357,16 @@ rb_scan_options (VALUE ropt, const char *spec_in, ...)
     long i, n = RARRAY_LEN(keys);
     for ( i = 0; i < n; i++ ) {
       VALUE key = rb_ary_entry(keys, i);
-      VALUE kname = SYMBOL_P(key) ? rb_sym2str(key) : rb_obj_as_string(key);
-      const char *kn = StringValueCStr(kname);
-      long kn_len = RSTRING_LEN(kname);
       int found = 0;
-      sp = spec_in;
-      while ( ( tok = option_key(&sp, &len) ) != NULL ) {
-        if ( len == kn_len && memcmp(tok, kn, len) == 0 ) { found = 1; break; }
+      /* A value is read by Symbol above, so only a Symbol can name a key. */
+      if ( SYMBOL_P(key) ) {
+        VALUE kname = rb_sym2str(key);
+        const char *kn = StringValueCStr(kname);
+        long kn_len = RSTRING_LEN(kname);
+        sp = spec_in;
+        while ( ( tok = option_key(&sp, &len) ) != NULL ) {
+          if ( len == kn_len && memcmp(tok, kn, len) == 0 ) { found = 1; break; }
+        }
       }
       if ( ! found ) {
         rb_raise(rb_eArgError, "unknown keyword: %"PRIsVALUE, rb_inspect(key));
@@ -1414,6 +1429,57 @@ rb_set_options (VALUE ropt, const char *spec_in, ...)
 }
 
 
+/* RubyVM::InstructionSequence#to_a, one caller at a time across Ractors.
+   The first to_a on an instruction sequence builds a decoded copy of its
+   code and publishes the buffer before filling it, so a second Ractor
+   that reads the same sequence at that moment decodes raw addresses and
+   crashes the process (Ruby 3.4 and 4.0; fixed for 4.1).  A block written
+   inside Ractor.new is one sequence shared by every Ractor started from
+   it.  The wait for the lock is made without the GVL, so a Ractor that
+   holds the lock and starts a GC is not left waiting on one that wants
+   it. */
+static rb_nativethread_lock_t ca_iseq_to_a_lock;
+
+static VALUE
+ca_iseq_to_a_call (VALUE iseq)
+{
+  return rb_funcall(iseq, rb_intern("to_a"), 0);
+}
+
+static VALUE
+rb_ca_s_instruction_sequence_to_a (VALUE self, VALUE iseq)
+{
+  VALUE result;
+  int   state = 0;
+  /* lock: Ruby runs under it, to serialise to_a; every waiter waits without the GVL */
+  ca_native_lock_without_gvl(&ca_iseq_to_a_lock);
+  /* protect: what is held is the lock, not an array or a buffer */
+  result = rb_protect(ca_iseq_to_a_call, iseq, &state);
+  rb_nativethread_lock_unlock(&ca_iseq_to_a_lock);
+  if ( state ) {
+    rb_jump_tag(state);
+  }
+  return result;
+}
+
+/* A short pause between tries for a lock, made without the GVL. */
+static void *
+ca_native_lock_pause (void *arg)
+{
+  struct timespec t = { 0, 20000 };   /* 20 us */
+  nanosleep(&t, NULL);
+  return NULL;
+}
+
+void
+ca_native_lock_without_gvl (rb_nativethread_lock_t *lock)
+{
+  /* lock: the pause below runs while the lock is not held */
+  while ( rb_native_mutex_trylock(lock) != 0 ) {
+    rb_thread_call_without_gvl(ca_native_lock_pause, NULL, RUBY_UBF_IO, NULL);
+  }
+}
+
 /* Whether this runs in the main Ractor: Init does, and leaves a value in
    its Ractor-local storage that no other Ractor has. */
 static rb_ractor_local_key_t ca_main_ractor_key;
@@ -1432,11 +1498,15 @@ Init_carray_utils (void)
   rb_ractor_local_storage_value_set(ca_main_ractor_key, Qtrue);
   ca_id_names = st_init_numtable();
   rb_nativethread_lock_initialize(&ca_id_names_lock);
+  rb_nativethread_lock_initialize(&ca_iseq_to_a_lock);
   id_answering = rb_intern("__carray_answering_method__");
   id_begin    = rb_intern("begin");
   id_end      = rb_intern("end");
   id_excl_end = rb_intern("exclude_end?");
 
+  rb_define_private_method(rb_singleton_class(rb_cCArray),
+                           "instruction_sequence_to_a",
+                           rb_ca_s_instruction_sequence_to_a, 1);
   rb_define_singleton_method(rb_cCArray, "guess_type_and_bytes",
                              rb_ca_s_guess_type_and_bytes, -1);
 

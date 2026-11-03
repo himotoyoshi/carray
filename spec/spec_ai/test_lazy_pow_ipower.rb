@@ -4,8 +4,10 @@
 #
 # Pins:
 #   - `a.lazy ** Integer` on Float/Complex parent routes to OP_IPOWER
-#     (binary exponentiation via op_powi_<type>), not OP_POW
-#     (transcendental pow / cpow).
+#     (the int64 exponent kept as it is), not OP_POW.
+#   - a scalar Integer exponent gives the answer an int64 array exponent
+#     gives, eager, lazy and pow!: -2 .. 4 by products, the rest by
+#     pow / powf / cpow.
 #   - byte parity with eager `a ** Integer` across:
 #       * float32 / float64 / cmplx64 / cmplx128
 #       * positive / negative / 0 / 1 exponent
@@ -161,5 +163,46 @@ class TestLazyPowIpower < Test::Unit::TestCase
     assert_equal (f.lazy ** 3).copy.to_a, f.lazy.pow(3).copy.to_a
     c = CA_CMPLX128([1.1 + 2.3i])
     assert_equal c.pow(5).to_a, c.lazy.pow(5).copy.to_a
+  end
+
+  # --- a scalar exponent answers what an array exponent answers --------
+
+  def test_scalar_exponent_is_the_array_exponent
+    r = Random.new(7)
+    %i[float32 float64 cmplx64 cmplx128].each do |t|
+      a = CArray.new(t, [200])
+      a.elements.times do |i|
+        v = (r.rand - 0.5) * 6
+        a[i] = t.to_s.start_with?("c") ? Complex(v, r.rand - 0.5) : v
+      end
+      a[3] = 0
+      a[5] = UNDEF
+      [-2, -1, 0, 1, 2, 3, 4, 5, 7, 13, 31, -3, -31, 1000, 2**53 + 1].each do |k|
+        want = (a ** CA_INT64([k] * 200)).to_a.map(&:inspect)
+        b = a.copy
+        b.pow!(k)
+        [a ** k, (a.lazy ** k).copy, b].each do |got|
+          assert_equal a.data_type, got.data_type, "#{t} ** #{k}"
+          assert_equal want, got.to_a.map(&:inspect), "#{t} ** #{k}"
+        end
+      end
+    end
+  end
+
+  # Up to the fourth power and down to -2, at most two roundings.
+  def test_small_exponents_are_products
+    a = CA_DOUBLE([1.1, -2.7, 3.3e-5, 0.0, -0.0])
+    sq = a * a
+    assert_equal sq.to_a.map(&:inspect), (a ** 2).to_a.map(&:inspect)
+    assert_equal (sq * a).to_a.map(&:inspect), (a ** 3).to_a.map(&:inspect)
+    assert_equal (sq * sq).to_a.map(&:inspect), (a ** 4).to_a.map(&:inspect)
+    assert_equal (1.0 / sq).to_a.map(&:inspect), (a ** -2).to_a.map(&:inspect)
+    assert_equal (sq * sq).to_a.map(&:inspect), (a ** CA_DOUBLE([4.0] * 5)).to_a.map(&:inspect)
+  end
+
+  def test_scalar_exponent_matches_ruby_pow
+    assert_equal 1.0000001 ** 1000, (CA_DOUBLE([1.0000001]) ** 1000)[0]
+    assert_equal 1.0000001 ** 1000, (CA_DOUBLE([1.0000001]).lazy ** 1000).copy[0]
+    assert_equal 1.0, (CA_DOUBLE([-1.0]) ** (2**53 + 1))[0]
   end
 end

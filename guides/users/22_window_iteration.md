@@ -1,8 +1,8 @@
 # Window iteration
 
-The slab iterator in [Slab iteration](11_slab_iteration.md) folds each *non-overlapping* fiber of an array. The **window iterator** folds an *overlapping* window centred on every cell. Give each cell a small neighbourhood, fold that neighbourhood to one value, and you get a **rolling** result — a moving average, a running standard deviation, a bounded convolution — shaped like the original array.
+The slab iterator in [Slab iteration](11_slab_iteration.md) folds each *non-overlapping* slab of an array. The **window iterator** folds an *overlapping* window centred on every cell. Each cell gets a small neighbourhood, the neighbourhood folds to one value, and the output is a **rolling** result — a moving average, a running standard deviation, a bounded convolution — shaped like the original array.
 
-You build one with `windows`:
+The `windows` method builds one:
 
 ```ruby
 a = CArray.float64(8).seq(1)     #  => [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0 ]
@@ -23,7 +23,7 @@ Do not confuse it with the singular `window`, which is a plain view: `a.window(-
 a.windows(*ranges, bounds: :skip, fill_value: nil)
 ```
 
-You give **one offset range per axis**. Each range `lo..hi` describes the window around an anchor cell `i`: the window spans `a[i+lo .. i+hi]`. So the window width on that axis is `hi - lo + 1`, and where `lo`/`hi` sit relative to zero decides whether the anchor is centred, leading, or trailing.
+The arguments are **one offset range per axis**. Each range `lo..hi` describes the window around an anchor cell `i`: the window spans `a[i+lo .. i+hi]`. So the window width on that axis is `hi - lo + 1`, and where `lo`/`hi` sit relative to zero decides whether the anchor is centred, leading, or trailing.
 
 | call | width | shape of window | anchor sits at |
 |---|---|---|---|
@@ -45,7 +45,7 @@ By default the output is shaped exactly like the source — one window, and so o
 
 ## The common reduction surface
 
-A window fold is applied to every cell's window. The named reductions are the same family you already know from [Reduction and statistics](04_reduction_and_statistics.md), now evaluated per window:
+A window fold is applied to every cell's window. The named reductions are the ones in [Reduction and statistics](04_reduction_and_statistics.md), now evaluated for each window:
 
 | family | methods |
 |---|---|
@@ -58,7 +58,7 @@ A window fold is applied to every cell's window. The named reductions are the sa
 | order statistics | `median` · `percentile(*p)` · `quantile` (see [below](#order-statistics)) |
 | first / distinct | `first` · `last` (first / last present value, row-major within the window) · `nunique` (distinct present values) |
 | counting | `count` · `count_not_masked` · `count_masked` · `count(v)` · `elements` |
-| generic | `each` · `reduce` (escape hatch) |
+| generic | `each` · `reduce` (custom statistics) |
 
 Each named reduction returns a source-shaped array (or a shrunk one under `:truncate`). They all accept `min_count:` and `fill_value:`, described in [Boundary strictness](#boundary-strictness-min_count--fill_value).
 
@@ -146,7 +146,7 @@ a.windows(-1..1).mean(min_count: 3, fill_value: 0.0)  # ... and fill the edges
 * **`min_count: k`** — a window with fewer than `k` present cells yields `UNDEF`. Setting `min_count:` to the window size means "full windows only" — the shape is kept but the edges are undefined.
 * **`fill_value: v`** on a reduction call — replace an `UNDEF` *result* with `v`.
 
-Note the two distinct roles of a fill value. At **construction** (`windows(..., fill_value: v)`) it sets the *margin*. On a **reduction call** (`mean(fill_value: v)`) it replaces an *undefined result*. They are independent knobs.
+Note the two distinct roles of a fill value. At **construction** (`windows(..., fill_value: v)`) it sets the *margin*. On a **reduction call** (`mean(fill_value: v)`) it replaces an *undefined result*. The two settings are independent.
 
 ## Weighted windows and bounded convolution
 
@@ -232,7 +232,7 @@ There is **no `map`** and **no `sort_addr`** on a window iterator. Overlapping w
 
 ## Generic iteration — `each` and `reduce`
 
-For a statistic not in the named surface, `each` and `reduce` hand you each window directly. They are the slow, general path — a per-window materialise — so prefer a named reduction or `correlate` when one fits.
+For a statistic not in the named surface, `each` and `reduce` pass each window to the block. They are the slow, general path, because each window is materialised, so prefer a named reduction or `correlate` when one fits.
 
 `each` yields each anchor's window as a CArray (an Enumerator without a block):
 
@@ -243,7 +243,7 @@ a.windows(-1..1, bounds: :truncate).each.map { |w| w.to_a }
 #  => [ [1.0, 2.0, 3.0], [2.0, 3.0, 4.0], [3.0, 4.0, 5.0], [4.0, 5.0, 6.0] ]
 ```
 
-`reduce` folds each window to one value, producing a source-shaped result — the escape hatch for a custom rolling statistic:
+`reduce` folds each window to one value, producing a source-shaped result. This allows a custom rolling statistic:
 
 ```ruby
 a.windows(-1..1, bounds: :truncate).reduce { |w| w.max - w.min }   # rolling range
@@ -270,7 +270,7 @@ series.windows(-2..2, bounds: :nearest).mean    # width-5, edges extended
 series.windows(-2..2, bounds: :truncate).mean   # width-5, valid interior only
 ```
 
-Reach for `:skip` when the *renormalised* edge (dividing by the cells that exist) is what you mean; reach for `:nearest` / `:truncate` / `fill_value:` when you want an unmasked fast path and can accept edge extension, a shrunk output, or a constant margin.
+Use `:skip` when the edge should be *renormalised* (divided by the cells that exist). Use `:nearest` / `:truncate` / `fill_value:` for an unmasked fast path, when edge extension, a shrunk output, or a constant margin is acceptable.
 
 ### A smoothing (box-blur) kernel
 
@@ -294,7 +294,7 @@ signal.windows(-2..2, fill_value: 0.0).convolve(fir)
 ## See also
 
 * [Iterator family](21_iterator_family.md) — the overview of `windows`, `each_slab`, and the categorical iterator.
-* [Slab iteration](11_slab_iteration.md) — the non-overlapping, per-axis sibling.
+* [Slab iteration](11_slab_iteration.md) — the non-overlapping sibling that works along an axis.
 * [Reduction and statistics](04_reduction_and_statistics.md) — the named reductions the window folds delegate to, and `min_count:` / `fill_value:`.
 * [Masks and missing values](05_masks.md) — `UNDEF`, and how a masked margin is folded.
 * Full reference: `CAWindowIterator.md` — design rationale, the boundary/`min_count` unification, and performance guidance.

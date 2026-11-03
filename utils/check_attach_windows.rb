@@ -20,7 +20,9 @@
 # the windows; the kernel iterator and sweep engines, which close their own
 # on the way out; and the operation-table slots of the views
 # (*_func_attach, *_func_sync, ...), whose attach is released by the
-# matching detach slot.
+# matching detach slot.  A slot that raises before publishing ca->ptr has no
+# detach slot called for it; utils/check_attach_then_alloc.rb checks that
+# an attach / allocate slot does not allocate after attaching its parent.
 #
 # The generated carray_kernels_*.c are not read; their templates in
 # ext/mkkernel.rb are, with the same note (a C comment in the template or a

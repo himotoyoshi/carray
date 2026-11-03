@@ -227,14 +227,14 @@ A record value is **already a typed Ruby object** (`Float`, `Integer`, `Complex`
 | the column's non-nil values are… | column built as |
 |---|---|
 | all `Integer` | `:int64` |
-| `Integer` and `Float` | `:float64` |
+| `Integer` and `Float` (an `Integer` past 2^53 keeps the column `:object`) | `:float64` |
 | `Integer`, `Float` and `Complex` | `:cmplx128` |
 | strings | a text column (`CAString`) |
 | `CATime::Element` / `CATimedelta::Element` | a `CATime` / `CATimedelta` column in the finest resolution among them |
 | `DateTime` / booleans / `Rational` / `BigDecimal` / mixed, or an Integer an `int64` cannot hold | `:object` (left as is) |
 | numeric **arrays** of one shape | an N-D column (see [Making N-D columns](#making-n-d-columns-from-records)) |
 
-- The column set is the **union of keys** in first-appearance order; keys are stringified (String- or Symbol-keyed records both work).
+- The column set is the **union of keys** in first-appearance order; keys are stringified (String- or Symbol-keyed records both work). Records with no key at all give no column, and so no row: the row count is held by the columns, as in `CAFrame.new`.
 - A **missing key, `nil` or `UNDEF`** becomes `UNDEF`. An integer column with a hole stays `:int64` with an `UNDEF` cell — **no promotion to float**: the mask carries the missingness, so there is no need to force the column to float to hold a NaN.
 - `types:` casts named columns afterward (the same map / array-key forms as [`cast`](#changing-a-columns-type)), overriding the detected type:
 
@@ -338,7 +338,7 @@ time     CATime       3       0       3  2024-01-01  2024-01-03  2024-01-02  1D
 
 ### One reduction of every column — `df.mean`, `df.max`, ...
 
-The reductions of a [grouped frame](#the-same-reduction-for-every-column) also work on the frame itself, with every row in one group: the result is a frame of **one row**, with no index. Given names, it holds those columns; without, every column whose type has the reduction. An object column with no present value (one of a frame with no rows, or all `UNDEF`) does not show what it holds and is left out, except by `count`; name it to reduce it. A column keeps its type where the reduction keeps it, so the earliest time of a time column is a time.
+The reductions of a [grouped frame](#the-same-reduction-for-every-column) also work on the frame itself, with every row in one group: the result is a frame of **one row**, with no index. Given names, it holds those columns; without, every column whose type has the reduction. An object column with no present value (one of a frame with no rows, or all `UNDEF`) does not show what it holds and is left out, except by `count`, and so is one whose cells do not answer the reduction (a text cell among numbers for `sum`); name it to reduce it, and the error comes through. A cell answers by raising `TypeError`, `ArgumentError`, `NoMethodError` or `RangeError`, so an object of your own whose `+` raises one of these through a bug of its own is left out too: name the column to see it. A column keeps its type where the reduction keeps it, so the earliest time of a time column is a time.
 
 ```ruby
 df.mean                                  # => one row, the mean of every numeric column
@@ -507,7 +507,7 @@ df.tail(3)     # last 3 rows
 
 A **numeric** index is looked up with a number: `at(2.5)`, `at(2)`. A String or `true` / `false` raises, so a label read from text is converted first — `at(Float(s))`.
 
-In an **object** index, `at` compares labels with Ruby's `==`, so `at(1.0)` finds a label `1`. `join`, `align` and `group_by` compare object keys with `eql?`, as a Ruby `Hash` does, so there `1` and `1.0` are different keys. When numbers are kept in an object column, cast it to a numeric type (`df.cast("k", :float64)`) and both agree.
+In an **object** index, `at` compares labels with Ruby's `==`, so `at(1.0)` finds a label `1`. `join`, `align` and `group_by` compare object keys with `eql?`, as a Ruby `Hash` does, so there `1` and `1.0` are different keys. When numbers are kept in an object column, cast it to a numeric type (`df.cast("k", :float64)`) and both agree. In a numeric index, the label is read in the index's type: `at(0.1)` on a `float32` index finds the `float32` cell nearest 0.1, as writing `0.1` into that column would store it.
 
 ```ruby
 byname = df.set_index("station")
@@ -770,7 +770,7 @@ df.transform(/^t/) { |col, name| ... }               # the name is the second ar
 ```
 
 - The block returns a CArray or an Array of one value per row; an Array is typed by its values, and the empty Array of a frame with no rows keeps the type of the column it was given. A single value — a reduction's — is refused: one number is not a column. To give every row its column's summary, use a reduction with `keep_rows: true` (`df.mean("temp", keep_rows: true)`).
-- What the block returns becomes the column as it is, so a view stays a view and a write to a cell reaches what it was made from; `copy` cuts that.
+- What the block returns becomes the column as it is, so a view stays a view and a write to a cell reaches what it was made from; `copy` cuts that. A lazy expression is evaluated.
 - The blocks run before the frame is built, so a refusal leaves nothing half-made.
 
 ### Changing a column's type
@@ -830,7 +830,7 @@ df = df.cast(df.infer_types)                      # the same as cast(:infer)
 df = df.cast(df.infer_types.merge("code" => :int32))   # with one type of your own
 ```
 
-- Only text columns are looked at (object columns, `CAString`, `CAConstString`); a column that already has a type is not listed.
+- Only text columns are looked at (object columns, `CAString`, `CAConstString`); a column that already has a type is not listed. An object column's cells are read as their text, so Ruby numbers there (`[1, 2]`, or `1` beside `"2"`) are typed as the text would be.
 - A column is listed only when **every present cell reads as one type**, tried in this order:
   1. a number: `:int64` when every value is an integer that fits in int64, `:float64` when every value is a number;
   2. `:boolean` when every value is `true` or `false` (in any case);
@@ -1253,7 +1253,7 @@ The block runs once per group in Ruby, so with many groups `table` is far slower
 
 The values the block returns — and those a Proc reduction of `aggregate` returns — become columns typed as [`from_records`](#caframefrom_records) types a record's values: Integers an `int64` column, numbers a `float64` one, Strings a text column (`CAString`), time elements a `CATime` / `CATimedelta` column, arrays of one shape an N-D column, anything else (`true` / `false`, Ruby `Time`) an `object` column. `nil` and `UNDEF` are missing. Arrays become an N-D column only when every group gives one of the same shape, so a list whose length varies from group to group is an `object` column.
 
-The columns are the names any group's Hash has, in the order they first appear. A group whose Hash lacks a name is `UNDEF` in that column, as `from_records` reads a record that lacks a key.
+The columns are the names any group's Hash has, in the order they first appear. A group whose Hash lacks a name is `UNDEF` in that column, as `from_records` reads a record that lacks a key. With no group, or with every value `UNDEF`, there is no value to type a column by, and it is an object column; a Symbol reduction (`:mean`) keeps the column's type, since the type answers for it.
 
 ### Going through the groups — `each`, `size`
 
@@ -1527,7 +1527,7 @@ obs.join(stations, on: "station", how: :anti)   # observations of an unlisted on
 
 Each row appears at most once, in this frame's order, however many rows of the other frame share its key. No column of the other frame is added, so no name collides, and passing `suffixes:` raises `ArgumentError`. A row with a masked key matches nothing, so `:semi` leaves it out and `:anti` keeps it. Keys are compared as the other modes compare them, including several key columns. The result is a sub-frame of this frame, as `filter` returns: its columns and index are views of the selected rows.
 
-**How keys are compared.** The two key columns need not have the same type; values are matched as values:
+**How keys are compared.** The two key columns need not have the same type; values are matched as values. An integer key beside a float key is read as the float, so a key with an integer past 2^53 for `float64` (2^24 for `float32`), where the float stops holding every integer, is refused (also one the float happens to hold, such as 2^60, so whether a key is refused depends on its size alone) rather than matched with the float next to it; `concatenate`, `stack` and `stack_columns` refuse the same way:
 
 - numbers of different types: an `int64` key `2` matches a `float64` key `2.0`, and a negative signed value never matches a large unsigned one;
 - time keys in different units: a day key matches an hour key at midnight of that day, from either side. The result's key column is the left key for `:left` and `:inner`, the right key for `:right`, and in the finer of the two units for `:outer`, which holds the keys of both;
@@ -1576,7 +1576,7 @@ obs.join_asof(radar, on: "time", by: "station", tolerance: "10 minutes")
 - **`tolerance:` is the same kind of quantity as the key.** For a numeric key it is a number (`tolerance: 0.5`). For a time key it is a duration: a String in the spellings `CArray.time(unit:)` takes (`"10 minutes"`), or a `CATimedelta` value (`CATimedelta::Element.new(600, :s)`). A bare number is refused for a time key, since its length would depend on the unit the column is stored in; a duration means the same length whatever that unit is.
 - Neither frame needs to be sorted by the key; the result keeps the left frame's row order.
 - Each left row gets **one** row of the other frame. When several rows there share a key, `:floor` takes the **last** of them (the latest entry for that time) and `:ceil` the **first**; `:round` takes the first on an exact match, and otherwise does what `:floor` or `:ceil` does on its nearer side. Remove the duplicates first when the choice matters.
-- A masked or NaN key in either frame matches nothing. Keys of different types or units are compared as `join` compares them.
+- A masked or NaN key in either frame matches nothing. Keys of different types or units are compared as `join` compares them, except that an object key is placed by `<=>`, so `2` sits at `2.0` here where `join` tells them apart.
 - `on:` names the key in each frame: a column, or the index by the row axis name, as `join` reads it.
 - Like a `:left` `join`, the result shares this frame's columns and index; the other frame's columns are gathered into new arrays.
 
@@ -2017,6 +2017,7 @@ A name that is not a column, a Range that runs backwards, or a column named twic
 - `shape:` arranges the columns in row-major order — the last axis runs fastest — and must hold exactly as many: 36 columns of maximum, minimum, mean for each month are `shape: [12, 3]`. Without it the columns make one axis.
 - The new column is a **view** of the old ones: writing to it — masking a missing-value code with `df["temp"][:eq, 999999] = UNDEF`, say — writes the columns it was made from.
 - Columns of different data types are read at a common type. Stacked columns that are themselves N-D keep their axes after the new ones.
+- The new column has no attributes of its own, and `unstack_column` does not give the stacked columns theirs back.
 
 **`unstack_column`:**
 

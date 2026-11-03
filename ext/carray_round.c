@@ -196,6 +196,21 @@ ca_round_entity (CArray *ca, long ndigits)
   }
 }
 
+typedef struct {
+  CArray *ca;
+  long    ndigits;
+} ca_round_call_t;
+
+/* The cells of an object array are asked in turn, and a cell that is an
+   array asks its own (ca_computing_run). */
+static VALUE
+ca_round_cells (VALUE arg)
+{
+  ca_round_call_t *c = (ca_round_call_t *) arg;
+  ca_round_entity(c->ca, c->ndigits);
+  return Qnil;
+}
+
 /* The array to round: a boolean is rounded as its 0/1 int64 values, as
    round without digits does. */
 static VALUE
@@ -228,7 +243,15 @@ ca_round_copy (VALUE src, long ndigits)
   if ( ndigits > 0 && ca_is_integer_type(co) ) {
     return out;
   }
-  ca_round_entity(co, ndigits);
+  if ( ca_is_object_type(co) ) {
+    ca_round_call_t c;
+    c.ca      = co;
+    c.ndigits = ndigits;
+    ca_computing_run(1, &co, ca_round_cells, (VALUE) &c);
+  }
+  else {
+    ca_round_entity(co, ndigits);
+  }
   return out;
 }
 

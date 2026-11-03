@@ -290,6 +290,90 @@ ca_bitfield_setup (CABitfield *ca, CArray *parent,
   return 0;
 }
 
+/* The bit field view whose cells `ca` is, of the same data type: ca itself,
+   or the bit field at the end of a chain of single-parent views that keep
+   the type (a slice, a grid, a mask selection of the field).  A view of
+   several parents (a stack or a meld) has one when every parent has a field
+   of the same width and sign beneath it, so that a value is kept the same
+   way whichever parent its cell lands in.  NULL when there is none. */
+CArray *
+ca_bitfield_beneath (CArray *ca)
+{
+  while ( ca && ! ca_is_entity(ca) ) {
+    CArray *parent;
+    if ( ca->obj_type == CA_OBJ_BITFIELD ) {
+      return ca;
+    }
+    if ( ca_test_flag(ca, CA_FLAG_MULTI_PARENTS) ) {
+      CAMultiParent *mp = (CAMultiParent *) ca;
+      CABitfield *first = NULL;
+      int32_t k;
+      for (k=0; k<mp->n_parents; k++) {
+        CArray *p = mp->parents[k];
+        CABitfield *f;
+        if ( ! p || p->data_type != ca->data_type ) {
+          return NULL;
+        }
+        f = (CABitfield *) ca_bitfield_beneath(p);
+        if ( ! f || ( first && ( f->bit_length != first->bit_length ||
+                                 f->sign_extend != first->sign_extend ) ) ) {
+          return NULL;
+        }
+        if ( ! first ) {
+          first = f;
+        }
+      }
+      return (CArray *) first;
+    }
+    parent = ((CAView *) ca)->parent;
+    if ( ! parent || parent->data_type != ca->data_type ) {
+      return NULL;
+    }
+    ca = parent;
+  }
+  return NULL;
+}
+
+/* A value stored into a field keeps its low `bits` bits, as the bits of a
+   wider integer written into the field would. */
+VALUE
+ca_integer_wrap_bits (VALUE v, int bits, int sign_extend)
+{
+  VALUE integer, modulus;
+  if ( RB_TYPE_P(v, T_STRING) ) {
+    int64_t x;
+    ca_decimal_string_store(v, CA_INT64, &x);
+    integer = LL2NUM(x);
+  }
+  else {
+    integer = RB_INTEGER_TYPE_P(v) ? v : rb_Integer(v);
+  }
+  if ( FIXNUM_P(integer) && bits < 62 ) {
+    long x = FIX2LONG(integer);
+    long m = 1L << bits;
+    x &= m - 1;
+    if ( sign_extend && x >= ( m >> 1 ) ) {
+      x -= m;
+    }
+    return LONG2FIX(x);
+  }
+  modulus = rb_funcall(INT2FIX(1), rb_intern("<<"), 1, INT2FIX(bits));
+  integer = rb_funcall(integer, '%', 1, modulus);
+  if ( sign_extend &&
+       RTEST(rb_funcall(rb_funcall(integer, '*', 1, INT2FIX(2)),
+                        rb_intern(">="), 1, modulus)) ) {
+    integer = rb_funcall(integer, '-', 1, modulus);
+  }
+  return integer;
+}
+
+VALUE
+ca_bitfield_wrap_integer (CArray *ca, VALUE v)
+{
+  CABitfield *cb = (CABitfield *) ca;
+  return ca_integer_wrap_bits(v, (int) cb->bit_length, cb->sign_extend);
+}
+
 CABitfield *
 ca_bitfield_new (CArray *parent, ca_size_t offset, ca_size_t bitlen,
                  int8_t data_type)
@@ -462,16 +546,14 @@ static void
 ca_bitfield_func_allocate (void *ap)
 {
   CABitfield *ca = (CABitfield *) ap;
-  ca_attach(ca->parent);
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
 }
 
 static void
 ca_bitfield_func_attach (void *ap)
 {
   CABitfield *ca = (CABitfield *) ap;
-  ca_attach(ca->parent);
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
   ca_bitfield_attach(ca);
 }
 

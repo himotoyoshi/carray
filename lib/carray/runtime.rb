@@ -172,5 +172,15 @@ class CArray
   end
   private_class_method :define_named_methods
 
+  # CArray.promote_list, its refusal named after the verb that gave it the
+  # list (stack, meld, concatenate, ...), not after promote_list.
+  def self.promote_list_for (verb, list, data_type: nil)
+    CArray.promote_list(list, data_type: data_type)
+  rescue ArgumentError, CArray::DataTypeError => e
+    raise unless e.message.start_with?("promote_list: ")
+    raise e.class, "#{verb}: #{e.message.delete_prefix("promote_list: ")}"
+  end
+  private_class_method :promote_list_for
+
 end
 

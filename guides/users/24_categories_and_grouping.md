@@ -1,10 +1,10 @@
 # Categories and grouping
 
-A recurring shape of question is "compute a statistic *per category*." The mean temperature per season. The count of samples per wind-speed bucket. The maximum value per region on a map. In each case the data carries a **label** — a season, a bucket, a region — and you want one answer for every distinct label.
+A recurring shape of question is "compute a statistic *per category*." The mean temperature per season. The count of samples per wind-speed bucket. The maximum value per region on a map. In each case the data carries a **label** — a season, a bucket, a region — and the goal is one answer for every distinct label.
 
-CArray answers this in two steps. First you build a **categorical**: the object that says which category each cell belongs to. Then you **group** by it, and reduce each group. There are two grouping surfaces, depending on the shape of your problem:
+CArray answers this in two steps. The first step builds a **categorical**: the object that says which category each cell belongs to. The second step **groups** by it and reduces each group. There are two grouping surfaces, depending on the shape of the problem:
 
-| you have | you reach for |
+| data | method |
 |---|---|
 | a flat array of values + a parallel array of labels | `value.group_by_category(cat)` |
 | a grid, grouped along one or more *axes* by their coordinates | `value[cat, nil, …]` with `axis: :group` |
@@ -17,12 +17,12 @@ Everything here works after `require "carray"` — the categorical and grouping 
 
 ## The categorical
 
-A **categorical** is a labelled column: a dense array of integer **codes** plus a small **label** vocabulary. Each cell stores a code — an index `0 … k-1` into the labels — and reading the cell decodes the code back to its label. It is the CArray data type for "this cell is one of a fixed, small set of categories." (If you know a pandas `Categorical` or an Arrow dictionary, it is the same idea.)
+A **categorical** is a labelled column: a dense array of integer **codes** plus a small **label** vocabulary. Each cell stores a code — an index `0 … k-1` into the labels — and reading the cell decodes the code back to its label. It is the CArray data type for "this cell is one of a fixed, small set of categories." (A pandas `Categorical` and an Arrow dictionary are the same idea.)
 
 The class is `CACategorical`. Two facts drive everything about it:
 
-* The **codes are the storage.** A categorical is a read-only view (a Face) over an integer codes array, so slicing, reshaping, transposing, or gathering a categorical gives you another categorical — the codes ride the view chain, the label vocabulary tags along.
-* The surface is **non-numeric.** Arithmetic on a categorical raises — adding `1` to a category is a category error. When you genuinely want the raw integers, ask for `.codes`.
+* The **codes are the storage.** A categorical is a read-only view (a Face) over an integer codes array, so slicing, reshaping, transposing, or gathering a categorical gives another categorical: the codes follow the view chain, and the labels stay attached.
+* The surface is **non-numeric.** Arithmetic on a categorical raises — adding `1` to a category is a category error. The raw integers are available from `.codes`.
 
 ### Building one from data — `categorize`
 
@@ -61,9 +61,9 @@ cat[1]            #  => UNDEF                        jul excluded
 cat.has_mask?     #  => true
 ```
 
-`sort_labels:` is a discovery-only knob: when you pass an explicit `labels:` you have already chosen the order, so `sort_labels:` is ignored. Duplicate labels raise — the code-to-label mapping must be one-to-one.
+`sort_labels:` is a discovery-only option: an explicit `labels:` already gives the order, so `sort_labels:` is ignored. Duplicate labels raise — the code-to-label mapping must be one-to-one.
 
-### Wrapping codes you already have — `from_codes`
+### Wrapping existing codes — `from_codes`
 
 When the data already arrives as dense integer codes — a database join key, an ML feature column, an Arrow dictionary exported from Python, the output of a binning primitive — use `CACategorical.from_codes(codes, labels)` and skip discovery. The `codes` array becomes the storage parent verbatim.
 
@@ -73,7 +73,7 @@ cat   = CACategorical.from_codes(codes, %w[tokyo osaka kyoto])
 cat.to_a          #  => ["tokyo", "osaka", "tokyo", "kyoto", "osaka", "tokyo"]
 ```
 
-Excluded cells are identified by the **all-ones sentinel** — type-max for an unsigned code type, `-1` for a signed one — and masked automatically. Both conventions are recognised, so codes imported from either world just work:
+Excluded cells are identified by the **all-ones sentinel** — type-max for an unsigned code type, `-1` for a signed one — and masked automatically. Both conventions are recognised, so codes imported from either convention are accepted:
 
 ```ruby
 # signed -1 = missing
@@ -84,7 +84,7 @@ CACategorical.from_codes(codes, %w[a b]).to_a
 
 ### Binning continuous data
 
-For continuous values (temperature, precipitation, altitude, …) the categories are usually intervals rather than discrete keys. The canonical form is **snap to a grid, then `categorize`** — the labels are the actual snapped values, so you never have to author edges and labels separately.
+For continuous values (temperature, precipitation, altitude, …) the categories are usually intervals rather than discrete keys. The canonical form is **snap to a grid, then `categorize`** — the labels are the actual snapped values, so edges and labels never need to be written separately.
 
 Two value-returning primitives cover the two grid shapes:
 
@@ -103,7 +103,7 @@ cat.category_sizes.to_a.first(5) #  => counts per snapped bin (aligned to labels
 
 Pass `offset:` to shift the grid phase — `snap(0.5, offset: 0.25)` snaps to `..., 0.25, 0.75, 1.25, ...` (bin centres rather than edges).
 
-If you want a **pinned** grid — one that always shows every bin regardless of which values happened to appear in this particular sample — pass the grid as `labels:` to `categorize`:
+For a **pinned** grid — one that always shows every bin regardless of which values happened to appear in this particular sample — pass the grid as `labels:` to `categorize`:
 
 ```ruby
 grid = Array.new(61) { |i| 270.0 + i * 0.5 }              # 270.0, 270.5, ..., 300.0
@@ -136,7 +136,7 @@ cat.category_sizes.to_a
 #  => [2, 1, 1, 2, 0]                         (counts per class, aligned to labels)
 ```
 
-The sibling `bin(vmin, vmax, bins:)` (uniform equal-width) returns bin indices directly, without the round-trip through snapped values. Reach for the index-returning primitives when you only need integer codes downstream — for a histogram, a weighted aggregation, or a composite grid code (§below). Wrapping a bare bin index in a categorical whose labels are `0..k-1` does not add information.
+The sibling `bin(vmin, vmax, bins:)` (uniform equal-width) returns bin indices directly, without the round-trip through snapped values. Use the index-returning primitives when only integer codes are needed — for a histogram, a weighted aggregation, or a composite grid code (§below). Wrapping a bare bin index in a categorical whose labels are `0..k-1` does not add information.
 
 #### Equal-frequency (quantile) bins
 
@@ -190,7 +190,7 @@ cat.codes.value.refer(CA_INT8).to_a
 
 ### Label-space operations
 
-Because the *value* of a categorical cell is its category, the built-in comparison and counting methods work in **label space** — you name a label, not a code:
+Because the *value* of a categorical cell is its category, the built-in comparison and counting methods work in **label space**: the argument is a label, not a code:
 
 ```ruby
 cat = CArray.object(6) { |i| %w[a b a c b a][i] }.categorize
@@ -198,7 +198,7 @@ cat = CArray.object(6) { |i| %w[a b a c b a][i] }.categorize
 cat.eq("a").to_a       #  => [true, false, true, false, false, true]     boolean mask, by label
 cat.count("a")         #  => 3
 cat.count("zzz")       #  => 0                        unknown label -> 0, not an error
-cat.category_sizes.to_a      #  => [3, 2, 1]                per-category counts, aligned to labels
+cat.category_sizes.to_a      #  => [3, 2, 1]                count of each category, aligned to labels
 ```
 
 `category_sizes` always returns a length-`k` array in label order, keeping a trailing `0` for a category that never occurs — so `labels.zip(category_sizes.to_a)` always pairs up:
@@ -219,12 +219,12 @@ cat = keys.categorize
 cat.eq("a").to_a          #  => [true, false, UNDEF, true]
 ```
 
-### Code-space operations — the `.codes` escape hatch
+### Code-space operations — `.codes`
 
 `cat.codes` is the raw storage parent, a plain integer `CArray`. Everything `CArray` offers works there — arithmetic, histograms, joins:
 
 ```ruby
-cat.codes + 1             # OK — you asked for the raw integers
+cat.codes + 1             # OK — the raw integers
 cat.codes.count(0)        # count of one category by its code
 cat.codes.eq(2)           # boolean mask by code
 ```
@@ -253,14 +253,14 @@ cat.shape         #  => [3, 4]
 cat.category_sizes.to_a #  => [4, 5, 3]                 dry / wet / storm
 ```
 
-Slices are themselves categoricals — the vocabulary rides along:
+Slices are themselves categoricals, and the labels stay attached:
 
 ```ruby
 cat[0, nil].class    #  => CACategorical
 cat[0, nil].to_a     #  => [:dry, :dry, :wet, :wet]
 ```
 
-And per-axis work drops naturally to the codes parent through the label-space comparisons (note the `axis:` keyword — positional axis arguments are not accepted):
+Work along an axis reaches the codes through the label-space comparisons (note the `axis:` keyword — positional axis arguments are not accepted):
 
 ```ruby
 # which stations were :dry at least twice?
@@ -293,7 +293,7 @@ cat.category_sizes.to_a #  => [1, 2, 2]
 
 Rules apply in order — a cell hit by two rules lands in the one written last — so put the more specific rule after the more general one, or make the predicates disjoint.
 
-**Normalize before you categorize.** The same key spelled two ways becomes two categories unless you canonicalize first. `convert` is the natural pre-processing step:
+**Normalize before `categorize`.** The same key spelled two ways becomes two categories unless it is canonicalized first. `convert` is the natural pre-processing step:
 
 ```ruby
 raw = ["Tokyo ", "tokyo", "OSAKA", "osaka", " Tokyo"]
@@ -321,7 +321,7 @@ cat.labels               #  => ["a", "b", "other"]
 cat.category_sizes.to_a  #  => [5, 3, 5]
 ```
 
-**Time-of-year grouping.** For a `CATime` array (see [Time arrays](26_time_arrays.md)), how you categorize the timestamp depends on whether the group is a **fixed cycle** (Jan…Dec, Mon…Sun, spring…winter) or a **data-driven period** (which year-months actually appear in this dataset).
+**Time-of-year grouping.** For a `CATime` array (see [Time arrays](26_time_arrays.md)), the way to categorize the timestamp depends on whether the group is a **fixed cycle** (Jan…Dec, Mon…Sun, spring…winter) or a **data-driven period** (which year-months actually appear in this dataset).
 
 Fixed cycle — climatology, one bucket per month regardless of year:
 
@@ -389,7 +389,7 @@ The full categorical reference is CACategorical.md.
 
 ## Categorical group-by — `group_by_category`
 
-The first grouping path is for a **flat** problem: an array of values, and a parallel array of labels, both read cell for cell. You want one statistic per category.
+The first grouping path is for a **flat** problem: an array of values, and a parallel array of labels, both read cell for cell. The goal is one statistic per category.
 
 `value.group_by_category(cat)` returns a **`CACategoricalIterator`**, whose reduction methods each return a length-`k` array — one value per category, aligned to `cat.labels`.
 
@@ -414,7 +414,7 @@ The guiding rule is simple:
 
 > **A category's statistic equals the CArray reduction over that category's members.** `grp.mean[i]` is `members.mean`, `grp.variance[i]` is `members.variance`, and so on.
 
-So everything you know about how a reduction treats an ordinary array — how it skips masked cells, what it returns on a short or empty array — carries over group by group.
+So a reduction treats each group as it treats an ordinary array: it skips masked cells in the same way and returns the same answer on a short or empty array.
 
 ### Excluded cells drop out
 
@@ -494,9 +494,9 @@ val.reshape(6)[grp.sort_addr] #  => [ 10, 20, 60, 30, 50, 40 ]   sorted within b
 
 A masked value sorts to the tail of its segment (as `CArray#sort` sends masked cells to the end). There is no group-*local* sort index — the grouped copy is already category-contiguous, so only the source-address form is offered, mirroring `min_addr` (kept) versus a within-group index (skipped).
 
-### Custom per-group work — `each` / `reduce` / `map`
+### Custom work on each group — `each` / `reduce` / `map`
 
-When the named reductions do not cover what you need, three methods hand you each group's members so you can compute it yourself — the same escape hatch as [`each_slab` / `reduce_slab` / `map_slab`](11_slab_iteration.md).
+When the named reductions are not enough, three methods pass the members of each group to a block, in the same way as [`each_slab` / `reduce_slab` / `map_slab`](11_slab_iteration.md).
 
 ```ruby
 cat = CA_OBJECT(%w[a a b b]).categorize
@@ -532,7 +532,7 @@ grp.sum      #  => [ 5.0, 5.0 ]     a = {(0,0), (1,1)}, b = {(0,1), (1,0)}
 
 ### Consecutive segments — `segments`
 
-A categorical group-by sorts the value so that each category becomes one contiguous run, then reduces each run. When the pieces are already contiguous in the value — the rows of a sparse matrix, the records of a ragged array — you can skip the sort and name the runs directly, by their boundaries or by their lengths:
+A categorical group-by sorts the value so that each category becomes one contiguous run, then reduces each run. When the pieces are already contiguous in the value — the rows of a sparse matrix, the records of a ragged array — the sort can be skipped and the runs named directly, by their boundaries or by their lengths:
 
 ```ruby
 v  = CA_DOUBLE([3, 1, 4, 1, 5, 9, 2, 6])
@@ -549,7 +549,7 @@ it.cumsum     #  => [ 3.0, 4.0, 8.0, 1.0, 6.0, 15.0, 17.0, 23.0 ]
 
 ## Axis-group — grouping a grid by its coordinates
 
-The second grouping path is for a **grid**. Here the categories run along an *axis*: a `[time, lat, lon]` field grouped by season along the time axis, a map grouped by region along its spatial axes, values grouped by which longitude band they sit in. You keep the other axes and fold each group.
+The second grouping path is for a **grid**. Here the categories run along an *axis*: a `[time, lat, lon]` field grouped by season along the time axis, a map grouped by region along its spatial axes, values grouped by which longitude band they sit in. The other axes stay, and each group folds to one value.
 
 This is a newer, 3.x-era surface. The support-class names (`AxisGroup`, `CAGroupIterator`, `GroupLabels`) are still provisional and may be renamed; the surface described here — build a categorical, position it, reduce with `:group`, read labels — is the stable part.
 
@@ -557,7 +557,7 @@ The full reference is AxisGroup.md and CAGroupIterator.md.
 
 ### Positioning the categorical
 
-You place the categorical against the array **one slot per axis**. The slot position *is* the source axis:
+The categorical is placed against the array with **one slot per axis**. The slot position *is* the source axis:
 
 | slot | meaning |
 |---|---|
@@ -576,7 +576,7 @@ temp[season, nil, nil].mean(axis: :group).shape   #  => [4, 2, 3]   season x lat
 
 The `season` slot is a group axis (the 12 months collapse to 4 seasons); the two `nil` slots are band axes, kept as-is. The result carries a seasonal mean for every `(lat, lon)`.
 
-**All axes must be given explicitly.** The slots must account for exactly `value.ndim` source axes — there is no trailing omission and no implicit `nil` fill. A spec that silently guesses the axes it wasn't told about is a spec you have to second-guess:
+**All axes must be given explicitly.** The slots must account for exactly `value.ndim` source axes — there is no trailing omission and no implicit `nil` fill. A spec does not guess the axes that it was not given:
 
 ```ruby
 temp.axis_group(season)        #  => raises IndexError: 1 of 3 axes
@@ -585,7 +585,7 @@ temp.axis_group(season, nil)   #  => raises IndexError: 2 of 3 axes
 
 ### The `axis: :group` keyword is required
 
-Indexing an array with a group spec does **not** return an array — it returns a `CAGroupIterator`, a reduction dispatcher holding the value and the spec. You reach a result by calling a reduction on it *with* `axis: :group`.
+Indexing an array with a group spec does **not** return an array — it returns a `CAGroupIterator`, a reduction dispatcher holding the value and the spec. A result comes from calling a reduction on it *with* `axis: :group`.
 
 That keyword is required by design. The very same indexer (`value[cat, nil]`) can also do ordinary selection, so grouping is **opt-in**: only `axis: :group` engages it. Without it, the value is reduced plainly, ignoring the grouping:
 
@@ -633,7 +633,7 @@ Masked input cells and out-of-vocabulary keys are simply left out of their group
 
 ### Position: `min_addr`, not `min_index`
 
-A group preserves source order, so a *within-group* index is weak. The group returns the **flat source address** of the winning cell instead, which you index back into the raveled source:
+A group preserves source order, so a *within-group* index is weak. The group returns the **flat source address** of the winning cell instead, which indexes back into the raveled source:
 
 ```ruby
 data  = CArray.float64(4, 6) { |s, m| 10 + s + m }
@@ -667,7 +667,7 @@ t[g].mean(axis: [:group, 0])      #  => raises IndexError: slot 0 is a group axi
 
 ### Order statistics
 
-`median`, `percentile(p)`, and `quantile` (the five-number summary `[min, Q1, median, Q3, max]`) work per group too. Unlike the tier-1 reductions they cannot be scattered — an order statistic needs every member of a group held together — so they materialize one band fiber at a time, keeping peak memory proportional to the group axis length, not the whole array:
+`median`, `percentile(p)`, and `quantile` (the five-number summary `[min, Q1, median, Q3, max]`) work per group too. Unlike the tier-1 reductions they cannot be scattered — an order statistic needs every member of a group held together — so they gather the cells along the group axis for one position at a time, keeping peak memory proportional to the group axis length, not the whole array:
 
 ```ruby
 temp = CArray.float64(6, 4) { |i, j| Math.sin(i) + j }   # [time, station]
@@ -693,11 +693,11 @@ temp[g].mean(axis: :group)    # season means of temp
 other[g].sum(axis: :group)    # season sums of a different field, same spec
 ```
 
-The inline `value[cat, nil, …]` form is exactly `value[value.axis_group(cat, nil, …)]` — build the spec once when you reuse it, index directly when you don't.
+The inline `value[cat, nil, …]` form is exactly `value[value.axis_group(cat, nil, …)]` . Build the spec once to reuse it; otherwise index directly.
 
 ### Composite and rank-N groupings
 
-Two extensions come for free, because internally every grouping reduces to one *composite* classification over the group axes — you do not learn a new API.
+Two extensions need no new API, because internally every grouping reduces to one *composite* classification over the group axes.
 
 **Several group axes** — group by more than one categorical at once; the result gets one axis per group slot:
 
@@ -747,7 +747,7 @@ lab[0, 0]       #  => ["jan", "E"]
 lab[2, 1]       #  => ["mar", "W"]
 ```
 
-The per-axis label vectors — the headings you would put on a table — are available directly:
+The label vector of each axis (the headings of a table) is available directly:
 
 ```ruby
 lab.axis(0)     #  => ["jan", "feb", "mar"]   the mon axis labels
@@ -755,9 +755,9 @@ lab.axis(1)     #  => ["E", "W"]              the lon axis labels
 lab.coords      #  => [["jan", "feb", "mar"], ["E", "W"]]   all headings
 ```
 
-`GroupLabels` builds block tuples on demand from these small per-axis vectors — it never materializes the full tuple table, so it stores one vector per output axis regardless of how many blocks there are.
+`GroupLabels` builds block tuples on demand from these small vectors, one for each axis — it never materializes the full tuple table, so it stores one vector per output axis regardless of how many blocks there are.
 
-### Custom per-group work
+### Custom work on each group
 
 `each`, `map`, and `reduce` are available here too, and — unlike the named reductions — they take **no** `axis: :group`, because they have no plain form. They always group, materializing one band block at a time:
 
@@ -810,11 +810,11 @@ Both consume a categorical, but they answer different shapes of question.
 | input | a flat value array + a parallel categorical | a grid + a categorical positioned on axes |
 | groups by | which category each cell has | which coordinate each axis position has |
 | result | length-`k`, one per category | one axis per group slot, band axes kept |
-| kept axes | none — the value is read flat | the band (`nil`) axes ride through |
+| kept axes | none — the value is read flat | the band (`nil`) axes are kept |
 | order statistics | yes (materializes once) | yes (materializes per band block) |
 | best for | a flat categorical; many statistics on one grouping | a grid grouped along axes; reuse one spec across fields |
 
-If you only want counts, note that the dedicated `histogram` surface is simpler than either — no categorical to build. Grouping earns its keep once the reduction goes beyond counting (`mean`, `variance`, weighted sums), you need order statistics, or one classifier drives several reductions.
+For counts only, the `histogram` methods are simpler than either, because no categorical is needed. Grouping is useful when the reduction goes beyond counting (`mean`, `variance`, weighted sums), when order statistics are needed, or when one classifier drives several reductions.
 
 Both engines are consistent with the rest of CArray: masks pass straight through, excluded cells drop out of their group, and empty groups follow the core [empty-reduction contract](04_reduction_and_statistics.md) — identity for `sum` / `count`, `UNDEF` for ratios and extrema.
 
@@ -843,7 +843,7 @@ Every reduction returns a length-`k` `CArray` aligned to `cat.labels` unless not
 | `median` | as `CArray#median` | = `percentile(50)` |
 | `percentile(p)` | as `CArray#percentile` | `p` in `0..100` |
 | `quantile` | `Array<CArray>` | five-number summary `[min, Q1, median, Q3, max]` |
-| `wsum(w)` / `wmean(w)` | float64 | weighted; `w` is a per-cell weight in source order |
+| `wsum(w)` / `wmean(w)` | float64 | weighted; `w` has one weight for each cell, in source order |
 | `all` / `any` | boolean | boolean value data type only |
 | `first` / `last` | as `CArray#first` / `#last` | first / last present member, in source order; none = `UNDEF` |
 | `nunique` | int64 | distinct present members; none = `0` |
@@ -854,8 +854,8 @@ Every reduction returns a length-`k` `CArray` aligned to `cat.labels` unless not
 | `min_addr` / `max_addr` | int64 | flat source address of the min / max |
 | `sort_addr` | int64 | length-`nvalid`, source addresses that sort each group, group-major |
 | `each { \|members\| … }` | self | yields each category's members; no block → `Enumerator` |
-| `reduce { \|members\| … }` | length-`k` | custom per-group reduction |
-| `reduce(init) { \|acc, x\| … }` | length-`k` | inject-style per-group fold |
+| `reduce { \|members\| … }` | length-`k` | custom reduction of each group |
+| `reduce(init) { \|acc, x\| … }` | length-`k` | inject-style fold of each group |
 | `map { \|members\| … }` | source-shaped `CArray` | group-wise transform; cells in no category → `UNDEF` |
 
 ## Reference: `CAGroupIterator` (`value[cat, …]`)
@@ -870,13 +870,13 @@ The named reductions take `axis: :group` to engage grouping; `each` / `map` / `r
 | `wsum(w)` `wmean(w)` | weighted; `w` is source-shaped |
 | `median` `percentile(p)` `quantile` | materialize one band block at a time |
 | `min_addr` `max_addr` | flat source address (no `min_index` / `max_index` here) |
-| `sort_addr` | per-group sorted flat source addresses, group-major |
+| `sort_addr` | flat source addresses sorted within each group, group-major |
 | `axis: :group` | required, engages grouping |
 | `axis: [:group, n]` | also folds band slot `n` into the statistic (not for order statistics) |
-| `each` / `map` / `reduce` | custom per-group work; always group, no `axis:` |
+| `each` / `map` / `reduce` | custom work on each group; always group, no `axis:` |
 | `g.labels` | `GroupLabels` — coordinate labels in the result's index space |
 | `g.labels(i, j, …)` | the label tuple for one output block |
-| `g.labels.axis(k)` / `.coords` | per-axis label vectors (table headings) |
+| `g.labels.axis(k)` / `.coords` | label vector of each axis (table headings) |
 
 ## See also
 
@@ -884,7 +884,7 @@ The named reductions take `axis: :group` to engage grouping; `each` / `map` / `r
 * CACategoricalIterator.md — the categorical group-by reference.
 * AxisGroup.md and CAGroupIterator.md — the axis-group reference.
 * [The iterator family](21_iterator_family.md) — the shared reduction surface both group iterators belong to.
-* [Per-slab iteration](11_slab_iteration.md) — the `each` / `map` / `reduce` escape hatch, per axis.
-* [Reduction and statistics](04_reduction_and_statistics.md) — the per-array reductions each group delegates to, and the empty-reduction contract.
+* [Slab iteration](11_slab_iteration.md) — `each` / `map` / `reduce` along an axis.
+* [Reduction and statistics](04_reduction_and_statistics.md) — the array reductions that each group calls, and the empty-reduction contract.
 * [Masks and missing values](05_masks.md) — the mask contract the reductions follow.
 * [Indexing and slicing](02_indexing_and_slicing.md) — how `value[cat, nil, …]` fits the general indexer.

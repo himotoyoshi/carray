@@ -1,6 +1,6 @@
 # Discovery — distinct values, counts, modes, membership
 
-Once you have an array of raw values, a common next step is to *ask about the distribution of values themselves*: which values appear, how many times each, what the most common one is, whether a set of query values is present at all. This chapter covers the family of value-hash discovery methods that answer those questions.
+With an array of raw values, a common next step is to *ask about the distribution of values themselves*: which values appear, how many times each, what the most common one is, whether a set of query values is present at all. This chapter covers the family of value-hash discovery methods that answer those questions.
 
 They share a common substrate. Every one of them treats two values as the same when they compare `==` — so `1` and `1.0` are the same, and (because `NaN != NaN`) every NaN is folded into a single canonical bucket by these methods (unlike `mask_duplicates`, which uses strict `==` and keeps each NaN distinct). Masked (`UNDEF`) cells are excluded from the value set; they neither appear as a distinct value nor count toward frequencies.
 
@@ -30,7 +30,7 @@ a = CA_INT([1, 2, 2, 3, 1])
 a.unique          #  => [ 1, 2, 3 ]   (an int32 CArray, not a Ruby Array)
 ```
 
-The result is always 1-D, regardless of the input shape: an N-D array is flattened first, because "which distinct values are present" has no per-axis version that fits into a rectangle (the number of distinct values differs from fiber to fiber).
+The result is always 1-D, regardless of the input shape: an N-D array is flattened first, because "which distinct values are present" has no version along an axis that fits into a rectangle (the number of distinct values differs from row to row).
 
 Masked cells are excluded, and NaN cells collapse into a single NaN:
 
@@ -69,7 +69,7 @@ a.value_counts(sort: :count).map(&:to_a)   #  => [[3, 1, 2], [3, 2, 2]]
 a.value_counts(sort: :value).map(&:to_a)   #  => [[1, 2, 3], [2, 2, 3]]
 ```
 
-Because it returns a pair of CArrays, you can feed the counts straight into further arithmetic:
+Because it returns a pair of CArrays, the counts can go straight into further arithmetic:
 
 ```ruby
 vals, cnts = a.value_counts
@@ -81,7 +81,7 @@ Masked cells are excluded (they contribute nothing to counts, and no `UNDEF` app
 
 ## `nunique` — how many distinct values
 
-`nunique` is the count of distinct values. It takes `axis:`, so you can ask per-row or per-column:
+`nunique` is the count of distinct values. It takes `axis:`, so it can count for each row or each column:
 
 ```ruby
 a = CA_INT([1, 2, 2, 3, 1])
@@ -115,9 +115,9 @@ a.is_mode.to_a      #  => [false, false, true, true, true, false, false]   (the 
 b.is_mode.to_a      #  => [true, true, true, true, true, true]              (every cell is a mode value)
 ```
 
-`is_mode` is the *first-class* form — it does not squash ties into an arbitrary choice, and it composes with masks and per-axis reductions in the usual way (`b.is_mode(axis: 1)` masks each row's modes).
+`is_mode` is the *first-class* form — it does not squash ties into an arbitrary choice, and it composes with masks and reductions along an axis in the usual way (`b.is_mode(axis: 1)` masks each row's modes).
 
-For per-axis `mode`, each fiber can have a different number of modes (from 1 for a clear winner up to the fiber length for a total tie), so a rectangular result is impossible. `mode(axis: k)` therefore returns a **Ruby `Array` of CArrays**, one CArray per fiber, giving that fiber's mode values:
+For `mode` along an axis, each line of cells along the axis can have a different number of modes (from 1 for a clear winner up to the length of the axis for a total tie), so a rectangular result is impossible. `mode(axis: k)` therefore returns a **Ruby `Array` of CArrays**, one CArray per line, giving that line's mode values:
 
 ```ruby
 m = CA_INT([[1, 2, 2, 1],
@@ -148,7 +148,7 @@ a.is_in([2, 4]).to_a          #  => [false, true, false, true, false]
 a.is_in(CA_INT([1, 3, 5])).to_a  #  => [true, false, true, false, true]
 ```
 
-The `set` argument may be a Ruby `Array` or a CArray. Types are promoted symmetrically (`int32` and `float64` operands promote to `float64` on both sides), so you don't get integer-truncation surprises — a Float `1.5` query against an `int32` array will not accidentally match `1`.
+The `set` argument may be a Ruby `Array` or a CArray. Types are promoted symmetrically (`int32` and `float64` operands promote to `float64` on both sides), so integers are not truncated: a Float `1.5` query against an `int32` array will not accidentally match `1`.
 
 The classic use is filtering rows by category label:
 
@@ -190,7 +190,7 @@ a = CA_INT([10, 20, 20, 30, 10])
 a.mask_duplicates      #  => [ 10, 20, _, 30, _ ]
 ```
 
-Keeping the shape is what lets it work per fiber. Rows hold different numbers of distinct values, so a squeezed answer would be ragged and could not be a rectangular array:
+Keeping the shape is what lets it work per axis. Rows hold different numbers of distinct values, so a squeezed answer would be ragged and could not be a rectangular array:
 
 ```ruby
 m = CA_INT([[1, 2, 1],
@@ -203,7 +203,7 @@ m.mask_duplicates(axis: 1)        #  along each row
 #       [ 4, 2, 1 ] ]
 ```
 
-`axis: k` runs along each fiber of axis `k`; the default takes the whole array in flatten order. Values are judged by `==`, so every `NaN` survives — this is the one place in the chapter where NaNs are not folded together — and a cell that is already masked takes no part.
+`axis: k` runs along axis `k`, once for every position of the other axes; the default takes the whole array in flatten order. Values are judged by `==`, so every `NaN` survives — this is the one place in the chapter where NaNs are not folded together — and a cell that is already masked takes no part.
 
 ## Comparing whole sub-arrays — `along:`
 
@@ -232,7 +232,7 @@ z.mask_duplicates(along: 0)
 
 `along: k` names the axis whose **index enumerates** the sub-arrays: `along: 0` walks the rows of a 2-D array, `along: 1` the columns. This is NumPy's `np.unique(z, axis=k)`.
 
-**`along:` and `axis:` are different questions, and neither is a spelling of the other.** `axis:` names the axis a fiber runs *along* and asks about the values inside each fiber; `along:` asks which sub-arrays are distinct. For a 2-D array both end up talking about rows, with different numbers:
+**`along:` and `axis:` are different questions, and neither is a spelling of the other.** `axis:` names the axis to run *along* and asks about the values in each line of cells along it; `along:` asks which sub-arrays are distinct. For a 2-D array both end up talking about rows, with different numbers:
 
 ```ruby
 c = CA_INT([[0, 1, 0],
@@ -248,17 +248,17 @@ Giving both at once raises.
 
 The distinctness rule is the chapter's, widened: two sub-arrays are the same when every cell is, with all NaN folded together and `-0.0 == +0.0`. A sub-array holding a masked cell does not take part — it is not counted, never appears in `unique`, and in `mask_duplicates` keeps the mask it came with rather than being painted over.
 
-`unique(along:)` answers with a **view** of the surviving sub-arrays, not copies of them, so writing through it reaches the source; take a `copy` when that is not what you want. Two things it will not do: `sort:` has no meaning here, since sub-arrays have no order to sort by, and an `object` array is refused, because its cells hold Ruby references and would compare by identity rather than by value.
+`unique(along:)` answers with a **view** of the surviving sub-arrays, not copies of them, so writing through it reaches the source; use `copy` to avoid this. Two things it will not do: `sort:` has no meaning here, since sub-arrays have no order to sort by, and an `object` array is refused, because its cells hold Ruby references and would compare by identity rather than by value.
 
 `along:` is on `unique`, `nunique` and `mask_duplicates`. `value_counts`, `mode` and `is_in` still compare cells only.
 
-## What to reach for
+## Choosing a method
 
-| You want to know                                    | Reach for                             |
+| Question                                            | Method                                |
 |-----------------------------------------------------|---------------------------------------|
 | The distinct values                                 | `a.unique`                            |
 | Distinct values *and* their counts                  | `a.value_counts`                      |
-| Just the count of distinct values                   | `a.nunique` (with optional `axis:`)   |
+| Only the count of distinct values                   | `a.nunique` (with optional `axis:`)   |
 | The most common value                               | `a.mode`                              |
 | Which cells hold a modal value (per axis OK)        | `a.is_mode(axis:)`                    |
 | Which cells belong to a given set                   | `a.is_in(set)`                        |
@@ -268,4 +268,4 @@ The distinctness rule is the chapter's, widened: two sub-arrays are the same whe
 | First-occurrence marker without squashing shape     | `a.mask_duplicates`                   |
 | Which whole rows / columns / slabs are distinct      | `a.unique(along: k)`, `a.nunique(along: k)` |
 
-`unique` / `value_counts` / `nunique` / `mode` all fold NaN into a single canonical bucket and exclude masked cells; `mask_duplicates` uses strict `==` and keeps every NaN separate. Pick by whether you want values-as-set semantics or positions-as-mask semantics.
+`unique` / `value_counts` / `nunique` / `mode` all fold NaN into a single canonical bucket and exclude masked cells; `mask_duplicates` uses strict `==` and keeps every NaN separate. Choose by the meaning: values as a set, or positions as a mask.

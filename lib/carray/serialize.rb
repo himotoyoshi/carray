@@ -662,6 +662,12 @@ class CArray
     case tag
     when "object"
       shape, values, mask, attrs = rest
+      # The shape is only a claim until the cells are seen to fill it, and
+      # a damaged one can ask for more memory than the machine has.
+      unless marshal_cells_fill_shape?(values, shape) &&
+             (mask.nil? || marshal_cells_fill_shape?(mask, shape))
+        raise ArgumentError, "corrupt CArray Marshal payload (the cells do not fill shape #{shape.inspect})"
+      end
       ca = CArray.object(*shape)
       ca[] = values
       if mask
@@ -682,6 +688,22 @@ class CArray
     end
   end
   private_class_method :array_from_marshal_payload
+
+  # Whether `cells`, nested as #to_a nests them, has the extent of every axis
+  # of `shape`.  A cell may itself hold an Array, so only shape.size levels
+  # are counted.
+  def self.marshal_cells_fill_shape? (cells, shape)
+    return false unless shape.is_a?(Array) && !shape.empty? &&
+                        shape.all? { |extent| extent.is_a?(Integer) && extent >= 0 }
+    level = [cells]
+    shape.each do |extent|
+      return false unless level.all? { |row| row.is_a?(Array) && row.size == extent }
+      level = level.flat_map { |row| row }
+      return true if level.empty?
+    end
+    true
+  end
+  private_class_method :marshal_cells_fill_shape?
 
 end
 

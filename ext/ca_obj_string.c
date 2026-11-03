@@ -212,8 +212,8 @@ ca_string_refuse_cell (VALUE v, const char *where)
              "UNDEF masks a cell)", where);
   }
   rb_raise(rb_eTypeError,
-           "%s is of class %s, not a String (a CAString holds Strings; "
-           "UNDEF masks a cell)", where, rb_obj_classname(v));
+           "%s is of class %"PRIsVALUE", not a String (a CAString holds Strings; "
+           "UNDEF masks a cell)", where, rb_obj_class(v));
 }
 
 /* Every cell of `parent` that is not masked is a String.  Under a masked

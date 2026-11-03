@@ -34,6 +34,116 @@ and a newer one. The 1.x history, up to the 2.0.0 release, is in
      neighbour ("as well", "the producer above") or leave unnamed the
      method, class or keyword it is about. -->
 
+## 3.0.7
+
+- New: `CATime` and `CATimedelta` take the word forms of their operators
+  (`add`, `sub`; on a duration also `mul`, `div`, `neg`). A duration array
+  divided by one duration gives the ratios as numbers, a number may stand
+  left of a duration (`2 * d`), a duration element has `-@` and `abs`, and
+  a duration array has `to_seconds`. A duration's comparisons and stores
+  take a String such as `"3 days"`.
+
+- New: `pmax` and `pmin` (with `maximum`, `minimum`, `fmax`, `fmin`) on
+  `CATimedelta`, `CAFixlenString` and `CAConstString`. `CAConstString`
+  also has `match`, `bsearch`, `bsearch_addr`, `search_addr`, `min_addr`
+  and `max_addr`.
+
+- New: a `CAFixlenString` carries the encoding of its text
+  (`a.encoding`), and its cells read in that encoding: UTF-8 when the
+  strings were ASCII, `BINARY` when they disagreed. `to_const_string`
+  keeps it, so non-ASCII text comes back from `to_fixlen_string`. Two
+  arrays of different text encodings no longer stack.
+
+- New: `CAFrame#resample` takes a `CArray` as `by:`, and a windowed
+  reduction takes a Hash of column name to value as `fill_value:`.
+  `CACategorical#count` takes the keywords of `CArray#count`, and the
+  `all` and `any` of a categorical iterator take `axis:`.
+
+- New: `CArray.from_memory_view` and `wrap_memory_view` take an item of
+  several members (a record) as raw bytes, a `fixlen` array of the item's
+  size.
+
+- Change: a Float is refused as a shape, a size or a count
+  (`CArray.int32(2.5)`, `blocks(2.5)`, the counts of `repeat`), whole or
+  not; it was cut down to an Integer. A Float key of `[]` still reads as a
+  position.
+
+- Change: a data type name must match whole. `:complex128`, `:float16` or
+  `:int128` raise `ArgumentError`; they were read as the type whose name
+  they begin with (`:complex128` gave `cmplx64`). Write `:cmplx128`.
+  `CArray::Complex64::TypeSymbol` and `CArray::Complex128::TypeSymbol` are
+  `:cmplx64` and `:cmplx128`.
+
+- Change: a keyword given with a String key (`a.sum("axis" => 0)`) raises
+  `ArgumentError`; it was ignored. Write `axis: 0`.
+
+- Change: storing complex cells into a real array raises; the imaginary
+  parts were dropped. Convert with `to_type` first.
+
+- Change: an object or boolean array given where addresses are expected
+  (`project`, `scatter_add!` and the other `scatter_*!`, `addr2index`)
+  raises `IndexError`. A boolean array still selects in `[]`.
+
+- Change: a value a numeric or boolean array cannot hold (`nil`, a String,
+  a Symbol, another object) is answered alike for every data type: an
+  operator raises `TypeError`, an ordering (`<`, `pmax` and its kin)
+  raises `ArgumentError`, and `eq`, `ne`, `count`, `search` and `is_in`
+  find no cell. `search("2")` on a numeric array used to read the text.
+  `true` and `false` are 1 and 0, so `count(true)` counts the cells
+  holding 1. An object array still looks such values up as values.
+
+- Change: `UNDEF` beside an array in an operation is a masked scalar of the
+  array's own type, so `CA_INT32([1, 2]) + UNDEF` is an all-masked `int32`
+  array; integer, boolean and fixlen arrays gave an object array.
+
+- Change: `to_type` to an integer type gives `UNDEF` for an object Float,
+  Rational, BigDecimal or Complex the type cannot hold, and keeps the low
+  bytes of an object Integer wider than 64 bits, as `int64` to `int8` does.
+  A store and a view still refuse such values.
+
+- Change: `x ** k` with an Integer `k` from -2 to 4 is computed by at most
+  two multiplications or divisions (`x ** 2` is `x * x`), and other Integer
+  exponents through `pow`, for a scalar and an array exponent alike,
+  eagerly and lazily. Float and complex results can differ from 3.0.6 in
+  the last bit.
+
+- Change: a time or a date with a year past four digits is written with
+  its sign (`"+12345-01-01"`), in `to_s` and in CSV, so it reads back.
+
+- Change: `join`, `join_asof`, `align`, `CAFrame.concatenate`, `stack` and
+  `stack_columns` refuse integers that the float type they meet would
+  round (past 2**53 beside `float64`), in a key or in the pieces of a
+  column; such integers matched or merged with neighbouring values. Cast
+  one side to the other's type first.
+
+- Change: the frames that `GroupedFrame`, the windows and a frame's own
+  verbs return hold a copy of the index, so a write to the result's index
+  does not reach the source frame.
+
+- Change: `CAFrame` refuses, with an `ArgumentError` that names the verb,
+  a `GroupedFrame#table` or `#filter` without a block, a `lag` step that is
+  not an Integer, a `columns:` Range that selects no column, a
+  `fill_value:` Hash naming no column, a row-wise group verb with no column
+  left to compute, and a splice of a frame without an index into one with
+  an index.
+
+- Change: CSV type inference reads a column as text when a float would
+  round one of its integers, and an object column of Integers past 2**53
+  beside a Float is not inferred as `float64`.
+
+- Change: a walk into object cells (`unique`, `hash`, `Marshal.dump`,
+  computations over the cells) raises past 256 levels of nesting. A cell
+  holding a lazy expression over the array that holds the cell made these
+  run without end.
+
+- Change: a String Face (`CAString`, `CAFixlenString`, `CAConstString`)
+  refuses an ordering with a value that is not a String, and a Face
+  refuses a single Ruby object as the operand of an operator the Face does
+  not define.
+
+- Change (C extensions and carray-jit): `CArray::AddressBasis.sweep` and
+  the sweep bridge refuse a `CScalar` output beside an array operand.
+
 ## 3.0.6
 
 - New: `CAFrame` answers the column reductions itself, as a frame of one

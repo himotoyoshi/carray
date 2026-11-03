@@ -148,7 +148,7 @@ class CAFrame
   # as an empty reduction does: UNDEF for +mean+, 0 for +count+ and +sum+.
   # A row whose time is masked belongs to no bin.
   #
-  # +by:+ (a column name or an Array of them) bins each group of rows on its
+  # +by:+ (a column name, a CArray key or an Array of them) bins each group of rows on its
   # own: a group is the rows sharing the +by:+ values and a bin. The result
   # then has no index: the +by:+ columns and the bin times (named +name+)
   # are its first columns, the groups in the order their +by:+ values first
@@ -163,7 +163,9 @@ class CAFrame
   # @param origin [nil, Time, String, CATime::Element] where bins start.
   # @param label [:left, :right] which end of a bin names it and is closed.
   # @param fill [Boolean] whether bins with no rows are rows of the result.
-  # @param by [nil, String, Array<String>] columns whose groups are binned apart.
+  # @param by [nil, String, CArray, Array<String, CArray>] columns whose groups
+  #   are binned apart; a CArray key (one value per row, as group_by takes it)
+  #   is labelled "key0", "key1", ... by its place.
   # @return [GroupedFrame]
   # @raise [ArgumentError] when the column is not a CATime, or +label:+ is
   #   neither :left nor :right, or +by:+ names the time column.
@@ -191,13 +193,18 @@ class CAFrame
   # resample with by:. A group is a (by values, bin) pair, coded as
   # group * bins + bin, so the codes run through the groups in the order their
   # by values first appear and through each group's bins in time order.
+  # A by: key is a column name or, as group_by takes it, a CArray of one
+  # value per row; a CArray key is labelled "key0", "key1", ... by its place.
   private def resample_by(name, time, bins, grid, by, fill)
-    by_names = column_keys(Array(by), "resample")
-    raise ArgumentError, "resample: by: names no column" if by_names.empty?
-    if by_names.include?(name)
+    keys = by.is_a?(Array) ? by : [by]
+    raise ArgumentError, "resample: by: names no column" if keys.empty?
+    keys.each { |k| column_key(k, "resample") unless k.is_a?(CArray) }
+    if keys.include?(name)
       raise ArgumentError, "resample: by: names the time column #{name.inspect}"
     end
-    by_cols = by_names.map { |n| key_column(n, "resample") }
+    by_names = keys.each_with_index.map { |k, i| k.is_a?(String) ? k : "key#{i}" }
+    CAFrame.__send__(:refuse_repeated_names, by_names + [name], "resample")
+    by_cols = keys.map { |k| key_column(k, "resample") }
     gcat = CACategorical.send(:from_keys, by_cols)
     ng   = gcat.labels.size
     nb   = grid.elements
@@ -223,7 +230,7 @@ class CAFrame
       parts + [blabels[b]]
     end
     cat = CACategorical.from_codes(codes, labels)
-    key_names = by_names + (@columns.key?(name) ? [name] : [])
+    key_names = keys.grep(String) + (@columns.key?(name) ? [name] : [])
     GroupedFrame.new(self, cat, "group", key_names, label_columns: columns)
   end
 
@@ -233,9 +240,19 @@ class CAFrame
   # or one-year grid and then given the bins' unit, as the labels without
   # fill: are.
   private def resample_grid(bins, unit)
-    base = CATime::Resolution.parse(unit).base
-    if %i[Y M].include?(base)
-      CArray.time_range(bins.min, bins.max, unit: base, step: unit).to_unit(bins.unit)
+    res = CATime::Resolution.parse(unit)
+    if %i[Y M].include?(res.base)
+      months = res.base == :Y ? res.count * 12 : res.count
+      grid = CArray.time_range(bins.min, bins.max, unit: :M, step: "#{months} months")
+      # A key coarser than the bins holds one bin for several grid points.
+      # key-labels: the bins of a grid, labelled by the caller
+      grid.to_unit(bins.unit).unique(sort: true)
+    elsif CATimeUnitAlgebra.ratio(res, bins.unit).denominator != 1
+      # A step finer than the key is stepped in its own unit; the key holds
+      # one bin for several of its points.
+      grid = CArray.time_range(bins.min, bins.max, unit: res.base, step: unit)
+      # key-labels: the bins of a grid, labelled by the caller
+      grid.to_unit(bins.unit).unique(sort: true)
     else
       CArray.time_range(bins.min, bins.max, unit: bins.unit, step: unit)
     end
@@ -376,7 +393,7 @@ class CAFrame
     end
     cols = CAFrame.__send__(:quantile_columns, named)
     return CAFrame.new(cols) unless keep_rows
-    return CAFrame.new(cols, axis_name: @axis_name, index: @index)
+    return CAFrame.new(cols, axis_name: @axis_name, index: @index&.copy)
   end
 
   # The five columns a quantile gives a column, by name.
@@ -391,13 +408,10 @@ class CAFrame
   private_constant :QUANTILE_SUFFIXES
 
   private def reduce_all_rows (reduction, *names, min_count: nil, fill_value: nil, keep_rows: false, args: [])
-    if fill_value.is_a?(Hash)
-      unknown = fill_value.keys - column_names
-      unless unknown.empty?
-        raise ArgumentError,
-              "#{reduction}: fill_value names no column #{unknown.map(&:inspect).join(', ')}"
-      end
-    end
+    walk = ColumnWalk.new(self)
+    walk.__send__(:refuse_unknown_fill_columns, reduction, fill_value)
+    walk.__send__(:refuse_wrong_reduction_arguments, reduction, args,
+                  { min_count: min_count }.compact)
     return reduce_down_the_rows(reduction, names, keep_rows, args) do |name|
       fill = fill_value.is_a?(Hash) ? fill_value[name] : fill_value
       { min_count: min_count, fill_value: fill }.compact
@@ -425,7 +439,7 @@ class CAFrame
     end
     return CAFrame.new(named) unless keep_rows
     return out if out.is_a?(CArray)
-    return CAFrame.new(named, axis_name: @axis_name, index: @index)
+    return CAFrame.new(named, axis_name: @axis_name, index: @index&.copy)
   end
 
   # Values computed down the rows, one per row, as +GroupedFrame+ computes
@@ -459,8 +473,9 @@ class CAFrame
     out = ColumnWalk.new(self).over(operation, names, [], [], keywords) do |col, _|
       col.public_send(operation, **(col.ndim > 1 ? keywords.merge(axis: 0) : keywords))
     end
+    ColumnWalk.new(self).__send__(:refuse_no_column_on_rows, operation, out, @nrow)
     return out if out.is_a?(CArray)
-    return CAFrame.new(out, axis_name: @axis_name, index: @index)
+    return CAFrame.new(out, axis_name: @axis_name, index: @index&.copy)
   end
 
   # The frame's own walk over its columns: the one rule of a frame-wide verb
@@ -514,6 +529,8 @@ class CAFrame
     walk = ColumnWalk.new(self)
     if distance.nil?
       step = n.nil? ? 1 : n
+      # A wrong n: would otherwise read as no column having a lag.
+      CArray.float64(1).lag(step)
       cols = walk.over(:lag, names, [], [step]) do |col, _|
         (col.ndim > 1 ? col.lag(step, axis: 0) : col.lag(step)).copy
       end
@@ -524,7 +541,7 @@ class CAFrame
       end
     end
     return cols if cols.is_a?(CArray)
-    CAFrame.new(cols, axis_name: @axis_name, index: @index)
+    CAFrame.new(cols, axis_name: @axis_name, index: @index&.copy)
   end
 
   # [key name, key, sign, width] for a lag by distance; nil for one by rows.
@@ -548,7 +565,7 @@ class CAFrame
       on_name = column_key(on, verb)
     end
     key   = key_column(on_name, verb)
-    unless key.is_a?(CATime) || key.is_a?(CATimedelta) || (!key.face? && key.numeric?)
+    unless key.is_a?(CATime) || key.is_a?(CATimedelta) || (!key.face? && key.numeric? && !key.complex?)
       raise ArgumentError,
             "#{verb}: the key #{on_name.inspect} is #{CArray::Inspector.type_label(key)}; " \
             "a distance is taken along a time, a duration or a number"
@@ -804,7 +821,7 @@ class GroupedFrame
       cols[out] =
         case reduction
         when Symbol
-          group_reduce(@frame[in_name], reduction, *args, **options)
+          group_reduce(@frame.__send__(:named_column, in_name, "aggregate"), reduction, *args, **options)
         when Proc
           unless args.empty? && options.empty?
             raise ArgumentError, "aggregate: a Proc reduction takes no arguments (#{out.inspect})"
@@ -827,6 +844,7 @@ class GroupedFrame
   # first appear; a group whose Hash lacks a name is UNDEF there, as
   # +from_records+ reads a record that lacks a key.
   def table(keep_rows: false)
+    raise ArgumentError, "table: give a block" unless block_given?
     refuse_changed_rows("table")
     outs = []
     each_group_frame do |g|
@@ -953,7 +971,7 @@ class GroupedFrame
     end
     cols = CAFrame.__send__(:quantile_columns, named)
     return result_frame(cols, false) unless keep_rows
-    return CAFrame.new(cols, axis_name: @frame.axis_name, index: @frame.index)
+    return CAFrame.new(cols, axis_name: @frame.axis_name, index: @frame.index&.copy)
   end
 
   # The same convenience for the reductions that take no min_count: or
@@ -1041,7 +1059,7 @@ class GroupedFrame
       col[addr, *([nil] * (col.ndim - 1))].copy
     end
     return out if out.is_a?(CArray)
-    CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index)
+    CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index&.copy)
   end
 
   def order (*names, descending: false, method: :ordinal, kind: :quick)
@@ -1104,11 +1122,10 @@ class GroupedFrame
     when :ffill, :bfill
       @frame.__send__(:refuse_if_frozen)
       key = @frame.__send__(:column_key, name, "fill")
-      col = @frame[key]
+      col = @frame.__send__(:named_column, key, "fill")
       # A row in no group is UNDEF in the fill, so writing it changes nothing.
       held = group_transform(col, :strip_mask, [], { method: method_or_value })
-      target = col.is_masked
-      col[target] = held[target] if target.any
+      @frame.__send__(:write_filled_cells, col, held)
     when :linear
       @frame.__send__(:refuse_if_frozen)
       key = @frame.__send__(:column_key, name, "fill")
@@ -1122,7 +1139,7 @@ class GroupedFrame
     when Symbol
       raise ArgumentError,
             "fill: unknown method #{method_or_value.inspect} " \
-            "(:ffill | :bfill, or a constant fill value)"
+            "(:ffill | :bfill | :linear, or a constant fill value)"
     else
       @frame.fill(name, method_or_value)
     end
@@ -1230,6 +1247,7 @@ class GroupedFrame
   #   shape [ngroup].
   def filter (**options)
     CAFrame.__send__(:refuse_filter_keywords, options, "filter")
+    raise ArgumentError, "filter: give a block" unless block_given?
     refuse_changed_rows("filter")
     chosen = yield(self)
     unless chosen.is_a?(CArray) && chosen.data_type == :boolean
@@ -1278,15 +1296,25 @@ class GroupedFrame
     out = over_named_columns(op, names, @key_names, args, keywords) do |col|
       group_transform(col, op, args, keywords)
     end
+    refuse_no_column_on_rows(op, out, @frame.nrow)
     return out if out.is_a?(CArray)
-    CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index)
+    CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index&.copy)
   end
 
   # A column's within-group transform: an N-D column runs along the rows.
   private def group_transform(col, op, args, keywords)
+    return group_lag_by_rows(col, *args) if op == :lag && col.face? && !col.__send__(:holds_new_values?)
     it = col.group_by_category(@cat)
     keywords = keywords.merge(axis: 0) if col.ndim > 1
     it.public_send(op, *args, **keywords)
+  end
+
+  # A Face that cannot hold new values answers an iterator's lag in object
+  # cells. Reading each cell from the row it lags keeps the Face, as
+  # lag(before:) does.
+  private def group_lag_by_rows(col, step)
+    rows = CArray.int64(@frame.nrow).seq.group_by_category(@cat).lag(step)
+    col[rows, *([nil] * (col.ndim - 1))].copy
   end
 
   # Each result gets its own index.
@@ -1302,13 +1330,8 @@ class GroupedFrame
     refuse_key_as_result(reduction, names) unless keep_rows
     keywords = keywords.compact
     fills = keywords.delete(:fill_value)
-    if fills.is_a?(Hash)
-      unknown = fills.keys - @frame.column_names
-      unless unknown.empty?
-        raise ArgumentError,
-              "#{reduction}: fill_value names no column #{unknown.map(&:inspect).join(', ')}"
-      end
-    end
+    refuse_unknown_fill_columns(reduction, fills)
+    refuse_wrong_reduction_arguments(reduction, args, keywords)
     named = {}
     out = over_named_columns(reduction, names, @key_names, args) do |col, name|
       fill = fills.is_a?(Hash) ? fills[name] : fills
@@ -1322,7 +1345,7 @@ class GroupedFrame
     # labels beside it.
     if keep_rows
       return out if out.is_a?(CArray)
-      return CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index)
+      return CAFrame.new(out, axis_name: @frame.axis_name, index: @frame.index&.copy)
     end
     result_frame(named, false)
   end
@@ -1360,7 +1383,7 @@ class GroupedFrame
       return CAFrame.new(@label_columns.transform_values(&:copy).merge(cols))
     end
     CAFrame.new(cols.transform_values { |col| spread_to_rows(col) },
-                axis_name: @frame.axis_name, index: @frame.index)
+                axis_name: @frame.axis_name, index: @frame.index&.copy)
   end
 
   # A per-group result (one entry per group along axis 0) laid back over the
@@ -1377,6 +1400,10 @@ class GroupedFrame
   # A column's group reduction. An N-D column is reduced along the rows, so
   # each group keeps the trailing shape: a profile column (N, L) gives (G, L).
   private def group_reduce(col, reduction, *args, **keywords)
+    if %i[first last].include?(reduction) && col.ndim == 1 && args.empty? && keywords.empty? &&
+       col.face? && !col.__send__(:holds_new_values?)
+      return col[present_rows(col).group_by_category(@cat).public_send(reduction)].copy
+    end
     it = col.group_by_category(@cat)
     if col.ndim > 1 && !keywords.key?(:axis)
       it.public_send(reduction, *args, axis: 0, **keywords)
@@ -1428,7 +1455,7 @@ class GroupedFrame
   end
 
   private def each_group_slice(in_name)
-    col = @frame[in_name]
+    col = @frame.__send__(:named_column, in_name, "aggregate")
     ngroup.times do |k|
       yield col[group_address(k), *([nil] * (col.ndim - 1))]
     end

@@ -216,8 +216,7 @@ static void
 ca_reduce_func_allocate (void *ap)
 {
   CAReduce *ca = (CAReduce *) ap;
-  ca_attach(ca->parent);
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
 }
 
 static void
@@ -226,8 +225,7 @@ ca_reduce_func_attach (void *ap)
   CAReduce *ca = (CAReduce *) ap;
   char *p;
   ca_size_t i;
-  ca_attach(ca->parent);
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
   p = ca->ptr;
   for (i=0; i<ca->elements; i++) {
     ca_reduce_func_xfer_addrs(ca, 1, &i, p, CA_XFER_GET);

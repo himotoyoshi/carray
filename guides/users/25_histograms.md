@@ -1,16 +1,16 @@
 # Histograms
 
-A histogram counts how many values fall into each of a set of bins. CArray builds them for continuous data (real values sorted into bins by their edges) and for discrete data (integer labels counted directly), in one dimension, two dimensions, or any number at once. The entry methods return a small stateful object that carries the bin layout and the counts, and that you can keep feeding data to in chunks.
+A histogram counts how many values fall into each of a set of bins. CArray builds them for continuous data (real values sorted into bins by their edges) and for discrete data (integer labels counted directly), in one dimension, two dimensions, or any number at once. The entry methods return a small stateful object that carries the bin layout and the counts, and that accepts more data in chunks.
 
-Where the histogram methods really earn their keep is on **multi-dimensional arrays**. You are not meant to flatten your data first and loop in Ruby. Point a method at an axis with `axis:` and every fiber along the remaining axes gets its own histogram in a single call — one spectrum per detector row, one distribution per grid cell, one joint histogram per time step. The flat 1-D case is just the degenerate one-fiber version of the same machine.
+The histogram methods are most useful on **multi-dimensional arrays**. There is no need to flatten the data and loop in Ruby. With `axis:`, every position of the remaining axes gets its own histogram in a single call — one spectrum per detector row, one distribution per grid cell, one joint histogram per time step. The flat 1-D case is the same thing with no remaining axes.
 
-This chapter starts with the simplest case — a 1-D histogram of continuous values — and builds up to per-axis (fiber) histograms, joint histograms, weighting, and streaming. The discrete sibling `bincount_nd` comes at the end.
+This chapter starts with the simplest case — a 1-D histogram of continuous values — and builds up to histograms along an axis, joint histograms, weighting, and streaming. The discrete sibling `bincount_nd` comes at the end.
 
 Everything here works after `require "carray"`.
 
 ## The simplest case: a 1-D histogram
 
-You supply the **edges** — the boundary values between bins — and CArray counts how many samples land in each bin.
+The **edges** are the boundary values between bins. CArray counts how many samples land in each bin.
 
 ```ruby
 edges = CArray.float64(6).span(0..5)      # [0, 1, 2, 3, 4, 5] -> 5 bins
@@ -33,7 +33,7 @@ h.edges.to_a       # => [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
 h.midpoints.to_a   # => [0.5, 1.5, 2.5, 3.5, 4.5]   bin centres, length N
 ```
 
-`midpoints` is `(edges[0..-2] + edges[1..-1]) / 2` — the centre of each bin, one value shorter than `edges`. It is what you usually plot the counts against.
+`midpoints` is `(edges[0..-2] + edges[1..-1]) / 2` — the centre of each bin, one value shorter than `edges`. The counts are usually plotted against it.
 
 ### Out-of-range values: under and over
 
@@ -46,9 +46,9 @@ h.total            # => 7     every sample seen, in range or not
 h.outlier_total    # => 3     total minus counts.sum
 ```
 
-Notice `5.0` — a value exactly equal to the **top** edge — counted as `over`, not into the last bin, because bins are right-open. If you want the top edge folded into the last bin, see [Closing the top edge](#closing-the-top-edge) below.
+Notice `5.0` — a value exactly equal to the **top** edge — counted as `over`, not into the last bin, because bins are right-open. To fold the top edge into the last bin, see [Closing the top edge](#closing-the-top-edge) below.
 
-The counts you see with `counts` are the in-range bins only. The real storage extends them by two cells and is available as `full_counts`:
+`counts` returns the in-range bins only. The real storage extends them by two cells and is available as `full_counts`:
 
 ```ruby
 h.full_counts.to_a   # => [1, 1, 2, 0, 0, 1, 2]
@@ -60,7 +60,7 @@ h.counts.to_a        # => [1, 2, 0, 0, 1]
 
 ### Closing the top edge
 
-For a bounded quantity — a probability, a percentage, an angle mod 360 — you usually want a value sitting exactly on the top edge to count in the last bin rather than spilling into `over`. Pass `include_max: true`:
+For a bounded quantity — a probability, a percentage, an angle mod 360 — a value exactly on the top edge usually belongs in the last bin rather than in `over`. Pass `include_max: true`:
 
 ```ruby
 h = data.histogram1d(edges: edges, include_max: true)
@@ -85,7 +85,7 @@ See [Masks and missing values](05_masks.md) for how masks work generally.
 
 ### Along an axis of a bigger array
 
-`histogram1d` is not limited to a flat array. Hand it a multi-dimensional array and name the **sample** axis with `axis:`; every position of the remaining axes gets its own independent histogram, computed in one call. The counts gain those axes in front:
+`histogram1d` is not limited to a flat array. Pass it a multi-dimensional array and name the **sample** axis with `axis:`; every position of the remaining axes gets its own independent histogram, computed in one call. The counts gain those axes in front:
 
 ```ruby
 data = CArray.float64(2, 4)                  # two rows
@@ -96,16 +96,16 @@ h = data.histogram1d(edges: edges, axis: -1)  # bin along the last axis
 h.counts.shape         # => [2, 5]            one row of bins per input row
 h.counts[0, nil].to_a  # => [1, 1, 1, 1, 0]
 h.counts[1, nil].to_a  # => [2, 0, 0, 0, 1]
-h.under.to_a           # => [0, 1]            per-row outliers, too
+h.under.to_a           # => [0, 1]            outliers of each row, too
 ```
 
-Omitting `axis:` bins the whole array flat, as in every example above. The full mechanics of per-axis histograms — and the joint version — are in [One histogram per row: `axis:` and fibers](#one-histogram-per-row-axis-and-fibers) below.
+Omitting `axis:` bins the whole array flat, as in every example above. The full mechanics of histograms along an axis, and the joint version, are in [One histogram per row: `axis:`](#one-histogram-per-row-axis) below.
 
 ## What the entry methods return
 
-`histogram1d`, `histogram2d`, and `histogram` all return a `CArray::Histogram` object. It is a live accumulator — it holds the counts and knows its bin layout, so you read results off it and can keep adding to it.
+`histogram1d`, `histogram2d`, and `histogram` all return a `CArray::Histogram` object. It is a live accumulator — it holds the counts and knows its bin layout, so results can be read from it and more data can be added to it.
 
-| accessor          | what it gives you                                            |
+| accessor          | value                                                        |
 |-------------------|-------------------------------------------------------------|
 | `counts`          | in-range bins                                               |
 | `full_counts`     | the extended storage (each bin axis has `+2` outlier cells) |
@@ -119,7 +119,7 @@ Omitting `axis:` bins the whole array flat, as in every example above. The full 
 
 ## Joint histograms: two or more channels at once
 
-A joint histogram bins each sample by several coordinates at the same time. A weather sample might carry both a humidity and a temperature; a 2-D histogram tells you how many samples fall in each humidity-temperature cell.
+A joint histogram bins each sample by several coordinates at the same time. A weather sample might carry both a humidity and a temperature; a 2-D histogram shows how many samples fall in each humidity-temperature cell.
 
 The input carries the coordinates on a trailing **channel** axis: each sample is a length-`M` row of `M` coordinates. For `histogram2d` that is `(A, 2)` — `A` samples, two coordinates each.
 
@@ -145,7 +145,7 @@ Now `edges:` is an array of `M` edge arrays, one per dimension, each with its ow
 
 ### Which axis's outlier? `under(axis:)` / `over(axis:)`
 
-With more than one dimension, `under` and `over` need to know *which* coordinate's outlier you mean. Pass `axis:`; the other dimensions are summed away, giving the marginal:
+With more than one dimension, `under` and `over` need to know *which* coordinate's outlier is requested. Pass `axis:`; the other dimensions are summed away, giving the marginal:
 
 ```ruby
 h.under(axis: 0)     # => 1    samples below the humidity range
@@ -169,7 +169,7 @@ h.midpoints.map(&:elements)    # => [10, 6]
 
 ### `include_max` per dimension
 
-`include_max` may be a single boolean applied to every dimension, or an array of `M` booleans so you can close the top edge on one axis and leave another open:
+`include_max` may be a single boolean applied to every dimension, or an array of `M` booleans which closes the top edge on one axis and leaves another open:
 
 ```ruby
 h = data.histogram2d(edges: [eh, et], include_max: [true, false])
@@ -216,7 +216,7 @@ h = data.histogram2d(edges: [eh, et], weights: some_weights)
 
 ## Streaming: accumulate in chunks
 
-The object the entry methods return is a live accumulator. You do not have to hold all your data in one array — start an empty accumulator and feed it chunks with `add`.
+The object the entry methods return is a live accumulator. The data does not have to be in one array. Start with an empty accumulator and add chunks with `add`.
 
 Bootstrap an empty accumulator by passing a zero-length sample axis to the entry method:
 
@@ -228,7 +228,7 @@ acc.counts.to_a    # => [1, 1, 1, 1, 1]
 acc.total          # => 5
 ```
 
-`add(chunk, weights: ...)` accepts the same shapes as the entry method. The sample-axis length is free — each chunk may be a different size — but the fiber shape (see below) and the weighted/unweighted state are locked once the accumulator is built.
+`add(chunk, weights: ...)` accepts the same shapes as the entry method. The sample-axis length is free — each chunk may be a different size — but the shape of the other axes (see below) and the weighted/unweighted state are locked once the accumulator is built.
 
 ### Combining histograms with `+`
 
@@ -243,11 +243,11 @@ hc.counts.to_a     # => [2, 1, 1, 0, 1]
 hc.under           # => 1
 ```
 
-`+` returns a new histogram and checks that both sides agree on edges, fiber shape, `include_max`, and weighted/unweighted state; it raises otherwise. This lets you build histograms over separate batches — for example one per file — and merge them at the end.
+`+` returns a new histogram and checks that both sides agree on edges, the shape of the other axes, `include_max`, and weighted/unweighted state; it raises otherwise. This allows building histograms over separate batches, for example one for each file, and merging them at the end.
 
-## One histogram per row: `axis:` and fibers
+## One histogram per row: `axis:`
 
-Give `histogram1d` a 2-D (or higher) array and name the **sample** axis with `axis:`. Every position of the remaining axes — the *fiber* axes — gets its own independent histogram, all computed in a single call:
+Give `histogram1d` a 2-D (or higher) array and name the **sample** axis with `axis:`. Every position of the other axes gets its own independent histogram, all computed in a single call:
 
 ```ruby
 data = CArray.float64(2, 4)
@@ -259,24 +259,24 @@ h = data.histogram1d(edges: edges, axis: -1)   # reduce the last axis
 h.counts.shape         # => [2, 5]            one row of bins per input row
 h.counts[0, nil].to_a  # => [1, 1, 1, 1, 0]
 h.counts[1, nil].to_a  # => [2, 0, 0, 0, 1]
-h.under.to_a           # => [0, 1]            per-row under counts
+h.under.to_a           # => [0, 1]            under count of each row
 h.total.to_a           # => [4, 4]
 ```
 
-The leading axis here is a fiber axis, so `counts` gains that axis in front, and `under`, `over`, `total`, and `outlier_total` each return one value per fiber position rather than a scalar.
+The first axis here is not the sample axis, so `counts` gains that axis in front, and `under`, `over`, `total`, and `outlier_total` each return one value per position of it rather than a scalar.
 
-A vectorized *joint* histogram combines both ideas — the input is `fiber + (A, M)`. For a 3-D input `(2, 3, 2)`, `histogram2d`'s default `axis: [-2, -1]` names the last two axes as `[sample, channel]`, leaving the first as a fiber:
+A vectorized *joint* histogram combines both ideas — the input is `other + (A, M)`. For a 3-D input `(2, 3, 2)`, `histogram2d`'s default `axis: [-2, -1]` names the last two axes as `[sample, channel]`, leaving the first as the other axis:
 
 ```ruby
-data = CArray.float64(2, 3, 2)   # 2 fibers, 3 samples each, 2 coordinates
+data = CArray.float64(2, 3, 2)   # 2 sets of 3 samples, 2 coordinates each
 # ... fill data ...
 h = data.histogram2d(edges: [eh, et])
-h.counts.shape   # => [2, 10, 6]   a 10x6 grid per fiber
+h.counts.shape   # => [2, 10, 6]   a 10x6 grid per set
 ```
 
 ## The discrete sibling: `bincount` and `bincount_nd`
 
-When the values are already non-negative integer *labels*, you do not need edges — the value **is** the bin index. Use `bincount` for one variable and `bincount_nd` for the joint count of several.
+When the values are already non-negative integer *labels*, no edges are needed — the value **is** the bin index. Use `bincount` for one variable and `bincount_nd` for the joint count of several.
 
 For a single variable, `bincount` returns a plain counts array:
 
@@ -300,7 +300,7 @@ For the joint distribution of `M` integer variables, `bincount_nd` mirrors the `
 ```ruby
 x = CA_INT32([0, 1, 1, 2, 0])
 y = CA_INT32([0, 0, 1, 1, 2])
-data = CArray.int32(5, 2)         # fiber + (A=5, M=2)
+data = CArray.int32(5, 2)         # (A=5, M=2), no other axes
 data[nil, 0] = x
 data[nil, 1] = y
 
@@ -311,7 +311,7 @@ h.counts.to_a     # => [[1, 0, 1],
 h.total           # => 5
 ```
 
-`bincount_nd` returns a `CArray::BincountND` object, and supports weighting, streaming `add`, `+` composition, and vectorized fibers exactly like a histogram. It is the discrete counterpart, so its outlier model is simpler: labels index from 0, so there is no lower outlier. A label at or above its length lands in a single **upper overflow** cell, and the storage grows by `+1` per dimension (not `+2`). A negative label is an error, not an outlier:
+`bincount_nd` returns a `CArray::BincountND` object, and supports weighting, streaming `add`, `+` composition, and `axis:` over other axes exactly like a histogram. It is the discrete counterpart, so its outlier model is simpler: labels index from 0, so there is no lower outlier. A label at or above its length lands in a single **upper overflow** cell, and the storage grows by `+1` per dimension (not `+2`). A negative label is an error, not an outlier:
 
 ```ruby
 data = CArray.int32(3, 2)
@@ -331,11 +331,11 @@ h.overflow_total      # => 2
 
 ### Which tool to use
 
-* **Continuous values → `histogram1d` / `histogram2d` / `histogram`.** You choose the bins with `edges:`. Out-of-range values are kept in `under` and `over`.
+* **Continuous values → `histogram1d` / `histogram2d` / `histogram`.** `edges:` chooses the bins. Out-of-range values are kept in `under` and `over`.
 * **Integer labels, one variable → `bincount`.** The label is the bin index; simplest and fastest.
 * **Integer labels, joint distribution → `bincount_nd`.** Out-of-range labels go to the upper overflow cell; negatives raise.
 
-You *can* histogram integer data with integer edges, but the discrete methods are the natural fit — no edges to spell out, and no lower outlier to reason about.
+Integer data *can* be used with integer edges, but the discrete methods are the natural fit — no edges to spell out, and no lower outlier to reason about.
 
 ## Method reference
 
@@ -343,22 +343,22 @@ You *can* histogram integer data with integer edges, but the discrete methods ar
 
 | method | input | returns |
 |---|---|---|
-| `histogram1d(edges:, axis: -1, include_max: false, weights: nil)` | `fiber + (A,)` (channel axis may be omitted) | `CArray::Histogram` |
-| `histogram2d(edges:, axis: [-2,-1], include_max: false, weights: nil)` | `fiber + (A, 2)` | `CArray::Histogram` |
-| `histogram(edges:, axis: [-2,-1], include_max: false, weights: nil)` | `fiber + (A, M)` | `CArray::Histogram` |
+| `histogram1d(edges:, axis: -1, include_max: false, weights: nil)` | `other + (A,)` (channel axis may be omitted) | `CArray::Histogram` |
+| `histogram2d(edges:, axis: [-2,-1], include_max: false, weights: nil)` | `other + (A, 2)` | `CArray::Histogram` |
+| `histogram(edges:, axis: [-2,-1], include_max: false, weights: nil)` | `other + (A, M)` | `CArray::Histogram` |
 | `bincount(weights: nil, length: nil)` | `(A,)` integer | counts `CArray` |
-| `bincount_nd(lengths:, axis: [-2,-1], weights: nil)` | `fiber + (A, M)` integer | `CArray::BincountND` |
+| `bincount_nd(lengths:, axis: [-2,-1], weights: nil)` | `other + (A, M)` integer | `CArray::BincountND` |
 
-`edges:` and `lengths:` are required. `axis:` names the sample axis (`histogram1d`) or the `[sample, channel]` axis pair (the joint methods).
+`edges:` and `lengths:` are required. `axis:` names the sample axis (`histogram1d`) or the `[sample, channel]` axis pair (the joint methods). In the table, `other` stands for the axes `axis:` does not name; each position of them gets its own histogram.
 
 ### `CArray::Histogram`
 
 | method | result |
 |---|---|
-| `counts` | in-range bins, shape `fiber + (N_0, …, N_{M-1})` |
+| `counts` | in-range bins, shape `other + (N_0, …, N_{M-1})` |
 | `full_counts` | extended storage, each bin axis `+2` (under / over) |
 | `under(axis:)` / `over(axis:)` | outlier marginal on one axis; `axis:` optional for `M = 1`, required for `M >= 2` |
-| `total` / `outlier_total` | per-fiber totals |
+| `total` / `outlier_total` | totals per position of the other axes |
 | `midpoints` / `edges` | a single `CArray` for `M = 1`, an array of `M` otherwise |
 | `add(chunk, weights:)` | accumulate another chunk |
 | `+` | combine two compatible histograms cell by cell |
@@ -367,17 +367,17 @@ You *can* histogram integer data with integer edges, but the discrete methods ar
 
 | method | result |
 |---|---|
-| `counts` | in-range bins, shape `fiber + (L_0, …, L_{M-1})` |
+| `counts` | in-range bins, shape `other + (L_0, …, L_{M-1})` |
 | `full_counts` | extended storage, each bin axis `+1` (upper overflow) |
 | `overflow(axis:)` | upper-overflow marginal; `axis:` optional for `M = 1`, required for `M >= 2` |
-| `total` / `overflow_total` | per-fiber totals |
-| `lengths` | the per-dimension label ranges |
+| `total` / `overflow_total` | totals per position of the other axes |
+| `lengths` | the label range of each dimension |
 | `add(chunk, weights:)` | accumulate another chunk |
 | `+` | combine two compatible accumulators cell by cell |
 
 ## See also
 
-* [Reduction and statistics](04_reduction_and_statistics.md) — `sum`, `mean`, and the other per-axis reductions that summarise a whole array.
+* [Reduction and statistics](04_reduction_and_statistics.md) — `sum`, `mean`, and the other reductions that summarise a whole array or work along an axis.
 * [Masks and missing values](05_masks.md) — how masked and `NaN` samples are skipped.
-* [The iterator family](21_iterator_family.md) — the fiber model that the vectorized (`axis:`) forms build on.
+* [The iterator family](21_iterator_family.md) — the other ways of folding an array one piece at a time.
 * `../Histogram.md` — the full reference.

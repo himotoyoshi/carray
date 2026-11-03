@@ -20,6 +20,7 @@ rb_ca_s_each_index_internal (int ndim, VALUE *dim, uint8_t indim, VALUE ridx)
   int32_t is_leaf = (indim == ndim - 1);
   ca_size_t i;
 
+  if ( ! NIL_P(dim[indim]) ) ca_integer_arg(dim[indim], "a dimension", "each_index");
   if ( NIL_P(dim[indim]) ) {
     rb_ary_store(ridx, indim, Qnil);
     if ( is_leaf ) {
@@ -140,15 +141,21 @@ rb_ca_index_walk (VALUE self, CArray *ca, int8_t level,
          that want the whole subscript should write |*idx|. */
       if ( mode & CA_LOOP_WITH_VALUE ) {
         int argc = (int)ca->ndim + 1;
-        argv[0] = rb_ca_fetch_index(self, idx);
+        argv[0] = ( mode & CA_LOOP_STORE )
+                  ? rb_ca_fetch_addr(self, ca_index2addr(ca, idx))
+                  : rb_ca_fetch_index(self, idx);
         MEMCPY(argv + 1, RARRAY_CONST_PTR(ridx), VALUE, ca->ndim);
         obj = rb_yield_values2(argc, argv);
       }
       else {
         obj = rb_yield_values2((int)ca->ndim, RARRAY_CONST_PTR(ridx));
       }
+      /* map_index! writes in self's attach window.  The buffer is what the
+         sync sends to the parent; a store by subscript goes past it to the
+         root and the sync then puts the old values back (rule R5).  The
+         flat address reads and writes the buffer, as map! does. */
       if ( mode & CA_LOOP_STORE ) {
-        rb_ca_store_index(self, idx, obj);
+        rb_ca_store_addr(self, ca_index2addr(ca, idx), obj);
       }
       ret = obj;
     }

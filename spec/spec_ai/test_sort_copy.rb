@@ -224,4 +224,16 @@ class TestPartitionCopy < Test::Unit::TestCase
     part = a.partition_copy(0)
     assert_equal(a.sort_copy[0], part[0])
   end
+
+  # An empty array's one fiber has no buffer to copy from.
+  def test_empty
+    %i[int32 float64].each do |t|
+      [[0], [3, 0], [0, 3]].each do |shape|
+        a = CArray.new(t, shape)
+        assert_equal [0], a.sort_copy.shape
+        assert_equal [0], a.sort_copy(kind: :stable).shape
+        assert_equal shape, a.sort_copy(axis: -1).shape
+      end
+    end
+  end
 end

@@ -141,7 +141,7 @@ VALUE
 rb_ca_partition_copy_c (VALUE self, VALUE vkth, VALUE vaxis)
 {
   /* Mask handling (= same as partition view). */
-  VALUE target = self;
+  volatile VALUE target = self;   /* cat points into it; the walk can run a GC */
   CArray *cat;
   TypedData_Get_Struct(target, CArray, &carray_data_type, cat);
   if ( ca_has_mask(cat) ) {

@@ -788,6 +788,21 @@ ca_lazy_arena_acquire_object (ca_size_t n_elements)
   return ptr;
 }
 
+/* The caller is about to overwrite a scratch's VALUEs with cells of another
+   data type: from here on they are not to be marked. */
+void
+ca_lazy_arena_untag_objects (void *ptr)
+{
+  ca_lazy_arena_t *arena = ca_lazy_arena_get();
+  int i;
+  for ( i = 0; i < CA_LAZY_ARENA_SLOTS; i++ ) {
+    if ( arena->slots[i].ptr == ptr ) {
+      arena->slots[i].object_elements = 0;
+      return;
+    }
+  }
+}
+
 static void
 ca_lazy_arena_mark_object_slots (ca_lazy_arena_t *arena)
 {
@@ -1286,7 +1301,7 @@ ca_mask_of_operands_func_clone (void *ap)
 static int
 ca_mask_of_operands_operand_is_scalar (CAMaskOfOperands *lm, CArray *op)
 {
-  return ( op->elements == 1 && lm->elements > 1 );
+  return op->elements == 1;
 }
 
 static void

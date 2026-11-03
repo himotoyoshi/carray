@@ -24,6 +24,8 @@
 #ifndef CARRAY_INTERNAL_H
 #define CARRAY_INTERNAL_H
 
+#include "ruby/thread_native.h"   /* rb_nativethread_lock_t */
+
 #include "carray.h"
 #include <math.h>     /* isnan, for CA_OBJ_ISNAN */
 
@@ -85,6 +87,7 @@ void    ca_lazy_arena_enter   (void);
 void    ca_lazy_arena_exit    (void);
 void   *ca_lazy_arena_acquire (ca_size_t bytes);
 void   *ca_lazy_arena_acquire_object (ca_size_t n_elements);
+void         ca_lazy_arena_untag_objects (void *ptr);
 void    ca_lazy_arena_release (void *ptr);
 VALUE   ca_lazy_arena_protect (VALUE (*body)(VALUE),
                                VALUE (*cleanup)(VALUE), VALUE arg);
@@ -143,6 +146,18 @@ ca_boolean_normalize_bytes (void *ptr, ca_size_t n)
   for ( ca_size_t i = 0; i < n; i++ ) {
     p[i] = ( p[i] != 0 );
   }
+}
+
+/* A buffer for n cells of data_type, each bytes long: object cells start
+   as nil. */
+static inline char *
+ca_alloc_cells_of (int8_t data_type, ca_size_t elements, ca_size_t bytes)
+{
+  char *p = (char *) xmalloc(elements > 0 ? elements * bytes : 1);
+  if ( data_type == CA_OBJECT ) {
+    ca_object_cells_clear(p, elements);
+  }
+  return p;
 }
 
 static inline char *
@@ -236,6 +251,17 @@ void    ca_fill_or_free (CArray *co, VALUE (*fill)(VALUE), VALUE arg);
 
 void    ca_fill_or_xfree  (void *buf, VALUE (*fill)(VALUE), VALUE arg);
 void    ca_fill_or_detach (int n, CArray **list, VALUE (*fill)(VALUE), VALUE arg);
+
+/* The buffer of a view's own cells, for an attach or allocate slot that
+   attaches parents[0..n-1] and then works in a buffer of its own.  The
+   buffer is allocated before the parents are attached, and freed if
+   attaching them raises: a slot that raises before it publishes ca->ptr
+   gives ca_attach no detach slot to call, and a parent left attached keeps
+   reading and writing the copy it materialised instead of its root.  The
+   caller publishes the result as ca->ptr.  utils/check_attach_then_alloc.rb
+   finds a slot that allocates after attaching. */
+
+char   *ca_alloc_cells_then_attach (CArray *ca, int32_t n, CArray **parents);
 
 /* A view takes its parent's mask by asking the parent whether it has one,
    and a parent that is a CAObject answers in Ruby and can raise.  A view's
@@ -360,6 +386,7 @@ VALUE   ca_lazy_settle_scalar (VALUE operand, int was_scalar);
    of one view all take the same branch. */
 
 int     ca_parent_lends_no_memory (void *ap);
+void    rb_ca_cast_three (volatile VALUE *v1, volatile VALUE *v2, volatile VALUE *v3);
 
 /* Transfers of the descriptor views (CAGrid, CASelect, CASelectAxis,
    CAWindow) whose parent holds no ptr (ca_axis_dispatch.c).
@@ -433,6 +460,13 @@ CAReduce *ca_reduce_new (CArray *carray, ca_size_t count, ca_size_t offset);
 void     ca_broadcast_to_destination (VALUE dst, volatile VALUE *src);
 VALUE    rb_ary_flatten_for_elements (VALUE ary, ca_size_t elements, void *ap);
 
+/* carray_access.c */
+void ca_refuse_complex_into_real (CArray *ca, CArray *cv);
+
+/* carray_cast.c */
+void ca_cast_block_skip_masked (ca_size_t n, void *ap1, void *ptr1,
+                                void *ap2, void *ptr2, boolean8_t *m);
+
 /* carray_utils.c */
 const char *ca_calling_method_name (void);
 VALUE       ca_answer_as_caller (VALUE (*body)(VALUE), VALUE arg);
@@ -440,13 +474,26 @@ long        ca_integer_arg (VALUE v, const char *arg, const char *name);
 /* 1 with the position of an index key (an Integer, or a Float with no
    fraction while exact), 2 for an Integer past int64, 0 otherwise. */
 int         ca_index_key_position (VALUE v, ca_size_t *out);
+ca_size_t   ca_index_key_value (VALUE v);
 void        ca_refuse_without_common_type (VALUE self, VALUE other);
 ca_size_t   ca_shape_elements (int8_t ndim, const ca_size_t *dim, ca_size_t bytes);
 void        ca_check_index_array (VALUE v);
 VALUE       ca_order_key (VALUE v, const char *name);
 void        ca_check_integer_fits (VALUE v, int8_t data_type);
 VALUE       ca_obj2integer_fitting (VALUE v, int8_t data_type);
+/* A Ruby value stored into an integer cell of `dst`: refused when it does
+   not fit (ca_obj2integer_fitting), except into the cells of a bit field
+   view (ca_bitfield_beneath), which keep it modulo 2 ** bits
+   (ca_integer_wrap_bits). */
+VALUE       ca_obj2integer_store (CArray *dst, VALUE v, int8_t data_type);
+CArray     *ca_bitfield_beneath (CArray *ca);
+VALUE       ca_bitfield_wrap_integer (CArray *ca, VALUE v);
+/* v as an Integer modulo 2 ** bits; with sign_extend, in
+   -2 ** (bits - 1) ... 2 ** (bits - 1) - 1.  A String is read as a
+   decimal integer, any other value through Integer() (1.5 is 1). */
+VALUE       ca_integer_wrap_bits (VALUE v, int bits, int sign_extend);
 int         ca_integer_range_side (VALUE v, int8_t data_type);
+int         ca_obj_number_fits_integer (VALUE v, int8_t data_type);
 int         ca_bincmp_integer_prepare (volatile VALUE *self, volatile VALUE *other,
                                        int op_id, int *signed_side);
 int         ca_bincmp_answer_when_negative (int op_id, int signed_side);
@@ -481,6 +528,11 @@ VALUE ca_computing_run_nodes (int n, CArray **ops, VALUE (*body)(VALUE), VALUE a
 /* Refuses as cyclic a cell among cells[0..n) that is an array reaching a
    lazy node being evaluated: computing it would come back into the node. */
 void  ca_refuse_cells_reaching_evaluation (ca_size_t n, const VALUE *cells);
+/* Runs body(arg), a walk into the cells of an object array, one level deeper
+   in this fiber; past the limit it raises ArgumentError.  A cell can give a
+   new array each time it is opened, which the records above never meet
+   twice. */
+VALUE ca_cell_walk_run (VALUE (*body)(VALUE), VALUE arg);
 
 /* Registers a view type whose transfers only move cells between its parents
    and the caller (an index view: CAGrid, CASelect, CAWindow, CAStack, ...),
@@ -845,6 +897,40 @@ ca_query_match_applies (CArray *ref, VALUE query)
   return 1;
 }
 
+/* A Ruby value an integer, float, complex or boolean array can not hold:
+   anything but a Numeric, true, false and UNDEF that does not make an
+   array (an Array, a #to_ca, a memory view).  nil, a String, a Symbol and
+   other objects are foreign.  An object or fixlen array and a Face hold or
+   read such values, so nothing is foreign to them (ca_cast.c). */
+int     ca_value_foreign_to (CArray *ca, VALUE v);
+
+/* An operator refuses a foreign value as Float#+ does (TypeError), and an
+   ordering refuses it as Float#< does (ArgumentError).  `array` is the
+   CArray operand (ca_cast.c). */
+void    ca_refuse_foreign_operand (VALUE v, VALUE array);
+void    ca_refuse_foreign_order (VALUE v, VALUE array);
+
+/* true and false as the numbers 1 and 0 for a value query on an integer,
+   float or complex array; any other value, or array, is returned as is
+   (ca_cast.c). */
+VALUE   ca_truth_as_number (CArray *ca, VALUE v);
+
+/* eq / ne when no cell can match (carray_operator.c). */
+VALUE   ca_bincmp_no_match (VALUE self, int ne);
+
+/* A value an array can not hold matches no cell as a value query: eq, ne,
+   count and search answer as they do for an Integer outside the array's
+   type.  nil is such a value for every array but an object one, which
+   holds nil and is asked. */
+static inline int
+ca_query_matches_nothing (CArray *ca, VALUE query)
+{
+  if ( NIL_P(query) ) {
+    return ca->data_type != CA_OBJECT;
+  }
+  return ca_value_foreign_to(ca, query);
+}
+
 /* Equality of two object cells, as the float lanes answer it: Ruby's `==`,
    except that a Float NaN equals nothing, itself included.  rb_equal alone
    answers true for the same object, so whether two NaN cells matched would
@@ -985,5 +1071,13 @@ int  ca_index_key_is_scalar (VALUE arg);
 
 /* Whether this runs in the main Ractor (carray_utils.c). */
 int ca_in_main_ractor (void);
+
+/* Take a native lock that guards a table shared by every Ractor, waiting
+   without the GVL (carray_utils.c).  A Ractor that waits for the lock while
+   it holds its GVL cannot stop for a GC, so one that holds the lock and
+   allocates (a GC) would wait for it, and it for the lock.  The lock is only
+   ever taken outside the wait, so an interrupt that raises there leaves it
+   free.  The lock must not be held across a call that can raise. */
+void ca_native_lock_without_gvl (rb_nativethread_lock_t *lock);
 
 #endif /* CARRAY_INTERNAL_H */

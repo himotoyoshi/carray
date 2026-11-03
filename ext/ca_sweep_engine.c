@@ -36,6 +36,28 @@ ca_sweep_shape_str (CArray *ca)
   return s;
 }
 
+/* fsync is the kernel author's string: one '0' (input) or '1' (output) per
+ * operand.  Any other character would read as neither, and that operand
+ * would be neither written back nor given a mask. */
+static void
+ca_sweep_check_fsync (ca_sweep_state_t *st, const char *fallback_label)
+{
+  int k_op;
+  if ((int) strlen(st->fsync) != st->n_ops) {
+    rb_raise(rb_eRuntimeError,
+             "[BUG] invalid length of fsync arg in %s (expected %d)",
+             st->src_label ? st->src_label : fallback_label, st->n_ops);
+  }
+  for (k_op = 0; k_op < st->n_ops; k_op++) {
+    if (st->fsync[k_op] != '0' && st->fsync[k_op] != '1') {
+      rb_raise(rb_eRuntimeError,
+               "[BUG] invalid character '%c' in fsync arg \"%s\" in %s "
+               "(expected '0' or '1')", st->fsync[k_op], st->fsync,
+               st->src_label ? st->src_label : fallback_label);
+    }
+  }
+}
+
 void
 ca_sweep_refuse_shapes (CArray *a, CArray *b)
 {
@@ -60,8 +82,10 @@ ca_sweep_same_shape (CArray *a, CArray *b)
 
 /* Pair the operands: a scalar walks with stride 0, every other operand
  * must have the shape of the first non-scalar one, which is returned (NULL
- * when all operands are scalars).  Sets stride[] and n_kernel.  Allocates
- * nothing, so it runs before any operand is acquired. */
+ * when all operands are scalars).  A scalar OUTPUT would have every cell of
+ * the walk written over one cell, so it is refused beside an array.  Sets
+ * stride[] and n_kernel.  Allocates nothing, so it runs before any operand
+ * is acquired. */
 static CArray *
 ca_sweep_pair_operands (ca_sweep_state_t *st)
 {
@@ -80,6 +104,14 @@ ca_sweep_pair_operands (ca_sweep_state_t *st)
       st->n_kernel = ca->elements;
     } else if (!ca_sweep_same_shape(donor, ca)) {
       ca_sweep_refuse_shapes(donor, ca);
+    }
+  }
+  for (k_op = 0; donor && k_op < st->n_ops; k_op++) {
+    if (st->fsync[k_op] == '1' && ca_is_scalar(st->cx[k_op])) {
+      rb_raise(rb_eArgError,
+               "%s: a scalar output has one cell, and an array of %lld cells "
+               "was given as an operand; a scalar output pairs only with "
+               "scalars", ca_calling_method_name(), (long long) st->n_kernel);
     }
   }
   return donor;
@@ -117,6 +149,29 @@ ca_sweep_any_input_mask (ca_sweep_state_t *st)
   return 0;
 }
 
+/* The whole-buffer scratch for INPUT ca.  Object cells read from a lazy
+ * operand or a CAObject exist nowhere else until the kernel has used them,
+ * and the kernel may call Ruby, so the scratch is held for GC as long as it
+ * lives.  It is recorded in owned_buf before the hold, which can raise. */
+static char *
+ca_sweep_scratch_alloc (ca_sweep_state_t *st, int k_op)
+{
+  CArray *ca = st->cx[k_op];
+  st->owned_buf[k_op] = xmalloc(ca->elements * ca->bytes);
+  if (ca->data_type == CA_OBJECT) {
+    ca_object_cells_clear(st->owned_buf[k_op], ca->elements);
+    ca_gc_hold_buffer(st->owned_buf[k_op], ca->elements);
+  }
+  return st->owned_buf[k_op];
+}
+
+static void
+ca_sweep_scratch_free (void *buf)
+{
+  ca_gc_release_buffer(buf);
+  xfree(buf);
+}
+
 /* Give back everything acquire has taken so far, without syncing: detach
  * attached operands, free owned scratch (xmalloc on the whole-buffer path,
  * arena on the chunked one) and the mask buffers.  Called when a read
@@ -132,7 +187,7 @@ ca_sweep_abort (ca_sweep_state_t *st, int chunked)
       ca_detach(st->cx[k_op]);
     } else if (st->owned_buf[k_op]) {
       if (chunked) ca_lazy_arena_release(st->owned_buf[k_op]);
-      else         xfree(st->owned_buf[k_op]);
+      else         ca_sweep_scratch_free(st->owned_buf[k_op]);
     }
     st->owned_buf[k_op] = NULL;
   }
@@ -144,6 +199,21 @@ ca_sweep_abort (ca_sweep_state_t *st, int chunked)
   if (chunked && st->mask_scratch) {
     ca_lazy_arena_release(st->mask_scratch);
     st->mask_scratch = NULL;
+  }
+}
+
+/* The outputs' masks are overwritten by the OR of the input masks.  When no
+ * input is masked that is all clear, and there is no m0 to carry it: clear
+ * them here, before an output is attached, so a view gathers the cleared
+ * mask.  An output without a mask does not get one. */
+static void
+ca_sweep_clear_output_masks (ca_sweep_state_t *st)
+{
+  int k_op;
+  for (k_op = 0; k_op < st->n_ops; k_op++) {
+    if (st->fsync[k_op] == '1' && ca_has_mask(st->cx[k_op])) {
+      ca_clear_mask(st->cx[k_op]);
+    }
   }
 }
 
@@ -163,6 +233,8 @@ ca_sweep_acquire_body (VALUE arg)
   ca_sweep_state_t *st = ctx->st;
   int k_op;
 
+  if (!ctx->any_input_mask) ca_sweep_clear_output_masks(st);
+
   /* Per-operand acquire:
    *   OUTPUT (fsync == '1')       -> ca_attach + base = ca->ptr
    *   INPUT alias                 -> ca_attach + base = ca->ptr
@@ -178,9 +250,7 @@ ca_sweep_acquire_body (VALUE arg)
       st->attached[k_op] = 1;
       st->base[k_op]     = (char *) ca->ptr;
     } else {
-      ca_size_t bytes_total = ca->elements * ca->bytes;
-      st->owned_buf[k_op] = xmalloc(bytes_total);
-      st->base[k_op]      = st->owned_buf[k_op];
+      st->base[k_op] = ca_sweep_scratch_alloc(st, k_op);
       ca_xfer_all(ca, st->base[k_op], CA_XFER_GET);
     }
   }
@@ -209,7 +279,7 @@ ca_sweep_acquire_body (VALUE arg)
   }
 
   /* Overwrite each OUTPUT mask with the iter mask (creating the
-     OUTPUT mask if it did not exist).  No-op when m0 is NULL. */
+     OUTPUT mask if it did not exist). */
   if (st->m0) {
     for (k_op = 0; k_op < st->n_ops; k_op++) {
       CArray *ca = st->cx[k_op];
@@ -228,12 +298,7 @@ ca_sweep_acquire (ca_sweep_state_t *st)
   int k_op;
   int tag = 0;
 
-  if ((int) strlen(st->fsync) != st->n_ops) {
-    rb_raise(rb_eRuntimeError,
-             "[BUG] invalid length of fsync arg in %s (expected %d)",
-             st->src_label ? st->src_label : "ca_sweep_acquire",
-             st->n_ops);
-  }
+  ca_sweep_check_fsync(st, "ca_sweep_acquire");
 
   for (k_op = 0; k_op < st->n_ops; k_op++) {
     st->base[k_op]      = NULL;
@@ -343,7 +408,7 @@ ca_sweep_release (ca_sweep_state_t *st)
     if (st->attached[k_op]) {
       ca_detach(st->cx[k_op]);
     } else if (st->owned_buf[k_op]) {
-      xfree(st->owned_buf[k_op]);
+      ca_sweep_scratch_free(st->owned_buf[k_op]);
       st->owned_buf[k_op] = NULL;
     }
   }
@@ -363,6 +428,8 @@ ca_sweep_acquire_chunked_body (VALUE arg)
   ca_sweep_state_t *st = ctx->st;
   int k_op;
 
+  if (!ctx->any_input_mask) ca_sweep_clear_output_masks(st);
+
   /* per-operand acquire:
    *   OUTPUT (fsync == '1') : ca_attach + base_orig = ca->ptr (legitimate)
    *   INPUT  alias          : ca_attach + base_orig = ca->ptr (zero-copy)
@@ -378,9 +445,14 @@ ca_sweep_acquire_chunked_body (VALUE arg)
       st->attached[k_op]  = 1;
       st->base_orig[k_op] = (char *) ca->ptr;
     } else {
-      /* non-alias non-scalar INPUT: arena scratch sized for chunk_n_max */
-      ca_size_t scratch_bytes = st->chunk_n_max * ca->bytes;
-      st->owned_buf[k_op] = (char *) ca_lazy_arena_acquire(scratch_bytes);
+      /* non-alias non-scalar INPUT: arena scratch sized for chunk_n_max;
+       * the arena marks an object scratch while it is in use */
+      if (ca->data_type == CA_OBJECT) {
+        st->owned_buf[k_op] = (char *) ca_lazy_arena_acquire_object(st->chunk_n_max);
+      } else {
+        ca_size_t scratch_bytes = st->chunk_n_max * ca->bytes;
+        st->owned_buf[k_op] = (char *) ca_lazy_arena_acquire(scratch_bytes);
+      }
       /* base_orig stays NULL -- per-chunk gather lands the data in
        * owned_buf[k_op]; base[k_op] will be set to owned_buf[k_op] at
        * each chunk boundary. */
@@ -424,12 +496,7 @@ ca_sweep_acquire_chunked (ca_sweep_state_t *st)
   int tag = 0;
   CArray *shape_donor = NULL;
 
-  if ((int) strlen(st->fsync) != st->n_ops) {
-    rb_raise(rb_eRuntimeError,
-             "[BUG] invalid length of fsync arg in %s (expected %d)",
-             st->src_label ? st->src_label : "ca_sweep_acquire_chunked",
-             st->n_ops);
-  }
+  ca_sweep_check_fsync(st, "ca_sweep_acquire_chunked");
 
   for (k_op = 0; k_op < st->n_ops; k_op++) {
     st->base[k_op]      = NULL;

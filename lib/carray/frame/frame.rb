@@ -489,7 +489,7 @@ class CAFrame
     return false if col.face? || col.data_type != :object
     found = false
     col.each do |v|
-      next if UNDEF.equal?(v)
+      next if UNDEF.equal?(v) || v.nil?
       return false unless v.is_a?(String)
       found = true
     end
@@ -650,8 +650,8 @@ class CAFrame
       verdicts[key] = verdict
     end
     # The verdicts are a table about the rows, not a part of this one, so the
-    # frame's attributes are not carried.
-    CAFrame.new(verdicts, axis_name: @axis_name, index: @index)
+    # frame's attributes are not carried and the index is its own.
+    CAFrame.new(verdicts, axis_name: @axis_name, index: @index&.copy)
   end
 
   # A new frame with a column moved to the index and the row axis named
@@ -707,6 +707,7 @@ class CAFrame
   # The first +n+ rows as a positional view-frame (memo §11.3). +n+ larger
   # than +nrow+ yields the whole frame; +n+ of 0 yields an empty frame.
   def head(n = 5)
+    raise TypeError, "head: the count is an Integer (got #{n.inspect})" unless n.is_a?(Integer)
     raise ArgumentError, "head count must be non-negative (got #{n})" if n < 0
     row_span(0, [n, @nrow].min)
   end
@@ -714,6 +715,7 @@ class CAFrame
   # The last +n+ rows as a positional view-frame (memo §11.3). +n+ larger
   # than +nrow+ yields the whole frame; +n+ of 0 yields an empty frame.
   def tail(n = 5)
+    raise TypeError, "tail: the count is an Integer (got #{n.inspect})" unless n.is_a?(Integer)
     raise ArgumentError, "tail count must be non-negative (got #{n})" if n < 0
     row_span(@nrow - [n, @nrow].min, @nrow)
   end
@@ -728,6 +730,28 @@ class CAFrame
   # a row Hash and stays that way: zero matches raise KeyError, and duplicate
   # labels raise (go through +filter { |f| f.index.eq(label) }+ for the
   # multi-row, frame-returning path). Positional access is +df[i]+.
+  # A number as the index compares it without rounding: a whole float beside
+  # integers is an integer, and an integer beside floats that no float holds
+  # is no label there (a float32 index holds fewer integers than a float64
+  # one).
+  private def exact_label(label)
+    return label if @index.face?
+    if @index.integer? && label.is_a?(Float) && label.finite? && label == label.floor
+      label.to_i
+    elsif @index.float? && label.is_a?(Integer) && !index_float_holds?(label)
+      Float::NAN
+    else
+      label
+    end
+  end
+
+  # Whether the index's float type holds +n+ exactly.
+  private def index_float_holds?(n)
+    f = n.to_f
+    f = [f].pack("f").unpack1("f") if @index.data_type == CA_FLOAT32
+    f.finite? && f.to_i == n
+  end
+
   def at(label)
     raise ArgumentError, "at requires an index (set one with set_index)" unless @index
     # An index may hold a masked cell -- an outer join and align both build one
@@ -751,8 +775,8 @@ class CAFrame
             "at: the index is #{@index.data_type}, so the label must be a number " \
             "(got #{label.inspect}); convert it first, e.g. at(Float(s)) or at(Integer(s))"
     end
-    nan = label.is_a?(Float) && label.nan?
-    hit = nan ? @index.is_in([label]) : @index.eq(label)
+    nan = label.is_a?(Numeric) && label != label
+    hit = nan ? @index.is_in([label]) : @index.eq(exact_label(label))
     pos = hit.where
     case pos.elements
     when 0
@@ -1182,7 +1206,7 @@ class CAFrame
   # an index, the spliced-in frame must have one too (its rows need labels).
   private def splice_index(other, lo, hi)
     return nil unless @index
-    if other.nrow > 0 && other.index.nil?
+    if other.index.nil?
       raise ArgumentError,
             "splice frame needs an index because the target frame has one"
     end
@@ -1243,6 +1267,8 @@ class CAFrame
   end
 
   private def select_rows(selector)
+    # With no column and no index, nothing else bound-checks the selector.
+    selected_row_mask(selector) if @columns.empty? && @index.nil?
     cols = {}
     @columns.each do |name, col|
       cols[name] = col[selector, *([nil] * (col.ndim - 1))]
@@ -1262,6 +1288,12 @@ class CAFrame
             "(reset_index makes it a column again)"
     end
     raise KeyError, "#{lead}no column #{key.inspect}"
+  end
+
+  # The column a verb is given by name, the verb leading the refusal of a
+  # name that is no column.
+  private def named_column(key, verb)
+    @columns.fetch(key) { refuse_missing_column(key, verb) }
   end
 
   # filter takes no keyword. keep_masked:, which it once took, is named

@@ -44,6 +44,25 @@ class CArray
     end
     private :string_map
 
+    # An ordering (pmax and its kin, clip) with a value that is not a String
+    # is refused as String#< refuses it.  nil (no bound, for clip), UNDEF,
+    # an Array and a CArray are left to the operation.
+    def refuse_unordered_operands (verb, *operands)
+      operands.each do |v|
+        next if v.nil? || v.is_a?(String) || v.is_a?(Array) || v.is_a?(CArray) || UNDEF.equal?(v)
+        name = v.is_a?(Symbol) ? v.inspect : v.class
+        raise ArgumentError, "#{verb}: comparison of String with #{name} failed"
+      end
+    end
+    private :refuse_unordered_operands
+
+    # Clips the strings in byte order (see {CArray#clip}); a bound that is
+    # not a String is refused.
+    def clip (min, max = nil, *rest, **kw)
+      refuse_unordered_operands("clip", min, max)
+      super
+    end
+
     # ---- transforms (String result -> CAString) --------------------------
 
     # Per-cell `String#upcase`.
@@ -93,7 +112,7 @@ class CArray
     def encode (*a)    ; string_map { |s| s.encode(*a) } ; end
     # Per-cell `String#force_encoding`.
     # @return [CAString] shape and mask of `self` preserved.
-    def force_encoding (e) ; string_map { |s| s.force_encoding(e) } ; end
+    def force_encoding (e) ; string_map { |s| s.dup.force_encoding(e) } ; end
     # Per-cell `String#scrub`.
     # @return [CAString] shape and mask of `self` preserved.
     def scrub ()       ; string_map { |s| s.scrub } ; end
@@ -221,14 +240,16 @@ class CArray
       end
       entity = CArray.new(CA_FIXLEN, shape, :bytes => width)
       values.each_with_index { |s, i| entity[i] = s.nil? ? UNDEF : s }
-      CAFixlenString.wrap(entity)
+      text = respond_to?(:encoding) ? encoding : CAFixlenString.__send__(:encoding_of_strings, values)
+      CAFixlenString.wrap(entity, encoding: text)
     end
 
     # Self (zero-copy) when already a {CAConstString} of the same encoding;
     # otherwise materialises a compact column.
-    # @param encoding [Encoding] column encoding.
+    # @param encoding [Encoding] column encoding; defaults to the encoding
+    #   the array carries, and to UTF-8 for one that carries none.
     # @return [CAConstString]
-    def to_const_string (encoding: Encoding::UTF_8)
+    def to_const_string (encoding: respond_to?(:encoding) ? self.encoding : Encoding::UTF_8)
       if is_a?(CAConstString) && encoding == self.encoding
         return self
       end

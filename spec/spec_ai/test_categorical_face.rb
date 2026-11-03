@@ -607,4 +607,19 @@ class TestCACategoricalFace < Test::Unit::TestCase
     assert_equal [3, 2, 1], cat.category_sizes.to_a
   end
 
+
+  def test_count_takes_the_keywords_of_carray_count
+    o = CA_OBJECT(%w[ab b ab 1 zz b]); o[4] = UNDEF
+    c = o.categorize.reshape(2, 3)
+    s = CArray.string(o).reshape(2, 3)
+    [[], ["ab"], ["nope"], [UNDEF]].each do |args|
+      [{ axis: 1 }, { axis: 0 }, { min_count: 1 }, { axis: 1, keep_axis: true }].each do |kw|
+        want = s.count(*args, **kw)
+        got = c.count(*args, **kw)
+        assert_equal want.respond_to?(:to_a) ? want.to_a : want,
+                     got.respond_to?(:to_a) ? got.to_a : got, "#{args.inspect} #{kw}"
+      end
+    end
+    assert_equal [[2], [0]], c.blocks(1, 3).count("ab").to_a
+  end
 end

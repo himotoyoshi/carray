@@ -492,6 +492,7 @@ class CACategoricalIterator < CASegmentIterator
   # each c) — bounded by K, typically small.  A fused per-fiber variance
   # kernel is a natural follow-on if bench demands it.
   def axis_by_masked_copy (axis, op, out_data_type = core_reduce_type(op))
+    return axis_by_core(axis, op) if @value.face?
     h = @value
     axis = checked_axis(axis, op)
     full_c    = resolve_axis_codes(@cat.codes, h.shape, axis)
@@ -534,7 +535,7 @@ class CACategoricalIterator < CASegmentIterator
       flat ? g.__send__(op, *args, axis: axis, keep_axis: true)
            : g.__send__(op, *args, axis: axis)
     end
-    if answers.first.face? && answers.first.read_only?
+    if answers.first.face? && !answers.first.__send__(:holds_new_values?)
       answers = answers.map { |a| CArray.object(*a.shape) { a.to_a } }
     end
     out = flat ? CArray.concatenate(answers) : CArray.stack(answers, axis: 0).copy

@@ -135,7 +135,9 @@ class CArray
   #     `self`; cells with no match in the direction and beyond-tolerance
   #     cells are masked.
   #   @raise [ArgumentError] when `direction` is not one of the accepted
-  #     symbols, or `tolerance` is not a duration for a time key.
+  #     symbols, `tolerance` is not a duration for a time key, or `:round` /
+  #     `tolerance` is asked of an object key whose values have no `-` (a
+  #     String is ordered but has no distance).
   def locate_nearest_addr (ref, direction: :round, tolerance: nil)
     unless [:round, :floor, :ceil].include?(direction)
       raise ArgumentError,
@@ -150,8 +152,8 @@ class CArray
     # one has no place among the others either; it sorts after them.
     ri = ref.sort_addr
     ri = ri[0...ref.count_not_masked] if ref.has_mask?
-    if ref.float? && ri.elements > 0
-      ri = ri[0...(ri.elements - ref[ri].is_nan.count(true))]
+    if ri.elements > 0 && (nan = nearest_nan_cells(ref[ri]))
+      ri = ri[0...(ri.elements - nan.count(true))]
     end
     if ri.elements == 0
       out = CArray.int64(*shape)
@@ -160,6 +162,7 @@ class CArray
     end
     rs = ref[ri]
     n = rs.elements
+    nearest_refuse_distanceless(rs, direction, limit)
     rk, qk = nearest_keys(rs, self)
     # The position of each cell among the sorted references is counted, not
     # interpolated: :floor takes the last reference at or below it, :ceil the
@@ -172,15 +175,67 @@ class CArray
          when :round then nearest_round(rk, qk, nearest_count_below(rk, qk, false))
          end
     si[si.lt(0) | si.ge(n)] = UNDEF
-    si[qk.is_nan.strip_mask(false)] = UNDEF if qk.float?
+    nan = nearest_nan_cells(qk)
+    si[nan.strip_mask(false)] = UNDEF if nan
     si = si.reshape(*shape)
     si[is_masked] = UNDEF if has_mask?
     idx = ri.project(si)
     if limit
-      dist = (ref.project(idx) - self).abs
-      idx[dist > limit] = UNDEF
+      idx[nearest_beyond(ref.project(idx), self, limit)] = UNDEF
     end
     idx
+  end
+
+  # The NaN cells of a key, nil for a key that has none. A NaN in an object
+  # key is the cell that differs from itself.
+  private def nearest_nan_cells(key)
+    return key.is_nan if key.float?
+    return key.ne(key) if key.data_type == CA_OBJECT && !key.face?
+    nil
+  end
+
+  # :round and tolerance: measure how far a key is from its neighbours. An
+  # object key whose values have no subtraction (a String) is ordered but
+  # has no distance: only :floor and :ceil apply to it.
+  private def nearest_refuse_distanceless(key, direction, limit, subject = "locate_nearest_addr")
+    return unless key.data_type == CA_OBJECT && !key.face?
+    return unless direction == :round || limit
+    value = key.to_a.find { |v| !v.equal?(UNDEF) && v == v }
+    return if value.nil? || value.respond_to?(:-)
+    asked = (direction == :round) ? "direction: :round" : "tolerance:"
+    raise ArgumentError,
+          "#{subject}: #{asked} measures a distance, and a key of #{value.class} values " \
+          "has none (#{value.class} has no -); use direction: :floor or :ceil without tolerance:"
+  end
+
+  # Whether each pair of keys lies farther apart than +limit+. A time key is
+  # measured in ticks of the unit both keys meet in, as an integer key is:
+  # two instants an int64 holds can lie farther apart than an int64 holds (a
+  # nanosecond key spanning more than 292 years).
+  private def nearest_beyond(a, b, limit)
+    time_key = (a.is_a?(CATime) || a.is_a?(CATimedelta)) && a.class == b.class
+    r = time_key && CATimeUnitAlgebra.ratio(limit.unit, CATimeUnitAlgebra.diff_unit(a.unit, b.unit))
+    return nearest_distance(a, b) > limit unless r
+    a, b = a.in_common_unit_with(b)
+    threshold = (limit.value * r).floor
+    out = nearest_distance(a.ticks, b.ticks) > [threshold, 2**64 - 1].min
+    out[] = false if threshold >= 2**64 - 1
+    out
+  end
+
+  # How far apart two keys are. Integer keys are measured from the smaller to
+  # the larger, which fits an unsigned integer however far apart they are:
+  # the difference in their own type would wrap.
+  private def nearest_distance(a, b)
+    return (a - b).abs if a.face? || b.face?
+    t = a.send(:query_match_type, b)
+    return (a - b).abs if t == CA_OBJECT
+    a, b = a.to_type(t), b.to_type(t)
+    return (a - b).abs unless a.integer?
+    unless t == CA_UINT64
+      a, b = a.to_type(CA_INT64), b.to_type(CA_INT64)
+    end
+    (a.pmax(b) - a.pmin(b)).to_type(CA_UINT64)
   end
 
   # A key held as fixed-length bytes (raw fixlen, or a fixlen string) has
@@ -207,11 +262,7 @@ class CArray
   # that holds both.
   private def nearest_keys(rs, q)
     if rs.face? || q.face?
-      if rs.respond_to?(:to_unit) && q.class == rs.class && q.unit != rs.unit
-        u  = CATimeUnitAlgebra.finer(rs.unit, q.unit)
-        rs = rs.to_unit(u)
-        q  = q.to_unit(u)
-      end
+      rs, q = rs.in_common_unit_with(q) if rs.respond_to?(:to_unit) && q.class == rs.class && q.unit != rs.unit
       q  = rs.__send__(:reconcile_operand, q, "locate_nearest_addr")
       rs = rs.__send__(:face_storage)
     end
@@ -248,7 +299,7 @@ class CArray
   private def nearest_round(rk, qk, lt)
     lo = rk.project(lt - 1)
     hi = rk.project(lt)
-    upper = (hi - qk).le(qk - lo).strip_mask(false)
+    upper = nearest_distance(hi, qk).le(nearest_distance(qk, lo)).strip_mask(false)
     upper[lo.is_masked] = true if lo.has_mask?
     upper[hi.is_masked] = false if hi.has_mask?
     upper[hi.eq(qk).strip_mask(false)] = true

@@ -61,6 +61,9 @@ void ca_sort_merge_f64 (double    *a, double    *aux, ca_size_t n);
 /* P.3: NaN pre-partition for float data types (Hoare 1-pass, returns finite count). */
 ca_size_t ca_partition_nan_f32 (float32_t *a, ca_size_t n);
 ca_size_t ca_partition_nan_f64 (double    *a, ca_size_t n);
+/* The same, keeping the order within both regions; scratch holds n values. */
+ca_size_t ca_partition_nan_stable_f32 (float32_t *a, ca_size_t n, float32_t *scratch);
+ca_size_t ca_partition_nan_stable_f64 (double    *a, ca_size_t n, double    *scratch);
 
 /* Pair variant of NaN pre-partition for float argsort kernels.  scratch
    holds n pairs; its contents on return are unspecified. */

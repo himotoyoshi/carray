@@ -162,6 +162,10 @@ class CArray
     lfill = fill_value if lfill.nil?
     ufill = fill_value if ufill.nil?
     out = copy
+    # Whatever is written must fit: a finer time, a wider fixed string.
+    [min, max, lfill, ufill].each { |v|
+      out, = branches_in_common(out, v) unless v.nil? || UNDEF.equal?(v)
+    }
     out[self < min] = lfill.nil? ? min : lfill unless min.nil?
     out[self > max] = ufill.nil? ? max : ufill unless max.nil?
     out
@@ -170,6 +174,12 @@ class CArray
   # An array of +shape+ of the same kind as self: its data type and cell
   # width, or its Face over a zero storage.  Nothing is written into it, so
   # it can be built for a read-only Face too.
+  # Whether a cell can be given a value it has not seen.  Not a CAConstString,
+  # whose strings share a buffer, or a CACategorical, whose codes index a
+  # vocabulary.  A view that is read-only can still hold them: it is only
+  # that view that cannot be written.
+  private def holds_new_values? = true
+
   private def blank_like (shape)
     storage = face_storage
     out = CArray.new(storage.data_type, shape, bytes: storage.bytes)
@@ -334,7 +344,8 @@ class CArray
   #   masked: a missing bound is not read as either, so fill it first.
   #
   #   Boundary is strict `[min, max]`: values equal to a bound
-  #   remain unchanged in both the clamped and filled variants.
+  #   remain unchanged in both the clamped and filled variants.  A NaN
+  #   is in neither range and stays NaN.
   #
   #   @param min [Numeric, nil] lower bound; `nil` for one-sided
   #     clip above.
@@ -597,14 +608,14 @@ class CArray
   # reductions do: each block value is written into a blank of the Face
   # (which reads a CATime::Element, a string, a Face array ...) and handed
   # to the slab engine as the storage it became; the result is lifted back
-  # at the end.  A read-only Face has no blank to write into, so its values
-  # are collected as the surface objects they are.  A `data_type:` from the
-  # caller is the caller's, and passes through.
+  # at the end.  A Face that holds no new value has no blank to write into,
+  # so its values are collected as the surface objects they are.  A
+  # `data_type:` from the caller is the caller's, and passes through.
   module FaceSlabResult
     def map_slab (**kw, &block)
       return super unless face? && kw[:data_type].nil? && block
-      return super(**kw, data_type: :object, &block) if read_only?
-      out = super(**kw, data_type: face_storage.data_type) { |slab|
+      return super(**kw, data_type: :object, &block) unless holds_new_values?
+      out = super(**kw, **face_slab_type) { |slab|
         face_slab_storage(block.call(slab), slab.shape)
       }
       out.face_lift(self)
@@ -612,10 +623,10 @@ class CArray
 
     def reduce_slab (**kw, &block)
       return super unless face? && kw[:data_type].nil? && block
-      return super(**kw, data_type: :object, &block) if read_only?
+      return super(**kw, data_type: :object, &block) unless holds_new_values?
       fiber = kw.key?(:init)
       init  = kw.delete(:init)
-      out = super(**kw, data_type: face_storage.data_type) { |slab|
+      out = super(**kw, **face_slab_type) { |slab|
         value = if fiber
                   slab.to_a.flatten.inject(init) { |acc, e| block.call(acc, e) }
                 else
@@ -627,6 +638,13 @@ class CArray
     end
 
     private
+
+    # The engine's output type.  Fixlen storage is named by leaving it out: the
+    # name alone has no width, and the source's is the one wanted.
+    def face_slab_type
+      storage = face_storage
+      storage.data_type == CA_FIXLEN ? {} : { data_type: storage.data_type }
+    end
 
     def face_slab_storage (value, shape)
       cell = blank_like(shape)

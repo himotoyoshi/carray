@@ -45,7 +45,8 @@ class CArray
   #   @param addrs [CArray, Array<Integer>]
   #   @param vals [CArray, Numeric]
   #   @return [self]
-  #   @raise [IndexError] for out-of-range addresses.
+  #   @raise [IndexError] for out-of-range addresses, or when `addrs` is
+  #     float, complex, object or boolean.
   #   @raise [CArray::DataTypeError] for non-numeric `data_type`.
   def scatter_add!(addrs, vals); end
 

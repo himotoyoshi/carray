@@ -94,7 +94,10 @@ class CArray
     # The write goes through a flattened view, which carries a frozen
     # array's read-only flag but not its frozenness; say what the array is.
     raise FrozenError.new("can't modify frozen #{self.class}", receiver: self) if frozen?
-    flat_addr, _outer, _rest = gather_nd_flat_addr(indices, "put_nd")
+    flat_addr, outer, rest = gather_nd_flat_addr(indices, "put_nd")
+    # The values lie as gather_nd gives them back.
+    out_shape = outer + rest
+    flat_addr = flat_addr.reshape(*out_shape) unless out_shape.empty?
     if flat_addr.has_mask?
       # A masked coordinate writes nothing.  The values are laid out over
       # the coordinates by the store itself, so they mean what they mean

@@ -954,15 +954,29 @@ ca_refuse_cells_reaching_evaluation (ca_size_t n, const VALUE *cells)
   }
 }
 
+static VALUE
+ca_computing_start (VALUE arg)
+{
+  return ca_computing_next((ca_computing_t *) arg);
+}
+
 /* Runs body(arg), a computation over ops[0..n), with each object array
    among them recorded as computed over.  Raises when one of them is
    already being computed over by the same method: a cell's value, or an
-   element's operation, led the computation back into it. */
+   element's operation, led the computation back into it.  A computation
+   over object cells calls methods of the cells, so it counts as a walk into
+   them (ca_cell_walk_run). */
 VALUE
 ca_computing_run (int n, CArray **ops, VALUE (*body)(VALUE), VALUE arg)
 {
   ca_computing_t c;
+  int k;
   c.n = n; c.ops = ops; c.kind = CA_RECURSION_COMPUTE; c.k = 0; c.body = body; c.arg = arg;
+  for (k=0; k<n; k++) {
+    if ( ops[k] && ca_is_object_type(ops[k]) ) {
+      return ca_cell_walk_run(ca_computing_start, (VALUE) &c);
+    }
+  }
   return ca_computing_next(&c);
 }
 
@@ -985,6 +999,55 @@ ca_recursion_probe (VALUE key, VALUE arg, int recursive)
   return recursive ? Qtrue : Qfalse;
 }
 
+/* A walk into the cells of an object array (#hash, #==, a nested dump) goes
+   on into any array it finds there.  An array holding itself is found by
+   the records above, but a cell can also give a new array each time it is
+   opened (a lazy expression over an array that holds it), and then the walk
+   never meets an array it has seen.  So the depth of these walks is
+   limited.  It is counted for each fiber, not in the arrays. */
+
+#define CA_CELL_NESTING_MAX 256
+
+typedef struct {
+  VALUE thread;
+  VALUE before;
+} ca_cell_nesting_t;
+
+static VALUE
+ca_cell_nesting_leave (VALUE varg)
+{
+  ca_cell_nesting_t *t = (ca_cell_nesting_t *) varg;
+  rb_thread_local_aset(t->thread, rb_intern("carray_cell_nesting"), t->before);
+  return Qnil;
+}
+
+VALUE
+ca_cell_walk_run (VALUE (*body)(VALUE), VALUE arg)
+{
+  ca_cell_nesting_t t;
+  long depth;
+
+  t.thread = rb_thread_current();
+  if ( OBJ_FROZEN(t.thread) ) {       /* it can not hold the count */
+    return body(arg);
+  }
+  t.before = rb_thread_local_aref(t.thread, rb_intern("carray_cell_nesting"));
+  depth    = NIL_P(t.before) ? 0 : FIX2LONG(t.before);
+  if ( depth >= CA_CELL_NESTING_MAX ) {
+    rb_raise(rb_eArgError, "%s: object cells nested too deep: more than %d levels",
+             ca_calling_method_name(), CA_CELL_NESTING_MAX);
+  }
+  rb_thread_local_aset(t.thread, rb_intern("carray_cell_nesting"), LONG2FIX(depth + 1));
+  return rb_ensure(body, arg, ca_cell_nesting_leave, (VALUE) &t);
+}
+
+static VALUE
+ca_yield_nil (VALUE arg)
+{
+  (void) arg;
+  return rb_yield(Qnil);
+}
+
 static VALUE
 ca_refuse_reentry_step (VALUE self, VALUE name, int recursive)
 {
@@ -993,14 +1056,14 @@ ca_refuse_reentry_step (VALUE self, VALUE name, int recursive)
     rb_raise(rb_eArgError, "%" PRIsVALUE ": cyclic reference is not allowed in CArray",
              name);
   }
-  return rb_yield(Qnil);
+  return ca_cell_walk_run(ca_yield_nil, Qnil);
 }
 
 /* refuse_reentry(name) { ... } -- runs the block, refusing as cyclic a
    second call for the same array from inside it (rb_exec_recursive, by
-   the receiver).  Ruby code that walks the cells of an object array and
-   comes back to the array through a cell, such as the nested dump of a
-   view, goes through this. */
+   the receiver), and counting it as a walk into cells.  Ruby code that
+   walks the cells of an object array and comes back to the array through a
+   cell, such as the nested dump of a view, goes through this. */
 static VALUE
 rb_ca_refuse_reentry (VALUE self, VALUE name)
 {
@@ -1015,7 +1078,7 @@ ca_test_cyclic_check (void *ap, void *ptr)
 {
   CArray *ca = (CArray *) ap;
   if ( ca_is_object_type(ca) ) {
-    VALUE rval = *(VALUE *) ptr;
+    volatile VALUE rval = *(VALUE *) ptr;
     if ( rb_obj_is_carray(rval) ) {
       CArray *cv;
       TypedData_Get_Struct(rval, CArray, &carray_data_type, cv);

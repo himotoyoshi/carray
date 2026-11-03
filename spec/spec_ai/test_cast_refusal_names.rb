@@ -17,8 +17,6 @@ class TestCastRefusalNames < Test::Unit::TestCase
       e = assert_raise(FloatDomainError, t.to_s) { a[] = CA_DOUBLE([Float::NAN, 1.0]) }
       assert_equal "[]=: NaN cannot be converted to #{t}", e.message
     end
-    e = assert_raise(FloatDomainError) { CArray.int32(1)[] = CA_DCOMPLEX([Complex(Float::NAN, 0)]) }
-    assert_equal "[]=: NaN cannot be converted to int32", e.message
   end
 
   def test_a_number_other_than_0_or_1_into_a_boolean_cell

@@ -42,18 +42,10 @@ class TestE6aCountTrueFalse < Test::Unit::TestCase
     assert_equal 0, e.count(false)
   end
 
-  def test_non_boolean_raises_type_error
-    # CF.2 Q3 strict: numeric array rejects true/false with TypeError
-    # at the dispatch layer (= count(v) on int32/f64 rejects bool literal
-    # before even reaching the kernel).  Previously raised CArray::
-    # DataTypeError from the kernel itself; the new dispatch wraps with
-    # a clearer Ruby-level TypeError.
-    assert_raise(TypeError) do
-      CArray.int32(5).seq.count(true)
-    end
-    assert_raise(TypeError) do
-      CArray.float64(5).seq.count(false)
-    end
+  def test_non_boolean_counts_true_and_false_as_one_and_zero
+    # A numeric array reads true and false as 1 and 0, as eq does.
+    assert_equal 1, CArray.int32(5).seq.count(true)
+    assert_equal 1, CArray.float64(5).seq.count(false)
   end
 
   # --- per-axis (NEW capability via mkkernel) ---

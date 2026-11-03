@@ -59,6 +59,8 @@ require "carray/methods/is_in"   # refuse_range_set, for the set-valued verbs
 # kernels are gated off (`cat + 1` raises; arithmetic on category codes is
 # not meaningful).
 class CACategorical < CAObject
+  private def holds_new_values? = false
+
 
   # raw-byte unpack format per storage (codes) data_type, native endian.
   # The FIXLEN surface delivers a per-cell fetch as an N-byte String; this
@@ -373,12 +375,13 @@ class CACategorical < CAObject
   #   Returns a boolean CArray marking cells whose category equals
   #   `label`. A CArray is compared cell by cell, by label: another
   #   categorical is matched whatever order its labels are in, and a
-  #   masked cell on either side gives UNDEF. Anything else, a Ruby Array
-  #   included, is one label, as for {CArray#eq}. An unknown label matches
-  #   nothing.
+  #   masked cell on either side gives UNDEF. `UNDEF` asks the mask, as for
+  #   {CArray#eq}: true where a cell is in no category. Anything else, a Ruby
+  #   Array included, is one label. An unknown label matches nothing.
   #   @param label [Object, CArray] category to match, or one per cell.
   #   @return [CArray]
   def eq(label)
+    return is_masked if label.equal?(UNDEF)
     codes.eq(codes_of(label))
   end
 
@@ -388,24 +391,31 @@ class CACategorical < CAObject
   #     cell.
   #   @return [CArray]
   def ne(label)
+    return is_not_masked if label.equal?(UNDEF)
     codes.ne(codes_of(label))
   end
 
   # @overload count(label)
   #   Returns the number of cells whose category equals `label`
-  #   (0 for an unknown label).
+  #   (0 for an unknown label). `UNDEF` counts the cells in no category,
+  #   as {#count_masked}. The keywords of {CArray#count} (`axis:`,
+  #   `keep_axis:`, `min_count:`, `fill_value:`) are taken in both forms.
   #   @param label [Object] category to count.
   #   @return [Integer]
   # @overload count
   #   Returns the number of cells in some category (not masked), as
   #   {CArray#count} with no value does.
   #   @return [Integer]
-  def count(*args)
-    return count_not_masked if args.empty?
+  def count(*args, **kw)
+    return count_not_masked(**kw) if args.empty?
     raise ArgumentError, "count: wrong number of arguments (given #{args.size}, expected 0..1)" if args.size > 1
     label = args[0]
+    return count_masked(**kw) if label.equal?(UNDEF)
     code = @labels.index(label)
-    code ? codes.count(code) : 0
+    return codes.count(code, **kw) if code
+    # an unknown label matches no cell; counted over the same mask so the
+    # keywords (axis:, min_count:, fill_value:) answer as for a known label
+    kw.empty? ? 0 : codes.ne(codes).count(true, **kw)
   end
 
   # Per-category counts as a length-k array aligned to #labels. Trailing empty
@@ -494,7 +504,10 @@ class CACategorical < CAObject
   #   @return [CArray]
   def is_in (values)
     refuse_range_set(values, "is_in")
-    wanted = label_list(values).filter_map { |l| @labels.index(l) }
+    wanted = label_list(values).filter_map do |l|
+      # nan-order: looks a label up and orders nothing; == does not find a NaN.
+      l.is_a?(Float) && l.nan? ? @labels.index { |x| x.is_a?(Float) && x.nan? } : @labels.index(l)
+    end
     codes.is_in(CArray.int64(wanted.size) { |i| wanted[i] })
   end
 

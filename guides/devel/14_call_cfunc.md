@@ -26,7 +26,7 @@ and is intentionally kept: it is the most ergonomic surface when you
 already have a scalar C function and just want it applied element-wise
 with automatic casting and masking. Companion gems (carray-gsl, a PROJ
 binding, …) are its main consumers, and a few in-tree functions use it
-(`CAMath.lgamma`, `CAMath.sph_to_xyz`).
+(`CAMath.lgamma`, `CAMath.spherical_to_xyz`).
 
 This chapter is the developer-framing reference for the surface, with
 complete signature listings.
@@ -221,10 +221,13 @@ fixture `spec_ai/ext_cfunc_r_smoke/cfunc_r.c`).
   operands must agree in shape (a mismatch raises `ArgumentError`, even
   when the two arrays hold the same number of cells). There is no
   implicit NumPy-style trailing-axis alignment (CArray policy).
+- **Scalar outputs** — a scalar output pairs only with scalar inputs; beside
+  an array operand the raw layer raises `ArgumentError`.
 - **Mask handling** — the masks of all **input** operands are OR-folded
   into a single mask byte array and propagated to the outputs; masked
   cells are **skipped** (the callback is not invoked for them). You
-  never touch mask pointers.
+  never touch mask pointers. An output's mask is overwritten either way:
+  with no masked input, a mask the output already had is cleared.
 - **Attach-safety** — input-only operands (`fsync == '0'`) are
   **never** attached: the engine alias-checks via `ca_attach_is_alias`
   and, for non-alias views, uses `xmalloc` + `ca_xfer_all` to get a

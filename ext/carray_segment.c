@@ -34,7 +34,7 @@ static ID id_lengths, id_offsets;
    data type and masked cells, since neither names a count or a
    position. */
 static VALUE
-segment_read_int64 (VALUE v, const char *name, int is_lengths,
+segment_read_int64 (volatile VALUE v, const char *name, int is_lengths,
                     ca_size_t pad_front, CArray **out_ca, ca_size_t *out_k)
 {
   CArray *src, *dst;

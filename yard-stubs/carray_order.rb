@@ -24,6 +24,7 @@ class CArray
   #   @return [CArray] a fresh array shaped like `idx`; a Face of the same
   #     type when `self` is a Face.
   #   @raise [ArgumentError] if `lval` / `uval` is given and `self` is a Face.
+  #   @raise [IndexError] when `idx` is float, complex, object or boolean.
   def project(idx, lval = nil, uval = nil); end
 
   # sort / sort_copy stubs live in yard-stubs/carray_sort.rb (same
@@ -175,6 +176,11 @@ class CArray
   #   An `UNDEF` `val`, or a masked cell of a CArray `val`, finds
   #   nothing: `nil`, or `UNDEF` in that cell of the result.  The same
   #   holds for {#bsearch} and {#search_nearest}.
+  #
+  #   `nil` is no value of an array that is not `:object`, so it finds
+  #   nothing there; an `:object` array looks for it like any other value.
+  #   {#bsearch} and {#search_nearest} need an order or a distance, which
+  #   `nil` does not have, and raise.
   #
   #   A time array (`CATime`, `CATimedelta`) takes a value of another
   #   unit, a `Time` or a String: when it is off the array's grid the

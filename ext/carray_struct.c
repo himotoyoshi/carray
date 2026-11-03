@@ -113,9 +113,15 @@ ca_struct_read_primitive_fast (const char *p, int type_code)
   }
 }
 
+/* A String is read as a decimal number, as a store into the member's
+   field view reads it. */
 static void
 ca_struct_write_primitive_fast (char *p, int type_code, VALUE val)
 {
+  if ( type_code != CA_BOOLEAN && RB_TYPE_P(val, T_STRING) ) {
+    ca_decimal_string_store(val, (int8_t) type_code, p);
+    return;
+  }
   switch (type_code) {
   case CA_BOOLEAN: {
     /* The values a boolean array takes: true / false / 1 / 0. */
@@ -259,7 +265,7 @@ ca_struct_write_bitfield_fast (char *p, int view_bytes,
     }
   }
   else {
-    v = NUM2ULL(val);
+    v = NUM2ULL(ca_integer_wrap_bits(val, bits, 0));
   }
   uint64_t mask = (bits >= 64) ? ~(uint64_t)0
                                : ((uint64_t)1 << bits) - 1;
@@ -324,6 +330,15 @@ ca_struct_read_endian_swapped_fast (const char *p, int type_code)
 static void
 ca_struct_write_endian_swapped_fast (char *p, int type_code, VALUE val)
 {
+  if ( RB_TYPE_P(val, T_STRING) ) {
+    char host[8];
+    ca_decimal_string_store(val, (int8_t) type_code, host);
+    switch ( ca_sizeof[type_code] ) {
+    case 2: { uint16_t v; memcpy(&v, host, 2); v = CA_BSWAP16(v); memcpy(p, &v, 2); return; }
+    case 4: { uint32_t v; memcpy(&v, host, 4); v = CA_BSWAP32(v); memcpy(p, &v, 4); return; }
+    case 8: { uint64_t v; memcpy(&v, host, 8); v = CA_BSWAP64(v); memcpy(p, &v, 8); return; }
+    }
+  }
   switch (type_code) {
   case CA_INT16: {
     uint16_t v = (uint16_t) NUM2LL(ca_obj2integer_fitting(val, CA_INT16));
@@ -425,7 +440,7 @@ ca_struct_member_name (VALUE klass, VALUE name)
   if ( ! RB_TYPE_P(name, T_STRING) && ! RB_TYPE_P(name, T_FIXNUM) ) {
     rb_raise(rb_eTypeError,
              "a struct member is named by a String or an Integer position "
-             "(got %s)", rb_obj_classname(name));
+             "(got %"PRIsVALUE")", rb_obj_class(name));
   }
   name_s = ca_struct_resolve_name(klass, name);
   if ( NIL_P(name_s)
@@ -708,8 +723,8 @@ rb_ca_struct_initialize (int argc, VALUE *argv, VALUE self)
       VALUE unknown_inspect = rb_inspect(state.unknown_keys);
       VALUE known_inspect   = rb_inspect(members);
       rb_raise(rb_eArgError,
-               "unknown member(s) for %s: %s (known: %s)",
-               rb_class2name(klass),
+               "unknown member(s) for %"PRIsVALUE": %s (known: %s)",
+               klass,
                StringValueCStr(unknown_inspect),
                StringValueCStr(known_inspect));
     }
@@ -721,8 +736,8 @@ rb_ca_struct_initialize (int argc, VALUE *argv, VALUE self)
   long mems_size = RARRAY_LEN(members);
   if (argc > mems_size) {
     rb_raise(rb_eArgError,
-             "too many arguments for %s.new (<%d> for <%ld>)",
-             rb_class2name(klass), argc, mems_size);
+             "too many arguments for %"PRIsVALUE".new (<%d> for <%ld>)",
+             klass, argc, mems_size);
   }
   for (int i = 0; i < argc; i++) {
     VALUE name_s = rb_ary_entry(members, i);

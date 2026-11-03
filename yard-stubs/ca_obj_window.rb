@@ -54,7 +54,8 @@ class CArray
   #     or when `bounds` is not a recognised value.
   #   @raise [IndexError] when `bounds` is `"strict"` and a range reaches
   #     outside `self`, or `"ruby"` and a range reaches past the end or
-  #     before the first cell counted from the end.
+  #     before the first cell counted from the end, or `"nearest"` and a
+  #     range takes cells of an axis of length 0.
   def window(*ranges, fill_value: 0, bounds: "fill"); end
 
   # @!endgroup

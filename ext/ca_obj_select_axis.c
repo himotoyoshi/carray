@@ -726,9 +726,11 @@ ca_select_axis_func_allocate (void *ap)
 {
   CASelectAxis *ca = (CASelectAxis *) ap;
   if ( ! ca_parent_lends_no_memory(ca->parent) ) {
-    ca_attach(ca->parent);
+    ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
   }
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  else {
+    ca->ptr = ca_alloc_cells((CArray *) ca);
+  }
 }
 
 static void
@@ -743,10 +745,10 @@ ca_select_axis_func_attach (void *ap)
     return;
   }
 
-  ca_attach(ca->parent);
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
   ca_select_axis_describe_axes(ca, desc, pdims);
-  ca->ptr = ca_axis_dispatch_attach(ca->parent, pdims, desc, ca->ndim,
-                                    ca->bytes, ca->elements, NULL);
+  ca_axis_dispatch_gather(ca->parent, pdims, desc, ca->ndim,
+                          ca->bytes, ca->elements, NULL, ca->ptr);
 }
 
 static void
@@ -1008,7 +1010,7 @@ rb_ca_select_axis (int argc, VALUE *argv, VALUE self)
   }
 
   for ( i = 0; i < argc; i++ ) {
-    VALUE arg = argv[i];
+    volatile VALUE arg = argv[i];
 
     if ( ! rb_obj_is_carray(arg) ) {
       ca_index_axis_key(arg, parent->dim[i], i,

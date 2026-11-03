@@ -88,10 +88,15 @@ class CABlockIterator < CAIterator
     @sizes   = Array.new(@sndim)
     blocks.each_with_index do |b, i|
       if b.is_a?(Range)
+        unless b.begin.is_a?(Integer) && b.end.is_a?(Integer)
+          raise TypeError, "blocks: axis #{i} takes a Range of Integer positions, got #{b.inspect}"
+        end
         offsets[i] = b.begin
         @sizes[i]  = b.end - b.begin + (b.exclude_end? ? 0 : 1)
+      elsif b.is_a?(Integer)
+        @sizes[i]  = b
       else
-        @sizes[i]  = Integer(b)
+        raise TypeError, "blocks: a tile size must be an Integer (got #{b.class})"
       end
       if @sizes[i] < 1
         raise ArgumentError, "blocks: tile size on axis #{i} must be >= 1"
@@ -365,16 +370,9 @@ class CABlockIterator < CAIterator
   def count (*args, **kw)
     return count_not_masked(**kw) if args.empty?
     kw = CAIterator.reduce_keywords(:count, kw)
-    out = nil
-    each_region do |strip_ranges, tiles, out_ranges|
-      view = @source[*strip_ranges].block_view(*tiles)
-      # block_view is a CAStride, so #count is not shadowed; dispatch
-      # CArray#count explicitly anyway, matching the family regularity.
-      red = CArray.instance_method(:count).bind_call(view, *args, axis: @tile_axes, **kw)
-      out ||= CArray.new(red.data_type, @shape, bytes: red.bytes)
-      out[*out_ranges] = red
-    end
-    out
+    # block_view is a CAStride, so #count is not shadowed; dispatch
+    # CArray#count explicitly anyway, matching the family regularity.
+    assemble { |view, _| count_cells(view, *args, axis: @tile_axes, **kw) }
   end
 
   # @overload count_not_masked
@@ -477,6 +475,12 @@ class CABlockIterator < CAIterator
       return src[addr.strip_mask(hole[0])].copy
     end
     out = src[addr.strip_mask(0)].copy
+    unless out.__send__(:holds_new_values?)
+      # A const string's cells are written as Strings and packed again.
+      text = out.to_string
+      text[empty] = fill_value.nil? ? UNDEF : fill_value
+      return text.to_const_string
+    end
     out[empty] = fill_value.nil? ? UNDEF : fill_value
     out
   end
@@ -681,15 +685,24 @@ class CABlockIterator < CAIterator
   #   into a source-shaped CArray (the out-of-bounds cells of a partial edge
   #   tile are dropped).  Well-defined because tiles do not overlap; the source
   #   is not modified (a new array is returned).  Without a block, an Enumerator.
+  #   The result has the source's data type; a Face source gives a result of
+  #   the same Face, and a read-only Face (a categorical, a const string) an
+  #   object array of its surface values.
   #   @yieldparam tile [CArray]
   #   @return [CArray, Enumerator] source-shaped
   def map
     return to_enum(:map) unless block_given?
-    pout = CArray.new(padded_source.data_type, padded_source.shape, bytes: padded_source.bytes)
+    src  = padded_source
+    surface = src.face? && !src.__send__(:holds_new_values?)
+    pout = surface ? CArray.new(CA_OBJECT, src.shape) : src.__send__(:blank_like, src.shape)
     pgv  = pout.block_view(*@sizes)
     tgv  = tile_grid_view
     nils = Array.new(@sndim, nil)
-    CArray.each_index(*@shape) { |*g| pgv[*g, *nils] = yield(tgv[*g, *nils]) }
+    CArray.each_index(*@shape) { |*g|
+      tile = yield(tgv[*g, *nils])
+      tile = tile.to_a if surface && tile.is_a?(CArray) && tile.face?
+      pgv[*g, *nils] = tile
+    }
     pout[*@sndim.times.map { |i| 0...@source.shape[i] }].copy
   end
 
@@ -797,20 +810,23 @@ class CABlockIterator < CAIterator
       tile    = tgv[*g, *nils]
       scanned = tile.copy.reshape(tile.elements).public_send(op, *args).reshape(*@sizes)
       unless pout
-        pout = CArray.new(scanned.data_type, padded_source.shape, bytes: scanned.bytes)
+        pout = scanned.face? ? scanned.__send__(:blank_like, padded_source.shape) :
+                 CArray.new(scanned.data_type, padded_source.shape, bytes: scanned.bytes)
         pout[] = UNDEF
         pgv  = pout.block_view(*@sizes)
       end
       pgv[*g, *nils] = scanned
     end
+    # a source with no cells has no tile; its own scan gives the type
+    return @source.copy.reshape(@source.elements).public_send(op, *args).reshape(*@source.shape) unless pout
     pout[*@sndim.times.map { |i| 0...@source.shape[i] }].copy
   end
 
   # A source-shaped array that can hold what #tile_wise gives: of its kind,
-  # or an object array for a read-only Face, which cannot be written cell by
-  # cell.
+  # or an object array for a Face that holds no new value, which cannot be
+  # written cell by cell.
   def tile_output (lagged)
-    if lagged.face? && lagged.read_only?
+    if lagged.face? && !lagged.__send__(:holds_new_values?)
       CArray.object(*@source.shape)
     else
       lagged.__send__(:blank_like, @source.shape)
@@ -834,10 +850,21 @@ class CABlockIterator < CAIterator
       if pshape == @source.shape.to_a
         @source
       else
-        pad = @source.__send__(:blank_like, pshape)   # a Face stays one
-        pad[] = UNDEF
-        pad[*@sndim.times.map { |i| 0...@source.shape[i] }] = @source
-        pad
+        interior = @sndim.times.map { |i| 0...@source.shape[i] }
+        if @source.face? && !@source.__send__(:holds_new_values?)
+          # A Face that holds no new value cannot be written: its storage is
+          # padded and the Face put back on.
+          storage = @source.__send__(:face_storage)
+          pad = CArray.new(storage.data_type, pshape, bytes: storage.bytes)
+          pad[] = UNDEF
+          pad[*interior] = storage
+          pad.face_lift(@source)
+        else
+          pad = @source.__send__(:blank_like, pshape)   # a Face stays one
+          pad[] = UNDEF
+          pad[*interior] = @source
+          pad
+        end
       end
     end
   end

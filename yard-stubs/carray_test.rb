@@ -13,6 +13,7 @@ class CArray
   #   @return [Boolean]
   #   @raise [ArgumentError] if the number of indices does not match
   #     `ndim`.
+  #   @raise [TypeError] if an index is not an Integer.
   def valid_index?(*idx); end
 
   # @overload valid_addr?(addr)
@@ -21,11 +22,16 @@ class CArray
   #   @param addr [Integer] flat address into the contiguous element
   #     sequence.
   #   @return [Boolean]
+  #   @raise [TypeError] if `addr` is not an Integer.
   def valid_addr?(addr); end
 
   # @overload same_shape?(other)
-  #   Returns `true` if `other` has the same shape as `self`.
-  #   @param other [CArray]
+  #   Returns `true` if `other` has the same shape as `self`. Only the
+  #   shape is compared, whatever the data types of the two. A scalar has
+  #   the same shape as any array. An `other` that is not a CArray is read
+  #   as an object array: a nested Array by its nesting, anything else as
+  #   a scalar.
+  #   @param other [CArray, Object]
   #   @return [Boolean]
   def same_shape?(other); end
 
@@ -55,9 +61,10 @@ class CArray
   # @overload eql?(other)
   #   Returns `true` under Hash-invariant semantics: `data_class`,
   #   `data_type`, shape, and mask state must all match, and elements
-  #   are compared bitwise (for numeric types) or via `Object#eql?`
-  #   (for `:object` arrays), so -0.0 and 0.0 differ and two NaNs are
-  #   `eql?` only with the same bits.
+  #   are compared bitwise (for numeric types) or, for `:object` arrays, via
+  #   `Object#eql?` with an object equal to itself first, as in
+  #   `Array#eql?`. In a numeric array -0.0 and 0.0 differ and two NaNs
+  #   are `eql?` only with the same bits.
   #   Two Faces are `eql?` only when they are of the same class, share
   #   their state (a time array's unit, a categorical's labels) and hold
   #   the same storage.
@@ -72,7 +79,13 @@ class CArray
   #   `ndim`, `bytes`, `elements`, shape, scalar-ness, and mask
   #   presence; for unmasked arrays, samples the leading 64 bytes of
   #   data. Masked arrays skip the data sample.
+  #
+  #   An `:object` array samples the `#hash` of its cells, so an array in
+  #   a cell is hashed in turn. {#==}, {#eql?} and `Marshal.dump` walk into
+  #   cells the same way, and all of them refuse arrays nested more than
+  #   256 levels deep.
   #   @return [Integer]
+  #   @raise [ArgumentError] when object cells nest more than 256 levels.
   def hash; end
 
   # @!endgroup

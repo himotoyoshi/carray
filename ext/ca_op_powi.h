@@ -1,19 +1,11 @@
 /* ---------------------------------------------------------------------------
 
-   ca_op_powi.h -- shared `op_powi_<type>` integer-power helpers
+   ca_op_powi.h -- `op_powi_<type>`, an integer to an integer power
 
-   Used by:
-     - ext/carray_kernels.c (generated from ext/mkkernel.rb)
-         the `power` binop kernel's integer variants call
-         `op_powi_<type>` to compute integer exponentiation by binary
-         exponentiation (O(log p) vs pow's general path).
-     - ext/carray_math.c (hand-written, P.5b.5)
-         the `ipower` family (rb_ca_ipower, rb_ca_ipower_bang) uses
-         `op_powi_<type>` for the Float**Integer / Complex**Integer
-         fast path when invoked via CArray#pow with an Integer rhs.
-
-   Both files include this header independently; each TU gets its own
-   `static inline` copy with no linker conflicts.
+   The `power` binop kernel's integer variants (generated from
+   ext/mkkernel.rb) call `op_powi_<type>`, binary exponentiation in the
+   integer type.  A float or complex base goes through pow / cpow
+   instead (ext/ca_op_ipower.c for an Integer exponent).
 
    --------------------------------------------------------------------------- */
 
@@ -27,7 +19,7 @@
    an evaluator that compiles a kernel body calling op_powi_<type>
    (CArray.__kernel_helpers__, written into the build by mkkernel.rb).  It
    may use only <stdint.h>, float32_t / float64_t and ca_zerodiv: what such
-   an evaluator's C declares.  The complex instantiations stay outside. */
+   an evaluator's C declares. */
 
 /* BEGIN kernel helpers */
 
@@ -85,17 +77,6 @@ op_powi_## type (type x, int64_t p) \
   return op_powi_mag_## type(x, (uint64_t) p); \
 }
 
-#define op_powi_fc(type) \
-op_powi_magnitude(type) \
-static inline type \
-op_powi_## type (type x, int64_t p) \
-{ \
-  if ( p < 0 ) { \
-    return 1 / op_powi_mag_## type(x, (uint64_t) 0 - (uint64_t) p); \
-  } \
-  return op_powi_mag_## type(x, (uint64_t) p); \
-}
-
 op_powi(int8_t)
 op_powi_u(uint8_t)
 op_powi(int16_t)
@@ -104,12 +85,8 @@ op_powi(int32_t)
 op_powi_u(uint32_t)
 op_powi(int64_t)
 op_powi_u(uint64_t)
-op_powi_fc(float32_t)
-op_powi_fc(float64_t)
 
 /* END kernel helpers */
 
-op_powi_fc(cmplx64_t)
-op_powi_fc(cmplx128_t)
 
 #endif /* CA_OP_POWI_H */

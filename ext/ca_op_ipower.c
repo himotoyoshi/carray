@@ -1,7 +1,10 @@
 /* ---------------------------------------------------------------------------
 
-  Float/Complex ** Integer integer-exponent fast path via
-  binary exponentiation (O(log p)).
+  Float/Complex ** Integer: the exponent stays an int64 (no cast of the
+  array to a wider type), and each cell is computed exactly as `a ** b`
+  computes it when b is an array of that integer: the exponents -2 .. 4
+  by at most two multiplications or divisions, the rest by pow / powf /
+  cpow.
 
   Contents:
     (1) LAZY kernel table `ca_binop_ipower[CA_NTYPE]` — CABinOp dispatch
@@ -11,14 +14,59 @@
         `rb_ca_pow{,_bang}` dispatch between ipower (Float/Complex **
         Integer) and mkkernel-generated `rb_ca_power` (general pow).
 
-  Both paths share `op_powi_<type>` from ca_op_powi.h (= repeated
-  squaring, ~1-3 mul/cell for typical p).
+  Both paths share `ca_ipow_<type>` below.  The exponent is converted
+  the way an int64 cell is converted to the base's type (through double
+  for float32 / cmplx64), so the answer is the one the general power
+  kernel gives for the same exponent held in an array.
 
 ---------------------------------------------------------------------------- */
 
 #include "carray.h"
 #include "ca_binop_dispatch.h"
-#include "ca_op_powi.h"
+#include <math.h>
+#include <complex.h>
+
+/* The exponents -2 .. 4 take at most two roundings, as in the power
+   kernel (MkKernel.pow_short). */
+#define CA_IPOW_SHORT(x, p) do {                \
+    switch ( p ) {                              \
+    case 2:  return (x) * (x);                  \
+    case 3:  return (x) * (x) * (x);            \
+    case 4:  return ((x) * (x)) * ((x) * (x));  \
+    case 1:  return (x);                        \
+    case 0:  return 1;                          \
+    case -1: return 1 / (x);                    \
+    case -2: return 1 / ((x) * (x));            \
+    }                                           \
+  } while (0)
+
+static inline float32_t
+ca_ipow_float32_t (float32_t x, int64_t p)
+{
+  CA_IPOW_SHORT(x, p);
+  return powf(x, (float) (double) p);
+}
+
+static inline float64_t
+ca_ipow_float64_t (float64_t x, int64_t p)
+{
+  CA_IPOW_SHORT(x, p);
+  return pow(x, (double) p);
+}
+
+static inline cmplx64_t
+ca_ipow_cmplx64_t (cmplx64_t x, int64_t p)
+{
+  CA_IPOW_SHORT(x, p);
+  return cpow(x, (float) (double) p);
+}
+
+static inline cmplx128_t
+ca_ipow_cmplx128_t (cmplx128_t x, int64_t p)
+{
+  CA_IPOW_SHORT(x, p);
+  return cpow(x, (double) p);
+}
 
 /* Defined in ext/carray_kernels.c (mkkernel-generated general pow /
    cpow binop).  Called by rb_ca_pow{,_bang} when the fast path does
@@ -71,7 +119,7 @@ ca_binop_ipower_##T (ca_size_t n, boolean8_t *m,                        \
         p1 = q1 + k*i1;                                                 \
         p2 = q2 + k*i2;                                                 \
         p3 = q3 + k*i3;                                                 \
-        *p3 = op_powi_##T(*p1, *p2);                                    \
+        *p3 = ca_ipow_##T(*p1, *p2);                                    \
       }                                                                 \
     }                                                                   \
   } else {                                                              \
@@ -79,7 +127,7 @@ ca_binop_ipower_##T (ca_size_t n, boolean8_t *m,                        \
       p1 = q1 + k*i1;                                                   \
       p2 = q2 + k*i2;                                                   \
       p3 = q3 + k*i3;                                                   \
-      *p3 = op_powi_##T(*p1, *p2);                                      \
+      *p3 = ca_ipow_##T(*p1, *p2);                                      \
     }                                                                   \
   }                                                                     \
 }
@@ -115,12 +163,12 @@ ca_ipower_float32_t (ca_size_t n, boolean8_t *m,
   ca_u_float32_t *p1 = (ca_u_float32_t *) ptr1, *p2 = (ca_u_float32_t *) ptr2;
   if ( m ) {
     while (n--) {
-      if ( ! *m++ ) { *p2 = op_powi_float32_t(*p1, ipow); }
+      if ( ! *m++ ) { *p2 = ca_ipow_float32_t(*p1, ipow); }
       p1++; p2++;
     }
   }
   else
-    while (n--) { (*p2) = op_powi_float32_t(*p1, ipow); p1++; p2++; }
+    while (n--) { (*p2) = ca_ipow_float32_t(*p1, ipow); p1++; p2++; }
 }
 
 static void
@@ -130,12 +178,12 @@ ca_ipower_float64_t (ca_size_t n, boolean8_t *m,
   ca_u_float64_t *p1 = (ca_u_float64_t *) ptr1, *p2 = (ca_u_float64_t *) ptr2;
   if ( m ) {
     while (n--) {
-      if ( ! *m++ ) { *p2 = op_powi_float64_t(*p1, ipow); }
+      if ( ! *m++ ) { *p2 = ca_ipow_float64_t(*p1, ipow); }
       p1++; p2++;
     }
   }
   else
-    while (n--) { (*p2) = op_powi_float64_t(*p1, ipow); p1++; p2++; }
+    while (n--) { (*p2) = ca_ipow_float64_t(*p1, ipow); p1++; p2++; }
 }
 
 static void
@@ -145,12 +193,12 @@ ca_ipower_cmplx64_t (ca_size_t n, boolean8_t *m,
   ca_u_cmplx64_t *p1 = (ca_u_cmplx64_t *) ptr1, *p2 = (ca_u_cmplx64_t *) ptr2;
   if ( m ) {
     while (n--) {
-      if ( ! *m++ ) { *p2 = op_powi_cmplx64_t(*p1, ipow); }
+      if ( ! *m++ ) { *p2 = ca_ipow_cmplx64_t(*p1, ipow); }
       p1++; p2++;
     }
   }
   else
-    while (n--) { (*p2) = op_powi_cmplx64_t(*p1, ipow); p1++; p2++; }
+    while (n--) { (*p2) = ca_ipow_cmplx64_t(*p1, ipow); p1++; p2++; }
 }
 
 static void
@@ -160,12 +208,12 @@ ca_ipower_cmplx128_t (ca_size_t n, boolean8_t *m,
   ca_u_cmplx128_t *p1 = (ca_u_cmplx128_t *) ptr1, *p2 = (ca_u_cmplx128_t *) ptr2;
   if ( m ) {
     while (n--) {
-      if ( ! *m++ ) { *p2 = op_powi_cmplx128_t(*p1, ipow); }
+      if ( ! *m++ ) { *p2 = ca_ipow_cmplx128_t(*p1, ipow); }
       p1++; p2++;
     }
   }
   else
-    while (n--) { (*p2) = op_powi_cmplx128_t(*p1, ipow); p1++; p2++; }
+    while (n--) { (*p2) = ca_ipow_cmplx128_t(*p1, ipow); p1++; p2++; }
 }
 
 /* The data types the ipower kernels cover; checked before any window

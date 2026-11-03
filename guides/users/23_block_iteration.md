@@ -1,12 +1,12 @@
 # Block iteration
 
-The reductions in [Reduction and statistics](04_reduction_and_statistics.md) collapse a whole axis. The [slab iterator](11_slab_iteration.md) folds a 1-D fiber. The [window iterator](22_window_iteration.md) folds an *overlapping* window that slides one cell at a time. The **block iterator** folds a *non-overlapping* tile: the array is cut into fixed-size tiles, each tile is reduced to one value, and the result is a small grid — one cell per tile.
+The reductions in [Reduction and statistics](04_reduction_and_statistics.md) collapse a whole axis. The [slab iterator](11_slab_iteration.md) folds a slab. The [window iterator](22_window_iteration.md) folds an *overlapping* window that slides one cell at a time. The **block iterator** folds a *non-overlapping* tile: the array is cut into fixed-size tiles, each tile is reduced to one value, and the result is a small grid — one cell per tile.
 
-This is **pooling**, the operation you use to downsample: mean-pool or max-pool a 2-D grid, shrink an image, aggregate a fine grid into a coarse one.
+This is **pooling**, the operation that downsamples an array: mean-pool or max-pool a 2-D grid, shrink an image, aggregate a fine grid into a coarse one.
 
-A *tile* here is a rectangular block of cells of a fixed per-axis size. Tiles do not overlap and together they cover the whole array. Contrast the family:
+A *tile* here is a rectangular block of cells with a fixed size on each axis. Tiles do not overlap and together they cover the whole array. Contrast the family:
 
-* a **slab** is a 1-D fiber — you pick an axis, the rest index which fiber;
+* a **slab** is the sub-array cut out by `axis:` — the other axes select which slab;
 * a **window** overlaps its neighbours — anchor at every cell, output stays the source shape;
 * a **tile** is disjoint — the output is a coarse **grid**, much smaller than the source.
 
@@ -36,7 +36,7 @@ a.blocks(2, 2).max
 #       [ 13, 15 ] ]
 ```
 
-You give one size per axis — `blocks(2, 2)` for a 2-D array, `blocks(2)` for a 1-D array, `blocks(4, 4, 4)` for a 3-D array. Passing the wrong number of sizes raises `ArgumentError`.
+The arguments are one size per axis — `blocks(2, 2)` for a 2-D array, `blocks(2)` for a 1-D array, `blocks(4, 4, 4)` for a 3-D array. Passing the wrong number of sizes raises `ArgumentError`.
 
 ```ruby
 CArray.int32(6).seq.blocks(2).sum
@@ -168,7 +168,7 @@ bi.count_masked
 
 ### Requiring full tiles — `min_count:`
 
-If you want a partial tile to report **no answer** rather than a value from too few cells, pass `min_count:` — a tile with fewer present cells than that becomes `UNDEF`. It passes straight through to the core reduction.
+To make a partial tile report **no answer** rather than a value from too few cells, pass `min_count:` — a tile with fewer present cells than that becomes `UNDEF`. It passes straight through to the core reduction.
 
 ```ruby
 CArray.int32(5, 5).seq.blocks(2, 2).mean(min_count: 4)
@@ -177,11 +177,11 @@ CArray.int32(5, 5).seq.blocks(2, 2).mean(min_count: 4)
 #       [ UNDEF, UNDEF, UNDEF ] ]
 ```
 
-`fill_value:` is the companion knob — it replaces the would-be `UNDEF` cells with a value instead. Both are accepted by `sum`, `prod`, `mean`, `min`, `max`, `variance`, `stddev`, `variancep`, `stddevp`, and `minmax`.
+`fill_value:` is the companion option — it replaces the would-be `UNDEF` cells with a value instead. Both are accepted by `sum`, `prod`, `mean`, `min`, `max`, `variance`, `stddev`, `variancep`, `stddevp`, and `minmax`.
 
 ### "Valid" pooling — slice first
 
-If you would rather **drop** the remainder entirely and pool only over full tiles (a floor grid), there is no boundary knob for it — express it explicitly by slicing the source before you tile:
+To **drop** the remainder entirely and pool only over full tiles (a floor grid), slice the source before calling `blocks`. There is no option for this:
 
 ```ruby
 a = CArray.int32(5).seq
@@ -191,7 +191,7 @@ a[0...4].blocks(2).sum
 
 ## Masks
 
-A masked source is passed straight through: each tile carries the mask, and the per-tile reduction skips the masked cells exactly as it would on a whole array (see [Masks and missing values](05_masks.md)).
+A masked source is passed straight through: each tile carries the mask, and the reduction of each tile skips the masked cells exactly as it would on a whole array (see [Masks and missing values](05_masks.md)).
 
 ```ruby
 a = CArray.double(4, 4).seq
@@ -229,21 +229,21 @@ a.blocks(2, 2).map { |tile| tile - tile.mean }    # centre each tile
 
 Each tile the block sees is a uniform `Π sz_i`-shaped CArray. At a partial edge tile the out-of-bounds cells are masked (so the block always sees a full-shaped tile), and when the result is scattered back those out-of-bounds cells are simply dropped. Without a block, `map` returns an enumerator.
 
-## `each` / `reduce` — the escape hatch
+## `each` / `reduce` — custom statistics
 
-For a per-tile statistic not in the named surface, `each` and `reduce` hand you each tile as a plain CArray and let you write the body in Ruby. This is the slow path — it materialises each tile — so prefer a named reduction when one fits.
+For a statistic not in the named surface, `each` and `reduce` pass each tile to the block as a plain CArray. This is the slow path, because each tile is materialised, so prefer a named reduction when one fits.
 
 `reduce { |tile| … }` folds each tile to one value with the block:
 
 ```ruby
 CArray.int32(4, 4).seq.blocks(2, 2).reduce { |tile| tile.max - tile.min }
 #  => [ [ 5, 5 ],
-#       [ 5, 5 ] ]              per-tile range
+#       [ 5, 5 ] ]              range of each tile
 ```
 
-`reduce(init) { |acc, x| … }` fiber-folds each tile element by element, like Ruby's `Enumerable#inject` (masked cells are skipped). `each { |tile| … }` runs the block for side-effects and returns `self`; without a block it returns an enumerator.
+`reduce(init) { |acc, x| … }` folds each tile element by element, like Ruby's `Enumerable#inject` (masked cells are skipped). `each { |tile| … }` runs the block for side-effects and returns `self`; without a block it returns an enumerator.
 
-At a partial edge tile these forms see a uniform full-shaped tile whose out-of-bounds cells are masked — you never get a ragged shape, the remainder is absorbed into the mask.
+At a partial edge tile these forms see a uniform full-shaped tile whose out-of-bounds cells are masked . The shape is never ragged, because the mask absorbs the remainder.
 
 ## A leading offset
 
@@ -254,7 +254,7 @@ CArray.int32(6).seq.blocks(1..2).sum   # offset 1, tile size 2
 #  => [ 3.0, 7.0, 5.0 ]                # skip cell 0, tile [1,2] [3,4] [5]
 ```
 
-The plain integer form `blocks(2)` is the common case (offset `0`); the range form is there when you need to align tiles to a boundary other than the start.
+The plain integer form `blocks(2)` is the common case (offset `0`); the range form aligns tiles to a boundary other than the start.
 
 ## Method reference
 
@@ -283,10 +283,10 @@ Built with `a.blocks(sz0, sz1, …)` — one tile size per axis (an Integer, or 
 | `count_not_masked` | count of present cells (fewer at a partial edge tile) |
 | `count_masked` | count of masked cells (`elements - count_not_masked`) |
 | `elements` | structural tile size `Π sz_i` (mask-independent) |
-| `map { \|tile\| … }` | per-tile transform scattered back to a source-shaped array |
+| `map { \|tile\| … }` | transform each tile, scattered back to a source-shaped array |
 | `each { \|tile\| … }` | run the block per tile for side-effects; returns `self` |
-| `reduce { \|tile\| … }` | custom per-tile fold to one value |
-| `reduce(init) { \|acc, x\| … }` | per-tile element-by-element fold |
+| `reduce { \|tile\| … }` | custom fold of each tile to one value |
+| `reduce(init) { \|acc, x\| … }` | element-by-element fold of each tile |
 | `source` | the array being tiled (leading offset already applied) |
 | `shape` / `ndim` | the tile-grid shape / its rank |
 
@@ -299,4 +299,4 @@ Reduction keywords (accepted by `sum`, `prod`, `mean`, `min`, `max`, `variance`,
 
 ## Where block iteration fits
 
-`blocks` is one member of the [iterator family](21_iterator_family.md) — the same reduction names (`sum`, `mean`, `minmax`, `median`, the count family, `map`, `each` / `reduce`) appear on every member, and each differs only in what a *piece* is. Reach for the block iterator when you want to **pool or downsample** into non-overlapping tiles; for a rolling statistic use the [window iterator](22_window_iteration.md), and for a statistic per row or column of the full extent use the [slab iterator](11_slab_iteration.md).
+`blocks` is one member of the [iterator family](21_iterator_family.md) — the same reduction names (`sum`, `mean`, `minmax`, `median`, the count family, `map`, `each` / `reduce`) appear on every member, and each differs only in what a *piece* is. Use the block iterator to **pool or downsample** into non-overlapping tiles; for a rolling statistic use the [window iterator](22_window_iteration.md), and for a statistic per row or column of the full extent use the [slab iterator](11_slab_iteration.md).

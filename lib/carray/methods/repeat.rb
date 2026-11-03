@@ -59,7 +59,17 @@ class CArray
         end
         CArray.int64(width).fill(count)
       else
-        given = count.to_ca.int64
+        unless count.respond_to?(:to_ca)
+          raise TypeError, "repeat: count must be an Integer or a list of them (got #{count.class})"
+        end
+        given = count.to_ca
+        # A list arrives as an object array; a Float in it is no count, as a
+        # float array is not.
+        unless given.integer? || (given.data_type == CA_OBJECT &&
+                                  given.to_a.flatten.all? { |c| c.is_a?(Integer) || c.equal?(UNDEF) })
+          raise TypeError, "repeat: counts must be Integers"
+        end
+        given = given.int64
         unless given.elements == width
           raise ArgumentError,
                 "repeat: #{given.elements} counts for #{width} " \

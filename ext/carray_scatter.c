@@ -266,6 +266,10 @@ ca_scatter_is_scalar (VALUE v)
     } \
   } \
   else { \
+    if ( rb_obj_is_carray(rvals) ) { \
+      TypedData_Get_Struct(rvals, CArray, &carray_data_type, cv); \
+      ca_refuse_complex_into_real(ca, cv); \
+    } \
     /* coerce: a store into the receiver */ \
     rvals = rb_ca_wrap_readonly(rvals, INT2NUM(ca->data_type)); \
     TypedData_Get_Struct(rvals, CArray, &carray_data_type, cv); \

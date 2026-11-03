@@ -204,7 +204,7 @@ class CASlabIterator < CAIterator
     return count_not_masked(**kw) if args.empty?
     # CABlock / CAWindow shadow #count with a geometry accessor, and @reference
     # may be such a view, so dispatch CArray#count explicitly for count(v).
-    CArray.instance_method(:count).bind_call(@reference, *args, axis: @slab_axes,
+    count_cells(@reference, *args, axis: @slab_axes,
                                              **CAIterator.reduce_keywords(:count, kw))
   end
 

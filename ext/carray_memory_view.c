@@ -449,6 +449,22 @@ ca_mv_probe_data_type (VALUE obj)
   return data_type;
 }
 
+/* True when format is a struct of several members that exactly describes an
+   item of item_size bytes.  A consumer takes such items as raw bytes: the
+   format names no members to rebuild a record from. */
+static bool
+ca_mv_format_is_struct (const char *format, ssize_t item_size)
+{
+  rb_memory_view_item_component_t *members = NULL;
+  size_t n_members = 0;
+  const char *err = NULL;
+  ssize_t size;
+  if ( format == NULL ) return false;
+  size = rb_memory_view_parse_item_format(format, &members, &n_members, &err);
+  if ( members != NULL ) xfree(members);
+  return size == item_size && n_members >= 2;
+}
+
 /* Per-element byte width for consumer-side wrap/from CArray allocation.
    For numeric types it is `ca_sizeof[data_type]`; for CA_FIXLEN it is the
    MemoryView item_size, since fixlen has no compile-time element width. */
@@ -511,7 +527,7 @@ ca_mv_alloc_strides_contiguous (CArray *ca, ssize_t *shape, bool row_major)
 
 typedef struct {
   int          depth;        /* 0 = the view itself, 1 = parent, 2 = grand-, ... */
-  const char  *class_name;   /* class name of the offending link */
+  VALUE        klass;        /* class of the offending link (nil: unknown) */
   const char  *reason;       /* short explanation */
   int          face;         /* refused because it is a Face: a copy is
                                 refused too, so no copy is suggested */
@@ -528,11 +544,10 @@ ca_mv_is_castride_family (CArray *ca)
   return ca_func[ca->obj_type].attach == ca_stride_func.attach;
 }
 
-static const char *
-ca_mv_class_name_of (CArray *ca)
+static VALUE
+ca_mv_class_of (CArray *ca)
 {
-  VALUE klass = ca_class[ca->obj_type];
-  return NIL_P(klass) ? "(unknown)" : rb_class2name(klass);
+  return ca_class[ca->obj_type];
 }
 
 static const char *
@@ -597,7 +612,7 @@ ca_mv_compose_to_entity (CArray *ca, ca_mv_reject_t *rej,
   if (ca_is_face(ca)) {
     if (! ca_face_memory_view_exportable(ca)) {
       rej->depth = 0;
-      rej->class_name = ca_mv_class_name_of(ca);
+      rej->klass = ca_mv_class_of(ca);
       rej->reason = "a Face whose storage bytes do not carry its values "
                     "without the Face; export its storage instead "
                     "(e.g. .ticks, .codes)";
@@ -609,7 +624,7 @@ ca_mv_compose_to_entity (CArray *ca, ca_mv_reject_t *rej,
   if (ca_is_entity(ca)) {
     if (! ca_mv_is_core_entity(ca)) {
       rej->depth = 0;
-      rej->class_name = ca_mv_class_name_of(ca);
+      rej->klass = ca_mv_class_of(ca);
       rej->reason = "installed outside the core; its bytes are not "
                     "exported";
       return false;
@@ -620,7 +635,7 @@ ca_mv_compose_to_entity (CArray *ca, ca_mv_reject_t *rej,
   }
   if (!ca_mv_is_castride_family(ca)) {
     rej->depth = 0;
-    rej->class_name = ca_mv_class_name_of(ca);
+    rej->klass = ca_mv_class_of(ca);
     rej->reason = ca_mv_reject_reason_for(ca);
     return false;
   }
@@ -628,7 +643,7 @@ ca_mv_compose_to_entity (CArray *ca, ca_mv_reject_t *rej,
   ca_stride_compose_to_root((CAStride *) ca, &root, out_strides, out_base);
   if (!ca_is_entity(root)) {
     rej->depth = -1;
-    rej->class_name = ca_mv_class_name_of(root);
+    rej->klass = ca_mv_class_of(root);
     if (ca_mv_is_castride_family(root)) {
       rej->reason = "CAStride chain stride pattern does not compose "
                     "linearly into entity (e.g. reshape across non-contig)";
@@ -639,7 +654,7 @@ ca_mv_compose_to_entity (CArray *ca, ca_mv_reject_t *rej,
   }
   if (! ca_mv_is_core_entity(root)) {
     rej->depth = -1;
-    rej->class_name = ca_mv_class_name_of(root);
+    rej->klass = ca_mv_class_of(root);
     rej->reason = "installed outside the core; its bytes are not exported";
     return false;
   }
@@ -704,7 +719,7 @@ ca_mv_fixlen_format (ca_size_t bytes)
 {
   st_data_t found;
   char     *fmt;
-  rb_nativethread_lock_lock(&ca_mv_fixlen_formats_lock);
+  ca_native_lock_without_gvl(&ca_mv_fixlen_formats_lock);
   if ( st_lookup(ca_mv_fixlen_formats, (st_data_t) bytes, &found) ) {
     rb_nativethread_lock_unlock(&ca_mv_fixlen_formats_lock);
     return (const char *) found;
@@ -712,7 +727,8 @@ ca_mv_fixlen_format (ca_size_t bytes)
   rb_nativethread_lock_unlock(&ca_mv_fixlen_formats_lock);
   fmt = ALLOC_N(char, 24);
   snprintf(fmt, 24, "%llds", (long long) bytes);
-  rb_nativethread_lock_lock(&ca_mv_fixlen_formats_lock);
+  /* lock: st_insert can run a GC, which does not take this lock */
+  ca_native_lock_without_gvl(&ca_mv_fixlen_formats_lock);
   if ( st_lookup(ca_mv_fixlen_formats, (st_data_t) bytes, &found) ) {
     xfree(fmt);
     fmt = (char *) found;
@@ -1171,6 +1187,9 @@ ca_mv_holder_take_data (ca_mv_imported_holder_t *h, VALUE src,
   }
 
   data_type = ca_mv_data_type_from_format(v->format, v->item_size);
+  if ( data_type < 0 && ca_mv_format_is_struct(v->format, v->item_size) ) {
+    data_type = CA_FIXLEN;
+  }
   if ( data_type < 0 ) {
     rb_raise(rb_eArgError, "unsupported MemoryView format: %s (item_size=%ld)",
              v->format, (long) v->item_size);
@@ -1344,10 +1363,10 @@ ca_mv_wrap_body (VALUE arg)
      for a class would get something that is not it. */
   if ( a->target_class != rb_cCAWrap && ! d->contiguous ) {
     rb_raise(rb_eArgError,
-             "%s was requested, but this producer is strided, so the result "
+             "%"PRIsVALUE" was requested, but this producer is strided, so the result "
              "would be a CAStride; pass a row-major contiguous producer, or "
              "use CArray.from_memory_view for a copy",
-             rb_class2name(a->target_class));
+             a->target_class);
   }
 
   if ( m != NULL ) {
@@ -1503,8 +1522,8 @@ rb_ca_s_wrap_memory_view (int argc, VALUE *argv, VALUE klass)
   target_class = ( klass == rb_cCArray ) ? rb_cCAWrap : klass;
   if ( ! RTEST(rb_class_inherited_p(target_class, rb_cCAWrap)) ) {
     rb_raise(rb_eTypeError,
-             "wrap_memory_view builds a CAWrap; %s is not a subclass of it",
-             rb_class2name(target_class));
+             "wrap_memory_view builds a CAWrap; %"PRIsVALUE" is not a subclass of it",
+             target_class);
   }
   return ca_mv_wrap(obj, mask_obj, target_class, explicit_data_type, -1, 0);
 }
@@ -1585,8 +1604,8 @@ rb_ca_s_from_memory_view (int argc, VALUE *argv, VALUE klass)
   if ( klass != rb_cCArray &&
        ! RTEST(rb_class_inherited_p(klass, rb_cCAWrap)) ) {
     rb_raise(rb_eTypeError,
-             "from_memory_view builds a CArray; %s cannot be returned from it",
-             rb_class2name(klass));
+             "from_memory_view builds a CArray; %"PRIsVALUE" cannot be returned from it",
+             klass);
   }
   ca_mv_import_args_init(&a, obj, mask_obj);
   a.explicit_data_type = explicit_data_type;
@@ -1642,12 +1661,12 @@ rb_ca_s_memory_view_reject_reason (VALUE klass, VALUE obj)
     else if (rej.depth == 1) where = "parent";
     else                     where = NULL;   /* ancestor[N] */
     if (where) {
-      return rb_sprintf("%s is %s (%s); zero-copy wrap not possible.%s",
-                        where, rej.class_name, rej.reason,
+      return rb_sprintf("%s is %"PRIsVALUE" (%s); zero-copy wrap not possible.%s",
+                        where, NIL_P(rej.klass) ? rb_str_new_cstr("(unknown)") : rej.klass, rej.reason,
                         rej.face ? "" : " Export arr.copy for a snapshot.");
     } else {
-      return rb_sprintf("ancestor[%d] is %s (%s); zero-copy wrap not possible.%s",
-                        rej.depth - 1, rej.class_name, rej.reason,
+      return rb_sprintf("ancestor[%d] is %"PRIsVALUE" (%s); zero-copy wrap not possible.%s",
+                        rej.depth - 1, NIL_P(rej.klass) ? rb_str_new_cstr("(unknown)") : rej.klass, rej.reason,
                         rej.face ? "" : " Export arr.copy for a snapshot.");
     }
   }

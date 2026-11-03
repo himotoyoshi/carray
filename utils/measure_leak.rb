@@ -7,6 +7,14 @@
 # the growth divided by +calls+.  A raise from the expression is rescued,
 # since the cases worth measuring are mostly the ones that raise.
 #
+# The window is measured up to three times and the smallest growth is
+# reported, stopping at the first that did not grow.  macOS's allocator
+# keeps the last block freed on each CPU counted as in use, so a loop that
+# frees a large buffer can read a few buffers of growth with nothing held
+# (no carray involved: malloc and free alone do it), and more of them the
+# longer it runs and the busier the machine is.  Those blocks are not added
+# again in the next window; a leak is.
+#
 # The number is read through Fiddle from the C allocator, so it counts C
 # allocations (xmalloc, ALLOC_N) that Ruby cannot see: macOS's
 # malloc_zone_statistics, or glibc's malloc_stats, whose report (written
@@ -93,11 +101,16 @@ module LeakMeter
       call = -> { (#{expr}) rescue nil }
       #{warmup}.times { call.() }
       GC.start
-      before = in_use.()
-      #{calls}.times { call.() }
-      GC.start
-      growth = in_use.() - before
-      growth -= 1 << 32 if RUBY_PLATFORM !~ /darwin/ && growth >= 1 << 31
+      growth = nil
+      3.times {
+        before = in_use.()
+        #{calls}.times { call.() }
+        GC.start
+        grown = in_use.() - before
+        grown -= 1 << 32 if RUBY_PLATFORM !~ /darwin/ && grown >= 1 << 31
+        growth = grown if growth.nil? || grown < growth
+        break if growth <= 0
+      }
       puts growth.fdiv(#{calls})
     RUBY
   end

@@ -1,30 +1,30 @@
 # The iterator family
 
-CArray 3.0 has a family of six **iterators** that all answer the same question — *"fold each piece of the array to a value"* — but disagree about what a *piece* is. A piece can be a fiber along an axis, a sliding window, a non-overlapping tile, the cells of one category, a coordinate-classified group, or a run of consecutive cells. Once you can read one member you can read all of them, because they share a single reduction surface: `mean`, `min`, `stddev`, `median`, `wsum`, and the rest are spelled the same way everywhere.
+CArray 3.0 has a family of six **iterators** that all answer the same question — *"fold each piece of the array to a value"* — but disagree about what a *piece* is. A piece can be a slab along an axis, a sliding window, a non-overlapping tile, the cells of one category, a coordinate-classified group, or a run of consecutive cells. Code for one member reads like code for any other, because they share a single reduction surface: `mean`, `min`, `stddev`, `median`, `wsum`, and the rest are spelled the same way everywhere.
 
-This chapter is the map. It shows the one shared question, the common surface, and where the members legitimately differ — then points you to the chapter that covers each member in full.
+This chapter is the map. It shows the one shared question, the common surface, and where the members legitimately differ — then points to the chapter that covers each member in full.
 
 ## The six members
 
-Every member takes a source array, decides what a piece is, and lets you reduce each piece with the same method names. What changes from member to member is how you build the iterator and the shape of the result.
+Every member takes a source array, decides what a piece is, and reduces each piece with the same method names. What changes from member to member is how the iterator is built and the shape of the result.
 
 | iterator | a *piece* is… | built by | output shape | chapter |
 |---|---|---|---|---|
-| `CASlabIterator` | a 1-D fiber along the marked axis | `a[nil, :>]` / `each_slab` | source shape minus the slab axis | [11](11_slab_iteration.md) |
+| `CASlabIterator` | the cells along the marked axis | `a[nil, :>]` / `each_slab` | source shape minus the slab axis | [11](11_slab_iteration.md) |
 | `CAWindowIterator` | an overlapping window per anchor | `a.windows(-1..1)` | reference-shaped (rolling) | [22](22_window_iteration.md) |
 | `CABlockIterator` | a non-overlapping tile | `a.blocks(2, 2)` | tile grid (ceil) | [23](23_block_iteration.md) |
 | `CACategoricalIterator` | the cells sharing one category | `value.group_by_category(cat)` | length-`k`, one per category | [24](24_categories_and_grouping.md) |
 | `CAGroupIterator` | a coordinate-classified group | `value[cat, nil]` | group slots × preserved band axes | [24](24_categories_and_grouping.md) |
 | `CASegmentIterator` | a run of consecutive cells between two offsets | `value.segments(offsets: o)` | length-`k`, one per segment | [24](24_categories_and_grouping.md) |
 
-The intuition to hold onto: **choose a member by what a piece should be**, then call the reduction you want. The engine underneath each member is different and tuned for its own layout, but you never see that — you see the same surface.
+The rule is: **choose a member by what a piece should be**, then call the reduction. The engine of each member is different and tuned for its own layout, but the surface is the same.
 
 ```ruby
 a = CArray.int32(2, 3).seq
 #  => [ [ 0, 1, 2 ],
 #       [ 3, 4, 5 ] ]
 
-a[nil, :>].mean          # slab: per-row mean
+a[nil, :>].mean          # slab: mean of each row
 #  => [ 1.0, 4.0 ]
 
 a.blocks(2, 2).sum       # block: sum of each (up-to) 2x2 tile
@@ -35,7 +35,7 @@ a.blocks(2, 2).sum       # block: sum of each (up-to) 2x2 tile
 
 All six descend from `CAIterator`, a **form-only base**. It carries no engine of its own — each member supplies its own. What the base declares is only two things: the shared shape accessors (`shape` and `ndim`; `dim` is a legacy alias for `shape`) and the list of reduction names every member is expected to provide.
 
-`CAIterator` deliberately does **not** `include Enumerable`. That is a design decision, not an oversight. `Enumerable` would inject `min`, `max`, `sum`, `count`, `to_a`, and friends — names that already mean something precise on this surface. If `Enumerable#min` leaked in, `it.min` might silently compare *pieces* against each other instead of folding *within* each piece, and you would get a plausible-looking wrong answer with no error. So the family spells out its whole surface explicitly and lets nothing slip in behind it.
+`CAIterator` deliberately does **not** `include Enumerable`. That is a design decision, not an oversight. `Enumerable` would inject `min`, `max`, `sum`, `count`, `to_a`, and other methods — names that already mean something precise on this surface. If `Enumerable#min` leaked in, `it.min` might silently compare *pieces* against each other instead of folding *within* each piece, and the result would be a plausible-looking wrong answer with no error. So the family spells out its whole surface explicitly and lets nothing slip in behind it.
 
 The same principle governs the abstract methods. If a member has not implemented a required reduction, calling it raises a clean `NotImplementedError` naming the member — never a wrong answer:
 
@@ -43,7 +43,7 @@ The same principle governs the abstract methods. If a member has not implemented
 CAWindowIterator does not provide #map (optional)
 ```
 
-A loud failure you can read beats a quiet fold in the wrong direction.
+An error is better than a silent fold in the wrong direction.
 
 ## The common reduction surface
 
@@ -79,7 +79,7 @@ it = d[nil, :>]                      # slab per row
 it.wmean(CA_DOUBLE([1, 1, 2, 2]))    # weighted mean per row
 #  => [ 2.8333333333333335, 6.833333333333333 ]
 
-it.median                            # per-row median
+it.median                            # median of each row
 #  => [ 2.5, 6.5 ]
 
 it.count_not_masked                  # contributing cells per row
@@ -89,20 +89,19 @@ it.elements                          # cells per piece (mask ignored)
 #  => [ 4, 4 ]
 ```
 
-### The escape hatch: `each` and `reduce`
+### General methods: `each` and `reduce`
 
-When the statistic you want is not in the named list, drop to `each` or `reduce`. `each { |piece| … }` visits every piece (with no block it returns an `Enumerator`, so `.map`, `.each_with_index`, and friends chain on). `reduce {
-|piece| … }` folds each piece to one value with a block of your own:
+When the statistic is not in the named list, use `each` or `reduce`. `each { |piece| … }` visits every piece (without a block it returns an `Enumerator`, so `.map`, `.each_with_index`, and other `Enumerator` methods can be chained). `reduce { |piece| … }` folds each piece to one value with a block:
 
 ```ruby
-d[nil, :>].reduce { |row| row.max - row.min }   # per-row range
+d[nil, :>].reduce { |slab| slab.max - slab.min }   # range of each slab
 #  => [ 3.0, 3.0 ]
 
-d[nil, :>].each.map { |row| row.sum }
+d[nil, :>].each.map { |slab| slab.sum }
 #  => [10.0, 26.0]
 ```
 
-`reduce(init) { |acc, e| … }` is the inject-style form: it feeds you each element of the piece in turn.
+`reduce(init) { |acc, e| … }` is the inject-style form: the block receives each element of the piece in turn.
 
 ## Where the members differ
 
@@ -115,13 +114,13 @@ The differences matter as much as the shared surface, and they all follow from w
 | count family, `elements`, `each` / `reduce` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `min_index` / `max_index` (position **within** a piece) | ✓ | ✓ | ✓ | ✓ | — ² |
 | `min_addr` / `max_addr` (flat **source** address of the winner) | ✓ | — ³ | — ³ | ✓ | ✓ |
-| `map` (per-piece transform, scattered back) | ✓ | — ⁴ | ✓ | ✓ | ✓ |
-| `sort_addr` (per-piece sort → source addresses) | ✓ | — ⁴ | — ³ | ✓ | ✓ |
+| `map` (transform each piece, scattered back) | ✓ | — ⁴ | ✓ | ✓ | ✓ |
+| `sort_addr` (sort each piece → source addresses) | ✓ | — ⁴ | — ³ | ✓ | ✓ |
 
 1. Window order statistics leave the UNDEF margin of the default `:skip` out of each window, as they leave out any masked cell. See [Window iteration](22_window_iteration.md).
 2. A group preserves source order, so a *within-group* index is weak; the group offers the flat source address instead (see below).
 3. Not provided in this first version.
-4. A window's pieces overlap and its margin cells are padding with no source address, so an element-wise scatter-back (`map`) and a per-cell source `sort_addr` are ill-defined and raise `NotImplementedError`.
+4. A window's pieces overlap and its margin cells are padding with no source address, so an element-wise scatter-back (`map`) and a `sort_addr` that gives a source address for each cell are ill-defined and raise `NotImplementedError`.
 
 ### Position — `_index` vs `_addr`
 
@@ -159,7 +158,7 @@ Beyond the common surface, each member adds methods that only make sense for it:
 
 ## Calling conventions
 
-Five of the six members **bind the axis at construction time**. You choose the pieces when you build the iterator, so the reduction itself takes no `axis`:
+Five of the six members **bind the axis at construction time**. The pieces are chosen when the iterator is built, so the reduction itself takes no `axis`:
 
 ```ruby
 a = CArray.int32(2, 3).seq
@@ -187,7 +186,7 @@ CA_DOUBLE([1, 2, 3, 4, 5]).segments(offsets: [0, 2, 5]).mean   # segment — the
 
 ### The group iterator is the exception
 
-`CAGroupIterator` needs `axis: :group`. The reason is that the array indexer `value[cat, nil]` is overloaded: with a plain integer index it is an ordinary selection, and with a categorical it *can* be a grouping. To keep the two apart, a group reduction only engages the grouping when you pass `axis: :group`. Without it, the value is reduced plainly.
+`CAGroupIterator` needs `axis: :group`. The reason is that the array indexer `value[cat, nil]` is overloaded: with a plain integer index it is an ordinary selection, and with a categorical it *can* be a grouping. To keep the two apart, a group reduction engages the grouping only with `axis: :group`. Without it, the value is reduced plainly.
 
 ```ruby
 row_cat = CA_OBJECT(["x", "y", "x"]).categorize   # classifies axis 0
@@ -195,7 +194,7 @@ val     = CA_DOUBLE([[1, 2],
                      [3, 4],
                      [5, 6]])
 
-val[row_cat, nil].mean(axis: :group)   # per-group mean, band axis preserved
+val[row_cat, nil].mean(axis: :group)   # mean of each group, band axis preserved
 #  => [ [ 3.0, 4.0 ],
 #       [ 3.0, 4.0 ] ]
 

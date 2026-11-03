@@ -1272,7 +1272,7 @@ VALUE
 rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
                                          ca_binop_func_t func[])
 {
-  volatile VALUE out;
+  volatile VALUE out, receiver;
   CArray *ca1, *ca2, *ca3; /* ca3 = ca1.op(ca2) */
   int self_is_scalar, other_is_scalar;
   ca_size_t n_kernel;
@@ -1282,11 +1282,42 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
   ca_binop_read_boolean_as_truth(func[CA_BOOLEAN] != ca_binop_not_implement,
                                  &self, &other);
 
+  receiver = rb_obj_is_carray(other) ? Qnil : self;
+
+  /* pmax and its kin pick by order, so a value the array can not hold is
+     refused as an ordering refuses it. */
+  if ( ! rb_obj_is_carray(other) && rb_obj_is_carray(self) &&
+       ca_binop_picks_by_order(ca_binop_op_id_of_table(func)) ) {
+    CArray *cs;
+    GetCArray(self, cs);
+    /* a boolean array picks as its 0 / 1 int64 numbers */
+    if ( func[cs->data_type == CA_BOOLEAN ? CA_INT64 : cs->data_type]
+         != ca_binop_not_implement ) {
+      ca_refuse_foreign_order(other, self);
+    }
+    else {
+      /* an array the op is not defined for says so, whatever the operand */
+      ca_op_refuse_unimplemented(self, cs->data_type, rb_eCADataTypeError);
+    }
+  }
+
   /* do implicit casting */
   rb_ca_cast_self_or_other(&self, &other);
 
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
   TypedData_Get_Struct(other, CArray, &carray_data_type, ca2);
+
+  /* A Face whose cells are not Ruby values does not go down to an object
+     array to meet a single Ruby object: an operator it does not define for
+     an array of its own stays undefined. */
+  if ( ca1->data_type == CA_OBJECT && rb_obj_is_carray(receiver) ) {
+    CArray *ca0;
+    TypedData_Get_Struct(receiver, CArray, &carray_data_type, ca0);
+    if ( ca_is_face(ca0) && ca0->data_type == CA_FIXLEN ) {
+      ca_op_refuse_unimplemented(receiver, ca0->data_type,
+                                 rb_eCADataTypeError);
+    }
+  }
 
   /* Boolean-as-numeric promotion: an arithmetic op (+ - * / % ** ...) has
      no boolean kernel, so its func[CA_BOOLEAN] slot is ca_binop_not_implement.
@@ -1853,16 +1884,8 @@ rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
   volatile VALUE out;
   CArray *ca1, *ca2, *ca3, *cao;
 
-  /* Pairwise data_type promotion: ((self, other2) -> common), then
-     ((self', other3) -> common).  Mirrors how the binop driver normalises
-     two operands; for triop we apply it twice.  After this, all three
-     CArrays share the same data_type (and unbound-repeats are resolved). */
-  rb_ca_cast_self_or_other(&self, &other2);
-  rb_ca_cast_self_or_other(&self, &other3);
-  rb_ca_cast_self_or_other(&other2, &other3);
-  /* one more pass to re-normalise self vs other2 in case the
-     other2/other3 cast widened other2 above self's data_type  */
-  rb_ca_cast_self_or_other(&self, &other2);
+  /* After this, all three CArrays share the same data_type. */
+  rb_ca_cast_three(&self, &other2, &other3);
 
   TypedData_Get_Struct(self,   CArray, &carray_data_type, ca1);
   TypedData_Get_Struct(other2, CArray, &carray_data_type, ca2);
@@ -2426,6 +2449,23 @@ ca_bincmp_mixed_sign (VALUE self, VALUE other, ca_bincmp_func_t func[],
   return out;
 }
 
+/* The answer of eq (ne = 0) or ne (ne = 1) when no cell can match: false
+   (true for ne) in every cell, masked where `self` is masked. */
+VALUE
+ca_bincmp_no_match (VALUE self, int ne)
+{
+  volatile VALUE out;
+  CArray *ca, *co;
+  GetCArray(self, ca);
+  out = RTEST(rb_obj_is_cscalar(self))
+      ? rb_cscalar_new(CA_BOOLEAN, 0, NULL)
+      : rb_carray_new(CA_BOOLEAN, ca->ndim, ca->dim, 0, NULL);
+  TypedData_Get_Struct(out, CArray, &carray_data_type, co);
+  ca_mask_overlay_safe(co, 1, ca);
+  memset(co->ptr, ne ? 1 : 0, co->elements * co->bytes);
+  return out;
+}
+
 VALUE
 rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
                                     ca_bincmp_func_t func[],
@@ -2444,6 +2484,27 @@ rb_ca_call_bincmp (volatile VALUE self, volatile VALUE other,
     }
     else {
       rb_raise(rb_eArgError, "array can not be compared with UNDEF");
+    }
+  }
+
+  /* eq and ne with a value the array can not hold (nil, a String): no cell
+     matches. */
+  if ( (ca_bincmp_func_t) func == (ca_bincmp_func_t) ca_bincmp_eq
+       || (ca_bincmp_func_t) func == (ca_bincmp_func_t) ca_bincmp_ne ) {
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
+    if ( ca_query_matches_nothing(ca1, other) ) {
+      return ca_bincmp_no_match(self,
+               (ca_bincmp_func_t) func == (ca_bincmp_func_t) ca_bincmp_ne);
+    }
+  }
+
+  /* An ordering with a value the array can not hold is refused as Float#<
+     refuses it.  An array that has no ordering at all (complex) keeps its
+     own refusal below. */
+  if ( ! rb_obj_is_carray(other) && ca_bincmp_op_id_of(func) <= CA_BINCMP_GE ) {
+    TypedData_Get_Struct(self, CArray, &carray_data_type, ca1);
+    if ( func[ca1->data_type] != ca_bincmp_not_implement ) {
+      ca_refuse_foreign_order(other, self);
     }
   }
 

@@ -430,26 +430,20 @@ class CArray
   private :clamp_between
   LazyDispatch.send(:private, :clamp_between)
 
-  # `**` integer-exponent lazy fast path.
+  # `**` with an Integer exponent.
   #
-  # The default OP_POW path above goes through the `power` binop kernel,
-  # which uses `pow(x, p)` / `cpow(x, p)` (transcendental, ~20-50 ns/cell)
-  # for float / complex parents.  When `other` is an Integer, the eager
-  # `rb_ca_pow` dispatches to `rb_ca_ipower` (= binary exponentiation via
-  # `op_powi_<type>`, ~1-3 mul/cell, 3-5x faster than the transcendental
-  # form).  Mirror that dispatch here so `a.lazy ** 2` rides the same
-  # fast path.
-  #
-  # Routing rule (matches eager `rb_ca_pow`):
+  # The eager `rb_ca_pow` sends a Float / Complex array to an Integer power
+  # through `rb_ca_ipower` (ext/ca_op_ipower.c), which keeps the exponent
+  # an int64 and computes each cell with pow / powf / cpow, the answer the
+  # `power` kernel gives for the same exponent held in an array.  The lazy
+  # form builds the matching CABinOp(OP_IPOWER) node:
   #   - lazy parent + Integer exponent + Float/Complex parent data_type
   #     -> wrap exponent as CScalar.int64 + CABinOp(OP_IPOWER)
-  #   - lazy parent (other cases) -> CABinOp(OP_POW)  [existing]
-  #   - else -> eager (which itself dispatches to ipower internally)
+  #   - lazy parent (other cases) -> CABinOp(OP_POW)
+  #   - else -> eager
   #
-  # Integer parents intentionally stay on OP_POW: the mkkernel-generated
-  # `power` binop kernel already uses `op_powi_<type>` for integer data_types
-  # via the `int:` expr in MkKernel.binop :power, so OP_POW + int parent
-  # is already fast.  The lazy-substrate gap was Float/Complex only.
+  # Integer parents stay on OP_POW: the `power` kernel's `int:` expr is
+  # `op_powi_<type>`, binary exponentiation in the integer type.
   module LazyDispatch
     def **(other)
       if ( lazy_view? || (other.is_a?(CArray) && other.lazy_view?) ) &&
@@ -498,7 +492,8 @@ class CArray
   # `eq` / `feq`.
   #
   # A comparison with UNDEF goes to the eager method, which answers `eq` /
-  # `ne` from the mask and refuses the others.
+  # `ne` from the mask and refuses the others, and so does one with nil on
+  # an array that can not hold it.
   #
   # `feq` is arity 1 in eager (compile-time FLT_EPSILON / DBL_EPSILON);
   # we mirror that here.  Runtime eps is a future extension (struct field

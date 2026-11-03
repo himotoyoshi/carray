@@ -227,7 +227,7 @@ minutes"` is count 10 of base `:m`. The base units:
 | `:ms`| millisec  | 1704067200000                               |
 | `:us`| microsec  | 1704067200000000                            |
 | `:ns`| nanosec   | 1704067200000000000                         |
-| `:ps`, `:fs`, `:as` | pico / femto / atto sec | implemented, rarely used |
+| `:ps`, `:fs`, `:as` | pico / femto / atto sec | implemented, rarely used. Their text stops at nine fraction digits, so a CSV keeps nanoseconds; write `ticks` for the exact values |
 
 Bases split into two groups: **fixed-length** (`:W`/`:D`/`:h`/…/`:as`,
 an exact number of seconds) and **calendar** (`:Y`/`:M`, month-ordinal
@@ -1384,6 +1384,7 @@ td[2]              # => CATimedelta::Element
 td[2].value        # => raw int64
 td[2].unit         # => #<CATime::Resolution 1 s>   (.base => :s)
 td[2].to_seconds   # => Rational (exact); raises for :Y / :M (use to_seconds_approx)
+td.to_seconds      # => object array of Rational, the same for every cell
 td[2].to_s         # => "60s", ...   (with unit suffix)
 ```
 

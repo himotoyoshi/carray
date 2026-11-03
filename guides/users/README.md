@@ -25,7 +25,7 @@ These can be read in any order, once the core walkthrough is comfortable. Each i
 10. [Composition](10_composition.md) — combining arrays along existing or new axes (`meld`, `stack`, `montage`, `concatenate`, `mosaic`, `tabulate`). Full reference: `docs/topics/Composition.md`.
 11. [Slab iteration](11_slab_iteration.md) — iterating per-axis with `each_slab` / `map_slab` / `reduce_slab`. Full reference: `docs/topics/SlabIterator.md`.
 12. [Faces](12_faces.md) — arrays read as something other than numbers (times, categories, strings): what every Face has in common, the Faces that come with CArray, and writing one of your own in Ruby. Chapters 14, 24 and 26 cover the individual Faces. Full reference: `docs/topics/CAFace.md`.
-13. [Object arrays](13_object_arrays.md) — arrays of arbitrary Ruby objects. Full reference: `docs/topics/CAObject.md`.
+13. [Object arrays](13_object_arrays.md) — arrays of arbitrary Ruby objects.
 14. [Text, fixed-length strings, and records](14_text_and_fixlen.md) — the string-array family (`CAString`, `CAFixlenString`, `CAConstString`, raw `CA_FIXLEN`) side by side with construction, string operations, ordering, conversions, and interop; plus `CARecord`, the array of structs with named fields. Full reference: `docs/topics/StringArrays.md`, `docs/objects/CAConstString.md`, `docs/objects/CARecord.md`.
 15. [MemoryView interop](15_memory_view.md) — zero-copy exchange with Numo::NArray, Apache Arrow, PyCall, fiddle. Full reference: `docs/interop/MemoryView.md`.
 16. [Indexer reference](16_indexer_reference.md) — every form of `[]` and `[]=`, with a quick-lookup table. Companion to chapter 2. Full reference: `docs/topics/Indexer_decision_tree.md`.

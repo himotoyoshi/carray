@@ -1,12 +1,12 @@
 # Sort, search, and interpolation
 
-This chapter covers the ordering, searching, and table-lookup methods. They share a family resemblance: most of them take `axis:` and operate **per slab** — each row (or column, or whichever axis you pick) is processed independently — and most of them return *positions* (addresses into an array) rather than values, so they compose with the indexer (see [Indexing and slicing](02_indexing_and_slicing.md)) for round-trip workflows.
+This chapter covers the ordering, searching, and table-lookup methods. They share a family resemblance: most of them take `axis:` and process **each slab independently**, and most of them return *positions* (addresses into an array) rather than values, so they compose with the indexer (see [Indexing and slicing](02_indexing_and_slicing.md)) for round-trip workflows.
 
-A recurring convention: a **miss** — a query with no answer — comes back as `UNDEF` (masked), not as a sentinel number. That lets missing-ness propagate through any arithmetic you do next; see [Masks and missing values](05_masks.md).
+A recurring convention: a **miss** — a query with no answer — comes back as `UNDEF` (masked), not as a sentinel number. That lets missing-ness propagate through any later arithmetic; see [Masks and missing values](05_masks.md).
 
 ## Sorting
 
-`sort(axis:)` returns a per-axis sorted **view**; the original is untouched (see [Views](06_views.md) for why a sort is a view). Use `sort_copy(axis:)` when you want an independent, materialised array instead of a view — it is cheaper than `sort(axis:).copy` and clearer in intent.
+`sort(axis:)` returns a **view** sorted along the axis; the original is untouched (see [Views](06_views.md) for why a sort is a view). Use `sort_copy(axis:)` to get an independent, materialised array instead of a view — it is cheaper than `sort(axis:).copy` and clearer in intent.
 
 ```ruby
 m = CA_INT([[3, 1, 4, 1, 5],
@@ -29,7 +29,7 @@ m.sort_index(axis: 1)
 #       [ 1, 4, 3, 2, 0 ] ]
 ```
 
-The point of the index form is that you can use it to reorder a *parallel* array — labels, weights, anything that lives in lock-step with `m`:
+The index form can reorder a *parallel* array — labels, weights, anything that lives in lock-step with `m`:
 
 ```ruby
 labels = CA_INT([[10, 20, 30, 40, 50],
@@ -38,7 +38,7 @@ idx    = m.sort_index(axis: 1)
 
 labels[idx]
 #  => [ [ 20, 40, 10, 30, 50 ],
-#       [ 20, 50, 40, 30, 10 ] ]    labels reordered by m's per-row sort
+#       [ 20, 50, 40, 30, 10 ] ]    labels reordered by the sort of each row of m
 ```
 
 When `idx` has the same leading axes as `labels`, the trailing axis is treated as the position within each slab. `labels.project(idx)` is the named form of the same `labels[idx]` operation, and reads more clearly in a method chain.
@@ -47,7 +47,7 @@ When `idx` has the same leading axes as `labels`, the trailing axis is treated a
 
 ### `partition_index` — the k-th element without a full sort
 
-`partition_index(k, axis:)` returns the positions of a permutation in which the k-th smallest element sits at position `k` of each slab: everything before position `k` is no larger than it, everything after is no smaller. It is much cheaper than a full sort when you only care about a small `k` (a top-K or a median split).
+`partition_index(k, axis:)` returns the positions of a permutation in which the k-th smallest element sits at position `k` of each slab: everything before position `k` is no larger than it, everything after is no smaller. It is much cheaper than a full sort when only a small `k` matters (a top-K or a median split).
 
 ```ruby
 v = CA_INT([7, 3, 8, 1, 5, 2, 6, 4])
@@ -127,7 +127,7 @@ grid.linear_fetch(2.5)     # => 3.0     (back again)
 
 ### The canonical use — interpolate `y` at an arbitrary `x`
 
-The pair earns its keep when you have two arrays sampled on the same grid — an independent variable `x` and a dependent variable `y` — and you want `y` at an `x` that falls between sample points. Two steps: find the fractional address of the query along `x`, then read `y` at the same address.
+The pair is useful for two arrays sampled on the same grid, an independent variable `x` and a dependent variable `y`, when `y` is needed at an `x` that falls between sample points. Two steps: find the fractional address of the query along `x`, then read `y` at the same address.
 
 ```ruby
 xs = CA_DOUBLE([10.0, 20.0, 30.0, 40.0, 50.0])   # the grid (monotonic)
@@ -160,9 +160,9 @@ grid.linear_section(3.0, method: :binary)   # default, O(log n) with O(1) fast
 grid.linear_section(3.0, method: :linear)   # sequential scan, O(n)
 ```
 
-Reach for `:linear` on a short grid or when a simple scan reads better than a dispatch to binary search; the results agree exactly on every input. An unknown `method:` raises.
+Use `:linear` on a short grid or when a simple scan reads better than a dispatch to binary search; the results agree exactly on every input. An unknown `method:` raises.
 
-The grid **must be monotonic** (ascending or descending). Interpolation on non-monotonic data is undefined — no error is raised; you simply get the bracket the search happens to land on.
+The grid **must be monotonic** (ascending or descending). Interpolation on non-monotonic data is undefined — no error is raised, and the result is whichever bracket the search happens to land on.
 
 ### `linear_fetch` — fractional address to value
 
@@ -188,7 +188,7 @@ grid.linear_fetch(CA_DOUBLE([-1.0, 2.0, 100.0]))
 #  => [ NaN, 2.0, NaN ]
 ```
 
-In the array form the miss is `NaN`; in the 1-D scalar shortcut (a 1-D `self` with a scalar query) it is `nil` instead. Either way the whole family obeys one rule — **out of range → no answer, never extrapolate** — and the domains of `linear_section` and `linear_fetch` match exactly, so values flow through a `linear_section → linear_fetch` chain without a single range check in your own code.
+In the array form the miss is `NaN`; in the 1-D scalar shortcut (a 1-D `self` with a scalar query) it is `nil` instead. Either way the whole family obeys one rule — **out of range → no answer, never extrapolate** — and the domains of `linear_section` and `linear_fetch` match exactly, so values flow through a `linear_section → linear_fetch` chain without any range check in user code.
 
 Lift the misses into the mask when downstream work should skip them:
 
@@ -197,9 +197,9 @@ grid.linear_fetch(CA_DOUBLE([-1.0, 2.0, 100.0])).mask_invalid
 #  => [ _, 2.0, _ ]
 ```
 
-### Per-fiber interpolation over an axis
+### Interpolation along an axis
 
-Both methods take an `axis:` keyword. Without it the array is flattened into one 1-D sequence; with it the operation runs once per fiber, keeping every other axis as an independent problem and consuming the named axis.
+Both methods take an `axis:` keyword. Without it the array is flattened into one 1-D sequence; with it the operation runs along that axis once for every position of the other axes, keeping each as an independent problem and consuming the named axis.
 
 ```ruby
 g  = CA_DOUBLE([[0, 1, 2, 3],
@@ -211,7 +211,7 @@ g.linear_section(qs, axis: 1)
 #       [ 0.75, 1.5 ] ]    each row interpolated against its own grid
 ```
 
-This is the pattern for keeping a different lookup table per row — per- distribution sampling, per-channel calibration, per-column regridding. Negative axes count from the end (`axis: -1` is the last axis).
+This pattern keeps a different lookup table for each row. Examples are sampling from a different distribution in each row, calibrating each channel, and regridding each column. Negative axes count from the end (`axis: -1` is the last axis).
 
 ### Broadcast layouts of the query array
 
@@ -219,10 +219,10 @@ When the query itself is a CArray, four broadcast layouts are accepted, picked b
 
 | layout   | query shape        | meaning                                   | result shape      |
 |----------|--------------------|--------------------------------------------|-------------------|
-| **A1**   | scalar             | one query for every fiber                  | `[4, 5]`          |
-| **A2**   | `[M]` (1-D)        | the same `M` queries broadcast per fiber   | `[4, 5, M]`       |
-| **A2.5** | `[4, 5]`           | one distinct query per fiber               | `[4, 5]`          |
-| **A3**   | `[4, 5, M]`        | `M` distinct queries per fiber             | `[4, 5, M]`       |
+| **A1**   | scalar             | one query for every position               | `[4, 5]`          |
+| **A2**   | `[M]` (1-D)        | the same `M` queries at every position     | `[4, 5, M]`       |
+| **A2.5** | `[4, 5]`           | one distinct query per position            | `[4, 5]`          |
+| **A3**   | `[4, 5, M]`        | `M` distinct queries per position          | `[4, 5, M]`       |
 
 ```ruby
 self_3d = CArray.float64(4, 5, 6) { |i, j, k| k.to_f }
@@ -240,7 +240,7 @@ self_3d.linear_fetch(val, axis: -1).shape          #  => [4, 5, 3]     (A3)
 
 A3 is the workhorse for regridding: each `(i, j)` column of `self` is a profile, `val[i, j, :]` are the `M` target positions for that column, and one call produces the interpolated value of every target in every column with no Ruby-level loop.
 
-A2.5 needs a base shape with at least 2 axes (so it can't be confused with A2 broadcast). For a 2-D `self` where you want one query per fiber, make that intent explicit by reshaping the query to `[N, 1]` — which falls into A3 with `M = 1`.
+A2.5 needs a base shape with at least 2 axes (so it can't be confused with A2 broadcast). For a 2-D `self` with one query per position, make that intent explicit by reshaping the query to `[N, 1]` — which falls into A3 with `M = 1`.
 
 ### Data types, masks, and return values
 
@@ -257,7 +257,7 @@ y = CA_DOUBLE([0.0, 1.0, 2.0]); y[1] = UNDEF
 y.linear_section(1.0)   # => raises ArgumentError
 ```
 
-If you need to interpolate across gaps, close them first — fill the mask with `strip_mask(fill_value)`, or rebuild the grid from the unmasked entries so it is contiguous and monotonic before calling these methods.
+To interpolate across gaps, close them first — fill the mask with `strip_mask(fill_value)`, or rebuild the grid from the unmasked entries so it is contiguous and monotonic before calling these methods.
 
 ### Quick reference
 
@@ -265,7 +265,7 @@ If you need to interpolate across gaps, close them first — fill the mask with 
 # value -> fractional address
 arr.linear_section(value)                    # scalar or CArray query
 arr.linear_section(value, method: :linear)   # :binary (default) | :linear
-arr.linear_section(query, axis: k)           # per-fiber
+arr.linear_section(query, axis: k)           # once per position of the other axes
 
 # fractional address -> value
 arr.linear_fetch(address)
@@ -283,7 +283,7 @@ ys.linear_fetch(xs.linear_section(x_query))
 | default search              | `:binary` (`O(log n)`; `O(1)` for equispaced grids) |
 | compute / result type       | `Float64` (inputs coerced)                    |
 | masked `self`               | raises                                        |
-| `axis:`                     | per-fiber; named axis consumed; negatives allowed |
+| `axis:`                     | runs along that axis; named axis consumed; negatives allowed |
 
 ## Locating addresses in a reference array
 
@@ -350,8 +350,8 @@ Unmatched observations (`addr[i] == UNDEF`) skip the scatter automatically — n
 
 | Method                          | Returns                                                    |
 |---------------------------------|------------------------------------------------------------|
-| `sort(axis:)`                   | Per-slab sorted **view**                                   |
-| `sort_copy(axis:)`              | Per-slab sorted **entity** (owned copy)                    |
+| `sort(axis:)`                   | **View** with each slab sorted                             |
+| `sort_copy(axis:)`              | **Entity** (owned copy) with each slab sorted              |
 | `sort_index(axis:)`             | Positions that would sort each slab                        |
 | `project(idx)`                  | Reorder self by an index array (named form of `self[idx]`) |
 | `partition_index(k, axis:)`     | Positions of a k-th-element partition                      |

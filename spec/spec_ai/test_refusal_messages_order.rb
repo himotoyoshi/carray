@@ -25,8 +25,9 @@ class TestRefusalMessagesOrder < Test::Unit::TestCase
     g = CArray.struct { float64 :lat }
     e = assert_raise(ArgumentError) { CArray.fixlen_string(%w[ab]).is_in(CARecord.new(g, 2)) }
     assert_match(/to_type\(:object\) gives its values/, e.message)
-    e = assert_raise(ArgumentError) { CArray.const_string(%w[a b]).bsearch("a") }
-    assert_match(/#to_string gives its strings/, e.message)
+    # A String has no distance: every string Face refuses nearest alike.
+    e = assert_raise(CArray::DataTypeError) { CArray.const_string(%w[a b]).search_nearest("a") }
+    assert_match(/nearest needs a distance/, e.message)
   end
 
   def test_a_categorical_cannot_be_ordered_by_its_codes

@@ -1,6 +1,6 @@
 # Composition
 
-*Composition* means building one larger array out of several smaller ones. You already have some pieces — three monthly grids, the red/green/blue channels of an image, four image tiles arranged in a 2×2 mosaic — and you want to glue them together into a single array.
+*Composition* means building one larger array out of several smaller ones. The starting point is a set of pieces, such as three monthly grids, the red/green/blue channels of an image, or four image tiles arranged in a 2×2 mosaic. The result is a single array.
 
 CArray's composition surface is a **3 × 2** matrix. The three rows ask *how* the pieces fit together; the two columns split the methods into view-default and eager:
 
@@ -15,11 +15,11 @@ Two questions decide which one:
 - Do the pieces line up along an axis the inputs already have, am I making a brand-new axis, or am I tiling into a grid?
 - Do I want a view over the original pieces, or a fresh, independent entity?
 
-**The view-default methods do not copy.** `meld`, `stack`, and `montage` return a view onto the original arrays — reads gather from the pieces on demand, and writes flow back to them. Pieces of different data types are promoted through cast views, so the result is still a view. Materialise with `.copy` when you want a fresh independent buffer.
+**The view-default methods do not copy.** `meld`, `stack`, and `montage` return a view onto the original arrays — reads gather from the pieces on demand, and writes flow back to them. Pieces of different data types are promoted through cast views, so the result is still a view. Use `.copy` to get a fresh independent buffer.
 
 **The eager methods materialise.** `concatenate` and `mosaic` allocate a destination, auto-cast mixed data types to a common one, and paste each piece in, so they always return a fresh owned CArray.
 
-Along the axis being extended, the pieces need *not* be the same length — `meld` welds ragged pieces just as happily as uniform ones. The one composition that is uniform-only by definition is `stack`: putting pieces on a brand-new axis only makes sense when every piece has the same shape. (`montage` also requires uniform tiles; its ragged counterpart is `mosaic`.)
+Along the axis being extended, the pieces need *not* be the same length — `meld` welds ragged pieces in the same way as uniform ones. The one composition that is uniform-only by definition is `stack`: putting pieces on a brand-new axis only makes sense when every piece has the same shape. (`montage` also requires uniform tiles; its ragged counterpart is `mosaic`.)
 
 The rest of this page walks through each method. (For background on what "view" means, see [Views](06_views.md).)
 
@@ -88,10 +88,10 @@ A common mistake — melding twelve monthly `[lat, lon]` grids into a yearly arr
 ```ruby
 # monthly_arrays : an Array of 12 CArrays, each shape [720, 360]
 yearly = CArray.meld(monthly_arrays, axis: 0)
-# resulting shape: [12 * 720, 360]  — not what you want!
+# resulting shape: [12 * 720, 360]  — not a new time axis
 ```
 
-`meld` extends an *existing* axis. If you want a brand-new time axis on top of the monthly grids, you want `stack`.
+`meld` extends an *existing* axis. To add a new time axis to the monthly grids, use `stack`.
 
 NumPy equivalent: `np.concatenate(list, axis=axis)` — except that `meld` returns a view.
 
@@ -156,11 +156,11 @@ cols = m.split(axis: 1)        #  => [ [1,4,7], [2,5,8], [3,6,9] ]
 CArray.stack(m.split(axis: 0), axis: 0) == m   #  => true (round-trip)
 ```
 
-Each piece is a writable view — assigning into `rows[0]` changes `m`. Take `.copy` of a piece when you want it independent.
+Each piece is a writable view — assigning into `rows[0]` changes `m`. Use `.copy` on a piece to make it independent.
 
 ### Tiling into multiple new axes
 
-`stack` plus `reshape` covers the case where you want the tile pattern to live on *new* outer axes rather than to extend existing ones. Four `[2, 2]` pieces arranged in a `2 × 2` grid, with the tile axes kept as brand-new outer axes:
+`stack` plus `reshape` covers the case where the tile pattern should live on *new* outer axes rather than to extend existing ones. Four `[2, 2]` pieces arranged in a `2 × 2` grid, with the tile axes kept as brand-new outer axes:
 
 ```ruby
 CArray.stack([a, b, c, d]).reshape(2, 2, 2, 2)
@@ -173,8 +173,8 @@ This is still a view (both `stack` and `reshape` are view operations), so nothin
 
 Ask: does each input array *already have* the axis I want to extend?
 
-- The 12 monthly grids each have axes `[lat, lon]`. There is no "month" axis on any single grid — that axis only exists in the combined array. So you need `stack` to create it.
-- If you had 12 *yearly* grids each of shape `[12, 720, 360]` (so the month axis is already present), and you wanted to splice them into a 144-month series, that's `meld` along axis 0.
+- The 12 monthly grids each have axes `[lat, lon]`. There is no "month" axis on any single grid — that axis only exists in the combined array. So `stack` is needed to create it.
+- In 12 *yearly* grids of shape `[12, 720, 360]`, the month axis is already present. Joining them into a 144-month series is `meld` along axis 0.
 
 ## `montage` — tile into an N-D grid (uniform, view)
 
@@ -244,16 +244,16 @@ t.repeat([2, 1], axis: 1)
 
 Without `axis:` a multi-dimensional receiver is taken in flatten order and the result is 1-D, which is what `np.repeat` does.
 
-The result is a **view**: the same element named as many times as it was repeated, so nothing is copied, and a write through one of those positions reaches the cell it names — and therefore shows at every other position naming the same cell. `copy` when that is not what you want.
+The result is a **view**: the same element named as many times as it was repeated, so nothing is copied, and a write through one of those positions reaches the cell it names — and therefore shows at every other position naming the same cell. Use `copy` to avoid this.
 
 Counts must be non-negative and there must be exactly as many as there are elements (or sub-arrays along `axis:`); a masked count is refused, since it names no number of repetitions.
 
 ## `concatenate` and `mosaic` — the eager siblings
 
-`concatenate` is the eager counterpart of `meld`, and `mosaic` of `montage`. They allocate a destination, paste each piece in, and return a fresh owned CArray. Reach for them when:
+`concatenate` is the eager counterpart of `meld`, and `mosaic` of `montage`. They allocate a destination, paste each piece in, and return a fresh owned CArray. Use them when:
 
-- you want an **independent entity** rather than a view over the pieces (the eager form does in one step what `meld(...).copy` does in two), or
-- the pieces have **mixed data types** and you want the automatic promotion to a common type instead of casting each piece yourself.
+- the result must be an **independent entity** rather than a view over the pieces (the eager form does in one step what `meld(...).copy` does in two), or
+- the pieces have **mixed data types** and should be promoted to a common type automatically, without casting each piece by hand.
 
 ```ruby
 x = CArray.int32(2, 3).seq            # [[0, 1, 2], [3, 4, 5]]
@@ -319,7 +319,7 @@ The rows must line up: columns of unequal length raise rather than being padded.
 
 ## View or entity?
 
-`meld`, `stack`, and `montage` return *views* — they do not copy the data of the input arrays. See [Views](06_views.md) for what this means in practice: writing through the result reaches back and changes the original pieces, and holding the result keeps the parents alive. Staying a view matters when you only need a subset of the result (`meld(files)[0..99, nil]`), when you feed the result straight into a reduction (`meld(monthly).sum(axis: 0)`), or when memory is tight and you want to avoid a peak allocation.
+`meld`, `stack`, and `montage` return *views* — they do not copy the data of the input arrays. See [Views](06_views.md) for what this means in practice: writing through the result reaches back and changes the original pieces, and holding the result keeps the parents alive. Staying a view matters in three cases: when only a subset of the result is needed (`meld(files)[0..99, nil]`), when the result goes straight into a reduction (`meld(monthly).sum(axis: 0)`), and when memory is tight and a peak allocation must be avoided.
 
 To get a separate, contiguous copy, ask for one explicitly with `.copy`:
 
@@ -332,7 +332,7 @@ m = v.copy                            #  fresh, materialised CArray
 m.entity?                             #  => true
 ```
 
-(`.to_ca` is *not* the way to materialise: on a view it returns the view itself, unchanged. Use `.copy` when you need an independent buffer.)
+(`.to_ca` is *not* the way to materialise: on a view it returns the view itself, unchanged. Use `.copy` to get an independent buffer.)
 
 `concatenate`, `mosaic`, and `tabulate` allocate a destination and paste each piece in, so they always return a fresh materialised CArray directly.
 
@@ -358,7 +358,7 @@ CArray.concatenate([i, f], data_type: :float32)        #  forced float32
 
 ## Summary
 
-| You want to ...                                              | Use            | Result   |
+| Task                                                         | Use            | Result   |
 |--------------------------------------------------------------|----------------|----------|
 | Weld arrays along an existing axis (uniform or ragged)       | `meld`         | view     |
 | Stack same-shape arrays along a brand-new axis               | `stack`        | view     |
@@ -368,4 +368,4 @@ CArray.concatenate([i, f], data_type: :float32)        #  forced float32
 | Assemble a 2-D table from a list of columns                  | `tabulate`     | eager    |
 | Lay each element of one array down several times            | `repeat`       | view     |
 
-The view methods keep you connected to the pieces; the eager methods hand you an independent entity and auto-cast mixed types along the way.
+The view methods stay connected to the pieces. The eager methods return an independent entity and cast mixed types automatically.

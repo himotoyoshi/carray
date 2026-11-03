@@ -142,7 +142,7 @@ ca_bincmp_setup (CABinCmp *ca, CArray *left, CArray *right, uint16_t op_id,
   ca->nosync    = 0;
   ca->right     = right;
   ca->op_id     = op_id;
-  ca->right_is_scalar = ( right->elements == 1 && left->elements > 1 ) ? 1 : 0;
+  ca->right_is_scalar = ( right->elements == 1 ) ? 1 : 0;
   /* Builder has already cast both operands to common data_type.  */
   ca->common_dt = left->data_type;
   ca->sign_fix  = 0;
@@ -622,6 +622,7 @@ rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
 {
   CArray *l, *r;
   int8_t  l_in_dt, r_in_dt;
+  int     left_scalar;
   int     signed_side = 0;
   volatile VALUE l_resolved, r_resolved;
 
@@ -640,6 +641,20 @@ rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
     r_resolved = ca_bincmp_cast_operand(r_resolved,
                      ( signed_side == 2 ) ? CA_INT64 : CA_UINT64);
     break;
+  }
+
+  /* A value the array can not hold matches no cell in eq / ne, and an
+     ordering with it is refused, as the eager comparison answers. */
+  if ( ! rb_obj_is_carray(r_resolved) && rb_obj_is_carray(l_resolved) ) {
+    CArray *lc;
+    GetCArray(l_resolved, lc);
+    if ( ( op_id == CA_BINCMP_EQ || op_id == CA_BINCMP_NE ) &&
+         ca_query_matches_nothing(lc, r_resolved) ) {
+      return ca_bincmp_no_match(l_resolved, op_id == CA_BINCMP_NE);
+    }
+    if ( op_id <= CA_BINCMP_GE && ! ca_is_complex_type(lc) ) {
+      ca_refuse_foreign_order(r_resolved, l_resolved);
+    }
   }
 
   /* A scalar beside the array (a Ruby value or a CScalar) is wrapped and
@@ -687,8 +702,9 @@ rb_ca_bincmp_build (VALUE l_cary, VALUE r_cary, uint16_t op_id, double eps)
   TypedData_Get_Struct(l_resolved, CArray, &carray_data_type, l);
   TypedData_Get_Struct(r_resolved, CArray, &carray_data_type, r);
 
-  if ( l->elements != r->elements ) {
-    if ( r->elements == 1 ) {
+  left_scalar = ca_is_scalar(l) && ! ca_is_scalar(r);
+  if ( l->elements != r->elements || left_scalar ) {
+    if ( r->elements == 1 && ! left_scalar ) {
       /* CScalar right: handled via right_is_scalar */
     }
     else if ( l->elements == 1 ) {

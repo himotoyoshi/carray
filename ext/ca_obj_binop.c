@@ -153,12 +153,13 @@ ca_binop_setup (CABinOp *ca, CArray *left, CArray *right, uint16_t op_id)
   ca->operands[1] = right;
   ca->parents     = ca->operands;
   ca->n_parents   = 2;
-  /* right_is_scalar fast path: when right holds a single element,
-     xfer_stride pulls only that cell into scratch and walks the
-     kernel with element-stride 0 (broadcast).  The symmetric
+  /* right_is_scalar: a right of one cell is pulled once and walked with
+     element-stride 0, also when left has one cell too -- a view over this
+     node can ask for that one cell several times, and a CScalar right has
+     fewer axes than the request.  The symmetric
      left_is_scalar case is currently handled by wrapping left in
      a broadcast view of right's shape (correct but slower). */
-  ca->right_is_scalar = ( right->elements == 1 && left->elements > 1 ) ? 1 : 0;
+  ca->right_is_scalar = ( right->elements == 1 ) ? 1 : 0;
 
   memcpy(ca->dim, left->dim, left->ndim * sizeof(ca_size_t));
 
@@ -454,9 +455,10 @@ ca_binop_func_fill_data (void *ap, void *ptr)
 
    Boolean AND / OR are three-valued (Kleene): a masked cell is resolved by
    the *known* side (`unknown | true = true`, `unknown & false = false`), so
-   it is NOT masked in the result.  The blind value the value kernel writes
-   is already correct on a resolved cell because the absorbing element (true
-   for OR, false for AND) dominates whatever sits on the masked side. */
+   it is NOT masked in the result.  The value the kernel writes is already
+   right on a resolved cell: the absorbing element (true for OR, false for
+   AND) decides it whatever byte sits on the masked side, and the boolean
+   OR kernel writes 1, not the OR of the bytes. */
 static void
 ca_binop_func_create_mask (void *ap)
 {
@@ -554,6 +556,7 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
 {
   CArray *l, *r;
   int8_t  l_in_dt, r_in_dt;
+  int     left_scalar;
   volatile VALUE l_resolved, r_resolved;
 
   /* Collapse markers on both sides. */
@@ -568,6 +571,22 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
      data_type the eager binop gives it, and the pair is promoted as the
      eager binop promotes it.  An integer power keeps its int64 exponent
      (ca_binop_kernel_input_data_types). */
+  if ( ! rb_obj_is_carray(r_resolved) && rb_obj_is_carray(l_resolved) &&
+       ca_binop_picks_by_order(op_id) ) {
+    CArray *lc;
+    GetCArray(l_resolved, lc);
+    /* a boolean array picks as its 0 / 1 int64 numbers */
+    if ( ca_binop_kernel_lookup_vv(op_id,
+           lc->data_type == CA_BOOLEAN ? CA_INT64 : lc->data_type)
+         != ca_binop_not_implement ) {
+      ca_refuse_foreign_order(r_resolved, l_resolved);
+    }
+    else {
+      /* an array the op is not defined for says so, whatever the operand */
+      ca_op_refuse_unimplemented(l_resolved, lc->data_type, rb_eCADataTypeError);
+    }
+  }
+
   if ( op_id != CA_BINOP_IPOWER &&
        ( ! rb_obj_is_carray(l_resolved) || ! rb_obj_is_carray(r_resolved) ||
          rb_obj_is_cscalar(l_resolved) || rb_obj_is_cscalar(r_resolved) ) ) {
@@ -633,14 +652,20 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
            op commutes (ADD / MUL / BIT_*).  Non-commutative +
            left scalar wraps left in a broadcast view of right's
            shape so the kernel sees matched shapes; cost is N
-           reads of the scalar cell with stride 0. */
-  if ( l->elements != r->elements ) {
-    if ( r->elements == 1 ) {
+           reads of the scalar cell with stride 0.
+       A left CScalar is taken here also beside a one-cell array, whose
+       shape is the answer's. */
+  left_scalar = ca_is_scalar(l) && ! ca_is_scalar(r);
+  if ( l->elements != r->elements || left_scalar ) {
+    if ( r->elements == 1 && ! left_scalar ) {
       /* CScalar-vs-array, right.  xfer_stride handles this with
          right_step = 0. */
     }
     else if ( l->elements == 1 ) {
-      int commutes = ( op_id == CA_BINOP_ADD     ||
+      /* An object cell answers an operator for itself, so which operand
+         receives it is part of the expression. */
+      int commutes = l->data_type != CA_OBJECT &&
+                     ( op_id == CA_BINOP_ADD     ||
                        op_id == CA_BINOP_MUL     ||
                        op_id == CA_BINOP_BIT_AND ||
                        op_id == CA_BINOP_BIT_OR  ||

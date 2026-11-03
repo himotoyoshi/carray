@@ -40,8 +40,9 @@ class CArray
   #   `Array#include?` does, so they are equal there. To match by value
   #   across Integer and Float, convert the array to a numeric type first.
   #
-  #   Masked cells of `values` do not enter the set. Masked cells of
-  #   `self` stay masked in the result (membership is unknown), so
+  #   Masked cells of `values` do not enter the set, and neither does `nil`
+  #   unless `self` is an `:object` array, which can hold it. Masked cells
+  #   of `self` stay masked in the result (membership is unknown), so
   #   `is_in` propagates `self`'s mask like an element-wise comparison.
   #
   #   For a per-fiber "does this fiber contain any of these values"
@@ -59,7 +60,7 @@ class CArray
   #   @return [CArray] boolean CArray of the same shape as `self`.
   def is_in (values)
     refuse_range_set(values, "is_in")
-    a, b = promote_value_set(values)
+    a, b = promote_value_set(values_of_set(values))
     a.__send__(:__is_in__, b)
   end
 
@@ -130,6 +131,25 @@ class CArray
     raise ArgumentError,
           "#{verb}: a Range is not taken as a set; pass its values as an Array " \
           "((#{values.inspect}).to_a), or test an interval with is_between(#{values.inspect})"
+  end
+
+  # The set as the array reads it.  nil is no value of an array that can not
+  # hold it, so it enters no set, and true and false are the numbers 1 and 0
+  # to an integer, float or complex array, as they are to eq.
+  def values_of_set (values)
+    return values if data_type == CA_OBJECT
+    numeric = !face? && (integer? || float? || complex?)
+    case values
+    when Array
+      values = values.compact
+      numeric ? values.map { |v| (v == true) ? 1 : (v == false) ? 0 : v } : values
+    when CArray
+      ( values.data_type == CA_OBJECT ) ? values.mask_eq(nil) : values
+    when true, false
+      numeric ? (values ? 1 : 0) : values
+    else
+      values
+    end
   end
 
   # Reconcile a set-valued argument with self to a common data_type via

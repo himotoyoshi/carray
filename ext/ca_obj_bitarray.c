@@ -399,16 +399,14 @@ static void
 ca_bitarray_func_allocate (void *ap)
 {
   CABitarray *ca = (CABitarray *) ap;
-  ca_attach(ca->parent);
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
 }
 
 static void
 ca_bitarray_func_attach (void *ap)
 {
   CABitarray *ca = (CABitarray *) ap;
-  ca_attach(ca->parent);
-  ca->ptr = ca_alloc_cells((CArray *) ca);
+  ca->ptr = ca_alloc_cells_then_attach((CArray *) ca, 1, &ca->parent);
   ca_bitarray_attach(ca);
 }
 

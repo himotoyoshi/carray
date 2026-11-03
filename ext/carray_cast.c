@@ -607,10 +607,11 @@ OBJ2BOOL (VALUE v)
   else if ( v == Qtrue ) {
     return 1;
   }
-  else if ( rb_obj_is_kind_of(v, rb_cInteger) ) {
-    int flag = NUM2INT(v);
+  else if ( FIXNUM_P(v) ) {
+    /* an Integer past a Fixnum is no 0 or 1, and is refused below */
+    long flag = FIX2LONG(v);
     if ( flag == 0 || flag == 1 ) {
-      return flag;
+      return (boolean8_t) flag;
     }
   }
   {
@@ -638,7 +639,7 @@ ca_str_nonfinite (const char *str, double *out)
   if ( ! strcasecmp(str, "nan")
        || ! strcasecmp(str, "+nan")
        || ! strcasecmp(str, "-nan") ) {
-    *out = 0.0/0.0;
+    *out = NAN;        /* 0.0/0.0 sets the sign bit on x86 */
     return 1;
   }
   else if ( ! strcasecmp(str, "inf")
@@ -831,6 +832,40 @@ ca_obj2integer_ok (VALUE val, int8_t wide_type, void *wide, VALUE *integer)
   return 1;
 }
 
+/* The to_type reader of an object cell for an integer type: a number that
+   is not an Integer (Float, Rational, BigDecimal, Complex) and does not fit
+   the type is a missing value, as a float array's cell is.  An Integer
+   keeps its low bytes (the readers below). Returns 1 when the cell may be
+   read on. */
+int
+ca_obj_number_fits_integer (VALUE val, int8_t data_type)
+{
+  int state = 0;
+  volatile VALUE integer;
+  if ( RB_INTEGER_TYPE_P(val) || NIL_P(val) || RB_TYPE_P(val, T_STRING) ) {
+    return 1;
+  }
+  /* protect: converts the caller's value and reports failure; nothing is held */
+  integer = rb_protect(ca_kernel_integer, val, &state);
+  if ( state ) {
+    rb_set_errinfo(Qnil);
+    return 1;              /* the reader fails it on its own */
+  }
+  return ca_integer_range_side(integer, data_type) == 0;
+}
+
+/* The low bytes of an Integer in two's complement, for the _ok readers
+   below: an Integer wider than the C type is cut to it, as an Integer that
+   fits a long is when the caller narrows it to the cell's type.  These
+   readers report failure through their return value and do not raise, so
+   a Bignum cannot go through NUM2LONG and friends. */
+static void
+ca_integer_low_bytes (VALUE integer, void *out, size_t size)
+{
+  rb_integer_pack(integer, out, 1, size, 0,
+                  INTEGER_PACK_2COMP | INTEGER_PACK_NATIVE_BYTE_ORDER);
+}
+
 int
 rb_obj2long_ok (VALUE val, long *out)
 {
@@ -843,7 +878,12 @@ rb_obj2long_ok (VALUE val, long *out)
   if ( ! ca_obj2integer_ok(val, CA_INT64, &wide, &integer) ) {
     return 0;
   }
-  *out = NIL_P(integer) ? (long) wide : NUM2LONG(integer);
+  if ( NIL_P(integer) ) {
+    *out = (long) wide;
+  }
+  else {
+    ca_integer_low_bytes(integer, out, sizeof(*out));
+  }
   return 1;
 }
 
@@ -859,7 +899,12 @@ rb_obj2ulong_ok (VALUE val, unsigned long *out)
   if ( ! ca_obj2integer_ok(val, CA_UINT64, &wide, &integer) ) {
     return 0;
   }
-  *out = NIL_P(integer) ? (unsigned long) wide : NUM2ULONG(integer);
+  if ( NIL_P(integer) ) {
+    *out = (unsigned long) wide;
+  }
+  else {
+    ca_integer_low_bytes(integer, out, sizeof(*out));
+  }
   return 1;
 }
 
@@ -875,7 +920,12 @@ rb_obj2ll_ok (VALUE val, long long *out)
   if ( ! ca_obj2integer_ok(val, CA_INT64, &wide, &integer) ) {
     return 0;
   }
-  *out = NIL_P(integer) ? (long long) wide : NUM2LL(integer);
+  if ( NIL_P(integer) ) {
+    *out = (long long) wide;
+  }
+  else {
+    ca_integer_low_bytes(integer, out, sizeof(*out));
+  }
   return 1;
 }
 
@@ -891,7 +941,12 @@ rb_obj2ull_ok (VALUE val, unsigned long long *out)
   if ( ! ca_obj2integer_ok(val, CA_UINT64, &wide, &integer) ) {
     return 0;
   }
-  *out = NIL_P(integer) ? (unsigned long long) wide : rb_num2ull(integer);
+  if ( NIL_P(integer) ) {
+    *out = (unsigned long long) wide;
+  }
+  else {
+    ca_integer_low_bytes(integer, out, sizeof(*out));
+  }
   return 1;
 }
 
@@ -1021,6 +1076,42 @@ ca_cast_block_with_mask (ca_size_t n, void *ap1, void *ptr1,
   ca_cast_func_table[ca1->data_type][ca2->data_type](n, ca1, ptr1, ca2, ptr2, m);
 }
 
+/* A store and a cast view: the masked cells are left alone and every other
+   cell is converted as it is with no mask at all, so that the answer for a
+   cell does not depend on another cell being masked.  An object cell needs
+   this: the table's loop with a mask is #to_type's, which wraps an integer
+   the cell cannot hold and masks a value it cannot read. */
+void
+ca_cast_block_skip_masked (ca_size_t n, void *ap1, void *ptr1,
+                           void *ap2, void *ptr2, boolean8_t *m)
+{
+  CArray *ca1 = (CArray *) ap1;
+  CArray *ca2 = (CArray *) ap2;
+  char *p1 = (char *) ptr1;
+  char *p2 = (char *) ptr2;
+  ca_size_t i = 0;
+
+  if ( m == NULL ) {
+    ca_cast_block(n, ap1, ptr1, ap2, ptr2);
+    return;
+  }
+  if ( ca1->data_type != CA_OBJECT ) {
+    ca_cast_block_with_mask(n, ap1, ptr1, ap2, ptr2, m);
+    return;
+  }
+  while ( i < n ) {
+    ca_size_t j;
+    if ( m[i] ) {
+      i++;
+      continue;
+    }
+    for ( j = i; j < n && ! m[j]; j++ ) {
+    }
+    ca_cast_block(j - i, ap1, p1 + i * ca1->bytes, ap2, p2 + i * ca2->bytes);
+    i = j;
+  }
+}
+
 VALUE
 ca_ptr2obj (void *ap, void *ptr)
 {
@@ -1147,32 +1238,32 @@ rb_ca_face_numeric_projection (VALUE self, CArray *ca)
 
   if ( ! rb_respond_to(self, id_to_numeric) ) {
     rb_raise(rb_eTypeError,
-             "%s declares no numeric conversion: define #to_numeric to say "
+             "%"PRIsVALUE" declares no numeric conversion: define #to_numeric to say "
              "how its values become numbers, or take the surface with "
              "to_type(:object) / the storage with #parent",
-             rb_obj_classname(self));
+             rb_obj_class(self));
   }
 
   num = rb_funcall(self, id_to_numeric, 0);
 
   if ( ! rb_obj_is_carray(num) ) {
     rb_raise(rb_eTypeError,
-             "%s#to_numeric must return a CArray (got %s)",
-             rb_obj_classname(self), rb_obj_classname(num));
+             "%"PRIsVALUE"#to_numeric must return a CArray (got %"PRIsVALUE")",
+             rb_obj_class(self), rb_obj_class(num));
   }
 
   TypedData_Get_Struct(num, CArray, &carray_data_type, cn);
 
   if ( ca_is_face(cn) ) {
     rb_raise(rb_eTypeError,
-             "%s#to_numeric must return a plain CArray, not a Face (got %s)",
-             rb_obj_classname(self), rb_obj_classname(num));
+             "%"PRIsVALUE"#to_numeric must return a plain CArray, not a Face (got %"PRIsVALUE")",
+             rb_obj_class(self), rb_obj_class(num));
   }
 
   if ( cn->elements != ca->elements ) {
     rb_raise(rb_eArgError,
-             "%s#to_numeric returned %lld elements, expected %lld",
-             rb_obj_classname(self),
+             "%"PRIsVALUE"#to_numeric returned %lld elements, expected %lld",
+             rb_obj_class(self),
              (long long) cn->elements, (long long) ca->elements);
   }
 
@@ -1584,15 +1675,15 @@ ca_type_adapt_view (VALUE obj, VALUE rtype, int8_t data_type, int mode)
       return rb_ca_to_type_internal(1, args, obj);
     case CA_ADAPT_WRITABLE:
       rb_raise(rb_eTypeError,
-               "%s has no writable view in another data_type: the writes "
+               "%"PRIsVALUE" has no writable view in another data_type: the writes "
                "would land on the storage its surface hides -- wrap "
                "#parent to reach that storage",
-               rb_obj_classname(obj));
+               rb_obj_class(obj));
     default:
       rb_raise(rb_eTypeError,
-               "%s has no view of its values in another data_type: "
+               "%"PRIsVALUE" has no view of its values in another data_type: "
                "#to_type gives the values, #parent the raw storage",
-               rb_obj_classname(obj));
+               rb_obj_class(obj));
     }
   }
 
@@ -2158,7 +2249,7 @@ rb_ca_cast (volatile VALUE self)
    string semantics those bodies implement (min-width memcmp with a length
    tiebreak); this is only about a scalar standing in for a cell. */
 static int
-ca_fixlen_scalar_operand (volatile VALUE *scalar, VALUE reference)
+ca_fixlen_scalar_operand (volatile VALUE *scalar, volatile VALUE reference)
 {
   CArray *cr;
   /* A String is the only operand that means a cell value here.  A Regexp
@@ -2180,6 +2271,24 @@ ca_fixlen_scalar_operand (volatile VALUE *scalar, VALUE reference)
                                         len > cr->bytes ? len : cr->bytes,
                                         *scalar);
   }
+  return 1;
+}
+
+/* UNDEF as the scalar side of an operation with an array: a masked
+   scalar of the array's own data_type and width.  UNDEF has no value, so it
+   cannot decide the type of the result; read as a Ruby object it would make
+   an integer, boolean or fixlen operation answer an object array, while a
+   float one kept its type.  An operation the data type does not take
+   (fixlen `+`) is refused as for any other operand. */
+static int
+ca_undef_scalar_operand (volatile VALUE *scalar, volatile VALUE reference)
+{
+  CArray *cr;
+  if ( *scalar != CA_UNDEF || ! rb_obj_is_carray(reference) ) {
+    return 0;
+  }
+  TypedData_Get_Struct(reference, CArray, &carray_data_type, cr);
+  *scalar = rb_cscalar_new_with_value(cr->data_type, cr->bytes, CA_UNDEF);
   return 1;
 }
 
@@ -2249,12 +2358,22 @@ ca_obj2integer_fitting (VALUE v, int8_t data_type)
   return integer;
 }
 
+VALUE
+ca_obj2integer_store (CArray *dst, VALUE v, int8_t data_type)
+{
+  CArray *field = dst ? ca_bitfield_beneath(dst) : NULL;
+  if ( field ) {
+    return ca_bitfield_wrap_integer(field, v);
+  }
+  return ca_obj2integer_fitting(v, data_type);
+}
+
 /* A Ruby Integer operand against an integer array is taken in the array's
    own data type, refused when it does not fit (ca_check_integer_fits).
    Widening instead would make the result's type depend on a scalar's
    value.  A Float, a Face and an object array keep the coercion below. */
 static int
-ca_integer_scalar_operand (volatile VALUE *scalar, VALUE reference)
+ca_integer_scalar_operand (volatile VALUE *scalar, volatile VALUE reference)
 {
   CArray *cr;
   if ( ! RB_INTEGER_TYPE_P(*scalar) || ! rb_obj_is_carray(reference) ) {
@@ -2278,7 +2397,7 @@ ca_integer_scalar_operand (volatile VALUE *scalar, VALUE reference)
    promoted together.  Against an object array, a Face or a fixlen array an
    Array stays one value. */
 static int
-ca_array_operand (volatile VALUE *ary, VALUE reference, int both)
+ca_array_operand (volatile VALUE *ary, volatile VALUE reference, int both)
 {
   CArray *cr;
   volatile VALUE flat, probe_self, probe;
@@ -2368,13 +2487,105 @@ ca_operand_from_memory_view (VALUE obj)
    its class.  A Face reports the data type of its storage ("fixlen" for a
    time, a categorical, a record or a string column), which says nothing
    about what the operand is. */
-static const char *
+static VALUE
 ca_coerce_operand_name (VALUE obj, CArray *ca)
 {
   if ( ca_is_face(ca) ) {
-    return rb_obj_classname(obj);
+    return rb_obj_class(obj);
   }
-  return ca_type_name[ca->data_type];
+  return rb_str_new_cstr(ca_type_name[ca->data_type]);
+}
+
+int
+ca_value_foreign_to (CArray *ca, VALUE v)
+{
+  if ( ca_is_face(ca) || ca->data_type == CA_OBJECT || ca->data_type == CA_FIXLEN ) {
+    return 0;
+  }
+  if ( v == Qtrue || v == Qfalse || v == CA_UNDEF || rb_obj_is_carray(v) ) {
+    return 0;
+  }
+  if ( RTEST(rb_obj_is_kind_of(v, rb_cNumeric)) || RB_TYPE_P(v, T_ARRAY) ) {
+    return 0;
+  }
+  if ( rb_respond_to(v, rb_intern("to_ca")) || rb_memory_view_available_p(v) ) {
+    return 0;
+  }
+  return 1;
+}
+
+VALUE
+ca_truth_as_number (CArray *ca, VALUE v)
+{
+  if ( ( v == Qtrue || v == Qfalse ) && ! ca_is_face(ca) &&
+       ( ca_is_integer_type(ca) || ca_is_float_type(ca) ||
+         ca_is_complex_type(ca) ) ) {
+    return INT2FIX(v == Qtrue);
+  }
+  return v;
+}
+
+/* The name Ruby's coercion error gives a value: nil and a Symbol by
+   themselves, anything else by its class. */
+static VALUE
+ca_foreign_value_name (VALUE v)
+{
+  if ( NIL_P(v) || SYMBOL_P(v) ) {
+    return rb_inspect(v);
+  }
+  return rb_class_name(CLASS_OF(v));
+}
+
+/* The Ruby class whose operator the array's cells answer for. */
+static const char *
+ca_cell_class_name (CArray *ca)
+{
+  if ( ca_is_float_type(ca) ) return "Float";
+  if ( ca_is_complex_type(ca) ) return "Complex";
+  return "Integer";
+}
+
+void
+ca_refuse_foreign_operand (VALUE v, volatile VALUE array)
+{
+  CArray *ca;
+  if ( ! rb_obj_is_carray(array) ) {
+    return;
+  }
+  GetCArray(array, ca);
+  if ( ca_value_foreign_to(ca, v) ) {
+    rb_raise(rb_eTypeError, "%s: %" PRIsVALUE " can't be coerced into %s",
+             ca_calling_method_name(), ca_foreign_value_name(v),
+             ca_cell_class_name(ca));
+  }
+}
+
+void
+ca_refuse_foreign_order (VALUE v, volatile VALUE array)
+{
+  CArray *ca;
+  if ( ! rb_obj_is_carray(array) ) {
+    return;
+  }
+  GetCArray(array, ca);
+  if ( ca_value_foreign_to(ca, v) ) {
+    rb_raise(rb_eArgError, "%s: comparison of %s with %" PRIsVALUE " failed",
+             ca_calling_method_name(), ca_cell_class_name(ca),
+             ca_foreign_value_name(v));
+  }
+}
+
+/* true and false are the numbers 0 and 1 to an operator, as a boolean
+   array is: an integer array reads them through ca_value_to_data_type, and
+   a float or complex array reads them here rather than through Float(). */
+static int
+ca_truth_scalar_operand (volatile VALUE *scalar)
+{
+  if ( *scalar == Qtrue || *scalar == Qfalse ) {
+    *scalar = rb_cscalar_new_with_value(CA_BOOLEAN, 0, *scalar);
+    return 1;
+  }
+  return 0;
 }
 
 void
@@ -2402,6 +2613,7 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
 
   if ( ! rb_obj_is_carray(*self) ) {
     self_is_object = 1;
+    ca_refuse_foreign_operand(*self, *other);
     if ( rb_ca_is_object_type(*other) ) {
       *self = rb_cscalar_new_with_value(CA_OBJECT, 0, *self);
     }
@@ -2414,11 +2626,17 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
       *self = rb_cscalar_new_with_value(CA_CMPLX128, 0, *self);
     }
 #endif
+    else if ( ca_undef_scalar_operand(self, *other) ) {
+      /* the array's own data_type; see the helper above */
+    }
     else if ( ca_fixlen_scalar_operand(self, *other) ) {
       /* width taken from the fixlen reference; see the helper above */
     }
     else if ( ca_integer_scalar_operand(self, *other) ) {
       /* the array's own integer type; see the helper above */
+    }
+    else if ( ca_truth_scalar_operand(self) ) {
+      /* boolean, promoted with the array below */
     }
     else if ( rb_ca_is_float_type(*other) ) {
       *self = rb_cscalar_new_with_value(CA_FLOAT64, 0, *self);
@@ -2435,6 +2653,7 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
 
   if ( ! rb_obj_is_carray(*other) ) {
     other_is_object = 1;
+    ca_refuse_foreign_operand(*other, *self);
 
     if ( rb_ca_is_object_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_OBJECT, 0, *other);
@@ -2448,11 +2667,17 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
       *other = rb_cscalar_new_with_value(CA_CMPLX128, 0, *other);
     }
 #endif
+    else if ( ca_undef_scalar_operand(other, *self) ) {
+      /* the array's own data_type; see the helper above */
+    }
     else if ( ca_fixlen_scalar_operand(other, *self) ) {
       /* width taken from the fixlen reference; see the helper above */
     }
     else if ( ca_integer_scalar_operand(other, *self) ) {
       /* the array's own integer type; see the helper above */
+    }
+    else if ( ca_truth_scalar_operand(other) ) {
+      /* boolean, promoted with the array below */
     }
     else if ( rb_ca_is_float_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_FLOAT64, 0, *other);
@@ -2526,9 +2751,53 @@ rb_ca_cast_self_or_other (volatile VALUE *self, volatile VALUE *other)
   /* A data type the operation does not take, as `sqrt!` on an integer
      array is refused (CArray::DataTypeError is a TypeError). */
   rb_raise(rb_eCADataTypeError,
-           "can't coerce carray with data_types of '%s' and '%s'",
+           "can't coerce carray with data_types of '%"PRIsVALUE"' and '%"PRIsVALUE"'",
            ca_coerce_operand_name(*self, ca),
            ca_coerce_operand_name(*other, cb));
+}
+
+/* The three operands of a three-operand expression at their common data_type.
+   Pairs find that type, and they find it for operands that are not arrays
+   yet.  An array then goes to it in one step: taken through the pairs, it
+   would pass through the type of the first pair (an int8 -1 becomes 255 in
+   uint8 and stays 255 in uint64), and the answer would depend on the order
+   of the operands.  The arrays are then brought to one shape together
+   (the size-1 broadcast of the pairs), after the cast: the cast starts from
+   the operand as given, so a shape the pairs settled on is set again here. */
+void
+rb_ca_cast_three (volatile VALUE *v1, volatile VALUE *v2, volatile VALUE *v3)
+{
+  volatile VALUE original[3];
+  volatile VALUE *cast[3];
+  CArray *ca;
+  int8_t common;
+  int i;
+
+  original[0] = *v1;
+  original[1] = *v2;
+  original[2] = *v3;
+  cast[0] = v1;
+  cast[1] = v2;
+  cast[2] = v3;
+
+  rb_ca_cast_self_or_other(v1, v2);
+  rb_ca_cast_self_or_other(v1, v3);
+  rb_ca_cast_self_or_other(v2, v3);
+  rb_ca_cast_self_or_other(v1, v2);
+
+  TypedData_Get_Struct(*v1, CArray, &carray_data_type, ca);
+  common = ca->data_type;
+  for ( i = 0; i < 3; i++ ) {
+    if ( ! rb_obj_is_carray(original[i]) ) continue;
+    TypedData_Get_Struct(original[i], CArray, &carray_data_type, ca);
+    *cast[i] = ( ca->data_type != common && ! ca_is_face(ca) )
+               ? rb_ca_wrap_readonly(original[i], INT2NUM(common))
+               : original[i];
+  }
+  ca_broadcast_pair(v1, v2);
+  ca_broadcast_pair(v1, v3);
+  ca_broadcast_pair(v2, v3);
+  ca_broadcast_pair(v1, v2);
 }
 
 /* Refuses a pair of arrays with no common data_type in the words of
@@ -2927,10 +3196,10 @@ rb_ca_s_promote_list (int argc, VALUE *argv, VALUE klass)
       TypedData_Get_Struct(elem, CArray, &carray_data_type, ca);
       if ( ca_is_face(ca) ) {
         rb_raise(rb_eArgError,
-                 "promote_list: data_type %s cannot be applied to a list "
+                 "promote_list: data_type %"PRIsVALUE" cannot be applied to a list "
                  "containing Face elements (= Face cannot be coerced to "
                  "a primitive without losing identity)",
-                 RSTRING_PTR(rb_inspect(data_type)));
+                 rb_inspect(data_type));
       }
     }
     {
@@ -2998,11 +3267,16 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
   ca_array_operand(other, *self, 0);
 
   if ( ! rb_obj_is_carray(*other) ) {
+    ca_refuse_foreign_operand(*other, *self);
     if ( rb_ca_is_object_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_OBJECT, 0, *other);
     }
-    else if ( ca_fixlen_scalar_operand(other, *self) ) {
+    else if ( ca_undef_scalar_operand(other, *self) ||
+              ca_fixlen_scalar_operand(other, *self) ) {
       return;   /* already the receiver's data_type and width */
+    }
+    else if ( ca_truth_scalar_operand(other) ) {
+      /* boolean, promoted with the array below */
     }
     else if ( rb_ca_is_float_type(*self) ) {
       *other = rb_cscalar_new_with_value(CA_FLOAT64, 0, *other);
@@ -3042,7 +3316,7 @@ rb_ca_cast_other (VALUE *self, volatile VALUE *other)
   /* A data type the operation does not take, as `sqrt!` on an integer
      array is refused (CArray::DataTypeError is a TypeError). */
   rb_raise(rb_eCADataTypeError,
-           "can't coerce carray with data_types of '%s' and '%s'",
+           "can't coerce carray with data_types of '%"PRIsVALUE"' and '%"PRIsVALUE"'",
            ca_coerce_operand_name(*self, ca),
            ca_coerce_operand_name(*other, cb));
 }
@@ -3205,8 +3479,8 @@ ca_cast_impl (int8_t data_type, int argc, VALUE *argv)
   if ( argc == 2 && ! RTEST(rb_obj_is_kind_of(v, rb_cRange)) ) {
     rb_raise(rb_eArgError,
              "a step (the second argument) is only accepted "
-             "when the first argument is a Range (got %s)",
-             rb_obj_classname(v));
+             "when the first argument is a Range (got %"PRIsVALUE")",
+             rb_obj_class(v));
   }
 
   if ( TYPE(v) == T_ARRAY ) {
@@ -3359,18 +3633,18 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
       }
       bytes = ( maxlen > 0 ) ? maxlen : 1;   /* all empty: one NUL byte */
     } else {
-      bytes = NUM2SIZE(bytes_v);
+      bytes = ca_integer_arg(bytes_v, "bytes", NULL);
     }
     shape = rb_funcall(rb_cCArray, id_guess_array_shape_cast, 1, v);
     ndim = RARRAY_LEN(shape);
-    for ( i = 0; i < ndim; i++ ) dim[i] = NUM2SIZE(rb_ary_entry(shape, i));
+    for ( i = 0; i < ndim; i++ ) dim[i] = ca_integer_arg(rb_ary_entry(shape, i), "a dimension", NULL);
     obj = rb_carray_new(CA_FIXLEN, (int8_t) ndim, dim, bytes, NULL);
     rb_ca_store_all(obj, v);
     return obj;
   }
   else if ( NIL_P(v) ) {
     ca_size_t dim0 = 0;
-    ca_size_t bytes = NIL_P(bytes_v) ? 1 : NUM2SIZE(bytes_v);
+    ca_size_t bytes = NIL_P(bytes_v) ? 1 : ca_integer_arg(bytes_v, "bytes", NULL);
     return rb_carray_new(CA_FIXLEN, 1, &dim0, bytes, NULL);
   }
   else {
@@ -3387,7 +3661,7 @@ rb_ca_cast_fixlen (int argc, VALUE *argv, VALUE self)
          check reports it. */
       ca_size_t bytes = 0;
       if ( ! NIL_P(bytes_v) ) {
-        bytes = NUM2SIZE(bytes_v);
+        bytes = ca_integer_arg(bytes_v, "bytes", NULL);
       }
       else if ( RB_TYPE_P(v, T_STRING) ) {
         bytes = ( RSTRING_LEN(v) > 0 ) ? RSTRING_LEN(v) : 1;

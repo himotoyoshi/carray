@@ -699,7 +699,10 @@ class CAStruct::Builder  # :nodoc:
   #   Declares a bitfield member. Bits accumulate within the
   #   current byte; when a byte member follows, the cursor rounds
   #   up to the next byte boundary. Only supported in `:struct`
-  #   (not `:union`) and always requires a name.
+  #   (not `:union`) and always requires a name.  A member of more
+  #   than one bit keeps the low `bits` bits of an Integer written to
+  #   it (300 into 3 bits is 4), through an element or the member's
+  #   column alike; a one-bit member is boolean.
   #   @param name [Symbol, String] member name.
   #   @param bits [Integer] bit width in `1..64`.
   #   @return [void]

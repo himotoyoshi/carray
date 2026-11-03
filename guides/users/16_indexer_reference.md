@@ -2,7 +2,7 @@
 
 This page is the reference for `[]` and `[]=` on a CArray. It walks through every form the indexer accepts, what shape it gives back, and what class the result has. For a gentler introduction see [Indexing and slicing](02_indexing_and_slicing.md); for the underlying classifier wire format see `docs/topics/Indexer_decision_tree.md`.
 
-**Every form of `[]` returns a view onto the original storage** — writing through it reaches back to the source. That property is the subject of [Views](06_views.md); this page just notes the class of view each form produces.
+**Every form of `[]` except `:>` returns a view onto the original storage** — writing through it reaches back to the source. That property is the subject of [Views](06_views.md); this page just notes the class of view each form produces.
 
 Most examples use this 3-by-4 array:
 
@@ -17,7 +17,7 @@ a = CArray.int32(3, 4).seq!
 
 ## 1. One argument per axis
 
-The general form takes one argument per axis. Each argument independently selects from its axis; the result drops the axes you gave an integer to and keeps the rest.
+The general form takes one argument per axis. Each argument independently selects from its axis; the result drops the axes indexed by an integer and keeps the rest.
 
 ### 1.1 Integer — pick one position
 
@@ -51,7 +51,7 @@ CArray.float64(2, 2).seq![0, 1].class            #  => Float
 
 ### 1.2 `nil` — keep the whole axis
 
-`nil` in an axis position means "every index along this axis". This is how you take a row, a column, or a slab.
+`nil` in an axis position means "every index along this axis". This form takes a row, a column, or a slab.
 
 ```ruby
 a[1, nil]    #  => [ 4, 5, 6, 7 ]      second row
@@ -147,7 +147,7 @@ A `step` of zero, or an `Array` of any length other than 1, 2, or 3, is an error
 
 ### 1.6 The rubber sigil — `:~` (or `false`)
 
-`:~` (and the legacy `false`) is the **rubber sigil**: it stands for as many `nil` axes as it takes to fill the rest of the shape. Useful when you only care about a few axes at known positions.
+`:~` (and the legacy `false`) is the **rubber sigil**: it stands for as many `nil` axes as it takes to fill the rest of the shape. It is useful when only a few axes at known positions matter.
 
 ```ruby
 a[:~, 1]     #  => [ 1, 5, 9 ]        same as a[nil, 1]
@@ -169,7 +169,7 @@ At most one `:~` may appear; using it lifts the strict arity check, so `argc` ca
 
 ## 2. Single-argument shortcuts on a multi-dimensional array
 
-When you give *one* argument to a multi-dimensional array, the indexer treats it as addressing the *flattened* array. Three forms apply.
+When a multi-dimensional array receives *one* argument, the indexer treats it as addressing the *flattened* array. Three forms apply.
 
 ### 2.1 Single integer — flat address
 
@@ -242,7 +242,7 @@ b[CA_INT([0, 2, 4])]   #  => [ 10, 30, 50 ]
 
 ### 3.3 Integer CArray on a multi-d source — `MAPPING`
 
-When the source has `ndim > 1` and you pass a single integer CArray, it is treated as flat addresses into the source:
+When the source has `ndim > 1`, a single integer CArray is treated as flat addresses into the source:
 
 ```ruby
 a[CA_INT([0, 5, 11])]    #  => [ 0, 5, 11 ]     flat positions 0, 5, 11
@@ -266,7 +266,7 @@ a[CA_INT([0, 2]), CA_INT([1, 3])]
 #       [ 9, 11 ] ]
 ```
 
-You can mix with `nil`:
+This form mixes with `nil`:
 
 ```ruby
 a[CA_INT([0, 2]), nil]
@@ -317,7 +317,7 @@ d[:gt, 2] = 0       #  => [ 0, 1, 2, 0, 0 ]
 d[:eq, 0] = -1      #  => [ -1, 1, 2, -1, -1 ]
 ```
 
-What it buys you is the middle of a chain. Selecting by a property of a value means naming that value twice, which a chain has no room for — so without the symbol key you have to break the chain, or reach for `then`:
+This form is useful in the middle of a chain. Selecting by a property of a value means naming that value twice, and a chain has no name for it. Without the symbol key, the code must break the chain or use `then`:
 
 ```ruby
 a = CA_DOUBLE([1.0, 0.0, -1.0, 4.0])
@@ -332,7 +332,7 @@ t = a / b; t[t.is_finite]              #  the same, having named it
 
 The `[]=` forms above buy the same thing: `d[:gt, 2] = 0` says once what `d[d.gt(2)] = 0` says twice, and the condition is about the very array being written.
 
-There is no table of accepted keys — any method name works, because the form is the identity above. The ones worth knowing are the comparisons (`:eq`, `:ne`, `:gt`, `:ge`, `:lt`, `:le`) and the predicates (`:is_invalid`, `:is_finite`, `:is_nan`, `:is_masked`, `:is_not_masked`), plus any boolean-returning method you define yourself.
+There is no table of accepted keys — any method name works, because the form is the identity above. The ones worth knowing are the comparisons (`:eq`, `:ne`, `:gt`, `:ge`, `:lt`, `:le`) and the predicates (`:is_invalid`, `:is_finite`, `:is_nan`, `:is_masked`, `:is_not_masked`), plus any user-defined method that returns a boolean.
 
 Read the identity both ways: `a[:fill, 0]` is `a[a.fill(0)]`, which empties `a` and then indexes it. Name a question, not a change.
 
@@ -387,17 +387,45 @@ v[1, :_].shape       #  => [1]       one element, held at rank 1
 v[1, :_, :_].shape   #  => [1, 1]    the same element at rank 2
 ```
 
-The result is still a view — it reads, writes back to `v`, and carries the mask. Note that it states its rank, so `v[1, :_]` pairs with another 1-D array, not with a 2-D one. When you want to keep an axis rather than drop it, index it with something that is not a scalar — `v[[1], :_]` or `v[1..1, :_]` both give `[1, 1]` — which is the same rule every axis follows.
+The result is still a view — it reads, writes back to `v`, and carries the mask. Note that it states its rank, so `v[1, :_]` pairs with another 1-D array, not with a 2-D one. To keep an axis rather than drop it, index it with something that is not a scalar — `v[[1], :_]` or `v[1..1, :_]` both give `[1, 1]` — which is the same rule every axis follows.
 
 * **Class back:** `CAStride` (a reshape view).
 
 ---
 
-## 7. Writing through the indexer
+## 7. Slab iteration — `:>`
+
+`:>` marks an axis as a slab axis. Unlike every other form, `:>` does not return a view. It returns a `CASlabIterator`, which walks the slabs of the array. See [Slab iteration](11_slab_iteration.md).
+
+```ruby
+a = CArray.int32(3, 4).seq!
+
+a[nil, :>].class    #  => CASlabIterator
+a[nil, :>].sum      #  => [ 6.0, 22.0, 38.0 ]            the slabs run along axis 1
+a[:>, nil].sum      #  => [ 12.0, 15.0, 18.0, 21.0 ]     the slabs run along axis 0
+
+b = CArray.int32(2, 3, 4).seq!
+b[:>, nil, :>].sum  #  => [ 60.0, 92.0, 124.0 ]          each slab has axes 0 and 2
+```
+
+The other positions select which slabs to walk. `nil` selects all of them. A Range or an integer selects part of them, and an integer keeps its axis in the result:
+
+```ruby
+a[0..1, :>].sum     #  => [ 6.0, 22.0 ]
+a[1, :>].sum        #  => [ 22.0 ]
+```
+
+`:_` cannot be used in the same index as `:>`, and assignment through `:>` raises `IndexError`.
+
+* **Class back:** `CASlabIterator` (not a view).
+
+---
+
+## 8. Writing through the indexer
 
 Every form above can sit on the left of an assignment. The right-hand side is either a scalar (filling every selected cell) or an array of the matching shape (copied in cell by cell).
 
-### 7.1 Fill with a scalar
+### 8.1 Fill with a scalar
 
 ```ruby
 a = CArray.int32(3, 4).seq!
@@ -409,7 +437,7 @@ a[a.gt(5)] = 0              #  zero every cell greater than 5
 a[:eq, 0] = -1              #  same effect through the predicate key
 ```
 
-### 7.2 Copy from a matching-shape source
+### 8.2 Copy from a matching-shape source
 
 ```ruby
 a = CArray.int32(3, 4).seq!
@@ -417,7 +445,7 @@ a[nil, 0] = CA_INT([7, 8, 9])
 a[0..1, 0..1] = CA_INT([[100, 200], [300, 400]])
 ```
 
-You can copy from a slice of one array into a slice of another:
+A slice of one array can be copied into a slice of another:
 
 ```ruby
 src = CArray.int32(3, 4).seq!
@@ -425,7 +453,7 @@ dst = CArray.int32(3, 4)
 dst[0..1, 1..2] = src[1..2, 0..1]
 ```
 
-### 7.3 Whole-array assignment with `a[] = ...`
+### 8.3 Whole-array assignment with `a[] = ...`
 
 `[]` with no arguments addresses the array as a whole. This is the usual way to replace the contents in place without allocating a new entity. It is especially useful for writing a view of `a` back into `a` itself:
 
@@ -439,7 +467,7 @@ a[] = CA_INT([[1, 2, 3, 4],
 
 See [Views](06_views.md) for the view-into-itself idiom — e.g. `a[] = a.flip(0)`, which reverses `a` in place without ever allocating a separate buffer.
 
-### 7.4 Masking through `[]= UNDEF`
+### 8.4 Masking through `[]= UNDEF`
 
 Assigning `UNDEF` through any of these forms masks the selected cells rather than overwriting their value:
 
@@ -451,13 +479,13 @@ b[:gt, 3]  = UNDEF       #  same idea through the predicate key
 
 See [Masks and missing values](05_masks.md) for the full story.
 
-### 7.5 An assignment that raises
+### 8.5 An assignment that raises
 
 A store that raises may leave part of the destination written: its values and its mask after the raise are not specified.
 
 ---
 
-## 8. Quick lookup
+## 9. Quick lookup
 
 | Index form                                       | Region          | View class           |
 |--------------------------------------------------|-----------------|----------------------|
@@ -472,9 +500,10 @@ A store that raises may leave part of the destination written: its values and it
 | `a[:eq, v]`, `a[:gt, v]`, ..., `a[:is_invalid]`  | SELECT          | `CASelect`           |
 | `a[int_carray]` (1-D index)                      | GRID            | `CAGrid`             |
 | `a[int_carray]` (multi-d index, flat mapping)    | MAPPING         | `CARefer`            |
-| `a[int_carray, int_carray, ...]` (per-axis pick) | GRID            | `CAGrid`             |
+| `a[int_carray, int_carray, ...]` (one index array for each axis) | GRID            | `CAGrid`             |
 | `a[:%, shape...]`                                | REPEAT          | `CARepeat`           |
 | `a[..., :_, ...]`                                | (newaxis)       | `CAStride`           |
 | `a[:~, ...]` or `a[false]`                       | (rubber)        | depends on the rest  |
+| `a[nil, :>]`, `a[:>, nil]`, ...                  | (slab)          | `CASlabIterator`     |
 
 For the wire-format detail behind this table — the exact payload each region carries, every error condition, and the recursive flat-address scan used by `ADDRESS_COMPLEX` — see `docs/topics/Indexer_decision_tree.md`.

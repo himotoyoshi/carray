@@ -51,6 +51,37 @@ add_slab_checked (char **base, ca_size_t *stride, ca_size_t n,
   add_slab(base, stride, n, m0);
 }
 
+/* out = a.to_s over object operands, collecting after every cell: what the
+   bridge read from `a` has to stay alive for the rest of the walk. */
+static void
+to_s_cell (void *p_out, void *p_a)
+{
+  *(VALUE *) p_out = rb_funcall(*(VALUE *) p_a, rb_intern("to_s"), 0);
+  rb_gc_start();
+}
+
+static void
+to_s_slab (char **base, ca_size_t *stride, ca_size_t n, const boolean8_t *m0)
+{
+  ca_size_t k;
+  for (k = 0; k < n; k++) {
+    if (m0 && m0[k]) continue;
+    to_s_cell(base[0] + k * stride[0], base[1] + k * stride[1]);
+  }
+}
+
+static VALUE
+sweep_raw_to_s (VALUE self, VALUE out, VALUE a)
+{
+  return ca_call_cfunc_2(to_s_cell, "10", out, a);
+}
+
+static VALUE
+sweep_raw_to_s_slab (VALUE self, VALUE out, VALUE a)
+{
+  return ca_call_cslab_2(to_s_slab, "10", out, a);
+}
+
 static VALUE
 sweep_raw_add (VALUE self, VALUE out, VALUE a, VALUE b)
 {
@@ -75,9 +106,29 @@ sweep_raw_add_slab_checked (VALUE self, VALUE out, VALUE a, VALUE b)
   return ca_call_cslab_3(add_slab_checked, "100", out, a, b);
 }
 
+static VALUE
+sweep_raw_add_fsync (VALUE self, VALUE fsync, VALUE out, VALUE a, VALUE b)
+{
+  return ca_call_cfunc_3(add_cell, StringValueCStr(fsync), out, a, b);
+}
+
+static VALUE
+sweep_raw_add_slab_fsync (VALUE self, VALUE fsync, VALUE out, VALUE a, VALUE b)
+{
+  return ca_call_cslab_3(add_slab, StringValueCStr(fsync), out, a, b);
+}
+
 void
 Init_sweep_raw (void)
 {
+  rb_define_singleton_method(rb_cCArray, "__sweep_raw_add_fsync__",
+                             sweep_raw_add_fsync, 4);
+  rb_define_singleton_method(rb_cCArray, "__sweep_raw_add_slab_fsync__",
+                             sweep_raw_add_slab_fsync, 4);
+  rb_define_singleton_method(rb_cCArray, "__sweep_raw_to_s__",
+                             sweep_raw_to_s, 2);
+  rb_define_singleton_method(rb_cCArray, "__sweep_raw_to_s_slab__",
+                             sweep_raw_to_s_slab, 2);
   rb_define_singleton_method(rb_cCArray, "__sweep_raw_add_checked__",
                              sweep_raw_add_checked, 3);
   rb_define_singleton_method(rb_cCArray, "__sweep_raw_add_slab_checked__",

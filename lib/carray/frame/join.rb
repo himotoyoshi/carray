@@ -135,13 +135,17 @@ class CAFrame
       key.__send__(:nearest_refuse_bytes, key, "join_asof: the on: key #{on.inspect}",
                    "join on it exactly with join")
     end
+    refuse_rounded_keys(lkey, rkey, "join_asof")
+    if [:round, :floor, :ceil].include?(direction)
+      rkey.__send__(:nearest_refuse_distanceless, rkey, direction, tolerance, "join_asof")
+    end
     addr = if exact.empty?
              lkey.locate_nearest_addr(rkey, direction: direction, tolerance: tolerance)
            else
              lexact = exact.map { |name| key_column(name, "join_asof") }
              rexact = rexact_names.map { |name| other.__send__(:key_column, name, "join_asof") }
              join_check_key_widths(exact, lexact, rexact, "join_asof")
-             _, lcode, rcode, k = join_codes(lexact, rexact)
+             _, lcode, rcode, k = join_codes(lexact, rexact, "join_asof")
              join_asof_by(lkey, rkey, lcode, rcode, k, direction, tolerance)
            end
     join_by_addr(other, [on, *exact], [ron, *rexact_names], addr, plan, view)
@@ -177,6 +181,7 @@ class CAFrame
       raise ArgumentError,
             "align: the reference has shape #{ref.shape.inspect}; give one key value per row of the result"
     end
+    refuse_rounded_keys(keys, ref, "align")
     addr = ref.locate_addr(keys)
     # The result's keys are the reference's values, taken as they are now
     # and shown with the key's attributes; the caller's array is left as
@@ -320,8 +325,9 @@ class CAFrame
   # so the number stays below the row count.  Returns [parts, lcode, rcode,
   # k], parts holding each column's [distinct values, left codes, right
   # codes].
-  private def join_codes(lkeys, rkeys)
+  private def join_codes(lkeys, rkeys, verb = "join")
     parts = lkeys.zip(rkeys).map do |lkey, rkey|
+      refuse_rounded_keys(lkey, rkey, verb)
       common = CArray.align_addr(lkey, rkey, join: :outer)[0]
       [common, lkey.locate_addr(common), rkey.locate_addr(common)]
     end
@@ -336,6 +342,14 @@ class CAFrame
       lcode, rcode, k = lt.locate_addr(tuples), rt.locate_addr(tuples), tuples.elements
     end
     [parts, lcode, rcode, k]
+  end
+
+  # The two sides of a key meet at one type; a value that type rounds would
+  # match another value.
+  private def refuse_rounded_keys(lkey, rkey, verb)
+    return if lkey.face? || rkey.face?
+    CAFrame.__send__(:refuse_rounded_integers, [lkey, rkey],
+                     lkey.send(:query_match_type, rkey), verb, "a key")
   end
 
   # The rows of a :semi or :anti join: whether each row's key code occurs
@@ -412,7 +426,7 @@ class CAFrame
         hi = rk.project((start + lt).tap { |a| a[has_hi.not] = UNDEF })
         # an exact match takes its first reference; otherwise the nearer
         # neighbour, the upper one on a tie
-        upper = (hi - qk).le(qk - lo).strip_mask(false)
+        upper = lkey.__send__(:nearest_distance, hi, qk).le(lkey.__send__(:nearest_distance, qk, lo)).strip_mask(false)
         upper[has_lo.not] = true
         upper[has_hi.not] = false
         upper[hi.eq(qk).strip_mask(false)] = true
@@ -421,8 +435,7 @@ class CAFrame
     local[local.lt(0) | local.ge(size)] = UNDEF
     found = rrows.project(gstart.project(qc) + local)
     if limit
-      dist = (rkey.project(found) - lkey.project(lrows)).abs
-      found[dist > limit] = UNDEF
+      found[lkey.__send__(:nearest_beyond, rkey.project(found), lkey.project(lrows), limit)] = UNDEF
     end
     addr[lrows] = found
     addr
@@ -433,7 +446,8 @@ class CAFrame
   private def asof_searchable(key, code)
     ok = code.is_not_masked.strip_mask(false)
     ok &= key.is_not_masked.strip_mask(false) if key.has_mask?
-    ok &= key.is_nan.strip_mask(false).not if key.float?
+    nan = key.__send__(:nearest_nan_cells, key)
+    ok &= nan.strip_mask(false).not if nan
     ok
   end
 

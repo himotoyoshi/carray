@@ -159,14 +159,27 @@ returns immediately. The mask sibling is also marked (cascade).
 hold object cells must therefore contain valid `VALUE`s before it is
 published, even if the code that fills it never calls Ruby today:
 
-- a buffer for an array's cells is allocated with `ca_alloc_cells(ca)`
-  (`carray_internal.h`), which starts object cells as `nil`. `rake
-  cell_buffer_check` (`utils/check_cell_buffers.rb`) reports a `ptr`
-  assigned straight from an allocator unless it carries a
-  `/* cells: ... */` note saying why its cells are valid;
+- a buffer for an array's cells is allocated with `ca_alloc_cells(ca)`,
+  or with `ca_alloc_cells_of(data_type, elements, bytes)` when there is no
+  array yet (both in `carray_internal.h`); either starts object cells as
+  `nil`. `rake cell_buffer_check` (`utils/check_cell_buffers.rb`) reports
+  a `ptr` assigned from an allocator, directly or through a variable
+  assigned in the same function, unless it carries a `/* cells: ... */`
+  note saying why its cells are valid;
 - any other fresh `VALUE` buffer is cleared with `ca_object_cells_clear`
   before it is held (`ca_gc_hold_push` for a hold nested in the current
   call, `ca_gc_hold_buffer` for one released in any order).
+
+A `CArray *` taken with `GetCArray` points into an object the collector
+owns. If the `VALUE` is not used again, the compiler need not keep it, and
+an allocation or a Ruby call can free the array while the pointer is still
+read. A `VALUE` read into a `CArray *` is declared `volatile VALUE`, or
+guarded with `RB_GC_GUARD` after the pointer's last use. `rake
+gc_hold_check` (`utils/check_gc_holds.rb`) reports one that is neither,
+unless it carries a `/* gc: ... */` note saying what holds the array.
+Only the receiver and the arguments of a method Ruby calls are exempt;
+the parameter of any other C function may have been handed a `VALUE`
+that nothing else holds.
 
 `spec/spec_ai/test_object_cells_gc_matrix.rb` lists every view class,
 either with a recipe that builds it with object cells or with the reason
@@ -261,6 +274,16 @@ asking an array for its mask (`ca_has_mask`, `ca_create_mask`,
   `rake protect_parts_check` (`utils/check_protect_parts.rb`) asks a
   hand-written `rb_protect` outside the files that implement these parts
   to say, in a `/* protect: ... */` note, why it is not one of them.
+- A view's attach or allocate slot that attaches its parent and works in
+  a buffer of its own takes the buffer first:
+  `ca->ptr = ca_alloc_cells_then_attach(ca, n, parents)` allocates the
+  cells, then attaches the parents, and frees the cells if the attach
+  raises. A slot that raises before it publishes `ca->ptr` gets no call of
+  its detach slot, so a parent attached ahead of a failed allocation would
+  stay attached for good, reading and writing the copy it materialised
+  instead of its root. `rake attach_then_alloc_check`
+  (`utils/check_attach_then_alloc.rb`) reports a slot that allocates after
+  attaching, unless an `/* attach: ... */` note says why.
 
 `rake leak_matrix` (`utils/leak_matrix.rb`, macOS) runs every public
 method over a `CAObject` source whose hooks raise and reports the calls

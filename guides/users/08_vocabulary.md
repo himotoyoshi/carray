@@ -1,6 +1,6 @@
 # Vocabulary
 
-CArray uses some words in its own way. This page collects the terms that are particular to CArray, or whose meaning differs from what you might expect coming from another array library. You can read it first, or come back to it as a reference.
+CArray uses some words in its own way. This page collects the terms that are particular to CArray, or whose meaning differs from their meaning in other array libraries. This page can be read first or used later as a reference.
 
 ## Entity and view
 
@@ -20,19 +20,19 @@ a.reshape(6).entity?    #  => false   reshape returns a view in CArray
 a[a > 2].entity?        #  => false   boolean indexing also returns a view
 ```
 
-**You use a view exactly like any other array.** The methods, indexing, and behaviour are the same whether you hold an entity or a view — you do not need to know or check which one you have. The one thing a view adds that you must keep in mind: **writing through a view reaches back and changes the data it refers to** (see [Views](06_views.md)). To get an independent array that does not share storage, call `copy`.
+**A view is used exactly like any other array.** The methods, indexing, and behaviour are the same for an entity and a view, so code does not need to check which one it has. A view adds one thing to keep in mind: **writing through a view reaches back and changes the data it refers to** (see [Views](06_views.md)). To get an independent array that does not share storage, call `copy`.
 
-A distinctive point of CArray is that each kind of view is its own named class, and the array will tell you which one it is if you ask:
+Each kind of view is its own named class, and `class` returns that class:
 
 ```ruby
 a.class              #  => CArray       (an entity)
 a[0, nil].class      #  => CABlock      (a slice view)
 a.transpose.class    #  => CATranspose
 a.reshape(6).class   #  => CAStride
-a[a > 2].class       #  => CASelect     (boolean / fancy indexing)
+a[a > 2].class       #  => CASelect     (boolean indexing)
 ```
 
-You rarely need to name these classes; it only explains why a slice prints as a `CArray`-like array yet shares storage with its source.
+These class names are rarely needed in code. They mostly appear when an array prints: a slice prints `CABlock` where an entity prints `CArray`.
 
 ## address
 
@@ -65,7 +65,7 @@ Address is CArray's term for what some libraries call a flat or ravel index. It 
 
 ## mask and UNDEF
 
-Every CArray can carry an element-wise **mask** that records which elements are "missing". **`UNDEF`** is the special constant you assign to mark an element as missing; masked elements print as `_`. This is built in to every array — you do not need a separate masked-array type. See [Masks](05_masks.md).
+Every CArray can carry an element-wise **mask** that records which elements are "missing". **`UNDEF`** is the special constant that marks an element as missing when it is assigned; masked elements print as `_`. This is built in to every array, so no separate masked-array type is needed. See [Masks](05_masks.md).
 
 ```ruby
 a = CArray.float64(3).seq
@@ -116,24 +116,20 @@ a[1, nil].class  #  => CABlock
 
 ## to_ca, copy, dup
 
-These look similar but play different roles. The clearest way to keep them apart is by *what you start from* and *what you want*:
+These look similar but play different roles. The dividing line is simple: **`to_ca` presents existing data as a CArray with the least work (no copy); `copy` owns the data (always a fresh copy).**
 
-The dividing line is simple: **`to_ca` presents existing data as a CArray with the least work (no copy); `copy` owns the data (always a fresh copy).**
-
-* **`copy`** — **own the data.** Always allocates a new, independent, contiguous entity — duplicating an entity, materialising a view. Use it when you will modify the result, must not disturb the original, or need real owned memory.
-
-* **`to_ca`** — **present this as a CArray, doing the least work.** Anything that is already a CArray is handed back unchanged:
+* **`copy`** — **own the data.** Always allocates a new, independent, contiguous entity — duplicating an entity, materialising a view. Use it when the result will be modified, when the original must not change, or when the array must own its memory.
+* **`to_ca`** — **present this as a CArray, doing the least work.** Anything that is already a CArray is returned unchanged:
     * a CArray **entity** or a CArray **view** → returned as-is (`self`), no copy (a `CAWrap` wrapping external memory counts as a CArray too → `self`);
     * a **lazy view** (`a.lazy + 1`) has no data yet, so it is *evaluated* into an entity (like Ruby's `Enumerable#to_a` forcing a lazy enumerator);
     * a Ruby **`Array`** or a **`Numo::NArray`** → built into a new CArray (there is no existing buffer to present, so this one must allocate).
-
-* **`dup` / `clone`** — Ruby's standard shallow copy. On an entity this happens to give an independent array, but on a **view it returns another view onto the same storage** — so it is *not* a reliable way to get an independent copy, and is a trap if you treat it like one. Prefer `copy`.
+* **`dup` / `clone`** — Ruby's standard shallow copy. On an entity this happens to give an independent array, but on a **view it returns another view onto the same storage** — so it is *not* a reliable way to get an independent copy. Use `copy`.
 
 The three behave differently on the same view — `equal?` (Ruby object identity) tells the story:
 
 ```ruby
 a = CArray.int32(2, 3).seq
-v = a[0, nil]              #  a view (CABlock)
+v = a[0, nil]        #  a view (CABlock)
 v.to_ca.equal?(v)    #  => true    already a CArray → returned as-is
 v.copy.equal?(v)     #  => false   a fresh owned copy (independent storage)
 v.dup.equal?(v)      #  => false   a new object, but still a view of the same data
@@ -148,15 +144,15 @@ v[0]            #  => 999    v was changed, because d shares its storage
 a[0, 0]         #  => 999    and so was a, the underlying entity
 ```
 
-For arrays from other libraries that speak the MemoryView protocol (for example Apache Arrow), use `CArray.from_memory_view(obj)` (copy) or `CArray.wrap_memory_view(obj)` (zero-copy, yielding a `CAWrap`). See MemoryView.
+For arrays from other libraries that speak the MemoryView protocol (for example Apache Arrow), use `CArray.from_memory_view(obj)` (copy) or `CArray.wrap_memory_view(obj)` (zero-copy, yielding a `CAWrap`). See [MemoryView interop](15_memory_view.md).
 
-Rule of thumb: **`to_ca`** to get a CArray out of whatever you are holding (cheap); **`copy`** when you need an independent, owned array. `copy` is the only way to copy a CArray: don't use `dup`, `clone` or `to_ca` for it.
+Use **`to_ca`** to get a CArray from any object; this does little work. Use **`copy`** to get an independent, owned array. `copy` is the only way to copy a CArray: do not use `dup`, `clone` or `to_ca` for it.
 
 ## Broadcasting
 
 CArray's **broadcasting** only stretches axes of size 1; it never adds axes implicitly to make shapes line up. Two arrays with different numbers of axes are an error, not a silent re-interpretation. To add an axis on purpose, use `:_` in the index. This differs from the implicit trailing-alignment used by some other libraries. See [Broadcasting](07_broadcasting.md).
 
-A 1-D array does not silently combine with a 2-D one — you have to say whether it is a row or a column:
+A 1-D array does not silently combine with a 2-D one. The code must state whether the 1-D array is a row or a column:
 
 ```ruby
 a = CArray.int32(2, 3).seq
@@ -171,9 +167,9 @@ a + v[:_, nil]    #  treat v as a row (shape [1, 3]) and broadcast it
 
 ## Face
 
-A **Face** is an extended data type built on top of CArray — a way to give the raw numbers an interpretation, such as a calendar date (`CATime`). Faces are an advanced topic with their own documentation; they are mentioned here only so the word is not a surprise when you meet it.
+A **Face** is an extended data type built on top of CArray — a way to give the raw numbers an interpretation, such as a calendar date (`CATime`). See [Faces](12_faces.md).
 
-## If you are coming from NumPy or Numo
+## For NumPy and Numo users
 
 | Their term            | In CArray                                         |
 |-----------------------|---------------------------------------------------|

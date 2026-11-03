@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name        = "carray"
-  s.version     = "3.0.6"
+  s.version     = "3.0.7"
   s.authors      = ["himotoyoshi"]
   s.email       = ["himotoyoshi@users.noreply.github.com"]
   s.summary     = "Multi-dimensional numerical array class for Ruby"

@@ -1201,7 +1201,9 @@ double    OBJ2DBL (VALUE v);
 /* Mask-aware object->numeric parsers: return 1 with *out set on success, or
    0 (no value; caller masks the cell) on parse failure.  Used by the
    object->int/float cast loop so an unparseable cell becomes UNDEF instead
-   of a silent 0.0 (float) or a raise (int).  See ext/carray_cast.c. */
+   of a silent 0.0 (float) or a raise (int).  An Integer wider than the C
+   type gives its low bytes (two's complement), as a narrowing C cast does;
+   these parsers do not raise.  See ext/carray_cast.c. */
 int   ca_obj2dbl_ok   (VALUE v, double *out);
 int   ca_obj2cmplx_ok (VALUE v, double complex *out);
 int   rb_obj2long_ok  (VALUE v, long *out);

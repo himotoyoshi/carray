@@ -10,8 +10,13 @@
 #
 #   ->ptr = xmalloc(   ->ptr = ALLOC_N(   ->ptr = xcalloc(   ...
 #
+# or a buffer taken from an allocator into a variable or a field and then
+# assigned to a ptr in the same function,
+#
+#   st->scratch = xmalloc(n);  ...  cw->ptr = st->scratch;
+#
 # and requires either ca_alloc_cells or a note, in a comment on the same line
-# or the line above, of the form
+# or the line above (of the allocation or of the ptr assignment), of the form
 #
 #   /* cells: <why the cells are valid before anything can mark them> */
 #
@@ -26,14 +31,33 @@ ROOT = File.expand_path("..", __dir__)
 ASSIGN = /->\s*ptr\s*=\s*(?:\([^)]*\)\s*)?(?:xmalloc|xmalloc2|xcalloc|xrealloc|ALLOC_N|ALLOC|malloc|calloc|realloc|ruby_xmalloc)\s*\(/
 NOTE   = /cells:\s*\S/
 
+TAKE = /^\s*([\w.\->\[\]]+)\s*=\s*(?:\([^)]*\)\s*)?(?:xmalloc|xmalloc2|xcalloc|xrealloc|ALLOC_N|ALLOC|malloc|calloc|realloc|ruby_xmalloc)\s*\(/
+
+def noted? (lines, i)
+  lines[i] =~ NOTE || (i > 0 && lines[i - 1] =~ NOTE)
+end
+
+def comment? (line)
+  line =~ %r{^\s*(?:/\*|//|\*(?:\s|/|$))}
+end
+
 def sites (path)
   lines = File.readlines(path, encoding: "UTF-8")
-  lines.each_with_index.filter_map do |line, i|
+  found = lines.each_with_index.filter_map do |line, i|
     next unless line =~ ASSIGN
-    next if line =~ %r{^\s*(?:/\*|//|\*(?:\s|/|$))}
-    noted = line =~ NOTE || (i > 0 && lines[i - 1] =~ NOTE)
-    [i + 1, line.strip] unless noted
+    next if comment?(line)
+    [i + 1, line.strip] unless noted?(lines, i)
   end
+  lines.each_with_index do |line, i|
+    next unless (m = line.match(TAKE)) && !comment?(line) && !noted?(lines, i)
+    var = Regexp.escape(m[1])
+    ((i + 1)...lines.size).each do |j|
+      break if lines[j] =~ /^\}/
+      next unless lines[j] =~ /->\s*ptr\s*=\s*(?:\([^)]*\)\s*)?#{var}\s*;/
+      found << [j + 1, "#{lines[j].strip}   (taken at line #{i + 1})"] unless noted?(lines, j)
+    end
+  end
+  found.sort
 end
 
 paths =

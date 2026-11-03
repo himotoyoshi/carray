@@ -86,6 +86,7 @@ end
 # (categorical labels) prefer {CACategorical}, which stores each distinct
 # value once.
 class CAConstString
+  private def holds_new_values? = false
 
   # Read-only String Face: L1 string operations only (no in-place Mutable).
   # Its C-native byte predicates / search / comparison (ext/ca_obj_const_string.c)
@@ -205,6 +206,17 @@ class CAConstString
     const_string_lift(to_string.clip(*args, **kw))
   end
 
+  # A String has no distance, so there is no nearest one; refused in the
+  # words CAString uses.
+  def search_nearest (*args, **kw)
+    to_string.search_nearest(*args, **kw)
+  end
+
+  # @see #search_nearest
+  def search_nearest_addr (*args, **kw)
+    to_string.search_nearest_addr(*args, **kw)
+  end
+
   # @overload min_index(axis: nil)
   #   @return [Integer, CArray] where the byte-smallest string sits.
   def min_index (*args, **kw)
@@ -215,6 +227,68 @@ class CAConstString
   #   @return [Integer, CArray] where the byte-largest string sits.
   def max_index (*args, **kw)
     to_string.max_index(*args, **kw)
+  end
+
+  # @overload min_addr(axis: nil)
+  #   @return [Integer, CArray] the flat address of the byte-smallest string.
+  def min_addr (*args, **kw)
+    to_string.min_addr(*args, **kw)
+  end
+
+  # @overload max_addr(axis: nil)
+  #   @return [Integer, CArray] the flat address of the byte-largest string.
+  def max_addr (*args, **kw)
+    to_string.max_addr(*args, **kw)
+  end
+
+  # @overload bsearch(value)
+  #   @return [Integer, nil] where a sorted column holds `value`.
+  def bsearch (*args, **kw)
+    to_string.bsearch(*args, **kw)
+  end
+
+  # @overload bsearch_addr(value)
+  #   @return [Integer, nil] the flat address of `value` in a sorted column.
+  def bsearch_addr (*args, **kw)
+    to_string.bsearch_addr(*args, **kw)
+  end
+
+  # @overload search_addr(value)
+  #   @return [Integer, nil] the flat address of the first cell equal to `value`.
+  def search_addr (*args, **kw)
+    to_string.search_addr(*args, **kw)
+  end
+
+  # @overload match(pattern)
+  #   @return [CArray] boolean, as {CAString} answers.
+  def match (*args)
+    to_string.match(*args)
+  end
+
+  # @!method pmax(other)
+  #   The later String in byte order of each cell and `other`.
+  #   @return [CAConstString]
+  # @!method pmin(other)
+  #   The earlier String in byte order of each cell and `other`.
+  #   @return [CAConstString]
+  # @!method maximum(other)
+  #   Another name of {#pmax}.
+  #   @return [CAConstString]
+  # @!method minimum(other)
+  #   Another name of {#pmin}.
+  #   @return [CAConstString]
+  # @!method fmax(other)
+  #   Another name of {#pmax}.
+  #   @return [CAConstString]
+  # @!method fmin(other)
+  #   Another name of {#pmin}.
+  #   @return [CAConstString]
+  CArray.send(:define_named_methods, self,
+              [:pmax, :pmin, :maximum, :minimum, :fmax, :fmin], :pick_among_strings)
+
+  private def pick_among_strings (op, other)
+    refuse_unordered_operands(op, other)
+    const_string_lift(to_string.public_send(op, string_operand(other)))
   end
 
   # @overload partition_copy(kth, axis: nil)

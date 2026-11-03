@@ -36,6 +36,9 @@ class CArray
   #     count).
   #   - `v == UNDEF`: forwards to {#count_masked} (UNDEF is mask-state
   #     vocabulary, not a value).
+  #   - `v` is `nil`, a String, a Symbol or another value that is not a
+  #     number, on an array that is not `:object` or `:fixlen`: `0`.  It
+  #     is no value of such an array, so no cell equals it.
   #   - `v` is a CArray: broadcasts; each `v[k]` is counted
   #     independently and stacked into a result whose trailing axes
   #     have shape `v.shape`.  Not supported when `self.data_type` is
@@ -43,9 +46,9 @@ class CArray
   #   - `self.data_type == :boolean`: `v` must be `true` / `false`, or
   #     the integer literal `1` (= true) / `0` (= false) — boolean
   #     stores 0/1, so `count(1)` == `count(true)`.  Any other value
-  #     (`2`, `1.0`, `nil`, …) raises `TypeError`.
-  #   - `self` is numeric, `v` is scalar: `v` must be numeric (true /
-  #     false are rejected -- they are the boolean array's domain).
+  #     (`2`, `1.0`, …) raises `TypeError`.
+  #   - `self` is numeric, `v` is scalar: `true` and `false` are the
+  #     numbers `1` and `0`, as they are to {#eq}.
   #     `v` (a scalar or an array) is compared in the type it and the
   #     array match in, as {#eq} compares: `CA_INT32([1, 2]).count(1.5)`
   #     is `0`, `CA_UINT8([255]).count(-1)` is `0` (-1 is not 255), and an

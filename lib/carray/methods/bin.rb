@@ -105,6 +105,9 @@ class CArray
   #   @raise [ArgumentError] when `edges` is not 1-D, has fewer than 2
   #     values, has a masked value or NaN, or decreases anywhere.  Equal
   #     edges (a bin of zero width) and infinite ones are accepted.
+  #   Values and edges are compared as float64, so int64 values beyond
+  #   2**53 are compared at that precision.
+  #
   #   @example
   #     e = CA_FLOAT64([0, 1, 10, 100])
   #     v = CA_FLOAT64([0.5, 5.0, 50.0, -1.0, 200.0])

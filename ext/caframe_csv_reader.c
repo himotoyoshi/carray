@@ -498,7 +498,7 @@ ca_csv_build_const_string_columns (VALUE text, ca_csv_walk_t *w)
     CArray *pe;
     int64_t *range;
     boolean8_t *m = NULL;
-    VALUE col = rb_carray_new(CA_FIXLEN, 1, dim, 2 * sizeof(int64_t), NULL);
+    volatile VALUE col = rb_carray_new(CA_FIXLEN, 1, dim, 2 * sizeof(int64_t), NULL);
     rb_ary_push(cols, col);
     TypedData_Get_Struct(col, CArray, &carray_data_type, pe);
     range = (int64_t *) pe->ptr;

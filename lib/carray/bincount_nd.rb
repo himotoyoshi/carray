@@ -238,7 +238,10 @@ class CArray
       ext_sizes   = @lengths.map { |l| l + 1 }      # +1: upper overflow cell
       strides_ext = ext_sizes.each_with_index.map { |_, k| ext_sizes[(k + 1)..].inject(1, :*) }
       total_ext   = ext_sizes.inject(:*)
-      widen       = total_ext > 0x7fffffff          # int64 flat for big joint tables
+      # The flat index is worked out in the labels' own type, so it must reach
+      # the last cell of the table in that type.
+      label_bits  = 8 * chunk.bytes - (chunk.data_type_name.start_with?("u") ? 0 : 1)
+      widen       = total_ext - 1 >= 2 ** label_bits
 
       # canonical [fiber..., sample, channel] view (channel last); weights to
       # [fiber..., sample].  Skip the transpose when the layout is already
@@ -270,7 +273,10 @@ class CArray
         ravel = nil
         (0...@m).each do |k|
           b = tchunk[nil, k]
-          b = b.clip(0, @lengths[k]) if b.max > @lengths[k] - 1
+          top = b.max
+          # No present cell in a channel: every sample is dropped.
+          return self if top == UNDEF
+          b = b.clip(0, @lengths[k]) if top > @lengths[k] - 1
           b = b.int64 if widen
           term = strides_ext[k] == 1 ? b : b * strides_ext[k]
           ravel = ravel.nil? ? term : ravel + term

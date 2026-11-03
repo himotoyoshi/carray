@@ -1,15 +1,15 @@
 # MemoryView interop
 
-A numerical array is just *bytes + shape + data_type + strides*, but every library packages that information differently. **MemoryView** is Ruby's standard envelope for that information (`rb_memory_view_t`, available since Ruby 3.0). By implementing the protocol once, CArray can exchange data with any other library that does the same — no per-pair bridge code. At present these include Apache Arrow (red-arrow) and Fiddle, which ships with Ruby; the examples on this page use only those two and CArray itself.
+A numerical array is just *bytes + shape + data_type + strides*, but every library packages that information differently. **MemoryView** is Ruby's standard envelope for that information (`rb_memory_view_t`, available since Ruby 3.0). By implementing the protocol once, CArray can exchange data with any other library that does the same — no separate bridge code for each pair of libraries. At present these include Apache Arrow (red-arrow) and Fiddle, which ships with Ruby; the examples on this page use only those two and CArray itself.
 
 This page is an introduction. The full reference, including the export matrix and format-string conventions, is in `MemoryView.md`.
 
-> See also: [Creating arrays](01_creating_arrays.md) for the regular constructors, and [Views](06_views.md) for the view classes you will see in the return values here (`CAWrap`, `CAStride`, ...).
+> See also: [Creating arrays](01_creating_arrays.md) for the regular constructors, and [Views](06_views.md) for the view classes that appear in the return values here (`CAWrap`, `CAStride`, ...).
 
-## Three things you can do
+## Three operations
 
 1. **Receive** a buffer from any producer that exposes MemoryView — `CArray.from_memory_view(obj)` (copy) or `CArray.wrap_memory_view(obj)` (zero-copy).
-2. **Hand a CArray to any consumer** that reads MemoryView. Pass `ca` directly; the consumer pulls the buffer through the protocol. No conversion code on either side.
+2. **Pass a CArray to any consumer** that reads MemoryView. Pass `ca` directly; the consumer pulls the buffer through the protocol. No conversion code on either side.
 3. **Probe** whether an object is consumable — `CArray.memory_view_available?(obj)`.
 
 ## Probing: `memory_view_available?`
@@ -48,7 +48,7 @@ tr.class                #  => CArray
 tr.shape                #  => [4, 3]
 ```
 
-Use `from_memory_view` when you want an independent snapshot, or when the producer's buffer may go away (memory about to be released).
+Use `from_memory_view` to get an independent snapshot, or when the producer's buffer may go away (memory about to be released).
 
 ## Zero-copy import: `wrap_memory_view`
 
@@ -89,11 +89,11 @@ v[0] = 0.0              #  RuntimeError: []=: can not modify read-only array
 | Source mutated later         | result unaffected      | result sees the change       |
 | Result mutated               | source unaffected      | source sees the change       |
 
-Rule of thumb: **`from_memory_view` for an independent snapshot, `wrap_memory_view` for shared state.**
+In short: **`from_memory_view` for an independent snapshot, `wrap_memory_view` for shared state.**
 
 ## Typeless producers
 
-Some producers publish a MemoryView with `format == NULL`, i.e. raw bytes with no data_type label. `Fiddle::Pointer`, a pointer to memory a C library handed you, is one. CArray cannot guess; you supply a `data_type:` keyword:
+Some producers publish a MemoryView with `format == NULL`, i.e. raw bytes with no data_type label. `Fiddle::Pointer`, a pointer to memory from a C library, is one. CArray cannot guess the type, so the `data_type:` keyword must supply it:
 
 ```ruby
 require "fiddle"
@@ -111,7 +111,7 @@ arr = CArray::Float64.wrap_memory_view(ptr).reshape(2, 2)
 arr.to_a                #  => [[1.0, 2.0], [3.0, 4.0]]
 ```
 
-These are equivalent. They land the wrap as a 1-D `CAWrap` of the named data_type, which you then `reshape` to whatever shape the buffer actually represents.
+These are equivalent. They produce a 1-D `CAWrap` of the named data_type. Use `reshape` to give it the shape that the buffer represents.
 
 ## Masked arrays are rejected
 
@@ -128,7 +128,7 @@ CArray.wrap_memory_view(m)
 
 The rejection is intentional: masked positions hold unspecified values, and silently letting them flow into another library as if they were valid would be a data-correctness bug.
 
-You have three explicit ways to proceed:
+There are three explicit ways to proceed:
 
 ```ruby
 CArray.wrap_memory_view(m.value)             #  raw value layer, mask ignored
@@ -155,7 +155,7 @@ CArray.memory_view_reject_reason(ca[ca > 5])
 #      Export arr.copy for a snapshot."
 ```
 
-When the diagnostic tells you to take a snapshot, the idiom is:
+When the error message asks for a snapshot, the idiom is:
 
 ```ruby
 sel  = ca[ca > 5]
@@ -163,11 +163,11 @@ snap = sel.copy                         #  CASelect → entity
 CArray.wrap_memory_view(snap)           #  OK now
 ```
 
-`to_ca` is not a snapshot (it hands the view back as it is), and `from_memory_view` reads only arrays that are exported, so `copy` is the one to use.
+`to_ca` is not a snapshot (it returns the view as it is), and `from_memory_view` reads only arrays that are exported, so `copy` is the one to use.
 
 ## CArray as producer
 
-The interesting direction in practice is also the easy one: **you pass a CArray to anyone who reads MemoryView, and it just works**. The consumer calls `rb_memory_view_get(ca, &view, flags)`; CArray does the right thing. `Fiddle::MemoryView` is such a consumer:
+The other direction needs no special code: **a CArray can be passed to any reader of MemoryView**. The consumer calls `rb_memory_view_get(ca, &view, flags)`; CArray does the right thing. `Fiddle::MemoryView` is such a consumer:
 
 ```ruby
 src = CArray.float64(3, 4).seq
@@ -183,15 +183,25 @@ The strategy depends on the view class on CArray's side:
 
 * **Entities and strided views** (`CArray`, `CAWrap`, `CScalar`, `CABlock`, `CARefer`, `CAStride`, `CATranspose`, `CAFarray`, `CARepeat`, `CAField`) are exported with the appropriate byte strides — **zero-copy**.
 * **Faces whose bytes are their values** (`CARecord` member by member, with its member names as `memory_view_field_names`; `CAFixlenString` as `Ns` bytes) are exported the same way.
-* **Everything else is refused**: views whose cells cannot be addressed by strides over one buffer (`CASelect`, `CAGrid`, `CAShift`, `CARoll`, `CAWindow`, `CATile`, `CAStack`, `CAMeld`, ...), lazy expressions, sub-byte and Ruby-object arrays, and Faces whose storage means nothing without the Face (`CATime`, `CATimedelta`, `CACategorical`, `CAConstString`). Nothing is materialised behind your back: hand the consumer a `copy`, or for one of those Faces its storage (`.ticks`, `.codes`).
+* **Everything else is refused**: views whose cells cannot be addressed by strides over one buffer (`CASelect`, `CAGrid`, `CAShift`, `CARoll`, `CAWindow`, `CATile`, `CAStack`, `CAMeld`, ...), lazy expressions, sub-byte and Ruby-object arrays, and Faces whose storage means nothing without the Face (`CATime`, `CATimedelta`, `CACategorical`, `CAConstString`). Nothing is materialised automatically: pass the consumer a `copy`, or for one of those Faces its storage (`.ticks`, `.codes`).
 
-A consumer that asks for a contiguous view, as `Fiddle::MemoryView` does, is refused one for a strided view such as a column slice; hand it a `copy`.
+A consumer that asks for a contiguous view, as `Fiddle::MemoryView` does, is refused one for a strided view such as a column slice; pass it a `copy`.
+
+### Faces
+
+MemoryView carries only the data in storage. For a Face such as `CATime` or `CACategorical`, the values of the surface type are not in storage: a time needs its unit, and a category needs its labels. Such a Face is not exported. Export its storage instead, and give the consumer the unit or the labels separately:
+
+```ruby
+dt = CArray.time_series("2024-06-15", count: 5, unit: :D)
+CArray.memory_view_available?(dt)          #  => false
+CArray.memory_view_available?(dt.ticks)    #  => true     days since 1970-01-01
+```
 
 For the full export matrix and the format strings CArray emits, see `MemoryView.md`.
 
 ## A complete round-trip example
 
-Read hourly temperatures from Arrow without copying, compute in CArray, and hand the result to a consumer:
+Read hourly temperatures from Arrow without copying, compute in CArray, and pass the result to a consumer:
 
 ```ruby
 require "carray"

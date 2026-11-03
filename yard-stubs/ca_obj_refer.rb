@@ -35,6 +35,9 @@ class CArray
   #   @raise [ArgumentError] when the byte widths do not divide
   #     evenly, when `offset` is negative, or when the requested
   #     view extends past the parent's data.
+  #   @raise [TypeError] on a Face, for a data type that is neither its
+  #     surface type nor its storage type: `to_type` gives the values,
+  #     `parent.refer` the raw storage.
   #   @raise [CArray::DataTypeError] when reinterpreting a CA_OBJECT parent
   #     with a non-object `data_type`, or a parent of another data type as
   #     `:boolean` (a boolean cell holds 0 or 1; compare instead, `ne(0)`).

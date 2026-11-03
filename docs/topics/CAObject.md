@@ -754,6 +754,22 @@ contract rules of their data-side counterparts described in
 when partial-region data is delivered by `copy_block` / `copy_addrs` and
 you also need mask bits to flow through the same chunked path.
 
+The object has no mask until one is made, so these hooks are not asked
+until then. Define `create_mask` and write `self.mask = 0` in `initialize`
+after `super`:
+
+```ruby
+class Forbidden < CAObject
+  def initialize (n)
+    super(:int32, [n])
+    self.mask = 0
+  end
+  def create_mask; end
+  def fetch_addr (addr) = addr
+  def mask_fetch_addr (addr) = addr.even? ? 1 : 0
+end
+```
+
 They are consulted the way the data-side hooks are. A read of the mask
 asks `mask_copy_data`, or else `mask_fetch_addr` / `mask_fetch_index`
 cell by cell. A write hands the cells to `mask_store_addr` /
