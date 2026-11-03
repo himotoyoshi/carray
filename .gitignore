@@ -96,7 +96,7 @@ spec/spec_ai/ext_*/*.so
 guides/pdf/
 
 # Private development notes (separate repository)
-/devel/
+/devel
 benchmark
 CLAUDE.md
 .claude/
