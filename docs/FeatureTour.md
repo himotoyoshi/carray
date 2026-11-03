@@ -98,6 +98,8 @@ a.reduce_slab(axis: -1) { |row| row.median }     #  the axis collapses
 
 `each_slab` is the third of the set, for when you only want the side effect. Beside them are four more iterators built on the same surface — over rolling windows, over non-overlapping tiles, over categories, and over grid groups.
 
+Covered in full by the guide: [Slab iteration](../guides/users/11_slab_iteration.md).
+
 ## Faces — new types that are still CArrays
 
 A Face gives an array an element type of its own, with behavior to match, while everything a CArray does still works on it. `CATime` is the worked example: the array reads and writes instants, and subtracting two of them answers a duration rather than a number. Underneath, it is integer ticks on a grid you name.
@@ -110,6 +112,8 @@ t.ticks                    #  => [ 20454, 20461, 20468 ]   the storage, untouche
 ```
 
 Because a Face is a view, its type survives slicing and every other view operation, and it can be stripped to get the plain numbers back. Faces of your own — an angle that wraps, a price stored as integer cents — are written the same way.
+
+Covered in full by the guide: [Faces](../guides/users/12_faces.md).
 
 ## A DataFrame whose columns are arrays
 
