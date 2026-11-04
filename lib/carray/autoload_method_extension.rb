@@ -17,6 +17,11 @@
 
 # @private
 module AutoloadMethodExtension
+  # Ruby 3.x can deadlock when Ractors require files at the same time, so a
+  # stub loads its library only in the main Ractor there.  Ruby 4.0 and later
+  # load from any Ractor.
+  LOAD_IN_MAIN_RACTOR_ONLY = RUBY_VERSION.split(".").first.to_i < 4
+
   # @!visibility private
   def autoload_method (method, library)
     if method.to_s =~ /\Aself\.(.+)\z/
@@ -36,11 +41,11 @@ module AutoloadMethodExtension
     # refuses to make a Proc shareable when a variable it reads may be.
     library       = Ractor.make_shareable(library_given.to_s.dup)
     original_spec = Ractor.make_shareable(spec_given.to_s.dup)
-    # Shareable, so the stub answers in any Ractor.  Only the main Ractor
-    # loads the library: Ractors that require at the same time can deadlock
-    # (Ruby 3.4), so another Ractor is told what to load there instead.
+    # Shareable, so the stub answers in any Ractor.  Where only the main
+    # Ractor may load (LOAD_IN_MAIN_RACTOR_ONLY), another Ractor is told what
+    # to load there instead.
     target.define_method(name, &Ractor.make_shareable(proc do |*args, **kwargs, &block|
-      unless Ractor.current == Ractor.main
+      if LOAD_IN_MAIN_RACTOR_ONLY and Ractor.current != Ractor.main
         raise Ractor::IsolationError,
               "'#{original_spec}' is loaded on first use from '#{library}'; " \
               "require it in the main Ractor before other Ractors use it"

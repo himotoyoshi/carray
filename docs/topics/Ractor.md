@@ -1,8 +1,8 @@
 # CArray in Ractors
 
-A Ractor can use CArray as the main Ractor does: build arrays, take views of them, compute, reduce, sort, and use CAFrame, structs, CATime and `fuse`. Two things decide how a program is laid out. Arrays cross between Ractors as copies, except a frozen array, which is shared; views stay in the Ractor that made them. And the parts of CArray that are loaded on first use are loaded in the main Ractor, before other Ractors use them.
+A Ractor can use CArray as the main Ractor does: build arrays, take views of them, compute, reduce, sort, and use CAFrame, structs, CATime and `fuse`. Two things decide how a program is laid out. Arrays cross between Ractors as copies, except a frozen array, which is shared; views stay in the Ractor that made them. And on Ruby 3.x, the parts of CArray that are loaded on first use are loaded in the main Ractor, before other Ractors use them.
 
-What this page says was measured on Ruby 3.4.5. Ractor itself is still marked experimental by Ruby.
+What this page says was measured on Ruby 3.4.5; loading from other Ractors was measured on Ruby 4.0.7 and 4.1.0dev. Ractor itself is still marked experimental by Ruby.
 
 ---
 
@@ -49,7 +49,7 @@ workers = 4.times.map do |k|
     a[k * rows ... (k + 1) * rows, nil].mean
   end
 end
-workers.map(&:take)       # Ruby 3.5 and later: workers.map(&:value)
+workers.map(&:take)       # Ruby 4.0 and later: workers.map(&:value)
 ```
 
 The view `a[k * rows ... (k + 1) * rows, nil]` belongs to the Ractor that made it; the array under it is the one `data` names in the main Ractor. Reading a frozen array writes nothing to it, so any number of Ractors can read it at once.
@@ -58,15 +58,17 @@ Writing to a shared array, or through a view of it, raises (`FrozenError`, or `c
 
 ---
 
-## Load what Ractors use in the main Ractor first
+## Ruby 3.x: load what Ractors use in the main Ractor first
 
-Many methods are defined the first time they are called: their file is loaded then. In a Ractor other than the main one, such a method raises until the main Ractor has loaded its file:
+Many methods are defined the first time they are called: their file is loaded then. On Ruby 4.0 and later, any Ractor can be the first to call one, and several Ractors can do so at once; nothing in this section applies.
+
+On Ruby 3.x, in a Ractor other than the main one, such a method raises until the main Ractor has loaded its file:
 
 ```
 'self.stack' is loaded on first use from 'carray/stack'; require it in the main Ractor before other Ractors use it
 ```
 
-The reason is a Ruby limit rather than a CArray one: Ractors that load files at the same time can deadlock (Ruby 3.4). Require, in the main Ractor, the files of what the Ractors will use:
+The reason is a Ruby limit rather than a CArray one: on Ruby 3.x, Ractors that load files at the same time can deadlock (measured on 3.4.1 and 3.4.9; fixed in Ruby 4.0). Require, in the main Ractor, the files of what the Ractors will use:
 
 ```ruby
 require "carray"
@@ -76,7 +78,7 @@ require "carray/methods/unique"
 r = Ractor.new { CArray.stack([CArray.int32(3).seq!, CArray.int32(3).seq!]).unique }
 ```
 
-The classes in the table (`CAFrame`, `CACategorical`, …) are loaded by Ruby when they are first named, also in another Ractor, but the same deadlock applies when several Ractors name one at the same time; require them in the main Ractor too.
+The classes in the table (`CAFrame`, `CACategorical`, …) are loaded by Ruby when they are first named, also in another Ractor, but on Ruby 3.x the same deadlock applies when several Ractors name one at the same time; require them in the main Ractor too.
 
 | file | what it defines |
 |---|---|

@@ -194,9 +194,11 @@ class TestRactorSharedState < Test::Unit::TestCase
     BODY
   end
 
-  # A method its library has not been loaded for says where to load it.
+  # Ruby 3.x: a method its library has not been loaded for says where to
+  # load it.
   def test_an_autoload_stub_names_its_library
     omit "Ractor not available" unless defined?(Ractor)
+    omit "Ruby 4.0 and later load from any Ractor" unless AutoloadMethodExtension::LOAD_IN_MAIN_RACTOR_ONLY
     src = <<~'RUBY'
       require "carray"
       Warning[:experimental] = false
@@ -205,6 +207,29 @@ class TestRactorSharedState < Test::Unit::TestCase
       exit(msg.include?("carray/histogram") && msg.include?("main Ractor") ? 0 : 3)
     RUBY
     st = run_child(src)
+    assert_equal 0, st.exitstatus, "child ended with #{st.inspect}"
+  end
+
+  # Ruby 4.0 and later: Ractors that call the same not-yet-loaded methods at
+  # once load them and get the main Ractor's answers.
+  def test_ractors_load_autoloaded_methods_at_once
+    omit "Ractor not available" unless defined?(Ractor)
+    omit "Ruby 3.x loads only in the main Ractor" if AutoloadMethodExtension::LOAD_IN_MAIN_RACTOR_ONLY
+    src = <<~'RUBY'
+      require "carray"
+      Warning[:experimental] = false
+      rs = 16.times.map do
+        Ractor.new do
+          a = CArray.float64(8).seq!
+          [a.segments(offsets: [0, 4, 8]).sum.to_a, a.blocks(2).sum.to_a,
+           CArray.stack([a, a]).sum, CArray.struct { int32 :x }.size]
+        end
+      end
+      vals = rs.map { |r| r.respond_to?(:value) ? r.value : r.take }.uniq
+      exit(vals == [[[6.0, 22.0], [1.0, 5.0, 9.0, 13.0], 56.0, 4]] ? 0 : 3)
+    RUBY
+    st = run_child(src)
+    assert_not_equal :timeout, st, "child did not finish"
     assert_equal 0, st.exitstatus, "child ended with #{st.inspect}"
   end
 end
