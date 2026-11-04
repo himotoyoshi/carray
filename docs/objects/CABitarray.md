@@ -81,7 +81,7 @@ host. On the common little-endian hosts this makes no observable difference.
   view of those is meaningless).
 - **MemoryView** — `CABitarray` is **rejected** by the MemoryView protocol
   (`CArray.memory_view_available?(ba)` is `false`); a 1-bit-per-boolean-cell
-  layout has no PEP 3118 format. Materialize with `.to_ca` first if a
+  layout has no PEP 3118 format. Materialize with `.copy` first if a
   consumer needs contiguous bytes.
 - **Not fold-collapsible** — the per-bit transform cannot be folded into a
   strided view chain the way `CAStride`-family views are, so a bitarray always

@@ -45,8 +45,9 @@ result.shape == parent.shape
 ```
 
 There is no separate buffer while the view is live: `fake` shares the
-parent's storage and casts on the fly. Materialising the view (`to_ca` /
-`copy`) is what produces an independent cast array.
+parent's storage and casts on the fly. Materialising the view (`copy`)
+is what produces an independent cast array; `to_ca` returns the view
+itself.
 
 ```ruby
 require "carray"
@@ -135,7 +136,7 @@ m.fake(:float64).is_masked.to_a   #=> [0, 1, 0]
 - **Construction** is O(1): the view stores only the target type and the
   parent reference.
 - **Reading / writing a cell** costs one cast-table call per element.
-- **Materialising** (`to_ca` / `copy` / feeding a kernel) casts every
+- **Materialising** (`copy` / feeding a kernel) casts every
   element into a contiguous buffer of `parent.elements` elements.
 - Because every access transforms values, `CAFake` never folds into a
   plain strided gather — the cast is a genuine transform boundary. It is

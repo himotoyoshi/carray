@@ -249,7 +249,7 @@ class CArray
   #   - +axis:+ takes a single Integer (the multi-axis Array form, which
   #     returned an N-D object grid, is no longer accepted)
   #   - pieces are CABlock views, NOT copies; writing through a piece
-  #     mutates +self+.  Chain +.copy+ / +.to_ca+ for independent entities.
+  #     mutates +self+.  Chain +.copy+ for independent entities.
   # @overload split(axis:)
   #   Returns an Array of `(ndim-1)`-D writable CABlock views obtained
   #   by splitting `self` along `axis`. Inverse of `CArray.stack`.

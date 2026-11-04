@@ -181,7 +181,7 @@ parent is reflected in the field view.
   strides, no data.
 - **Reading / writing a cell** is a single strided access into the
   parent's bytes — no per-cell conversion.
-- **Materialising** (`to_ca` / `copy` / feeding a kernel) gathers the
+- **Materialising** (`copy` / feeding a kernel) gathers the
   field into a contiguous buffer of `parent.elements` elements. Because
   `CAField` is a pure `CAStride`, contiguous or mergeable layouts take the
   fast strided-copy paths.

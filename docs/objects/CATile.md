@@ -142,15 +142,15 @@ write-back, take a copy (§4).
 
 ---
 
-## 4. Materialising — `to_ca` / `copy`
+## 4. Materialising — `copy`
 
 `CATile` is a `CAView`, so the usual view-vs-owned distinction applies
 (see the semantics table in the project docs):
 
 - **`v.copy`** — always a fresh, independent CArray entity. Detached from
   the parent; later writes to the parent are not seen.
-- **`v.to_ca`** — evaluates the view into a new entity as well (a view has
-  no contiguous buffer of its own to hand back).
+- **`v.to_ca`** — returns `v` itself: it is already a CArray, so there is
+  nothing to convert. It is not a snapshot.
 
 ```ruby
 a = CA_INT([1, 2, 3])
@@ -212,7 +212,7 @@ CArray.boolean(3).tap { |x| x[] = [true, false, true] }.tile(2).to_a
 - **Construction** is O(1): the view stores only `reps` and the parent
   reference.
 - **Reading a cell** costs one modulo per axis plus a parent fetch.
-- **Materialising** (`to_ca` / `copy` / passing to a kernel) gathers each
+- **Materialising** (`copy` / passing to a kernel) gathers each
   tile as a contiguous parent run where the layout allows, so the total
   work is proportional to the output size (`product(reps)` copies of the
   parent), done tile by tile without allocating any intermediate view
@@ -236,7 +236,7 @@ composite-region gather/scatter path shared with the other N-region views.
 | each rep | must be `>= 1` (else `IndexError`) |
 | read | gathers live from the parent (modulo wrap) |
 | write | lands in the parent; last-write-wins across overlapping tiles |
-| `v.copy` / `v.to_ca` | independent materialised CArray |
+| `v.copy` | independent materialised CArray (`v.to_ca` returns `v`) |
 | masked parent | masked `CATile` (mask tiles identically) |
 | eager equivalent | `CArray.montage([a] * n, tdim, axis: 0)` |
 

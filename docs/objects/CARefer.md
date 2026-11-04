@@ -263,7 +263,7 @@ Ruby object references, not fixed-width bytes.
   parent's bytes; no per-cell conversion.
 - **Same-width reshape / flatten** rewrites to a `CAStride` where possible,
   so it composes cheaply through chains of views.
-- **Materialising** (`to_ca` / `copy` / feeding a kernel) copies the
+- **Materialising** (`copy` / feeding a kernel) copies the
   view's bytes into a contiguous buffer.
 
 ---
