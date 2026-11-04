@@ -9,12 +9,32 @@ them it moves into `guides/users`.
 
 ---
 
-## 1. A view chosen by values keeps the positions it was made with
+## 1. `to_ca` is not a snapshot
 
-`sort` and boolean selection (`a[a > 0]`) return views. The view stores
-the positions it picked when it was made and reads the values from the
-parent each time. If the parent changes later, the view is no longer
-sorted, and no longer holds only the selected values.
+Most operations that pick part of an array, or rearrange it, return a
+view: a slice, `reshape`, `transpose`, `sort`, boolean selection, an
+index array. A view is already a CArray, so `to_ca` returns the view
+itself. It does not copy anything, and later writes to the parent still
+show through it.
+
+```ruby
+a = CA_INT32([3, 1, 2])
+v = a[0..1].to_ca   # still the view
+a[0] = 0
+v.to_a              #=> [0, 1]
+```
+
+**Instead:** use `copy` for an independent array. A lazy view is the
+exception: its `to_ca` evaluates the expression into a new array.
+
+## 2. A view chosen by values keeps only the positions
+
+`sort` and boolean selection (`a[a > 0]`) look at the values once, when
+the view is made, and keep only the positions they picked: the order of
+the sort, the list of selected cells. They do not keep the condition.
+The values are read from the parent each time, so once the parent
+changes, the view is no longer sorted, and no longer holds only the
+selected values.
 
 ```ruby
 a = CA_INT32([3, 1, 2])
@@ -28,30 +48,12 @@ b[0] = -5
 t.to_a              #=> [-5, 2]
 ```
 
-A view that is defined by positions (`reshape`, a slice, `transpose`,
-`tile`) also shows new values when the parent changes, but its promise
-("these cells, in this order") still holds. The promise of a sorted or
-selected view is about values ("in ascending order", "only the positive
-ones"), and the positions it stored cannot keep that promise once the
-values change.
+The same happens when the change comes through the view itself
+(`s[-1] = 0`, see §3). A sorted view means "the cells in the order they
+had when it was sorted", not "always in ascending order".
 
 **Instead:** take a snapshot with `copy` if the parent can change while
 you still use the result: `a.sort.copy`, `b[b > 0].copy`.
-
-## 2. `to_ca` is not a snapshot
-
-A view is already a CArray, so `to_ca` returns the view itself. It does
-not copy anything, and later writes to the parent still show through it.
-
-```ruby
-a = CA_INT32([3, 1, 2])
-v = a.sort.to_ca    # still the CARemap
-a[0] = 0
-v.to_a              #=> [1, 2, 0]
-```
-
-**Instead:** use `copy` for an independent array. A lazy view is the
-exception: its `to_ca` evaluates the expression into a new array.
 
 ## 3. Writing into a view writes into the parent
 
