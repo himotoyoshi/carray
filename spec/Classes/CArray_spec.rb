@@ -41,10 +41,12 @@ describe "TestCArray " do
 
   example "to_s" do
     a = CArray.int8(3, 3) { 1 }
-    is_asserted_by { a.to_s == ("\u0001" * 9) }
+    is_asserted_by { a.to_s == a.inspect }
+    is_asserted_by { "#{a}" == a.inspect }
 
     a = CArray.int32(3, 3) { 1 }
-    is_asserted_by { a.to_s == ([1].pack("l") * 9) }
+    is_asserted_by { a.to_s == a.inspect }
+    is_asserted_by { a.dump_binary == ([1].pack("l") * 9) }
   end
 
   example "to_ca" do

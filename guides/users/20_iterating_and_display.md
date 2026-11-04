@@ -90,20 +90,21 @@ The header, the layout and the `_` for a masked cell are `inspect`'s — only th
 It returns a String and holds the whole array in it, which is the cost: a line is as long as the last axis makes it, and nothing is streamed. There is no threshold to set — `inspect` always previews and `inspect_full` always doesn't, rather than one method whose behaviour depends on state set somewhere else.
 
 
-### `to_s` is *not* a printable form
+### `to_s` is the same text as `inspect`
 
-Note that `to_s` on a numeric array returns the **raw bytes** of the underlying storage as a binary `String`, not a human-readable rendering. It is the packed data, useful for writing bytes out but not for reading:
+`to_s` returns what `inspect` returns, so string interpolation, `puts` and error messages show the readable form:
 
 ```ruby
-CArray.int32(3).seq.to_s
-#  => "\x00\x00\x00\x00\x01\x00\x00\x00\x02\x00\x00\x00"   raw bytes, not "[0, 1, 2]"
+a = CArray.int32(3).seq
+"#{a}" == a.inspect               #  => true
+puts a                            #  prints the same text as p a
 ```
 
-To get a readable string, use `inspect` (what `p` and `irb` call), or convert to a Ruby structure first with `to_a` (see [Input and output](19_input_output.md)):
+For the packed element bytes, use `dump_binary` (see [Input and output](19_input_output.md)). Writing an array straight to an IO, as in `io.write(a)`, writes its text, not its bytes:
 
 ```ruby
-CArray.int32(3).seq.to_a.to_s     #  => "[0, 1, 2]"
-CArray.int32(3).seq.inspect       #  => "<CArray.int32(3): ... [ 0, 1, 2 ]>"
+CArray.int32(3).seq.dump_binary
+#  => "\x00\x00\x00\x00\x01\x00\x00\x00\x02\x00\x00\x00"
 ```
 
 For a large array, `inspect_full` is the one that leaves nothing out.

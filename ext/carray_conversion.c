@@ -505,11 +505,13 @@ rb_ca_dump_binary (int argc, VALUE *argv, VALUE self)
   return io;
 }
 
-/* CArray#to_s — equivalent to dump_binary with no argument. */
+/* CArray#to_s — the same text as inspect.  Ruby calls to_s wherever it puts
+ * an object into text (interpolation, puts, error messages), so it is the
+ * readable form; the element bytes are dump_binary's. */
 static VALUE
 rb_ca_to_s (VALUE self)
 {
-  return rb_ca_dump_binary(0, NULL, self);
+  return rb_inspect(self);
 }
 
 /* CArray#load_binary(io) — overwrite self's element bytes with ca_length

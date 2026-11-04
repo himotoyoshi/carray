@@ -211,12 +211,12 @@ class TestCAStructBitfield < Test::Unit::TestCase
   def test_bit_layout_is_the_same_bytes_on_every_host
     s = CArray.struct(pack: 1) { bit :pad, bits: 4; bit :value, bits: 8; bit :tail, bits: 4 }
     r = s.new(pad: 0xA, value: 0xCD, tail: 0x9)
-    assert_equal [0xDA, 0x9C], r.instance_variable_get(:@data).to_s.bytes
+    assert_equal [0xDA, 0x9C], r.instance_variable_get(:@data).dump_binary.bytes
     assert_equal [0xA, 0xCD, 0x9], [r.pad, r.value, r.tail]
     rs = CARecord.new(s, 2)
     rs[0] = r
     rs["value"][1] = 0x12
-    assert_equal [0xDA, 0x9C, 0x20, 0x01], rs.to_s.bytes
+    assert_equal [0xDA, 0x9C, 0x20, 0x01], rs.dump_binary.bytes
     assert_equal [0xCD, 0x12], rs["value"].to_a
   end
 

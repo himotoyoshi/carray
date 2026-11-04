@@ -22,11 +22,11 @@ describe "CArray#wrap_readonly" do
   # 2020-07-22
   example "string" do
     a = CA_UINT8([0,1,2,3,4,5,6,7])
-    b = CArray.wrap_readonly(a.to_s, CA_UINT8)
+    b = CArray.wrap_readonly(a.dump_binary, CA_UINT8)
     is_asserted_by { b == a }
 
-    c = CArray.wrap_readonly(a.to_s, CA_OBJECT)
-    is_asserted_by { c == CA_OBJECT(a.to_s) }
+    c = CArray.wrap_readonly(a.dump_binary, CA_OBJECT)
+    is_asserted_by { c == CA_OBJECT(a.dump_binary) }
   end
 
   # 2020-07-22

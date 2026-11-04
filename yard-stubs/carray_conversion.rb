@@ -62,12 +62,11 @@ class CArray
   def dump_binary(io = nil); end
 
   # @overload to_s
-  #   Equivalent to `dump_binary` with no arguments. Returns the raw
-  #   element bytes of `self` as a binary String. Ruby uses `to_s` where
-  #   it puts an object into text, so such text holds the bytes: a
-  #   `Ractor.make_shareable` refusal of a view, for one, raises
-  #   `ArgumentError: string contains null byte` in place of its own
-  #   message. Use `inspect` for a readable form.
+  #   Returns the same text as `inspect`. Ruby uses `to_s` where it puts
+  #   an object into text (string interpolation, `puts`, error messages),
+  #   so those show the readable form. Writing an array to an IO
+  #   (`io.write(a)`, `File.write(path, a)`) therefore writes this text;
+  #   for the element bytes, use `dump_binary`.
   #   @return [String]
   def to_s; end
 

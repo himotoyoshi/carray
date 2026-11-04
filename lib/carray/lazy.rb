@@ -651,13 +651,6 @@ class CAMonOp
     "#<CAMonOp #{op_label}(#{parent.inspect})>"
   end
 
-  # @overload to_s
-  #   Alias of {#inspect}.
-  #   @return [String]
-  def to_s
-    inspect
-  end
-
   # @overload dump_tree(indent = 0)
   #   Returns an ASCII summary of the lazy expression tree.
   #   Does not materialise.
@@ -740,13 +733,6 @@ class CABinOp
     "#<CABinOp #{op_label}(#{parent.inspect}, #{__binop_right__.inspect})>"
   end
 
-  # @overload to_s
-  #   Alias of {#inspect}.
-  #   @return [String]
-  def to_s
-    inspect
-  end
-
   # @overload dump_tree(indent = 0)
   #   Returns an ASCII summary of the lazy expression tree, walking
   #   both children. Does not materialise.
@@ -795,13 +781,6 @@ class CALazyMarker
   #   @return [String]
   def inspect
     "#<CALazyMarker over #{parent.inspect}>"
-  end
-
-  # @overload to_s
-  #   Alias of {#inspect}.
-  #   @return [String]
-  def to_s
-    inspect
   end
 
   # @overload dump_tree(indent = 0)

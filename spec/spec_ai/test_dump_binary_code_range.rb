@@ -16,10 +16,6 @@ class TestDumpBinaryCodeRange < Test::Unit::TestCase
     assert_equal "?A", as_utf8(b).scrub("?")
   end
 
-  def test_to_s_is_checked_by_contents
-    assert_equal false, as_utf8(CA_UINT8([0xff, 0x41]).to_s).valid_encoding?
-  end
-
   def test_given_ascii_string_is_checked_by_contents
     s = "AB".b
     assert_equal true, s.ascii_only?

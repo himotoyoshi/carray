@@ -31,7 +31,7 @@ Each Ractor keeps its own working memory for these (the lazy arena, the kernel i
 | any array with `move: true` | refused: `can not move CArray object` |
 | the value a Ractor returns | a copy |
 
-`Ractor.make_shareable(a)` freezes an array that is not frozen and shares it, as for any Ruby object. Given a view, it refuses, but the message is unhelpful: `ArgumentError: string contains null byte` (Ruby builds the message from `CArray#to_s`, which returns the array's raw bytes).
+`Ractor.make_shareable(a)` freezes an array that is not frozen and shares it, as for any Ruby object. Given a view, it refuses: `Ractor::Error: can not make shareable object for <CABlock.int32(1) ...>`.
 
 ---
 
