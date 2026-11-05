@@ -134,7 +134,46 @@ The result keeps the integer type of the array: integer division rounds down, as
 
 **Instead:** convert first (`to_type(:float64)`, or a wider integer type) when the result needs more range or a fraction.
 
-## 10. A lazy view is read-only
+## 10. Arithmetic picks the result type by the types, not by the values
+
+When the two sides of an operator have different types, the result type comes from a fixed rule over the two types. The values are not looked at, so the result can lose what one side held.
+
+- An integer with `float32` gives `float32`, for `int32` and `int64` too. Integers above 2²⁴ lose their low digits.
+- A signed integer with an unsigned one gives the unsigned type, so a negative value wraps.
+- A `float32` array with a Ruby Float stays `float32`.
+
+```ruby
+(CA_INT32([16777217]) + CA_FLOAT32([0])).to_a   #=> [16777216.0]
+(CA_INT8([-2]) + CA_UINT8([1])).to_a            #=> [255]   uint8
+(CA_FLOAT32([1]) + 0.1).to_a                    #=> [1.100000023841858]
+```
+
+Storing has the same character: a Float stored into an integer array loses its fraction (toward zero), as through the views of §5.
+
+```ruby
+a = CA_INT32([1, 2])
+a[0] = 1.7
+a.to_a                                          #=> [1, 2]
+```
+
+Comparisons are the exception. `eq`, `lt` and the other comparisons, and `promote_list` and `CArray.stack`, meet at a type that holds both sides, so `CA_INT8([-1]).lt(CA_UINT8([1]))` is `true`.
+
+**Instead:** convert one side first to a type that holds both: `to_type(:float64)`, or a wider signed type such as `:int16`.
+
+## 11. A CScalar is a scalar, not a one-element array
+
+`CA_INT64(5)` without brackets returns a CScalar. In arithmetic a CScalar counts as a scalar, like a Ruby number: if it is of the same kind as the array beside it (both integers, or both floats), it takes the array's type. A one-element array is an array, and the rule of §10 applies to it.
+
+```ruby
+(CA_INT8([1, 2]) + CA_INT64(100)).data_type     #=> :int8
+(CA_INT8([1, 2]) + CA_INT64([100])).data_type   #=> :int64
+```
+
+A CScalar of a different kind keeps its own type, so `CA_INT8([1]) + CA_FLOAT32(0.5)` is `float32`, while `CA_INT8([1]) + 0.5` is `float64` (a Ruby Float is a `float64`). Two CScalars follow the rule for arrays.
+
+**Instead:** to widen the result, convert the array (`to_type`), or pass a one-element array.
+
+## 12. A lazy view is read-only
 
 ```ruby
 l = CArray.int32(3).seq.lazy
