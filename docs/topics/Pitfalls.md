@@ -73,7 +73,22 @@ The same happens when the change comes through the view itself (`s[-1] = 0`, see
 
 **Instead:** take a snapshot with `copy` if the parent can change while you still use the result: `a.sort.copy`, `b[b > 0].copy`.
 
-## 5. A Ruby Array index is `[start, count, step]`, not a list of positions
+## 5. Writing through a type-converting view converts back to the parent's type
+
+`as_type(:float64)` on an integer array returns a view that reads the integers as floats. Writing into the view writes into the integer array, so each value is converted back to the integer type: the fraction is dropped (toward zero), and a value out of range raises `RangeError`. The view then shows the converted value, not the one you wrote. `CArray.wrap_readonly(a, :float64)` and `CArray.wrap_writable(a, :float64)` return the same kind of view. `wrap_readonly` does not make the result read-only: the name says that you intend only to read it.
+
+```ruby
+a = CA_INT32([1, 2, 3])
+f = a.as_type(:float64)   # a view of a
+f[0] = 5.7
+f[1] = -5.7
+a.to_a                    #=> [5, -5, 3]
+f.to_a                    #=> [5.0, -5.0, 3.0]
+```
+
+**Instead:** use `to_type(:float64)` for a new float array when you want to keep the fractions.
+
+## 6. A Ruby Array index is `[start, count, step]`, not a list of positions
 
 In NumPy and Numo, `a[[4, 1, 3]]` picks cells 4, 1 and 3. In CArray a Ruby Array key is a block: start, count, and an optional step.
 
@@ -86,7 +101,7 @@ a[CA_INT64([4, 1, 3])].to_a #=> [4, 1, 3]   a list of positions
 
 **Instead:** pass the positions as an integer CArray (`CA_INT64([...])`). See [NumPy and CArray](NumPyEquivalents.md) and the [indexer decision tree](Indexer_decision_tree.md).
 
-## 6. `==` compares whole arrays; `eq` compares cells
+## 7. `==` compares whole arrays; `eq` compares cells
 
 `==` answers whether two whole arrays are equal, so it returns `true` or `false`, and an array is never `==` to a number. The per-cell comparison is `eq`.
 
@@ -97,7 +112,7 @@ CA_INT32([1, 2]).eq(CA_INT32([1, 3])).to_a    #=> [true, false]
 CA_INT32([1, 2]).eq(1).to_a                   #=> [true, false]
 ```
 
-## 7. Multiple assignment does not unpack a CArray
+## 8. Multiple assignment does not unpack a CArray
 
 CArray does not define `to_ary`, so Ruby does not unpack it on the right of a multiple assignment. (Defining it would make Ruby unpack arrays in places where nobody asked for it.) `Array()` and the splat go through `to_a` and do work.
 
@@ -107,7 +122,7 @@ x, y = *CA_INT32([1, 2])   # x == 1, y == 2
 Array(CA_INT32([1, 2]))    #=> [1, 2]
 ```
 
-## 8. Integer arithmetic stays in the integer type
+## 9. Integer arithmetic stays in the integer type
 
 The result keeps the integer type of the array: integer division rounds down, as Ruby's `Integer#/` does, and values out of range wrap around, as in C.
 
@@ -119,7 +134,7 @@ The result keeps the integer type of the array: integer division rounds down, as
 
 **Instead:** convert first (`to_type(:float64)`, or a wider integer type) when the result needs more range or a fraction.
 
-## 9. A lazy view is read-only
+## 10. A lazy view is read-only
 
 ```ruby
 l = CArray.int32(3).seq.lazy
