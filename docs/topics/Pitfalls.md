@@ -19,7 +19,20 @@ v.to_a              #=> [0, 1]
 
 **Instead:** use `copy` for an independent array. A lazy view is the exception: its `to_ca` evaluates the expression into a new array.
 
-## 2. Writing into a view writes into the parent
+## 2. `sort` returns a view, not a sorted array
+
+`a.sort` neither copies `a` nor reorders it. It returns a view (a CARemap) that reads `a` in sorted order. Ruby's `Array#sort` returns a new array, so it is easy to expect the same here. Because the result is a view, the next two entries apply to it: writing into it changes `a`, and it stops being sorted when `a` changes.
+
+```ruby
+a = CA_INT32([3, 1, 2])
+s = a.sort          # CARemap
+a.to_a              #=> [3, 1, 2]   a itself is not reordered
+s.to_a              #=> [1, 2, 3]
+```
+
+**Instead:** use `sort_copy` for an independent sorted array, and `a[] = a.sort` to sort `a` in place (there is no `sort!`).
+
+## 3. Writing into a view writes into the parent
 
 Views are writable by default, including the ones NumPy returns as copies (`sort`, boolean selection, index arrays). Writing into one changes the parent.
 
@@ -40,7 +53,7 @@ c.to_a              #=> [9, 2]
 
 **Instead:** `copy` first when you want to change the result without touching the source.
 
-## 3. A view chosen by values keeps only the positions
+## 4. A view chosen by values keeps only the positions
 
 `sort` and boolean selection (`a[a > 0]`) look at the values once, when the view is made, and keep only the positions they picked: the order of the sort, the list of selected cells. They do not keep the condition. The values are read from the parent each time, so once the parent changes, the view is no longer sorted, and no longer holds only the selected values.
 
@@ -56,11 +69,11 @@ b[0] = -5
 t.to_a              #=> [-5, 2]
 ```
 
-The same happens when the change comes through the view itself (`s[-1] = 0`, see §2). A sorted view means "the cells in the order they had when it was sorted", not "always in ascending order".
+The same happens when the change comes through the view itself (`s[-1] = 0`, see §3). A sorted view means "the cells in the order they had when it was sorted", not "always in ascending order".
 
 **Instead:** take a snapshot with `copy` if the parent can change while you still use the result: `a.sort.copy`, `b[b > 0].copy`.
 
-## 4. A Ruby Array index is `[start, count, step]`, not a list of positions
+## 5. A Ruby Array index is `[start, count, step]`, not a list of positions
 
 In NumPy and Numo, `a[[4, 1, 3]]` picks cells 4, 1 and 3. In CArray a Ruby Array key is a block: start, count, and an optional step.
 
@@ -73,7 +86,7 @@ a[CA_INT64([4, 1, 3])].to_a #=> [4, 1, 3]   a list of positions
 
 **Instead:** pass the positions as an integer CArray (`CA_INT64([...])`). See [NumPy and CArray](NumPyEquivalents.md) and the [indexer decision tree](Indexer_decision_tree.md).
 
-## 5. `==` compares whole arrays; `eq` compares cells
+## 6. `==` compares whole arrays; `eq` compares cells
 
 `==` answers whether two whole arrays are equal, so it returns `true` or `false`, and an array is never `==` to a number. The per-cell comparison is `eq`.
 
@@ -84,7 +97,7 @@ CA_INT32([1, 2]).eq(CA_INT32([1, 3])).to_a    #=> [true, false]
 CA_INT32([1, 2]).eq(1).to_a                   #=> [true, false]
 ```
 
-## 6. Multiple assignment does not unpack a CArray
+## 7. Multiple assignment does not unpack a CArray
 
 CArray does not define `to_ary`, so Ruby does not unpack it on the right of a multiple assignment. (Defining it would make Ruby unpack arrays in places where nobody asked for it.) `Array()` and the splat go through `to_a` and do work.
 
@@ -94,7 +107,7 @@ x, y = *CA_INT32([1, 2])   # x == 1, y == 2
 Array(CA_INT32([1, 2]))    #=> [1, 2]
 ```
 
-## 7. Integer arithmetic stays in the integer type
+## 8. Integer arithmetic stays in the integer type
 
 The result keeps the integer type of the array, as in C: integer division truncates and values out of range wrap around.
 
@@ -106,7 +119,7 @@ The result keeps the integer type of the array, as in C: integer division trunca
 
 **Instead:** convert first (`to_type(:float64)`, or a wider integer type) when the result needs more range or a fraction.
 
-## 8. A lazy view is read-only
+## 9. A lazy view is read-only
 
 ```ruby
 l = CArray.int32(3).seq.lazy
