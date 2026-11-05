@@ -109,10 +109,10 @@ Array(CA_INT32([1, 2]))    #=> [1, 2]
 
 ## 8. Integer arithmetic stays in the integer type
 
-The result keeps the integer type of the array, as in C: integer division truncates and values out of range wrap around.
+The result keeps the integer type of the array: integer division rounds down, as Ruby's `Integer#/` does, and values out of range wrap around, as in C.
 
 ```ruby
-(CA_INT32([7]) / 2).to_a     #=> [3]
+(CA_INT32([7, -7]) / 2).to_a #=> [3, -4]
 (CA_INT32([7]) / 2.0).to_a   #=> [3.5]
 (CA_INT8([100]) + 100).to_a  #=> [-56]
 ```
