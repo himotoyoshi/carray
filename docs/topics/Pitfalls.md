@@ -124,13 +124,31 @@ Array(CA_INT32([1, 2]))    #=> [1, 2]
 
 ## 9. Integer arithmetic stays in the integer type
 
-The result keeps the integer type of the array: integer division rounds down, as Ruby's `Integer#/` does, and values out of range wrap around, as in C.
+The values inside an integer array are C integers of its type, and arithmetic follows C: the result keeps the type, and a value out of range wraps around. Integer division rounds down, as Ruby's `Integer#/` does.
 
 ```ruby
 (CA_INT32([7, -7]) / 2).to_a #=> [3, -4]
 (CA_INT32([7]) / 2.0).to_a   #=> [3.5]
 (CA_INT8([100]) + 100).to_a  #=> [-56]
 ```
+
+A Ruby Integer that the array's type cannot hold is taken by what the operation does with it:
+
+- `+ - * & | ^` take it modulo 2 ** bits. This gives the same answer as computing in a wider type and wrapping the result. Storing it (`a[0] = v`, `fill`, `CA_INT8([...])`) also keeps it modulo 2 ** bits.
+- `/`, `%`, `pmax`, `pmin` and `clip` raise `RangeError`. Wrapped first, the operand would give a different answer.
+- Comparisons answer by value: every `uint8` cell is `< 256`.
+- The exponent of `**` is a count of multiplications, of any size.
+
+```ruby
+u = CA_UINT8([0, 1, 2])
+(u + 256).to_a               #=> [0, 1, 2]
+(u + -1).to_a                #=> [255, 0, 1]   the same as u - 1
+u / 256                      # RangeError
+(u < 256).to_a               #=> [true, true, true]
+(CA_UINT8([2]) ** 10).to_a   #=> [0]
+```
+
+A Float that the type cannot hold is refused when it is stored (`RangeError`), because C gives no answer for that conversion.
 
 **Instead:** convert first (`to_type(:float64)`, or a wider integer type) when the result needs more range or a fraction.
 
@@ -169,7 +187,7 @@ Comparisons are the exception. `eq`, `lt` and the other comparisons, and `promot
 (CA_INT8([1, 2]) + CA_INT64([100])).data_type   #=> :int64
 ```
 
-A CScalar of a different kind keeps its own type, so `CA_INT8([1]) + CA_FLOAT32(0.5)` is `float32`, while `CA_INT8([1]) + 0.5` is `float64` (a Ruby Float is a `float64`). Two CScalars follow the rule for arrays.
+Its value is taken as a Ruby number's is, including the rules of §9 for an integer the array's type cannot hold. A CScalar of a different kind keeps its own type, so `CA_INT8([1]) + CA_FLOAT32(0.5)` is `float32`, while `CA_INT8([1]) + 0.5` is `float64` (a Ruby Float is a `float64`). Two CScalars follow the rule for arrays.
 
 **Instead:** to widen the result, convert the array (`to_type`), or pass a one-element array.
 
