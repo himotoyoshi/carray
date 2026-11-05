@@ -19,27 +19,7 @@ v.to_a              #=> [0, 1]
 
 **Instead:** use `copy` for an independent array. A lazy view is the exception: its `to_ca` evaluates the expression into a new array.
 
-## 2. A view chosen by values keeps only the positions
-
-`sort` and boolean selection (`a[a > 0]`) look at the values once, when the view is made, and keep only the positions they picked: the order of the sort, the list of selected cells. They do not keep the condition. The values are read from the parent each time, so once the parent changes, the view is no longer sorted, and no longer holds only the selected values.
-
-```ruby
-a = CA_INT32([3, 1, 2])
-s = a.sort          # CARemap, [1, 2, 3]
-a[0] = 0
-s.to_a              #=> [1, 2, 0]
-
-b = CA_INT32([3, -1, 2])
-t = b[b > 0]        # CASelect, [3, 2]
-b[0] = -5
-t.to_a              #=> [-5, 2]
-```
-
-The same happens when the change comes through the view itself (`s[-1] = 0`, see §3). A sorted view means "the cells in the order they had when it was sorted", not "always in ascending order".
-
-**Instead:** take a snapshot with `copy` if the parent can change while you still use the result: `a.sort.copy`, `b[b > 0].copy`.
-
-## 3. Writing into a view writes into the parent
+## 2. Writing into a view writes into the parent
 
 Views are writable by default, including the ones NumPy returns as copies (`sort`, boolean selection, index arrays). Writing into one changes the parent.
 
@@ -59,6 +39,26 @@ c.to_a              #=> [9, 2]
 ```
 
 **Instead:** `copy` first when you want to change the result without touching the source.
+
+## 3. A view chosen by values keeps only the positions
+
+`sort` and boolean selection (`a[a > 0]`) look at the values once, when the view is made, and keep only the positions they picked: the order of the sort, the list of selected cells. They do not keep the condition. The values are read from the parent each time, so once the parent changes, the view is no longer sorted, and no longer holds only the selected values.
+
+```ruby
+a = CA_INT32([3, 1, 2])
+s = a.sort          # CARemap, [1, 2, 3]
+a[0] = 0
+s.to_a              #=> [1, 2, 0]
+
+b = CA_INT32([3, -1, 2])
+t = b[b > 0]        # CASelect, [3, 2]
+b[0] = -5
+t.to_a              #=> [-5, 2]
+```
+
+The same happens when the change comes through the view itself (`s[-1] = 0`, see §2). A sorted view means "the cells in the order they had when it was sorted", not "always in ascending order".
+
+**Instead:** take a snapshot with `copy` if the parent can change while you still use the result: `a.sort.copy`, `b[b > 0].copy`.
 
 ## 4. A Ruby Array index is `[start, count, step]`, not a list of positions
 
