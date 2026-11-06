@@ -126,12 +126,18 @@ class TestAtFamily < Test::Unit::TestCase
     assert_equal([1, 2, 3], a.to_a)
   end
 
-  # A scalar is converted as `self[i] = v` converts it: one that does not
-  # fit the type raises before any cell changes.
-  def test_scatter_add_int8_scalar_out_of_range_raises
+  # scatter_add! keeps its answer modulo 2 ** bits, as add! does, so an
+  # Integer the type can not hold is cut to it; scatter_max! picks by
+  # order and refuses it before any cell changes.
+  def test_scatter_add_int8_scalar_out_of_range_wraps
     a = CA_INT8([0, 0, 0])
-    assert_raise(RangeError) { a.scatter_add!(CA_SIZE([0]), 300) }
-    assert_equal([0, 0, 0], a.to_a)
+    a.scatter_add!(CA_SIZE([0]), 300)
+    assert_equal([44, 0, 0], a.to_a)
+    a.scatter_sub!(CA_SIZE([1, 1]), [300, 2**70 + 1])
+    assert_equal([44, -45, 0], a.to_a)
+    assert_raise(RangeError) { a.scatter_max!(CA_SIZE([0]), 300) }
+    assert_raise(RangeError) { a.scatter_replace!(CA_SIZE([0]), 300) }
+    assert_equal([44, -45, 0], a.to_a)
   end
 
   # ---- §2.1: empty addrs is a no-op ----

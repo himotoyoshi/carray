@@ -93,8 +93,12 @@ class TestIntegerEdges < Test::Unit::TestCase
   # -- an Integer operand the array's type cannot hold ------------------
 
   def test_an_integer_operand_that_does_not_fit_is_refused
-    assert_raise(RangeError) { CA_INT32([5]) * 2**32 }
-    assert_raise(RangeError) { CA_UINT8([0]).lazy + 256 }
+    # + - * & | ^ keep the answer modulo 2 ** bits, as they do for an
+    # operand the type holds; an operation that picks or divides refuses
+    assert_equal [5], (CA_INT32([5]) * (2**32 + 1)).to_a
+    assert_equal [0], (CA_UINT8([0]).lazy + 256).to_a
+    assert_raise(RangeError) { CA_INT32([5]) / 2**32 }
+    assert_raise(RangeError) { CA_UINT8([0]).lazy % 256 }
     # count and search compare values, as eq does: such an Integer matches
     # nothing rather than being refused
     assert_equal 0, CA_UINT8([0, 0, 1]).count(256)
@@ -154,7 +158,8 @@ class TestIntegerEdges < Test::Unit::TestCase
     assert_equal [true, true, UNDEF], u.lazy.ne(-1).to_a
     assert_equal [false, false, UNDEF], (-1 > u).to_a
     assert_equal [true, true, UNDEF], (300 >= u.lazy).to_a
-    assert_raise(RangeError) { -1 + u }
+    assert_equal [255, 199, UNDEF], (-1 + u).to_a
+    assert_raise(RangeError) { -1 / u }
     assert_equal [true, true], CA_INT8([5, -3]).lt(300).to_a
     assert_equal [false], CA_UINT64([2**64 - 1]).eq(2**64).to_a
     assert_equal [true], CA_INT64([-2**63]).gt(-2**64).to_a

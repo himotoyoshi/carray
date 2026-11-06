@@ -571,6 +571,9 @@ rb_ca_binop_build (VALUE l_cary, VALUE r_cary, uint16_t op_id)
      data_type the eager binop gives it, and the pair is promoted as the
      eager binop promotes it.  An integer power keeps its int64 exponent
      (ca_binop_kernel_input_data_types). */
+  ca_scalar_operands_for_op(&l_resolved, &r_resolved,
+      ca_binop_scalar_operand_mode(op_id));
+
   if ( ! rb_obj_is_carray(r_resolved) && rb_obj_is_carray(l_resolved) &&
        ca_binop_picks_by_order(op_id) ) {
     CArray *lc;

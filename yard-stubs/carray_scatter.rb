@@ -23,7 +23,14 @@ class CArray
   #   Numeric, `true` / `false`, or `UNDEF`. The scalar is converted as
   #   `self[i] = v` converts it, so a value that does not fit the type
   #   raises (`RangeError`, `FloatDomainError` for NaN into an integer
-  #   type). A scalar `UNDEF` is a masked value.
+  #   type). An Integer is the exception for `scatter_add!`,
+  #   `scatter_sub!` and `scatter_mul!` on an integer array: they keep
+  #   the answer modulo 2 ** bits, as `add!` does, so
+  #   `CA_INT8([0]).scatter_add!([0], 300)` gives `[44]`.
+  #   `scatter_min!` and `scatter_max!` take it as `pmin` and `pmax` do:
+  #   one that can never win leaves the cells as they are, one that would
+  #   win in every cell raises. `scatter_replace!` refuses it.
+  #   A scalar `UNDEF` is a masked value.
   # - A negative `addrs[i]` counts from the end. One out of range
   #   raises `IndexError`; the pairs before it stay applied, through a
   #   view as well.

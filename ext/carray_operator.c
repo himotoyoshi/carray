@@ -14,6 +14,7 @@
 #include "carray_internal.h"   /* ca_lazy_arena_* */
 #include "ca_binop_dispatch.h"  /* ca_binop_op_id_of_table */
 #include "ca_monop_dispatch.h"  /* ca_monop_op_id_of_table */
+#include "ca_triop_dispatch.h"  /* ca_triop_fma, ca_triop_fms */
 
 /* Operand scratch for a chunked / gathered kernel run.
 
@@ -1268,6 +1269,30 @@ ca_binop_read_boolean_as_truth (int logical, volatile VALUE *pa,
   }
 }
 
+/* An integer array an operator has no kernel for says so before its
+   scalar operand is looked at: an Integer beside it keeps the array's
+   type, so the range of the Integer is not what stops the operation. */
+static void
+ca_binop_refuse_unimplemented_integer (VALUE array, VALUE scalar,
+                                       ca_binop_func_t func[])
+{
+  CArray *ca;
+
+  if ( ! rb_obj_is_carray(array) || RTEST(rb_obj_is_cscalar(array)) ) {
+    return;
+  }
+  if ( ! RB_INTEGER_TYPE_P(scalar) &&
+       ! ( rb_obj_is_carray(scalar) && RTEST(rb_obj_is_cscalar(scalar)) &&
+           RTEST(rb_ca_is_integer_type(scalar)) ) ) {
+    return;
+  }
+  GetCArray(array, ca);
+  if ( ca_is_integer_type(ca) && ! ca_is_face(ca) &&
+       func[ca->data_type] == ca_binop_not_implement ) {
+    ca_op_refuse_unimplemented(array, ca->data_type, rb_eCADataTypeError);
+  }
+}
+
 VALUE
 rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
                                          ca_binop_func_t func[])
@@ -1283,6 +1308,12 @@ rb_ca_call_binop (volatile VALUE self, volatile VALUE other,
                                  &self, &other);
 
   receiver = rb_obj_is_carray(other) ? Qnil : self;
+
+  ca_binop_refuse_unimplemented_integer(self, other, func);
+  ca_binop_refuse_unimplemented_integer(other, self, func);
+
+  ca_scalar_operands_for_op(&self, &other,
+      ca_binop_scalar_operand_mode(ca_binop_op_id_of_table(func)));
 
   /* pmax and its kin pick by order, so a value the array can not hold is
      refused as an ordering refuses it. */
@@ -1697,6 +1728,12 @@ rb_ca_call_binop_bang (VALUE self, VALUE other, ca_binop_func_t func[])
 
   rb_ca_modify(self);
 
+  ca_binop_refuse_unimplemented_integer(self, other, func);
+
+  /* the receiver is the write target and stays as it is */
+  ca_scalar_operand_for_op((volatile VALUE *) &other, self,
+      ca_binop_scalar_operand_mode(ca_binop_op_id_of_table(func)));
+
   /* do implicit casting */
   rb_ca_cast_other(&self, &other);
 
@@ -1877,12 +1914,30 @@ ca_triop_chunk_kernel (ca_chunked_run_t *run, ca_size_t off, ca_size_t n,
   }
 }
 
+/* clip is max with its lower bound and min with its upper one, so a bound
+   the receiver's type can not hold is taken as those take it
+   (ca_scalar_operand_for_op).  fma and fms promote their three operands
+   together and are left to that promotion. */
+static void
+ca_triop_scalar_operands (volatile VALUE *self, volatile VALUE *other2,
+                          volatile VALUE *other3, ca_triop_func_t func[])
+{
+  if ( func != ca_triop_clip ) {
+    return;
+  }
+  ca_scalar_operand_for_op(other2, *self, CA_SCALAR_FOR_MAX);
+  ca_scalar_operand_for_op(other3, *self, CA_SCALAR_FOR_MIN);
+}
+
 VALUE
 rb_ca_call_triop (VALUE self, VALUE other2, VALUE other3,
                   ca_triop_func_t func[])
 {
   volatile VALUE out;
   CArray *ca1, *ca2, *ca3, *cao;
+
+  ca_triop_scalar_operands((volatile VALUE *) &self, (volatile VALUE *) &other2,
+                           (volatile VALUE *) &other3, func);
 
   /* After this, all three CArrays share the same data_type. */
   rb_ca_cast_three(&self, &other2, &other3);
@@ -2057,6 +2112,9 @@ rb_ca_call_triop_bang (VALUE self, VALUE other2, VALUE other3,
   CArray *ca1, *ca2, *ca3;
 
   rb_ca_modify(self);
+
+  ca_triop_scalar_operands((volatile VALUE *) &self, (volatile VALUE *) &other2,
+                           (volatile VALUE *) &other3, func);
 
   rb_ca_cast_other(&self, &other2);
   rb_ca_cast_other(&self, &other3);
@@ -2364,6 +2422,9 @@ ca_bincmp_integer_prepare (volatile VALUE *self, volatile VALUE *other,
   int side;
 
   if ( op_id < CA_BINCMP_LT || op_id > CA_BINCMP_NE ) return 0;
+
+  /* an integer CScalar compares by its value, as an Integer does */
+  ca_scalar_operands_for_op(self, other, CA_SCALAR_FOR_COMPARE);
 
   if ( RB_INTEGER_TYPE_P(*other) &&
        ca_bincmp_plain_integer_array(*self, &dt1) ) {
@@ -2775,7 +2836,8 @@ rb_ca_coerce (VALUE self, VALUE other)
     return rb_ca_coerce(self, rb_funcall(other,rb_intern("to_ca"),0));
   }
   else {
-    /* do implicit casting */
+    /* do implicit casting; an Integer the array's type can not hold
+       raises, and the coerce in lib/carray/lazy.rb takes it from there */
     rb_ca_cast_self_or_other(&self, &other);
     return rb_assoc_new(other, self);
   }

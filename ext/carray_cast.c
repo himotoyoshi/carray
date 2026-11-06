@@ -2372,9 +2372,12 @@ ca_check_integer_fits (VALUE v, int8_t dt)
 }
 
 /* The store reader for an integer cell: the value as an Integer, refused
-   when it does not fit the cell's type, as an operator refuses it.  A
-   store raises where an array cast (to_type) keeps the C conversion.  A
-   non-Integer goes through Integer() (1.5 is 1; nil and NaN raise). */
+   when it does not fit the cell's type.  A store writes a value of the
+   cell's type, so a Ruby value it can not hold -- an Integer or a Float
+   alike -- is refused, though an operation such as + keeps its answer
+   modulo 2 ** bits.  An array cast (to_type, or a store from an integer
+   array) keeps the C conversion.  A non-Integer goes through Integer()
+   (1.5 is 1; nil and NaN raise). */
 VALUE
 ca_obj2integer_fitting (VALUE v, int8_t data_type)
 {
@@ -2413,6 +2416,198 @@ ca_obj2integer_store (CArray *dst, VALUE v, int8_t data_type)
     return ca_bitfield_wrap_integer(field, v);
   }
   return ca_obj2integer_fitting(v, data_type);
+}
+
+/* Whether Integer v is in the range of integer data type dt; a Fixnum
+   is answered without calling Ruby. */
+static int
+ca_integer_fits_type (VALUE v, int8_t dt)
+{
+  if ( FIXNUM_P(v) ) {
+    long x = FIX2LONG(v);
+    switch ( dt ) {
+    case CA_INT8:   return ( x >= INT8_MIN  && x <= INT8_MAX );
+    case CA_UINT8:  return ( x >= 0         && x <= UINT8_MAX );
+    case CA_INT16:  return ( x >= INT16_MIN && x <= INT16_MAX );
+    case CA_UINT16: return ( x >= 0         && x <= UINT16_MAX );
+    case CA_INT32:  return ( x >= INT32_MIN && x <= INT32_MAX );
+    case CA_UINT32: return ( x >= 0         && (unsigned long) x <= UINT32_MAX );
+    case CA_INT64:  return 1;
+    case CA_UINT64: return ( x >= 0 );
+    default:        return 1;
+    }
+  }
+  return ca_integer_range_side(v, dt) == 0;
+}
+
+/* Whether every value of integer type `inner` is a value of `outer`. */
+static int
+ca_integer_type_within (int8_t inner, int8_t outer)
+{
+  int inner_unsigned = ( inner == CA_UINT8 || inner == CA_UINT16 ||
+                         inner == CA_UINT32 || inner == CA_UINT64 );
+  int outer_unsigned = ( outer == CA_UINT8 || outer == CA_UINT16 ||
+                         outer == CA_UINT32 || outer == CA_UINT64 );
+  if ( inner_unsigned == outer_unsigned ) {
+    return ca_sizeof[inner] <= ca_sizeof[outer];
+  }
+  return inner_unsigned && ca_sizeof[inner] < ca_sizeof[outer];
+}
+
+/* An Integer taken into integer data type `dt` as C converts a wider
+   integer to it: modulo 2 ** bits, read as signed for a signed type. */
+VALUE
+ca_integer_wrap_to_type (VALUE v, int8_t dt)
+{
+  int sign_extend = ( dt == CA_INT8 || dt == CA_INT16 ||
+                      dt == CA_INT32 || dt == CA_INT64 );
+  if ( ca_integer_fits_type(v, dt) ) {
+    return v;
+  }
+  return ca_integer_wrap_bits(v, (int) ca_sizeof[dt] * 8, sign_extend);
+}
+
+static VALUE
+ca_integer_tree_wrap (VALUE v, int8_t dt)
+{
+  volatile VALUE out;
+  long i, n;
+  if ( RB_INTEGER_TYPE_P(v) ) {
+    return ca_integer_wrap_to_type(v, dt);
+  }
+  if ( ! RB_TYPE_P(v, T_ARRAY) ) {
+    return v;
+  }
+  n   = RARRAY_LEN(v);
+  out = rb_ary_new_capa(n);
+  for (i=0; i<n; i++) {
+    rb_ary_push(out, ca_integer_tree_wrap(RARRAY_AREF(v, i), dt));
+  }
+  return out;
+}
+
+/* The bound of integer data type dt on the side of v (side < 0: the
+   least value, side > 0: the greatest). */
+static VALUE
+ca_integer_type_bound (int8_t dt, int side)
+{
+  switch ( dt ) {
+  case CA_INT8:   return INT2FIX(side < 0 ? INT8_MIN  : INT8_MAX);
+  case CA_UINT8:  return INT2FIX(side < 0 ? 0         : UINT8_MAX);
+  case CA_INT16:  return INT2FIX(side < 0 ? INT16_MIN : INT16_MAX);
+  case CA_UINT16: return INT2FIX(side < 0 ? 0         : UINT16_MAX);
+  case CA_INT32:  return side < 0 ? LL2NUM(INT32_MIN) : LL2NUM(INT32_MAX);
+  case CA_UINT32: return side < 0 ? INT2FIX(0) : ULL2NUM(UINT32_MAX);
+  case CA_INT64:  return side < 0 ? LL2NUM(INT64_MIN) : LL2NUM(INT64_MAX);
+  default:        return side < 0 ? INT2FIX(0) : ULL2NUM(UINT64_MAX);
+  }
+}
+
+/* An operand of min (how = CA_SCALAR_FOR_MIN) or max beside an array of
+   integer type dt.  An Integer past the side where it can never be picked
+   -- above the type for min, below it for max -- gives the same answer as
+   the type's bound on that side, which the type holds, so it is brought to
+   that bound.  One past the other side would be picked in every cell, and
+   the type can not hold that answer, so it is refused. */
+static VALUE
+ca_integer_tree_saturate (VALUE v, int8_t dt, int how)
+{
+  volatile VALUE out;
+  long i, n;
+  if ( RB_INTEGER_TYPE_P(v) ) {
+    int side;
+    if ( ca_integer_fits_type(v, dt) ) {
+      return v;
+    }
+    side = ca_integer_range_side(v, dt);
+    if ( ( how == CA_SCALAR_FOR_MIN && side > 0 ) ||
+         ( how == CA_SCALAR_FOR_MAX && side < 0 ) ) {
+      return ca_integer_type_bound(dt, side);
+    }
+    ca_check_integer_fits(v, dt);
+    return v;
+  }
+  if ( ! RB_TYPE_P(v, T_ARRAY) ) {
+    return v;
+  }
+  n   = RARRAY_LEN(v);
+  out = rb_ary_new_capa(n);
+  for (i=0; i<n; i++) {
+    rb_ary_push(out, ca_integer_tree_saturate(RARRAY_AREF(v, i), dt, how));
+  }
+  return out;
+}
+
+void
+ca_scalar_operand_for_op (volatile VALUE *scalar, VALUE array, int how)
+{
+  CArray *ca, *cs;
+  VALUE value;
+
+  if ( ! rb_obj_is_carray(array) ) {
+    return;
+  }
+  TypedData_Get_Struct(array, CArray, &carray_data_type, ca);
+  if ( ! ca_is_integer_type(ca) || ca_is_face(ca) ) {
+    return;
+  }
+
+  /* A CScalar beside an array is a scalar operand, as a Ruby value is:
+     it is taken at its value, not converted to the array's type first.
+     One whose value the array's type holds is passed on as it is. */
+  if ( rb_obj_is_carray(*scalar) ) {
+    if ( ! RTEST(rb_obj_is_cscalar(*scalar)) || RTEST(rb_obj_is_cscalar(array)) ) {
+      return;
+    }
+    TypedData_Get_Struct(*scalar, CArray, &carray_data_type, cs);
+    if ( ! ca_is_integer_type(cs) || ca_is_face(cs) || ca_is_any_masked(cs) ||
+         ca_integer_type_within(cs->data_type, ca->data_type) ) {
+      return;
+    }
+    value = rb_ca_fetch_addr(*scalar, 0);
+    if ( ca_integer_fits_type(value, ca->data_type) ) {
+      return;
+    }
+    *scalar = value;
+  }
+
+  if ( how == CA_SCALAR_FOR_COMPARE ) {
+    return;
+  }
+  if ( how == CA_SCALAR_FOR_RING ) {
+    *scalar = ca_integer_tree_wrap(*scalar, ca->data_type);
+  }
+  else if ( how == CA_SCALAR_FOR_MIN || how == CA_SCALAR_FOR_MAX ) {
+    *scalar = ca_integer_tree_saturate(*scalar, ca->data_type, how);
+  }
+  else if ( RB_INTEGER_TYPE_P(*scalar) && ! ca_integer_fits_type(*scalar, ca->data_type) ) {
+    ca_check_integer_fits(*scalar, ca->data_type);
+  }
+}
+
+/* Prepares the scalar operands of an operation beside an integer array.
+   An integer CScalar is read as its Integer, so that it is taken as a
+   Ruby Integer is.  Then, by `how`:
+     CA_SCALAR_FOR_RING     + - * & | ^ (and fma / fms): the answer modulo
+                            2 ** bits does not depend on whether the
+                            operand was cut first, so an Integer the type
+                            can not hold is cut to it, as the cells of the
+                            answer are;
+     CA_SCALAR_FOR_MIN      an operand of min (pmin, minimum, the upper
+     CA_SCALAR_FOR_MAX      bound of clip, ...) or of max: one the type can
+                            not hold is brought to the type's bound when it
+                            can never be picked, which gives the same
+                            answer, and refused when it would be picked in
+                            every cell (ca_integer_tree_saturate);
+     CA_SCALAR_FOR_ORDER    any other operation (/ % divmod fmod): cut, the
+                            operand would give another answer, so one the
+                            type can not hold is refused;
+     CA_SCALAR_FOR_COMPARE  a comparison, which answers by value. */
+void
+ca_scalar_operands_for_op (volatile VALUE *self, volatile VALUE *other, int how)
+{
+  ca_scalar_operand_for_op(other, *self, how);
+  ca_scalar_operand_for_op(self, *other, how);
 }
 
 /* A Ruby Integer operand against an integer array is taken in the array's

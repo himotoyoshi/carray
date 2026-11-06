@@ -336,7 +336,115 @@ class CArray
       return self << -other if other < 0 && UNSIGNED.include?(data_type)
       super(other.clamp(-w, w))
     end
+
+    def bit_lshift! (other)
+      return super unless other.is_a?(Integer) && integer? && ! face?
+      w = bytes * 8
+      return bit_rshift!(-other) if other < 0 && UNSIGNED.include?(data_type)
+      super(other.clamp(-w, w))
+    end
+
+    def bit_rshift! (other)
+      return super unless other.is_a?(Integer) && integer? && ! face?
+      w = bytes * 8
+      return bit_lshift!(-other) if other < 0 && UNSIGNED.include?(data_type)
+      super(other.clamp(-w, w))
+    end
   end
+
+  # An Integer exponent on an integer array is a count, not a value of the
+  # array's type: `a ** 1000` multiplies 1000 times and keeps the answer
+  # modulo 2 ** bits, as the kernels do for an exponent of the array's own
+  # type.  An exponent the type can not hold is brought to one it can that
+  # gives the same answer: x ** p modulo 2 ** n repeats with period
+  # 2 ** (n - 2) once p is at least n (an even x is then 0), and a
+  # negative power is decided by x and the parity of p alone.  An integer
+  # CScalar exponent is read as its Integer.
+  module IntegerPowerCount
+    def ** (other)
+      if unfit_scalar_base_of?(other)
+        return other.send(:power_with_unfit_base, self[0])
+      end
+      count = integer_power_count(other)
+      return unsigned_reciprocal_power if unsigned_negative_count?(count)
+      return super(count)
+    end
+
+    def pow! (other)
+      count = integer_power_count(other)
+      if unsigned_negative_count?(count)
+        self[] = unsigned_reciprocal_power
+        return self
+      end
+      return super(count)
+    end
+
+    private
+
+    def integer_power_count (other)
+      return other unless integer? && ! face?
+      if other.is_a?(CScalar) && other.integer? && ! other.face? && ! other.any_masked?
+        other = other[0]
+      end
+      return other unless other.is_a?(Integer)
+      bits = bytes * 8
+      if IntegerShiftCount::UNSIGNED.include?(data_type)
+        return other if other < 0          # unsigned_reciprocal_power
+        lo, hi = 0, 2**63 - 1              # the kernels read the count as int64
+      else
+        lo, hi = -2**(bits - 1), 2**(bits - 1) - 1
+      end
+      return other if other.between?(lo, hi)
+      return ( other.even? ? -2 : -1 ) if other < 0
+      return bits + (other - bits) % 2**(bits - 2)
+    end
+
+    # An integer CScalar on the left whose value the array's type can not
+    # hold is taken at its value, as an Integer is.
+    def unfit_scalar_base_of? (other)
+      return false unless is_a?(CScalar) && integer? && ! face? && ! any_masked?
+      return false unless other.is_a?(CArray) && ! other.is_a?(CScalar) &&
+                          other.integer? && ! other.face?
+      bits = other.bytes * 8
+      lo, hi = IntegerShiftCount::UNSIGNED.include?(other.data_type) ?
+               [0, 2**bits - 1] : [-2**(bits - 1), 2**(bits - 1) - 1]
+      return ! self[0].between?(lo, hi)
+    end
+
+    # base ** self for an Integer base this array's type can not hold.  A
+    # cell with an exponent of 0 or more gets the base cut to the type
+    # (modulo 2 ** bits): b and b' equal modulo 2 ** n give b ** p and
+    # b' ** p equal modulo 2 ** n.  A negative exponent is 1 / base ** -p
+    # in integer division, which the base decides itself and the cut base
+    # would not (256 is 0 as uint8, 257 is 1): the base is at least 2 in
+    # size, so the cell is 0.
+    def power_with_unfit_base (base)
+      bits = bytes * 8
+      cut = base % 2**bits
+      if IntegerShiftCount::UNSIGNED.include?(data_type)
+        return cut ** self
+      end
+      cut -= 2**bits if cut >= 2**(bits - 1)
+      negative = self.lt(0)
+      power = cut ** negative.then_else(0, self)
+      return negative.then_else(0, power)
+    end
+
+    def unsigned_negative_count? (count)
+      return count.is_a?(Integer) && count < 0 &&
+             IntegerShiftCount::UNSIGNED.include?(data_type) && ! face?
+    end
+
+    # x ** -p is 1 / x ** p in integer division, which x decides alone, as
+    # on a signed array: 0 has no reciprocal, 1 stays 1, anything larger
+    # is 0.  The kernels of an unsigned array take no negative exponent.
+    def unsigned_reciprocal_power
+      raise ZeroDivisionError, "divided by 0" if self.eq(0).any
+      # coerce: x ** p keeps the type of x, as the kernels give it
+      return self.eq(1).to_type(data_type)
+    end
+  end
+
   # Prepended by carray/lazy, after it has wrapped << and >>: prepended
   # here, the method lazy aliases as the eager form would be this one.
 
@@ -357,6 +465,12 @@ class CArray
   #   A NaN in a bound array leaves that cell unbounded on that side,
   #   as `nil` does for the whole side.  A bound is never UNDEF or
   #   masked: a missing bound is not read as either, so fill it first.
+  #
+  #   On an integer array an Integer bound the type can not hold is taken
+  #   by value: a lower bound below the type or an upper bound above it
+  #   bounds nothing (`CA_UINT8([1, 200]).clip(0, 1000)` is `[1, 200]`);
+  #   a lower bound above the type or an upper bound below it would put
+  #   every cell out of the type, and raises `RangeError`.
   #
   #   Boundary is strict `[min, max]`: values equal to a bound
   #   remain unchanged in both the clamped and filled variants.  A NaN

@@ -862,6 +862,14 @@ rb_ca_elem_min (VALUE self, VALUE ridx, VALUE rval)
     rb_raise(rb_eCADataTypeError,
              "elem_min requires a real array (complex values have no order)");
   }
+  /* picks by order, as pmin does: an Integer the type can not hold is
+     brought to the type's bound when it can never win, and refused when
+     it would always win */
+  {
+    volatile VALUE value = rval;
+    ca_scalar_operand_for_op(&value, self, CA_SCALAR_FOR_MIN);
+    rval = value;
+  }
 
   /* Super-hot path: entity + numeric data type + Fixnum/Float rval. */
   ELEM_MINMAX_BODY(<);
@@ -921,6 +929,14 @@ rb_ca_elem_max (VALUE self, VALUE ridx, VALUE rval)
   if ( ca_is_complex_type(ca) ) {
     rb_raise(rb_eCADataTypeError,
              "elem_max requires a real array (complex values have no order)");
+  }
+  /* picks by order, as pmax does: an Integer the type can not hold is
+     brought to the type's bound when it can never win, and refused when
+     it would always win */
+  {
+    volatile VALUE value = rval;
+    ca_scalar_operand_for_op(&value, self, CA_SCALAR_FOR_MAX);
+    rval = value;
   }
 
   ELEM_MINMAX_BODY(>);

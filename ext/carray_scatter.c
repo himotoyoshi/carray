@@ -244,8 +244,10 @@ ca_scatter_is_scalar (VALUE v)
    the data_type gate has already run (arithmetic = numeric only, replace
    = numeric or boolean).  A scalar is converted the way `self[i] = v`
    converts it, so true / false reach only a boolean self and a value that
-   does not fit raises.  A scalar UNDEF is a masked value: the arithmetic
-   family skips every pair, replace masks every target. */
+   does not fit raises; the arithmetic, min and max families have taken
+   an Integer the type can not hold before this (AT_SETUP_OR_RETURN).  A
+   scalar UNDEF is a masked value: the arithmetic family skips every pair,
+   replace masks every target. */
 #define AT_SETUP_BODY(name) \
   ca_check_index_array(raddrs); \
   raddrs = rb_ca_wrap_readonly(raddrs, INT2NUM(CA_SIZE)); \
@@ -290,14 +292,23 @@ ca_scatter_is_scalar (VALUE v)
   int vals_scalar, vals_undef = 0; \
   ca_scatter_cell_t vcell = {{0}};
 
-#define AT_SETUP_OR_RETURN(name, ordered) \
+/* how is the mode of ca_scalar_operand_for_op: + - * keep their answer
+   modulo 2 ** bits, as add! does, so an Integer the type can not hold is
+   cut to it; min and max take it as pmin and pmax do, at the type's bound
+   when it can never win and refused when it would win in every cell. */
+#define AT_SETUP_OR_RETURN(name, how) \
   AT_SETUP_LOCALS \
   rb_ca_modify(self); \
   TypedData_Get_Struct(self, CArray, &carray_data_type, ca); \
+  { \
+    volatile VALUE scalar_vals_ = rvals; \
+    ca_scalar_operand_for_op(&scalar_vals_, self, (how)); \
+    rvals = scalar_vals_; \
+  } \
   if ( ! ca_is_numeric_type(ca) ) { \
     rb_raise(rb_eCADataTypeError, name " requires a numeric array"); \
   } \
-  if ( (ordered) && ca_is_complex_type(ca) ) { \
+  if ( (how) != CA_SCALAR_FOR_RING && ca_is_complex_type(ca) ) { \
     rb_raise(rb_eCADataTypeError, \
       name " requires a real array (complex values have no order)"); \
   } \
@@ -517,7 +528,7 @@ AT_BODY(ca_scatter_add_body, DISPATCH_ARITH(OP_ADD))
 static VALUE
 rb_ca_scatter_add_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
-  AT_SETUP_OR_RETURN("scatter_add!", 0);
+  AT_SETUP_OR_RETURN("scatter_add!", CA_SCALAR_FOR_RING);
   AT_RUN(ca_scatter_add_body);
   return self;
 }
@@ -531,7 +542,7 @@ AT_BODY(ca_scatter_sub_body, DISPATCH_ARITH(OP_SUB))
 static VALUE
 rb_ca_scatter_sub_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
-  AT_SETUP_OR_RETURN("scatter_sub!", 0);
+  AT_SETUP_OR_RETURN("scatter_sub!", CA_SCALAR_FOR_RING);
   AT_RUN(ca_scatter_sub_body);
   return self;
 }
@@ -547,7 +558,7 @@ AT_BODY(ca_scatter_mul_body, DISPATCH_ARITH(OP_MUL))
 static VALUE
 rb_ca_scatter_mul_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
-  AT_SETUP_OR_RETURN("scatter_mul!", 0);
+  AT_SETUP_OR_RETURN("scatter_mul!", CA_SCALAR_FOR_RING);
   AT_RUN(ca_scatter_mul_body);
   return self;
 }
@@ -563,7 +574,7 @@ AT_BODY(ca_scatter_min_body, DISPATCH_ORDERED(OP_MIN_INT, OP_MIN_FLT))
 static VALUE
 rb_ca_scatter_min_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
-  AT_SETUP_OR_RETURN("scatter_min!", 1);
+  AT_SETUP_OR_RETURN("scatter_min!", CA_SCALAR_FOR_MIN);
   AT_RUN(ca_scatter_min_body);
   return self;
 }
@@ -578,7 +589,7 @@ AT_BODY(ca_scatter_max_body, DISPATCH_ORDERED(OP_MAX_INT, OP_MAX_FLT))
 static VALUE
 rb_ca_scatter_max_bang (VALUE self, VALUE raddrs, VALUE rvals)
 {
-  AT_SETUP_OR_RETURN("scatter_max!", 1);
+  AT_SETUP_OR_RETURN("scatter_max!", CA_SCALAR_FOR_MAX);
   AT_RUN(ca_scatter_max_body);
   return self;
 }

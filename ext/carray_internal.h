@@ -501,6 +501,18 @@ VALUE       ca_bitfield_wrap_integer (CArray *ca, VALUE v);
    decimal integer, any other value through Integer() (1.5 is 1). */
 VALUE       ca_integer_wrap_bits (VALUE v, int bits, int sign_extend);
 int         ca_integer_range_side (VALUE v, int8_t data_type);
+VALUE       ca_integer_wrap_to_type (VALUE v, int8_t data_type);
+enum {
+  CA_SCALAR_FOR_RING,
+  CA_SCALAR_FOR_MIN,
+  CA_SCALAR_FOR_MAX,
+  CA_SCALAR_FOR_ORDER,
+  CA_SCALAR_FOR_COMPARE
+};
+void        ca_scalar_operand_for_op (volatile VALUE *scalar, VALUE array,
+                                      int how);
+void        ca_scalar_operands_for_op (volatile VALUE *self,
+                                       volatile VALUE *other, int how);
 int         ca_obj_number_fits_integer (VALUE v, int8_t data_type);
 int         ca_bincmp_integer_prepare (volatile VALUE *self, volatile VALUE *other,
                                        int op_id, int *signed_side);

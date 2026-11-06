@@ -89,8 +89,9 @@ end
 class TestScatterScalars < Test::Unit::TestCase
 
   def test_value_out_of_range_raises
-    assert_raise(RangeError) { CA_INT8([0, 0]).scatter_add!([0], 300) }
-    assert_raise(RangeError) { CA_UINT8([3]).scatter_max!([0], -1) }
+    assert_equal [44, 0], CA_INT8([0, 0]).scatter_add!([0], 300).to_a
+    assert_equal [3], CA_UINT8([3]).scatter_max!([0], -1).to_a
+    assert_raise(RangeError) { CA_UINT8([3]).scatter_min!([0], -1) }
     assert_raise(RangeError) { CA_INT32([5, 5]).scatter_add!([0], 1e20) }
   end
 

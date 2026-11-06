@@ -22,6 +22,7 @@
 
 #include "carray.h"
 #include "ca_binop_dispatch.h"
+#include "carray_internal.h"   /* CA_SCALAR_FOR_* */
 
 /* ------------------------------------------------------------------- */
 /* vv kernel lookup                                                     */
@@ -85,6 +86,33 @@ ca_binop_picks_by_order (int op_id)
 {
   return op_id == CA_BINOP_PMAX    || op_id == CA_BINOP_PMIN ||
          op_id == CA_BINOP_MAXIMUM || op_id == CA_BINOP_MINIMUM;
+}
+
+/* + - * & | ^ give an integer array the same answer modulo 2 ** bits
+   whether a scalar operand is cut to the array's type first or not. */
+int
+ca_binop_is_ring (int op_id)
+{
+  return op_id == CA_BINOP_ADD     || op_id == CA_BINOP_SUB    ||
+         op_id == CA_BINOP_MUL     || op_id == CA_BINOP_BIT_AND ||
+         op_id == CA_BINOP_BIT_OR  || op_id == CA_BINOP_BIT_XOR;
+}
+
+/* How a scalar operand beside an integer array is taken by op_id
+   (ca_scalar_operand_for_op). */
+int
+ca_binop_scalar_operand_mode (int op_id)
+{
+  if ( ca_binop_is_ring(op_id) ) {
+    return CA_SCALAR_FOR_RING;
+  }
+  if ( op_id == CA_BINOP_PMIN || op_id == CA_BINOP_MINIMUM ) {
+    return CA_SCALAR_FOR_MIN;
+  }
+  if ( op_id == CA_BINOP_PMAX || op_id == CA_BINOP_MAXIMUM ) {
+    return CA_SCALAR_FOR_MAX;
+  }
+  return CA_SCALAR_FOR_ORDER;
 }
 
 /* ------------------------------------------------------------------- */

@@ -47,7 +47,11 @@ self.scatter_replace!(addrs, vals)  # self[addrs[i]]  = vals[i]  (last-write-win
   `self.data_type`, or a scalar broadcast to every address (any Numeric,
   `true` / `false` for a boolean target, or `UNDEF`). A scalar is
   converted as `self[i] = v` converts it: a value that does not fit the
-  type raises.
+  type raises. An Integer is the exception for `_add` / `_sub` / `_mul`
+  on an integer array: they keep the answer modulo 2 ** bits, as `add!`
+  does (`CA_INT8([0]).scatter_add!([0], 300)` gives `[44]`). `_min` /
+  `_max` take it as `pmin` / `pmax` do: one that can never win leaves the
+  cells as they are, one that would win in every cell raises.
 
 ### 1.1 Duplicate addresses accumulate (sequential, unbuffered)
 

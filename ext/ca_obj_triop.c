@@ -535,8 +535,14 @@ rb_ca_triop_build (VALUE cary1, VALUE cary2, VALUE cary3, uint16_t op_id)
   }
   /* Scalar operands (clip's Numeric bounds, a CScalar) are wrapped and
      promoted pairwise in the order the eager triop uses. */
-  else if ( ! rb_obj_is_carray(r1) || ! rb_obj_is_carray(r2) || ! rb_obj_is_carray(r3) ||
-       rb_obj_is_cscalar(r1) || rb_obj_is_cscalar(r2) || rb_obj_is_cscalar(r3) ) {
+  /* a bound the type can not hold is taken as the eager clip takes it */
+  else if ( op_id == CA_TRIOP_CLIP ) {
+    ca_scalar_operand_for_op(&r2, r1, CA_SCALAR_FOR_MAX);
+    ca_scalar_operand_for_op(&r3, r1, CA_SCALAR_FOR_MIN);
+  }
+  if ( op_id != CA_TRIOP_SELECT &&
+       ( ! rb_obj_is_carray(r1) || ! rb_obj_is_carray(r2) || ! rb_obj_is_carray(r3) ||
+         rb_obj_is_cscalar(r1) || rb_obj_is_cscalar(r2) || rb_obj_is_cscalar(r3) ) ) {
     if ( ! rb_obj_is_carray(r1) ) {
       rb_raise(rb_eArgError,
                "CATriOp: the first operand must be a CArray");

@@ -467,8 +467,16 @@ class CArray
   # dispatch in this file does not reach `pow` through the C alias, so
   # `a.lazy.pow(2)` would fall to eager; `pow` is aliased again here.
   # An alias copies the method as it is at that moment, so this follows
-  # the integer-exponent `**` above, not the template one.
+  # the integer-exponent `**` above, not the template one.  `power` and
+  # `power!`, the names the kernel tables give, are the same operation.
+  #
+  # An Integer exponent on an integer array is a count before either form
+  # sees it (see CArray::IntegerPowerCount); prepended first, so that the
+  # alias resolves through it.
+  prepend IntegerPowerCount
   alias_method :pow, :**
+  alias_method :power, :**
+  alias_method :power!, :pow!
 
   # coerce: when self is a lazy view and the scalar appears on the LEFT
   # (e.g. `2 * a.lazy`), Ruby's Numeric#* calls a.lazy.coerce(2).  The
@@ -591,7 +599,10 @@ class CArray
 
   # An Integer the array's type cannot hold, on the left of an operator.
   # A comparison is answered from the array's side, where it compares by
-  # value; any other operator refuses the Integer as the array would.
+  # value, and so are + * & | ^, which give the same answer either way round
+  # (and -, as the negated difference): the array takes the Integer modulo
+  # 2 ** bits.  ** takes it as the base of each power.  Any other operator
+  # refuses the Integer as the array would.
   class OutOfRangeInteger
     def initialize (value, array, error)
       @value, @array, @error = value, array, error
@@ -601,6 +612,23 @@ class CArray
     def <= (other) = flip(other, :>=)
     def >  (other) = flip(other, :<)
     def >= (other) = flip(other, :<=)
+
+    def + (other) = flip(other, :+)
+    def * (other) = flip(other, :*)
+    def & (other) = flip(other, :&)
+    def | (other) = flip(other, :|)
+    def ^ (other) = flip(other, :^)
+
+    def - (other)
+      return -flip(other, :-)
+    end
+
+    # the base cut to the type where the exponent is 0 or more, 0 where it
+    # is negative (CArray::IntegerPowerCount#power_with_unfit_base)
+    def ** (other)
+      raise @error unless other.equal?(@array)
+      return @array.send(:power_with_unfit_base, @value)
+    end
 
     def method_missing (*)
       raise @error

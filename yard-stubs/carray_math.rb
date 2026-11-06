@@ -37,8 +37,9 @@ class CArray
   #     operands.
   #   @raise [ZeroDivisionError] when an integer divisor is `0`. Float
   #     division returns `Infinity` or `NaN` instead.
-  #   @raise [RangeError] when an Integer `other` does not fit the
-  #     integer `data_type` of `self`.
+  #   @raise [RangeError] when an Integer (or integer CScalar) `other`
+  #     does not fit the integer `data_type` of `self`: cut to the type, it
+  #     would give another quotient.
   #   @example
   #     CA_INT32([-7, -1, 7]) / 3      # => [ -3, -1, 2 ]
   #     CA_DOUBLE([-7.0]) / 3.0        # => [ -2.3333333333333335 ]
@@ -179,6 +180,13 @@ class CArray
   #   `BigDecimal` stay exact). Boolean arrays participate as their 0/1
   #   storage and promote to `:int64`, so a difference can reach `-1`.
   #   Masked elements stay masked.
+  #
+  #   An integer result that does not fit the type wraps, as in C.  An
+  #   Integer (or integer CScalar) `other` that the integer `data_type` of
+  #   `self` can not hold is taken modulo 2 ** bits the same way, so
+  #   `CA_UINT8([1]) + 256` is `[1]` and `+ -1` is the same as `- 1`; `&`,
+  #   `|`, `^`, `-` and `*` take it so too.  A store is not an operation:
+  #   `a[0] = 256` into a uint8 array raises `RangeError`.
   #   @param other [CArray, Numeric] addend, broadcast to `self.shape`.
   #   @return [CArray] result of the promoted `data_type` of the two
   #     operands.
@@ -238,6 +246,14 @@ class CArray
   #   exponent given as a Float are within an ulp or so; give the exponent
   #   as a Float when a large one needs full precision.  The exponent can
   #   be any Integer that fits 64 bits.
+  #   On an integer array an Integer (or integer CScalar) exponent is a
+  #   count of multiplications, of any size: `CA_UINT8([2]) ** 10` is `[0]`,
+  #   as 2 multiplied by itself 10 times is in uint8.
+  #   An Integer (or integer CScalar) base on the left that the integer
+  #   `data_type` of the exponents can not hold is cut to the type where
+  #   the exponent is 0 or more, and gives 0 where it is negative (`1 / b
+  #   ** p` in integer division): `1000 ** CA_INT8([2, -1])` is `[64, 0]`,
+  #   the power computed wide and cut to int8.
   #   Masked elements stay masked.
   #   @param other [CArray, Numeric] exponent, broadcast to `self.shape`.
   #   @return [CArray] result of the promoted `data_type` of the two
@@ -699,12 +715,19 @@ class CArray
   #   `NaN`: where one element is `NaN` the other is returned, and only
   #   two `NaN`s give `NaN`. Of `-0.0` and `0.0` the result is `0.0`,
   #   in either order. For the form that lets a `NaN` win see {#maximum}.
+  #
+  #   On an integer array an Integer `other` the type can not hold is
+  #   taken by value: one below the type is never the larger, so the
+  #   cells are returned as they are (`CA_INT8([5]).pmax(-1000)` is
+  #   `[5]`); one above it would be the answer in every cell, which the
+  #   type can not hold, so it raises `RangeError`.
   #   @param other [CArray, Numeric] the other operand, broadcast to
   #     `self.shape`.
   #   @return [CArray] result of the promoted `data_type` of the two
   #     operands (`:int64` for boolean).
   #   @raise [CArray::DataTypeError] for a complex array, which has no
   #     ordering.
+  #   @raise [RangeError] for an Integer `other` above the integer type.
   #   @example
   #     CA_DOUBLE([Float::NAN]).pmax(1.0)      # => [ 1.0 ]
   def pmax(other); end
@@ -712,10 +735,12 @@ class CArray
   # @overload pmin(other)
   #   Returns the element-wise smaller of `self` and `other`, ignoring
   #   `NaN`. Of `-0.0` and `0.0` the result is `-0.0`, in either order.
-  #   The counterpart of {#pmax}.
+  #   The counterpart of {#pmax}: an Integer `other` above the integer
+  #   type leaves the cells as they are, one below it raises.
   #   @param other [CArray, Numeric] the other operand.
   #   @return [CArray]
   #   @raise [CArray::DataTypeError] for a complex array.
+  #   @raise [RangeError] for an Integer `other` below the integer type.
   def pmin(other); end
 
   # @overload fmax(other)
@@ -734,7 +759,8 @@ class CArray
   #   Returns the element-wise larger of `self` and `other`,
   #   propagating `NaN`: where either element is `NaN` the result is
   #   `NaN`. Use this when a `NaN` must not be silently dropped, and
-  #   {#pmax} when it should be skipped.
+  #   {#pmax} when it should be skipped. An Integer `other` the integer
+  #   type can not hold is taken as {#pmax} takes it.
   #   @param other [CArray, Numeric] the other operand, broadcast to
   #     `self.shape`.
   #   @return [CArray] result of the promoted `data_type` of the two
@@ -746,7 +772,8 @@ class CArray
 
   # @overload minimum(other)
   #   Returns the element-wise smaller of `self` and `other`,
-  #   propagating `NaN`. The counterpart of {#maximum}.
+  #   propagating `NaN`. The counterpart of {#maximum}; an Integer `other`
+  #   is taken as {#pmin} takes it.
   #   @param other [CArray, Numeric] the other operand.
   #   @return [CArray]
   #   @raise [CArray::DataTypeError] for a complex array.
