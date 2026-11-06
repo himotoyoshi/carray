@@ -31,7 +31,9 @@ class CArray
   #   String branches make the result a {CAString}
   #   (`cond.then_else("yes", "no")`, also with `UNDEF` for one of them).
   #   A Symbol branch, or a String beside a value of another kind, makes
-  #   the result an object array.
+  #   the result an object array.  A Ruby Array branch is one value of an
+  #   object result; beside numeric or boolean values it is refused (make
+  #   it a CArray of the type you mean, e.g. `CA_INT32([9, 9, 9])`).
   #   When `self` or a branch is a lazy view, the result is a lazy view
   #   (read-only) that joins the expression around it; `copy` makes an
   #   array of it.  An object result is always computed at once.
@@ -40,6 +42,8 @@ class CArray
   #   @return [CArray] new array with the same shape as `self` (a
   #     {CAString} for String branches), or a lazy view (CATriOp) when an
   #     operand is lazy.
+  #   @raise [TypeError] when a branch is a Ruby Array beside numeric or
+  #     boolean values.
   #   @raise [ArgumentError] when `self` is not a boolean CArray, or when
   #     an array branch's shape does not pair with `self`'s as an
   #     operator's operands would (equal, or size-1 axes of the same ndim;
@@ -60,7 +64,7 @@ class CArray
       refuse_branch_mix(x, y, face)
       return face_then_else(x, y, face)
     end
-    dt = CArray.send(:selection_type, [x, y])
+    dt = CArray.send(:selection_type, [x, y], "then_else")
     return lazy_then_else(x, y, dt) if lazy_then_else?(x, y, dt)
     # A branch shaped unlike the condition goes through the lazy select,
     # which pairs the shapes by the operator rule (equal, or size-1 axes
@@ -214,6 +218,8 @@ class CArray
   #   @param data_type [Symbol, Integer, nil] override for the result
   #     data type.
   #   @return [CArray] new array with the same shape as `self`.
+  #   @raise [TypeError] when a callable returns a Ruby Array beside
+  #     numeric or boolean values (return a CArray of the type you mean).
   #   @raise [ArgumentError] when `cond` is not a same-shape
   #     boolean CArray.
   #   @example
@@ -239,13 +245,13 @@ class CArray
     # to the subset shape; wrap it here so the scatter step below sees a
     # same-length CArray.
     unless y_then.is_a?(CArray)
-      y_then = CArray.new(data_type || CArray.send(:selection_type, [y_then]), x_then.shape).fill(y_then)
+      y_then = CArray.new(data_type || CArray.send(:selection_type, [y_then], "conditional"), x_then.shape).fill(y_then)
     end
     unless y_else.is_a?(CArray)
-      y_else = CArray.new(data_type || CArray.send(:selection_type, [y_else]), x_else.shape).fill(y_else)
+      y_else = CArray.new(data_type || CArray.send(:selection_type, [y_else], "conditional"), x_else.shape).fill(y_else)
     end
 
-    dt  = data_type || CArray.send(:selection_type, [y_then, y_else])
+    dt  = data_type || CArray.send(:selection_type, [y_then, y_else], "conditional")
     out = CArray.new(dt, self.shape)
     out[cond]     = y_then
     out[cond.not] = y_else
@@ -281,6 +287,8 @@ class CArray
   #   @param data_type [Symbol, Integer, nil] override for the result
   #     data type.
   #   @return [CArray] new array with the shape of `condlist[0]`.
+  #   @raise [TypeError] when a choice is a Ruby Array beside numeric or
+  #     boolean values (make it a CArray of the type you mean).
   #   @raise [ArgumentError] on size mismatch, empty `condlist`, or a
   #     non-boolean / wrong-shape entry in `condlist`.
   #   @example
@@ -315,7 +323,7 @@ class CArray
       end
     end
 
-    dt = data_type || selection_type(choicelist + [default])
+    dt = data_type || selection_type(choicelist + [default], "select")
     # `default` can be either a same-shape CArray (per-cell fallback) or a
     # scalar (broadcast to every cell).
     default_full = default.is_a?(CArray) && !default.scalar?
@@ -379,15 +387,31 @@ class CArray
   end
   private_class_method :select_among_faces
 
-  def self.selection_type (values)
+  # A Ruby Array has no data type of its own: it stays one value of an
+  # object result, and beside values that give a numeric or boolean type it
+  # is refused, as an operator refuses it.
+  def self.selection_type (values, name)
     typed = values.reject { |v| v.equal?(UNDEF) }
     if typed.empty? || typed.any? { |v| v.is_a?(String) || v.is_a?(Symbol) }
-      CA_OBJECT
-    else
-      CArray.result_type(*typed)
+      return CA_OBJECT
     end
+    arrays, others = typed.partition { |v| v.is_a?(Array) }
+    dt = others.empty? ? nil : CArray.result_type(*others)
+    return dt if arrays.empty?
+    return CA_OBJECT if dt == CA_OBJECT
+    refuse_array_branch(name, dt) unless dt == CA_FIXLEN
+    CArray.result_type(*typed)
   end
   private_class_method :selection_type
+
+  def self.refuse_array_branch (name, dt)
+    beside = dt ? " beside #{CArray.data_type_name(dt)} values" : ""
+    example = dt == CA_BOOLEAN ? "CA_BOOLEAN(ary)" : "CA_INT64(ary) or CA_FLOAT64(ary)"
+    raise TypeError,
+          "#{name}: a Ruby Array can not be a value to select#{beside}; make " \
+          "it a CArray of the type you mean first, e.g. #{example}"
+  end
+  private_class_method :refuse_array_branch
 
   # Whether a selection among `values` gives text: every value that is not
   # UNDEF is a String or a CAString, and there is at least one.  The result
