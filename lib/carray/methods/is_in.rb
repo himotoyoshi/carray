@@ -263,6 +263,12 @@ class CArray
       # data type; a numeric self meets it in the object lane.
       [to_type(CA_OBJECT), elems.to_ca.to_type(CA_OBJECT)]
     else
+      # true and false are the numbers 1 and 0 beside a numeric self, as
+      # they are to an operator; cast from an object array they would be
+      # masked cells instead.
+      unless data_type == CA_BOOLEAN
+        elems = elems.map { |v| v == true ? 1 : v == false ? 0 : v }
+      end
       t = CArray.result_type(self, *elems)
       [coerce_self(t), elems.to_ca.to_type(t)]
     end
