@@ -99,19 +99,25 @@ a - b
 #       [ -27, -36, -45 ] ]
 ```
 
-A Ruby Array on the right of an operator is read as an array of its cells, nested Arrays giving its axes, so its shape has to match as an array's would. Each cell takes the type it would take as a scalar operand: Integers against an integer array keep the array's type, a Float widens the result.
+A Ruby Array is not an operand of a numeric or boolean array: `a + [[1, 1, 1], [2, 2, 2]]` raises TypeError. Make the Ruby Array a CArray first, and write the data type you mean:
 
 ```ruby
-a + [[1, 1, 1], [2, 2, 2]]
+a + CA_INT32([[1, 1, 1], [2, 2, 2]])
 #  => [ [ 1, 2, 3 ],
 #       [ 5, 6, 7 ] ]
 
-a.eq([[0, 0, 2], [3, 0, 5]])
+a + CA_FLOAT64([[0.5, 0.5, 0.5], [1, 1, 1]])
+#  => [ [ 0.5, 1.5, 2.5 ],
+#       [ 4.0, 5.0, 6.0 ] ]
+
+a.eq(CA_INT32([[0, 0, 2], [3, 0, 5]]))
 #  => [ [ true, false, true ],
 #       [ true, false, true ] ]
 ```
 
-Against an object array an Array stays one value, as a cell of such an array can hold an Array.
+The type you write takes part in the promotion as any CArray does. A CArray of an integer type cuts a Float down to an integer (`CA_INT32([1.5])` is `[1]`), so write a float type when the values have fractions. Do not use `to_ca` for this: `[1, 2, 3].to_ca` is an object array, so `a + [1, 2, 3].to_ca` is an object array too.
+
+Against an object array an Array stays one value, as a cell of such an array can hold an Array. Some Faces read an Array in their own way: a time array compares with an Array of times cell by cell.
 
 ## In-place forms
 

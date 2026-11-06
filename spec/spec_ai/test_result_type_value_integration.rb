@@ -55,8 +55,10 @@ class TestResultTypeValueIntegration < Test::Unit::TestCase
     # not a value — `result_type("int32")` works but `result_type("foo")`
     # raises (= dispatch precedence: Symbol/String/Class for name lookup).
     assert_equal :object, CArray.result_type(nil)
-    assert_equal :object, CArray.result_type([1, 2])
     assert_equal :object, CArray.result_type({})
+    # A Ruby Array has no data type: it is refused unless an object array
+    # is among the arguments.
+    assert_raise(TypeError) { CArray.result_type([1, 2]) }
   end
 
   # --------------------------------------------------------------

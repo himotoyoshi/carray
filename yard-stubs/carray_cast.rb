@@ -480,6 +480,9 @@ class CArray
   #   - Integer / Float / Complex / true / false / nil / Object -> *value*,
   #     data_type inferred (3 -> `:int64`, 3.14 -> `:float64`,
   #     1+2i -> `:cmplx128`, ...)
+  #   - Ruby Array -> no data type: beside an object array it is one more
+  #     object value, otherwise it is refused (make it a CArray of the type
+  #     you mean)
   #
   #   The arrays and data_type representations promote together. A
   #   scalar (a value, or a CScalar) then joins their type the way it
@@ -503,6 +506,7 @@ class CArray
   #   @param args [Array<CArray, Symbol, String, Class, Object>] operands.
   #   @return [Symbol]
   #   @raise [ArgumentError] when called with no arguments.
+  #   @raise [TypeError] when a Ruby Array is given beside no object array.
   #   @raise [CArray::DataTypeError] when two inputs are mutually incompatible
   #     (e.g. `:object` with `:fixlen`).
   #   @example

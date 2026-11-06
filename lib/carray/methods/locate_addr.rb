@@ -139,6 +139,9 @@ class CArray
   #     `tolerance` is asked of an object key whose values have no `-` (a
   #     String is ordered but has no distance).
   def locate_nearest_addr (ref, direction: :round, tolerance: nil)
+    if ref.is_a?(Array)
+      CArray.send(:refuse_ruby_array, "locate_nearest_addr", "an array to search")
+    end
     unless [:round, :floor, :ceil].include?(direction)
       raise ArgumentError,
             "locate_nearest_addr: direction must be :round / :floor / " \

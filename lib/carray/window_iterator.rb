@@ -891,6 +891,7 @@ class CAWindowIterator < CAIterator
   #   @param kernel [CArray] weights shaped like a single window.
   #   @return [CArray]
   def correlate (kernel, min_count: nil, fill_value: nil)
+    CArray.send(:refuse_ruby_array, "correlate", "a kernel") if kernel.is_a?(Array)
     unless kernel.shape == @widths
       raise ArgumentError,
             "correlate: kernel shape #{kernel.shape.inspect} != " \
@@ -918,6 +919,7 @@ class CAWindowIterator < CAIterator
   #   @param kernel [CArray] weights shaped like a single window.
   #   @return [CArray]
   def convolve (kernel, min_count: nil, fill_value: nil)
+    CArray.send(:refuse_ruby_array, "convolve", "a kernel") if kernel.is_a?(Array)
     correlate(reverse_all_axes(kernel), min_count: min_count, fill_value: fill_value)
   end
 
@@ -1003,6 +1005,7 @@ class CAWindowIterator < CAIterator
   private
 
   def weighted (weights)
+    CArray.send(:refuse_ruby_array, "wsum/wmean", "a weight array") if weights.is_a?(Array)
     unless weights.shape == @widths
       raise ArgumentError,
             "wsum/wmean: weights shape #{weights.shape.inspect} != " \

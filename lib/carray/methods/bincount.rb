@@ -42,6 +42,7 @@ class CArray
       raise ArgumentError, "bincount: length: must not be negative (got #{length})"
     end
     unless weights.nil?
+      CArray.send(:refuse_ruby_array, "bincount", "a weight array") if weights.is_a?(Array)
       unless weights.is_a?(CArray)
         raise ArgumentError, "bincount: weights must be a CArray"
       end
@@ -86,6 +87,7 @@ class CArray
     n = [length, label_max + 1].max
 
     if weights
+      CArray.send(:refuse_ruby_array, "bincount", "a weight array") if weights.is_a?(Array)
       unless weights.is_a?(CArray)
         raise ArgumentError, "bincount: weights must be a CArray"
       end

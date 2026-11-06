@@ -20,11 +20,11 @@ class TestMeshgrid < Test::Unit::TestCase
     assert_equal [[10.0, 10.0, 10.0], [20.0, 20.0, 20.0]], yy.to_a
   end
 
-  def test_array_axis_accepted
-    xx, yy = CArray.meshgrid([1, 2, 3], [10, 20])
-    assert_equal [2, 3], xx.shape
-    assert_equal [[1, 2, 3], [1, 2, 3]], xx.to_a
-    assert_equal [[10, 10, 10], [20, 20, 20]], yy.to_a
+  # A Ruby Array has no data type, so it is not a coordinate vector.
+  def test_array_axis_is_refused
+    e = assert_raise(TypeError) { CArray.meshgrid([1, 2, 3], [10, 20]) }
+    assert_match(/\Ameshgrid: a Ruby Array is not a coordinate vector/, e.message)
+    assert_raise(TypeError) { CArray.meshgrid(CA_INT32([1, 2, 3]), [10, 20]) }
   end
 
   def test_each_axis_keeps_its_own_data_type
@@ -33,8 +33,8 @@ class TestMeshgrid < Test::Unit::TestCase
     assert_equal :float64, yy.data_type
   end
 
-  def test_mixed_carray_and_array_axes
-    xx, yy = CArray.meshgrid(CA_INT32([1, 2, 3]), [10, 20])
+  def test_mixed_carray_and_range_axes
+    xx, yy = CArray.meshgrid(CA_INT32([1, 2, 3]), (10..20).step(10))
     assert_equal :int32, xx.data_type
     assert_equal [[10, 10, 10], [20, 20, 20]], yy.to_a
   end
@@ -46,14 +46,14 @@ class TestMeshgrid < Test::Unit::TestCase
   end
 
   def test_indexing_ij_with_coerced_axes
-    xx, yy = CArray.meshgrid([1, 2, 3], [10, 20], indexing: "ij")
+    xx, yy = CArray.meshgrid(CA_INT32([1, 2, 3]), CA_INT32([10, 20]), indexing: "ij")
     assert_equal [3, 2], xx.shape
     assert_equal [[1, 1], [2, 2], [3, 3]], xx.to_a
     assert_equal [[10, 20], [10, 20], [10, 20]], yy.to_a
   end
 
   def test_sparse_with_coerced_axes
-    xx, yy = CArray.meshgrid([1, 2, 3], [10, 20], copy: false, sparse: true)
+    xx, yy = CArray.meshgrid(CA_INT32([1, 2, 3]), CA_INT32([10, 20]), copy: false, sparse: true)
     assert_equal [[1, 2, 3], [1, 2, 3]], (xx + CArray.int32(2, 3) { 0 }).to_a
     assert_equal [[10, 10, 10], [20, 20, 20]],
                  (yy + CArray.int32(2, 3) { 0 }).to_a
@@ -94,12 +94,12 @@ class TestMeshgrid < Test::Unit::TestCase
 
   def test_non_1d_axis_is_rejected
     assert_raise(ArgumentError) do
-      CArray.meshgrid(CA_INT32([[1, 2], [3, 4]]), [10, 20])
+      CArray.meshgrid(CA_INT32([[1, 2], [3, 4]]), CA_INT32([10, 20]))
     end
   end
 
   def test_block_form_with_coerced_axes
-    sum = CArray.meshgrid([1, 2, 3], [10, 20]) { |a, b| a + b }
+    sum = CArray.meshgrid(CA_INT32([1, 2, 3]), CA_INT32([10, 20])) { |a, b| a + b }
     assert_equal [[11, 12, 13], [21, 22, 23]], sum.to_a
   end
 

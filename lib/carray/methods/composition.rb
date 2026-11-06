@@ -139,6 +139,7 @@ class CArray
   # per-piece dim sizes summed along each tile axis (= block-matrix
   # consistency required across rows / columns).
   def self.__ragged_paste (list, tdim, axis, data_type, name)
+    list.each { |a| refuse_ruby_array(name, "an array to join") if a.is_a?(Array) }
     shared_attrs = attrs_shared_by(list)
     list = promote_list_for(name, list, data_type: data_type)
     # promote_list has already enforced homogeneity (= common data_type, and

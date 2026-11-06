@@ -469,6 +469,14 @@ void ca_cast_block_skip_masked (ca_size_t n, void *ap1, void *ptr1,
 
 /* carray_utils.c */
 const char *ca_calling_method_name (void);
+
+/* Refuse a Ruby Array read as one value of a cell; kind is "an integer",
+   "a float" or "a boolean" (carray_cast.c). */
+NORETURN(void ca_refuse_array_value (const char *kind));
+
+/* Refuse v when it is a Ruby Array given where an array with a data type
+   is expected; role names what it would have been (carray_cast.c). */
+void    ca_refuse_ruby_array (VALUE v, const char *role);
 VALUE       ca_answer_as_caller (VALUE (*body)(VALUE), VALUE arg);
 long        ca_integer_arg (VALUE v, const char *arg, const char *name);
 /* 1 with the position of an index key (an Integer, or a Float with no

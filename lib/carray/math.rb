@@ -15,7 +15,7 @@ module CAMath
   #   @param x [CArray, Numeric] input value.
   #   @return [CArray]
   def expm1(x)
-    x.is_a?(CArray) ? x.expm1 : CArray.wrap_readonly(x, :float64).expm1
+    x.is_a?(CArray) ? x.expm1 : CAMath.send(:float_operand, x, "expm1").expm1
   end
 
   # @overload log1p(x)
@@ -25,7 +25,7 @@ module CAMath
   #   @param x [CArray, Numeric] input value.
   #   @return [CArray]
   def log1p(x)
-    x.is_a?(CArray) ? x.log1p : CArray.wrap_readonly(x, :float64).log1p
+    x.is_a?(CArray) ? x.log1p : CAMath.send(:float_operand, x, "log1p").log1p
   end
 
   # @overload atan2(y, x)
@@ -34,21 +34,21 @@ module CAMath
   #   @param y [CArray, Numeric] numerator.
   #   @param x [CArray, Numeric] denominator.
   #   @return [CArray]
-  def atan2(y, x); float_operand(y).atan2(x); end
+  def atan2(y, x); float_operand(y, "atan2").atan2(x); end
 
   # @overload hypot(x, y)
   #   Returns the element-wise Euclidean distance `sqrt(x^2 + y^2)`.
   #   @param x [CArray, Numeric] first leg.
   #   @param y [CArray, Numeric] second leg.
   #   @return [CArray]
-  def hypot(x, y); float_operand(x).hypot(y); end
+  def hypot(x, y); float_operand(x, "hypot").hypot(y); end
 
   # @overload copysign(x, y)
   #   Returns `|x|` with the sign of `y`, element-wise.
   #   @param x [CArray, Numeric] magnitude source.
   #   @param y [CArray, Numeric] sign source.
   #   @return [CArray]
-  def copysign(x, y); float_operand(x).copysign(y); end
+  def copysign(x, y); float_operand(x, "copysign").copysign(y); end
 
   # @overload logaddexp(x, y)
   #   Returns `log(exp(x) + exp(y))` computed to avoid overflow,
@@ -56,7 +56,7 @@ module CAMath
   #   @param x [CArray, Numeric] first log-space value.
   #   @param y [CArray, Numeric] second log-space value.
   #   @return [CArray]
-  def logaddexp(x, y); float_operand(x).logaddexp(y); end
+  def logaddexp(x, y); float_operand(x, "logaddexp").logaddexp(y); end
 
   # @overload nextafter(x, y)
   #   Returns the next representable float from `x` toward `y`,
@@ -64,18 +64,21 @@ module CAMath
   #   @param x [CArray, Numeric] starting value.
   #   @param y [CArray, Numeric] direction target.
   #   @return [CArray]
-  def nextafter(x, y); float_operand(x).nextafter(y); end
+  def nextafter(x, y); float_operand(x, "nextafter").nextafter(y); end
 
   # @overload fmod(x, y)
   #   Returns the C-style `fmod(x, y)` element-wise (sign follows `x`).
   #   @param x [CArray, Numeric] dividend.
   #   @param y [CArray, Numeric] divisor.
   #   @return [CArray]
-  def fmod(x, y);      (x.is_a?(CArray) ? x : CArray.wrap_readonly(x, :float64)).fmod(y); end
+  def fmod(x, y);      (x.is_a?(CArray) ? x : float_operand(x, "fmod")).fmod(y); end
 
-  # A float or complex CArray as it is; anything else as float64.
-  def float_operand(x)
-    x.is_a?(CArray) && (x.float? || x.complex?) ? x : CArray.wrap_readonly(x, :float64)
+  # A float or complex CArray as it is; anything else as float64.  A Ruby
+  # Array is refused, as it is in the other argument.
+  def float_operand(x, name)
+    return x if x.is_a?(CArray) && (x.float? || x.complex?)
+    CArray.send(:refuse_ruby_array, name, "an operand") if x.is_a?(Array)
+    CArray.wrap_readonly(x, :float64)
   end
   private_class_method :float_operand
 

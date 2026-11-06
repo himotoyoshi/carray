@@ -26,6 +26,21 @@ class CArray
   #   Boolean result  -> :boolean CArray
   module StringOperationMixin
 
+    # A Ruby Array is not an operand of a string array: it would be read as
+    # one value, and no cell equals it.  Compare with a CArray of Strings
+    # (CArray.string(ary)) instead.
+    CArray.send(:define_named_methods, self, [:eq, :ne],
+                :refuse_array_operand, super_block: true)
+
+    private def refuse_array_operand (op, args, kw)
+      if args[0].is_a?(Array)
+        raise TypeError,
+              "#{op}: a Ruby Array is not an operand of a string array; " \
+              "make it a CArray first, e.g. CArray.string(ary)"
+      end
+      yield(*args, **kw)
+    end
+
     # Per-cell map through the Face's scalar fetch.  A nil `data_type` returns a
     # CAString (string results); an explicit one returns a plain typed array
     # (integer / boolean results).  Shape and mask are carried.

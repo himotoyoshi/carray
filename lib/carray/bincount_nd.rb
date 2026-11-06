@@ -214,6 +214,7 @@ class CArray
 
       if weights
         raise ArgumentError, "weights given but accumulator is unweighted" unless @weighted
+        CArray.send(:refuse_ruby_array, "bincount_nd", "a weight array") if weights.is_a?(Array)
         # coerce: the accumulator's type, declared by weights_data_type:
         weights = CArray.wrap_readonly(weights, @counts_data_type)
         expected_w_shape = chunk.shape.dup

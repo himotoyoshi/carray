@@ -258,9 +258,10 @@ class CArray
     elsif data_type == CA_OBJECT
       # coerce: an object set holds values of self's kind
       [self, elems.to_ca.to_type(data_type)]
-    elsif elems.any? { |v| v.is_a?(String) || v.is_a?(Symbol) }
+    elsif elems.any? { |v| v.is_a?(String) || v.is_a?(Symbol) || v.is_a?(Array) }
       # A String is a value, which result_type would read as the name of a
-      # data type; a numeric self meets it in the object lane.
+      # data type, and an Array has no data type; a numeric self meets them
+      # in the object lane.
       [to_type(CA_OBJECT), elems.to_ca.to_type(CA_OBJECT)]
     else
       # true and false are the numbers 1 and 0 beside a numeric self, as

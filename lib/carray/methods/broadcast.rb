@@ -5,7 +5,8 @@ class CArray
   #   yields the broadcast tuple to a block.
   #
   #   Non-CArray arguments (Float / Integer) pass through unchanged
-  #   unless `expand_scalar` is true. CScalar instances are treated
+  #   unless `expand_scalar` is true.  A Ruby Array is refused: it has no
+  #   data type, so make it a CArray of the type you mean first. CScalar instances are treated
   #   as ndim-0 scalars and excluded from the ndim check.
   #
   #   All real CArray arguments must share the same `ndim`; implicit
@@ -22,6 +23,7 @@ class CArray
   #   @return [Array<CArray, Numeric>] broadcast arguments, or the
   #     block's return value when a block is given.
   #   @raise [ArgumentError] when CArray arguments differ in `ndim`.
+  #   @raise [TypeError] when an argument is a Ruby Array.
   def CArray.broadcast (*argv, expand_scalar: false, &block)
 
     sel = argv.select { |arg| arg.is_a?(CArray) && !arg.is_a?(CScalar) }
@@ -51,8 +53,10 @@ class CArray
         expand_scalar ? arg.broadcast_to(*dim) : arg
       when CArray
         arg.broadcast_to(*dim)
+      when Array
+        CArray.send(:refuse_ruby_array, "broadcast", "an array to broadcast")
       else
-        expand_scalar ? arg : arg
+        arg
       end
     end
 

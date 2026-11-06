@@ -10,6 +10,7 @@
 
 #include "ruby.h"
 #include "carray.h"
+#include "carray_internal.h"   /* ca_refuse_ruby_array */
 #include <math.h>
 
 #ifdef HAVE_TGMATH_H
@@ -30,6 +31,9 @@ mathfunc_sph_to_xyz (void *p0, void *p1, void *p2, void *p3, void *p4, void *p5)
 static VALUE 
 rb_camath_sph_to_xyz (VALUE mod, VALUE rx1, VALUE rx2, VALUE rx3)
 {
+  ca_refuse_ruby_array(rx1, "an operand");
+  ca_refuse_ruby_array(rx2, "an operand");
+  ca_refuse_ruby_array(rx3, "an operand");
   return ca_call_cfunc_3_3(CA_DOUBLE, CA_DOUBLE, CA_DOUBLE, CA_DOUBLE, CA_DOUBLE, CA_DOUBLE,
                              mathfunc_sph_to_xyz, rx1, rx2, rx3);
 }
@@ -53,6 +57,9 @@ mathfunc_xyz_to_sph (void *p0, void *p1, void *p2, void *p3, void *p4, void *p5)
 static VALUE 
 rb_camath_xyz_to_sph (VALUE mod, VALUE rx1, VALUE rx2, VALUE rx3)
 {
+  ca_refuse_ruby_array(rx1, "an operand");
+  ca_refuse_ruby_array(rx2, "an operand");
+  ca_refuse_ruby_array(rx3, "an operand");
   return ca_call_cfunc_3_3(CA_DOUBLE, CA_DOUBLE, CA_DOUBLE, CA_DOUBLE, CA_DOUBLE, CA_DOUBLE,
                              mathfunc_xyz_to_sph, rx1, rx2, rx3);
 }
@@ -76,6 +83,7 @@ mathfunc_lgamma (void *p0, void *p1)
 static VALUE
 rb_camath_lgamma (VALUE mod, VALUE rx1)
 {
+  ca_refuse_ruby_array(rx1, "an operand");
   return ca_call_cfunc_1_1(CA_DOUBLE, CA_DOUBLE, mathfunc_lgamma, rx1);
 }
 

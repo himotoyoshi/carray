@@ -25,11 +25,12 @@ class CArray
   #   arguments and returns the block's value.
   #
   #   Each axis goes through {CArray.wrap_readonly}, so a coordinate
-  #   vector may be given as anything that entry point accepts (a
-  #   CArray, an Array, a Range, a Numeric, a MemoryView producer, an
-  #   object answering `ca` / `to_ca`); its own data type is kept.
+  #   vector may be given as a CArray, a Range, a MemoryView producer or
+  #   an object answering `to_ca`; its own data type is kept.  A Ruby
+  #   Array has no data type and is refused: make it a CArray of the type
+  #   you mean (`CA_FLOAT64([0.5, 1.5])`).
   #
-  #   @param axes [Array<CArray, Array, Object>] 1-D coordinate vectors.
+  #   @param axes [Array<CArray, Object>] 1-D coordinate vectors.
   #   @param indexing [String] `"xy"` or `"ij"`.
   #   @param copy [Boolean] materialise each output when true.
   #   @param sparse [Boolean] return broadcast-on-demand views when true.
@@ -38,6 +39,7 @@ class CArray
   #     return value.
   #   @raise [ArgumentError] when `indexing` is neither `"xy"` nor `"ij"`,
   #     or when a coordinate vector is not 1-D.
+  #   @raise [TypeError] when a coordinate vector is a Ruby Array.
   #   @example
   #     x = CA_FLOAT64([1.0, 2.0, 3.0])
   #     y = CA_FLOAT64([10.0, 20.0])
@@ -53,6 +55,9 @@ class CArray
     # CArray comes back as itself and anything else is brought in with
     # its own data type.
     axes = axes.map.with_index do |axis, k|
+      if axis.is_a?(Array)
+        CArray.send(:refuse_ruby_array, "meshgrid", "a coordinate vector")
+      end
       a = CArray.wrap_readonly(axis)
       unless a.ndim == 1
         raise ArgumentError,

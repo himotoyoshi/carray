@@ -14,7 +14,7 @@ class TestSelectionArrayBranch < Test::Unit::TestCase
 
   def assert_refused (name, &block)
     e = assert_raise(TypeError, &block)
-    assert_match(/\A#{name}: a Ruby Array can not be a value to select/, e.message)
+    assert_match(/\A#{name}: a Ruby Array is not a value to select/, e.message)
     e
   end
 

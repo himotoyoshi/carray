@@ -398,20 +398,11 @@ class CArray
     arrays, others = typed.partition { |v| v.is_a?(Array) }
     dt = others.empty? ? nil : CArray.result_type(*others)
     return dt if arrays.empty?
-    return CA_OBJECT if dt == CA_OBJECT
-    refuse_array_branch(name, dt) unless dt == CA_FIXLEN
-    CArray.result_type(*typed)
+    return CA_OBJECT if dt == CA_OBJECT || dt == CA_FIXLEN
+    beside = dt ? " beside #{CArray.data_type_name(dt)} values" : ""
+    refuse_ruby_array(name, "a value to select#{beside}", dt)
   end
   private_class_method :selection_type
-
-  def self.refuse_array_branch (name, dt)
-    beside = dt ? " beside #{CArray.data_type_name(dt)} values" : ""
-    example = dt == CA_BOOLEAN ? "CA_BOOLEAN(ary)" : "CA_INT64(ary) or CA_FLOAT64(ary)"
-    raise TypeError,
-          "#{name}: a Ruby Array can not be a value to select#{beside}; make " \
-          "it a CArray of the type you mean first, e.g. #{example}"
-  end
-  private_class_method :refuse_array_branch
 
   # Whether a selection among `values` gives text: every value that is not
   # UNDEF is a String or a CAString, and there is at least one.  The result

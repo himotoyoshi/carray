@@ -864,6 +864,7 @@ class CASegmentIterator < CAIterator
   # The weighted kernel reads float64 weights; the per-segment fallback hands
   # them to the core as they are, so an object weight stays exact.
   def scatter_weights (weights, as_float64 = true)
+    CArray.send(:refuse_ruby_array, "wsum/wmean", "a weight array") if weights.is_a?(Array)
     unless weights.elements == codes.elements
       raise ArgumentError,
             "wsum/wmean: weights.elements (#{weights.elements}) != " \

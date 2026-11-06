@@ -169,6 +169,15 @@ rb_ca_count (int argc, VALUE *argv, VALUE self)
     return rb_ca_count_masked(argc - 1, argv + 1, self);
   }
 
+  /* A Ruby Array is not one value to count (a CArray v counts cell by
+     cell); an object array holds Arrays and counts them as values. */
+  if ( RB_TYPE_P(rval, T_ARRAY) && ! ca_is_object_type(src) &&
+       ! ca_is_fixlen_type(src) && ! ca_is_face(src) ) {
+    ca_refuse_array_value(ca_is_boolean_type(src) ? "a boolean" :
+                          ca_is_integer_type(src) ? "an integer" :
+                          ca_is_complex_type(src) ? "a complex" : "a float");
+  }
+
   /* An array that can not hold the value (nil, a String) counts no cell
      for it: the cells that matched, none, are counted the way count(true)
      counts a mask. */

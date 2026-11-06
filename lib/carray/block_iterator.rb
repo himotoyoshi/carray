@@ -560,6 +560,7 @@ class CABlockIterator < CAIterator
   # Broadcast a full-tile weight kernel over each region (sliced to the region's
   # possibly-ragged tile) and yield (view, broadcast weights) for the reduction.
   def weighted (weights)
+    CArray.send(:refuse_ruby_array, "wsum/wmean", "a weight array") if weights.is_a?(Array)
     unless weights.shape == @sizes
       raise ArgumentError,
             "wsum/wmean: weights shape #{weights.shape.inspect} != " \

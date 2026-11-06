@@ -13,6 +13,20 @@
 
 class CArray
 
+  # A Ruby Array has no data type of its own, so it does not stand in for a
+  # CArray: each reading of it (an object array by to_ca, the receiver's
+  # type, the type of its values) disagrees with another rule.  The caller
+  # makes it a CArray of the type it means.  The example names types to
+  # write rather than the receiver's, which would cut a Float down.
+  def self.refuse_ruby_array (name, role, dt = nil)
+    example = dt == CA_BOOLEAN ? "CA_BOOLEAN(ary)" : "CA_INT64(ary) or CA_FLOAT64(ary)"
+    raise TypeError,
+          "#{name}: a Ruby Array is not #{role}; make it a CArray of the " \
+          "type you mean first, e.g. #{example}"
+  end
+  private_class_method :refuse_ruby_array
+
+
   # The order sort puts two object values in (ca_obj_order_cmp in C): a
   # Float NaN after every other value, NaN ties NaN, other pairs by `<=>`.
   # nil when `<=>` cannot order the pair; the caller says what refused.
@@ -203,6 +217,7 @@ class CArray
   #   @raise [ArgumentError] when `offset.length != self.ndim`.
   #   @raise [FrozenError] when `self` is frozen.
   def paste (offset, src)
+    CArray.send(:refuse_ruby_array, "paste", "an array to paste") if src.is_a?(Array)
     # The write goes through a window view, which is not frozen itself:
     # refuse a frozen self here, as a write into it directly is refused.
     if frozen?
@@ -378,8 +393,11 @@ class CArray
     end
     return face_clip(min, max, fill_value, lfill, ufill) if face?
     if !min.nil? && !max.nil?
+      # A Ruby Array bound is refused by the clamp below (the operand rule
+      # of pmax / pmin), so it is not compared here.
       reversed = if min.is_a?(CArray) then min.gt(max).any
                  elsif max.is_a?(CArray) then max.lt(min).any
+                 elsif min.is_a?(Array) || max.is_a?(Array) then false
                  else min > max
                  end
       if reversed

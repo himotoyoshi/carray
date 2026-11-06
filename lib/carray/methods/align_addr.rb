@@ -36,16 +36,17 @@ class CArray
   #   equality). Arrays are coerced to the first array's data type within the same
   #   family (cross-family raises). Masked cells do not enter `common`.
   #
-  #   @param arrays [Array<CArray>] two or more arrays (Array / Range coerced
-  #     via `to_ca`). One array is allowed (degenerate: `common` is its distinct
-  #     values).
+  #   @param arrays [Array<CArray>] two or more arrays (a Range is coerced via
+  #     `to_ca`; a Ruby Array is refused, as it has no data type). One array is
+  #     allowed (degenerate: `common` is its distinct values).
   #   @param join [:outer, :inner, :left, :right] how to build `common`.
   #   @return [Array<CArray>] `[common, idx_0, idx_1, ...]`.
   #   @raise [ArgumentError] when no array is given or `join` is not one of the
   #     accepted symbols.
+  #   @raise [TypeError] when an array is a Ruby Array.
   def self.align_addr (*arrays, join: :outer)
     raise ArgumentError, "align_addr: need at least one array" if arrays.empty?
-    arrays = arrays.map { |a| a.is_a?(CArray) ? a : a.to_ca }
+    arrays = arrays.map { |a| align_operand(a, "align_addr") }
     # Seed the fold with the first array's distinct values so N == 1 and the
     # union/intersection folds all agree (a bare reduce over one element would
     # return it with duplicates intact).
@@ -90,9 +91,9 @@ class CArray
   #   under `:ceil`), and points whose match is farther than `tolerance`, come
   #   back masked.
   #
-  #   @param arrays [Array<CArray>] one or more arrays (Array / Range coerced
-  #     via `to_ca`).
-  #   @param grid [CArray, Array, Range, nil] the reference coordinate grid;
+  #   @param arrays [Array<CArray>] one or more arrays (a Range is coerced via
+  #     `to_ca`; a Ruby Array is refused, as it has no data type).
+  #   @param grid [CArray, Range, nil] the reference coordinate grid;
   #     `nil` uses the first array verbatim.
   #   @param direction [:round, :floor, :ceil] rounding rule for the nearest
   #     match.
@@ -103,13 +104,14 @@ class CArray
   #   @return [Array<CArray>] `[common, idx_0, idx_1, ...]`.
   #   @raise [ArgumentError] when no array is given (or `direction` is invalid,
   #     raised by {#locate_nearest_addr}).
+  #   @raise [TypeError] when an array or `grid` is a Ruby Array.
   def self.align_nearest_addr (*arrays, grid: nil, direction: :round, tolerance: nil)
     raise ArgumentError, "align_nearest_addr: need at least one array" if arrays.empty?
-    arrays = arrays.map { |a| a.is_a?(CArray) ? a : a.to_ca }
+    arrays = arrays.map { |a| align_operand(a, "align_nearest_addr") }
     common = if grid.nil?
                arrays.first
              else
-               grid.is_a?(CArray) ? grid : grid.to_ca
+               align_operand(grid, "align_nearest_addr")
              end
     idxs = arrays.map { |a|
       common.locate_nearest_addr(a, direction: direction, tolerance: tolerance)
@@ -117,4 +119,13 @@ class CArray
     [common, *idxs]
   end
 
+  # An array to align: a CArray as it is, a Ruby Array refused (it has no
+  # data type, and to_ca would make it an object array, where 2 and 2.0 are
+  # two values), anything else through its to_ca.
+  def self.align_operand (a, name)
+    return a if a.is_a?(CArray)
+    refuse_ruby_array(name, "an array to align") if a.is_a?(Array)
+    a.to_ca
+  end
+  private_class_method :align_operand
 end
